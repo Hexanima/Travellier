@@ -2,7 +2,7 @@
 
 ## Fuente de verdad
 
-- El producto está definido en `docs/PRD.md`. Consultarlo antes de implementar o modificar comportamiento funcional.
+- El producto de la primera versión está definido en `docs/versiones/v1/PRD.md`. Consultarlo antes de implementar o modificar comportamiento funcional.
 - Si una decisión de implementación contradice el PRD o requiere una nueva regla de negocio, señalarlo y pedir definición antes de asumirla.
 - El proyecto comienza desde un template; que un módulo actual sea mínimo no implica que sea una funcionalidad ya implementada.
 
