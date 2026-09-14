@@ -1,5 +1,7 @@
 {
-  "name": "clean_architecture_template",
+  "name": "travellier",
+  "description": "Aplicación mobile para organizar viajes grupales.",
+  "private": true,
   "workspaces": [
     "domain",
     "apps/*"
