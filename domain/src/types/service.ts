@@ -1,8 +1,3 @@
-import type { BaseEntity } from "./entity.js";
-import type { TaggedError } from "./error.js";
-import type { AsyncResult } from "./result.js";
-import type { UUID } from "./uuid.js";
-
 export const FilterOperators = {
   Eq: "Eq",
   Neq: "Neq",
@@ -74,14 +69,3 @@ export interface MultipleQueryResult<T> {
   offset: number;
   pages: number;
 }
-
-export interface Repository<T extends BaseEntity, TError extends TaggedError = TaggedError> {
-  getOne: (query: SingleQuery<T>) => AsyncResult<T, TError>;
-  getMany: (query: MultipleQuery<T>) => AsyncResult<MultipleQueryResult<T>, TError>;
-  create: (entity: T) => AsyncResult<void, TError>;
-  update: (entity: T) => AsyncResult<void, TError>;
-  delete: (id: UUID) => AsyncResult<void, TError>;
-}
-
-export type BaseService<T extends BaseEntity, TError extends TaggedError = TaggedError> =
-  Repository<T, TError>;
