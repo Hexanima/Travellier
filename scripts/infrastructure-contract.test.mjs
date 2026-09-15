@@ -41,7 +41,7 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*-\s*OPTIONS\s*$/m)
   })
 
-  it('provisions runtime secrets from stage configuration and scopes Lambda permissions', () => {
+  it('keeps runtime secrets out of the template and scopes Lambda permissions', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
 
     const service = readFileSync(servicePath, 'utf8')
@@ -52,11 +52,12 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*-\s*secretsmanager:GetSecretValue\s*$/m)
     assert.match(service, /^\s*-\s*s3:PutObject\s*$/m)
     assert.match(service, /^\s*Type:\s*AWS::SecretsManager::Secret$/m)
-    assert.match(service, /^\s*SecretString:\s*\$\{param:mongoConfiguration\}\s*$/m)
+    assert.match(service, /^\s*stackName:\s*\$\{self:service\}-\$\{sls:stage\}\s*$/m)
     assert.match(service, /^\s*DeletionPolicy:\s*Delete$/m)
     assert.match(service, /^\s*UpdateReplacePolicy:\s*Delete$/m)
     assert.doesNotMatch(service, /^\s*(?:DeletionPolicy|UpdateReplacePolicy):\s*Retain$/m)
     assert.doesNotMatch(service, /^\s*Name:\s*/m)
+    assert.doesNotMatch(service, /^\s*SecretString:\s*/m)
     assert.doesNotMatch(service, /s3:\*/)
     assert.doesNotMatch(service, /secretsmanager:\*/)
     assert.doesNotMatch(service, /Action:\s*["']\*["']/)
@@ -76,6 +77,20 @@ describe('Serverless infrastructure contract', () => {
 
       assert.match(script, new RegExp(`--stage ${stage}`))
       assert.doesNotMatch(script, /photoBucketName=/)
+    }
+  })
+
+  it('deploys each stage through the secure MongoDB secret writer', () => {
+    const manifest = JSON.parse(readFileSync(packagePath, 'utf8'))
+
+    for (const stage of ['dev', 'prod']) {
+      const script = manifest.scripts[`infrastructure:deploy:${stage}`]
+
+      assert.match(
+        script,
+        new RegExp(`node scripts/deploy-infrastructure\\.mjs --stage ${stage}`),
+      )
+      assert.doesNotMatch(script, /serverless deploy/)
     }
   })
 })

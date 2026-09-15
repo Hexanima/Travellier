@@ -6,6 +6,7 @@ provider:
   runtime: nodejs22.x
   architecture: arm64
   stage: ${opt:stage, 'dev'}
+  stackName: ${self:service}-${sls:stage}
   region: ${opt:region, 'sa-east-1'}
   logRetentionInDays: ${param:logRetentionInDays}
   httpApi:
@@ -82,7 +83,6 @@ resources:
       UpdateReplacePolicy: Delete
       Properties:
         Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
-        SecretString: ${param:mongoConfiguration}
     JwtSigningSecret:
       Type: AWS::SecretsManager::Secret
       DeletionPolicy: Delete
