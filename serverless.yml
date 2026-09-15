@@ -82,6 +82,7 @@ resources:
       UpdateReplacePolicy: Delete
       Properties:
         Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
+        SecretString: ${param:mongoConfiguration}
     JwtSigningSecret:
       Type: AWS::SecretsManager::Secret
       DeletionPolicy: Delete

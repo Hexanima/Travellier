@@ -54,18 +54,12 @@ Los comandos de Serverless requieren una sesión iniciada con `serverless login`
 
 Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
 
-Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado. Usá el output `MongoConfigurationSecretArn` del despliegue actual para cargar MongoDB, sin versionarlo:
+Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado.
+
+Configurá el parámetro secreto `mongoConfiguration` en la instancia de Serverless Dashboard de cada stage (`dev` y `prod`). El Dashboard lo conserva cifrado y Serverless lo carga como `SecretString` durante cada despliegue; no se requiere ejecutar comandos de AWS después de desplegar. Debe contener este JSON, sin versionarlo:
 
 ```json
 {"uri":"mongodb+srv://...","databaseName":"travellier"}
-```
-
-Mientras se carga, `GET /health` sigue disponible. Las rutas que requieran configuración runtime se habilitan al cargar el secreto:
-
-```bash
-aws secretsmanager put-secret-value \
-  --secret-id <mongodb-secret-arn> \
-  --secret-string '{"uri":"mongodb+srv://...","databaseName":"travellier"}'
 ```
 
 El secreto JWT se genera automáticamente. La conectividad de MongoDB Atlas debe habilitarse para la red desde la que corra la Lambda.

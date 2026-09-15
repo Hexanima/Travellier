@@ -41,7 +41,7 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*-\s*OPTIONS\s*$/m)
   })
 
-  it('keeps runtime secrets external and scopes Lambda permissions', () => {
+  it('provisions runtime secrets from stage configuration and scopes Lambda permissions', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
 
     const service = readFileSync(servicePath, 'utf8')
@@ -52,6 +52,7 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*-\s*secretsmanager:GetSecretValue\s*$/m)
     assert.match(service, /^\s*-\s*s3:PutObject\s*$/m)
     assert.match(service, /^\s*Type:\s*AWS::SecretsManager::Secret$/m)
+    assert.match(service, /^\s*SecretString:\s*\$\{param:mongoConfiguration\}\s*$/m)
     assert.match(service, /^\s*DeletionPolicy:\s*Delete$/m)
     assert.match(service, /^\s*UpdateReplacePolicy:\s*Delete$/m)
     assert.doesNotMatch(service, /^\s*(?:DeletionPolicy|UpdateReplacePolicy):\s*Retain$/m)
