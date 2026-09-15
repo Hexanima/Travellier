@@ -4,11 +4,11 @@ import { describe, expect, it } from "vitest";
 import App from "./App.js";
 
 describe("App", () => {
-  it("renders the clean architecture template screen", () => {
+  it("renders the Travellier application shell", () => {
     const markup = renderToStaticMarkup(<App />);
 
-    expect(markup).toContain("Clean Architecture Template");
-    expect(markup).toContain("Domain layer: ready");
-    expect(markup).not.toContain("Vite + React");
+    expect(markup).toContain("Travellier");
+    expect(markup).toContain("Organizá tus viajes en grupo.");
+    expect(markup).not.toContain("Clean Architecture Template");
   });
 });

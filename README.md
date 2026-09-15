@@ -39,7 +39,9 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 
 ## Comandos
 
-- `yarn test`
-- `yarn build`
-- `yarn workspace api dev`
-- `yarn workspace web dev`
+- `corepack yarn lint`
+- `corepack yarn typecheck`
+- `corepack yarn test`
+- `corepack yarn build`
+- `corepack yarn workspace api dev`
+- `corepack yarn workspace web dev`

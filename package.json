@@ -12,10 +12,9 @@
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "fe": "yarn workspaces foreach -vvpA --exclude '.'",
-    "fet": "yarn fe --topological",
-    "test": "yarn fe --exclude 'packages/templates/*' run test --run --clearScreen false",
-    "build": "yarn fet --exclude 'packages/templates/*' run build",
-    "lint": "yarn workspace web lint"
+    "lint": "yarn workspaces foreach -A --parallel run lint",
+    "typecheck": "yarn workspaces foreach -A --parallel run typecheck",
+    "test": "node --test scripts/quality-contract.test.mjs && yarn workspaces foreach -A --parallel run test --run --clearScreen false",
+    "build": "yarn workspaces foreach -A --topological run build"
   }
 }

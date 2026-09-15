@@ -3,21 +3,15 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { isOk, testUseCase } from "app-domain";
-
 export interface HealthResponse {
-  app: "clean-architecture-template";
-  domain: "ready" | "error";
+  app: "travellier";
+  status: "ready";
 }
 
-export const createHealthResponse = async (): Promise<HealthResponse> => {
-  const result = await testUseCase.execute(undefined, undefined);
-
-  return {
-    app: "clean-architecture-template",
-    domain: isOk(result) ? "ready" : "error",
-  };
-};
+export const createHealthResponse = async (): Promise<HealthResponse> => ({
+  app: "travellier",
+  status: "ready",
+});
 
 const sendJson = (
   response: ServerResponse,
