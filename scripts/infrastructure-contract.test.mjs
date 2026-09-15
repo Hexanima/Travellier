@@ -55,6 +55,7 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*DeletionPolicy:\s*Delete$/m)
     assert.match(service, /^\s*UpdateReplacePolicy:\s*Delete$/m)
     assert.doesNotMatch(service, /^\s*(?:DeletionPolicy|UpdateReplacePolicy):\s*Retain$/m)
+    assert.doesNotMatch(service, /^\s*Name:\s*/m)
     assert.doesNotMatch(service, /s3:\*/)
     assert.doesNotMatch(service, /secretsmanager:\*/)
     assert.doesNotMatch(service, /Action:\s*["']\*["']/)
