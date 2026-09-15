@@ -29,7 +29,9 @@ export const createLambdaHandler = ({
   async (
     event: ApiGatewayHttpApiEvent,
   ): Promise<ApiGatewayHttpApiResponse> => {
-    await loadRuntimeConfig();
+    if (event.rawPath !== "/health") {
+      await loadRuntimeConfig();
+    }
 
     return handleApiRequest({
       method: event.requestContext.http.method,

@@ -17,10 +17,10 @@
     "typecheck": "yarn workspaces foreach -A --parallel run typecheck",
     "test": "node --test scripts/quality-contract.test.mjs scripts/infrastructure-contract.test.mjs && yarn workspaces foreach -A --parallel run test --run --clearScreen false",
     "build": "yarn workspaces foreach -A --topological run build",
-    "infrastructure:print:dev": "serverless print --stage dev --param photoBucketName=travellier-validation-photos",
-    "infrastructure:print:prod": "serverless print --stage prod --param photoBucketName=travellier-validation-photos",
-    "infrastructure:package:dev": "serverless package --stage dev --param photoBucketName=travellier-validation-photos",
-    "infrastructure:package:prod": "serverless package --stage prod --param photoBucketName=travellier-validation-photos",
+    "infrastructure:print:dev": "serverless print --stage dev",
+    "infrastructure:print:prod": "serverless print --stage prod",
+    "infrastructure:package:dev": "serverless package --stage dev",
+    "infrastructure:package:prod": "serverless package --stage prod",
     "infrastructure:deploy:dev": "serverless deploy --stage dev",
     "infrastructure:deploy:prod": "serverless deploy --stage prod"
   }

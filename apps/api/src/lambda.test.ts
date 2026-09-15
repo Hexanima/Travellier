@@ -3,21 +3,12 @@ import { describe, expect, it } from "vitest";
 import { createLambdaHandler } from "./lambda.js";
 
 describe("Lambda API handler", () => {
-  it("returns the health response for an API Gateway request", async () => {
+  it("returns the health response without requiring runtime secrets", async () => {
     let runtimeConfigurationLoads = 0;
     const handler = createLambdaHandler({
       loadRuntimeConfig: async () => {
         runtimeConfigurationLoads += 1;
-
-        return {
-          environment: "dev",
-          mongo: {
-            uri: "mongodb+srv://travellier.example/database",
-            databaseName: "travellier_dev",
-          },
-          jwtSecret: "jwt-signing-secret",
-          photoBucketName: "travellier-dev-photos",
-        };
+        throw new Error("runtime configuration is not available");
       },
     });
 
@@ -52,6 +43,36 @@ describe("Lambda API handler", () => {
       statusCode: 200,
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ app: "travellier", status: "ready" }),
+    });
+    expect(runtimeConfigurationLoads).toBe(0);
+  });
+
+  it("loads runtime configuration before processing a non-health route", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+
+        return {
+          environment: "dev",
+          mongo: {
+            uri: "mongodb+srv://travellier.example/database",
+            databaseName: "travellier_dev",
+          },
+          jwtSecret: "jwt-signing-secret",
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+    });
+
+    const response = await handler({
+      rawPath: "/trips",
+      requestContext: { http: { method: "GET" } },
+    });
+
+    expect(response).toMatchObject({
+      statusCode: 404,
+      body: JSON.stringify({ error: "NotFound" }),
     });
     expect(runtimeConfigurationLoads).toBe(1);
   });

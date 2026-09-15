@@ -52,7 +52,7 @@ La API se despliega con Serverless Framework mediante [serverless.yml](serverles
 
 Los comandos de Serverless requieren una sesión iniciada con `serverless login` o un `SERVERLESS_ACCESS_KEY`; el workflow de calidad no requiere esas credenciales.
 
-Antes de desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
+Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
 
 El secreto MongoDB debe cargarse luego del primer despliegue con este formato, sin versionarlo:
 
@@ -60,10 +60,19 @@ El secreto MongoDB debe cargarse luego del primer despliegue con este formato, s
 {"uri":"mongodb+srv://...","databaseName":"travellier"}
 ```
 
+Mientras se carga, `GET /health` sigue disponible. Las rutas que requieran configuración runtime se habilitan al cargar el secreto:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id <mongodb-secret-arn> \
+  --secret-string '{"uri":"mongodb+srv://...","databaseName":"travellier"}'
+```
+
 El secreto JWT se genera automáticamente. La conectividad de MongoDB Atlas debe habilitarse para la red desde la que corra la Lambda.
 
-- `corepack yarn infrastructure:print:dev`
-- `corepack yarn infrastructure:print:prod`
-- `corepack yarn infrastructure:package:dev`
+- `corepack yarn infrastructure:print:dev --param photoBucketName=<dev-bucket>`
+- `corepack yarn infrastructure:print:prod --param photoBucketName=<prod-bucket>`
+- `corepack yarn infrastructure:package:dev --param photoBucketName=<dev-bucket>`
+- `corepack yarn infrastructure:package:prod --param photoBucketName=<prod-bucket>`
 - `corepack yarn infrastructure:deploy:dev --param photoBucketName=<bucket>`
 - `corepack yarn infrastructure:deploy:prod --param photoBucketName=<bucket>`

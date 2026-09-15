@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 
 const rootDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const servicePath = join(rootDirectory, 'serverless.yml')
+const packagePath = join(rootDirectory, 'package.json')
 
 describe('Serverless infrastructure contract', () => {
   it('defines the Travellier HTTP API Lambda for configurable stages', () => {
@@ -56,5 +57,21 @@ describe('Serverless infrastructure contract', () => {
     assert.doesNotMatch(service, /secretsmanager:\*/)
     assert.doesNotMatch(service, /Action:\s*["']\*["']/)
     assert.doesNotMatch(service, /mongodb\+srv:\/\//)
+  })
+
+  it('requires an explicit photo bucket for every stage command', () => {
+    const manifest = JSON.parse(readFileSync(packagePath, 'utf8'))
+
+    for (const [stage, command] of [
+      ['dev', 'infrastructure:print:dev'],
+      ['prod', 'infrastructure:print:prod'],
+      ['dev', 'infrastructure:package:dev'],
+      ['prod', 'infrastructure:package:prod'],
+    ]) {
+      const script = manifest.scripts[command]
+
+      assert.match(script, new RegExp(`--stage ${stage}`))
+      assert.doesNotMatch(script, /photoBucketName=/)
+    }
   })
 })
