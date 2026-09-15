@@ -2,7 +2,7 @@
 
 Aplicación mobile para organizar viajes grupales. Centraliza el transporte, el itinerario, las actividades, los posts con fotos y gastos, y la participación de cada integrante.
 
-El producto está en etapa de planificación. El modelo funcional completo está en [docs/PRD.md](docs/PRD.md).
+El producto está en etapa de planificación. El modelo funcional completo está en [docs/versiones/v1/PRD.md](docs/versiones/v1/PRD.md).
 
 ## Alcance inicial
 
@@ -34,7 +34,7 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `domain`: entidades, casos de uso, contratos de resultado y puertos sin dependencias de frameworks.
 - `apps/api`: adaptador HTTP; evolucionará hacia las funciones Lambda de la API.
 - `apps/web`: cliente React; evolucionará hacia el cliente mobile empaquetado con Capacitor.
-- `docs/PRD.md`: especificación funcional y modelo de datos.
+- `docs/versiones/v1/PRD.md`: especificación funcional y modelo de datos.
 - `AGENTS.md`: contexto e instrucciones para agentes que trabajen en el repositorio.
 
 ## Comandos

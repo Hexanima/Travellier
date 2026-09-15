@@ -1373,14 +1373,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"clean_architecture_template@workspace:.":
-  version: 0.0.0-use.local
-  resolution: "clean_architecture_template@workspace:."
-  dependencies:
-    typescript: "npm:^5.8.3"
-  languageName: unknown
-  linkType: soft
-
 "color-convert@npm:^2.0.1":
   version: 2.0.1
   resolution: "color-convert@npm:2.0.1"
@@ -3014,6 +3006,14 @@ __metadata:
   checksum: 10c0/487988b0a19c654ff3e1961b87f471702e708fa8a8dd02a298ef16da7206692e8552a0250e8b3e8759270f62e9d8314616f6da274734d3b558b1fc7b7724e892
   languageName: node
   linkType: hard
+
+"travellier@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "travellier@workspace:."
+  dependencies:
+    typescript: "npm:^5.8.3"
+  languageName: unknown
+  linkType: soft
 
 "ts-api-utils@npm:^2.1.0":
   version: 2.1.0
