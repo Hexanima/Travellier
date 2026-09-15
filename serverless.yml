@@ -78,15 +78,15 @@ resources:
   Resources:
     MongoConfigurationSecret:
       Type: AWS::SecretsManager::Secret
-      DeletionPolicy: Retain
-      UpdateReplacePolicy: Retain
+      DeletionPolicy: Delete
+      UpdateReplacePolicy: Delete
       Properties:
         Name: ${self:service}/${sls:stage}/mongodb
         Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
     JwtSigningSecret:
       Type: AWS::SecretsManager::Secret
-      DeletionPolicy: Retain
-      UpdateReplacePolicy: Retain
+      DeletionPolicy: Delete
+      UpdateReplacePolicy: Delete
       Properties:
         Name: ${self:service}/${sls:stage}/jwt
         Description: JWT signing secret for the Travellier ${sls:stage} environment.

@@ -54,7 +54,7 @@ Los comandos de Serverless requieren una sesión iniciada con `serverless login`
 
 Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
 
-El secreto MongoDB debe cargarse luego del primer despliegue con este formato, sin versionarlo:
+Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina para permitir un redeploy limpio con los mismos nombres. Por eso, el secreto MongoDB debe cargarse después de cada despliegue nuevo, sin versionarlo:
 
 ```json
 {"uri":"mongodb+srv://...","databaseName":"travellier"}
