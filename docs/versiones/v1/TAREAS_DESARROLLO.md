@@ -2,38 +2,38 @@
 
 ## Fase 1 — Base técnica
 
-### T01 — Definir estructura Clean Architecture
+### T01 — Reparar workspace Yarn y referencias base
 
-**Descripción:** Crear módulos `domain` y adaptadores para cliente, API, MongoDB, S3 y Capacitor. Evita dependencias de infraestructura dentro del dominio.
+**Descripción:** Corregir el lockfile para que incluya el workspace raíz y permita instalar, probar y compilar el monorepo. Actualizar las referencias documentales que aún apuntan al PRD en su ubicación anterior.
 
 **Criterios de aceptación:**
 
-- `domain` no importa módulos de `apps/*`.
-- Los puertos de persistencia, almacenamiento y notificaciones quedan definidos.
+- `corepack yarn install --immutable`, test, build y lint se ejecutan desde la raíz.
+- El README apunta a `docs/versiones/v1/PRD.md` y no conserva enlaces rotos al PRD.
 
 **Estimación:** M (4hs)
 **Dependencias:** —
 
-### T02 — Implementar tipos de dominio compartidos
+### T02 — Extender contratos y puertos de dominio
 
-**Descripción:** Crear `Result`, errores de dominio, validaciones y tipos base de identificadores `ObjectId`. Unifica el contrato de errores entre casos de uso y adaptadores.
+**Descripción:** Extender el `Result`, los errores y tipos ya presentes con value objects de `ObjectId`, validaciones de dominio y puertos para persistencia, almacenamiento y notificaciones. Conserva la regla de dependencias hacia el dominio.
 
 **Criterios de aceptación:**
 
-- Los casos de uso devuelven `Result` discriminado.
-- Los errores de validación, autenticación y autorización están tipados.
+- Los nuevos casos de uso reutilizan el `Result` discriminado existente.
+- Los puertos no dependen de MongoDB, AWS, HTTP ni Capacitor.
 
 **Estimación:** M (4hs)
 **Dependencias:** T01
 
-### T03 — Configurar calidad y pruebas
+### T03 — Consolidar calidad, pruebas y CI
 
-**Descripción:** Configurar TypeScript estricto, linting, formateo y runners de pruebas unitarias e integración. Incorporar ejecución automatizada en CI.
+**Descripción:** Extender la configuración existente de TypeScript, Vitest y ESLint con comandos consistentes para todos los workspaces y pipeline de CI. Reemplazar las pruebas de ejemplo a medida que se incorporen casos de uso de Travellier.
 
 **Criterios de aceptación:**
 
-- `lint`, typecheck y tests se ejecutan mediante scripts.
-- El pipeline falla ante errores de calidad o tests fallidos.
+- `lint`, typecheck, test y build se ejecutan mediante scripts raíz.
+- El pipeline falla ante errores de calidad, compilación o tests fallidos.
 
 **Estimación:** M (4hs)
 **Dependencias:** T01
@@ -74,16 +74,16 @@
 **Estimación:** M (4hs)
 **Dependencias:** T05
 
-### T07 — Crear shell mobile y navegación
+### T07 — Integrar Capacitor y navegación mobile
 
-**Descripción:** Configurar React con Capacitor, navegación protegida y estructura de pantallas principales. Incluir manejo consistente de carga, error y estados vacíos.
+**Descripción:** Evolucionar el cliente React existente a una aplicación empaquetable con Capacitor para iOS y Android. Incorporar navegación base, soporte de deep links y el shell preparado para rutas protegidas.
 
 **Criterios de aceptación:**
 
-- La app compila para Android e iOS.
-- Las rutas privadas redirigen a autenticación sin sesión válida.
+- La aplicación puede sincronizarse y compilarse para Android e iOS con Capacitor.
+- El shell resuelve navegación inicial y deep links sin depender todavía de Auth implementado.
 
-**Estimación:** M (4hs)
+**Estimación:** L (8hs)
 **Dependencias:** T01
 
 ### T08 — Crear componentes visuales base
@@ -764,5 +764,5 @@
 ## Resumen
 
 - Total de tareas: 61
-- Estimación inicial: 312 horas
+- Estimación inicial: 316 horas
 - No hay un límite de horas provisto.
