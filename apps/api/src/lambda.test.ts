@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 
-import { handler } from "./lambda.js";
+import { createLambdaHandler } from "./lambda.js";
 
 describe("Lambda API handler", () => {
   it("returns the health response for an API Gateway request", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+
+        return {
+          environment: "dev",
+          mongo: {
+            uri: "mongodb+srv://travellier.example/database",
+            databaseName: "travellier_dev",
+          },
+          jwtSecret: "jwt-signing-secret",
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+    });
+
     const response = await handler({
       version: "2.0",
       routeKey: "GET /health",
@@ -36,5 +53,6 @@ describe("Lambda API handler", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ app: "travellier", status: "ready" }),
     });
+    expect(runtimeConfigurationLoads).toBe(1);
   });
 });

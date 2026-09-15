@@ -24,6 +24,22 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*method:\s*'\*'\s*$/m)
   })
 
+  it('configures API Gateway CORS for Capacitor and local development', () => {
+    assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
+
+    const service = readFileSync(servicePath, 'utf8')
+
+    assert.match(service, /^\s*httpApi:\s*$/m)
+    assert.match(service, /^\s*cors:\s*$/m)
+    assert.match(service, /^\s*allowedOrigins:\s*$/m)
+    assert.match(service, /^\s*-\s*capacitor:\/\/localhost\s*$/m)
+    assert.match(service, /^\s*-\s*http:\/\/localhost\s*$/m)
+    assert.match(service, /^\s*allowedHeaders:\s*$/m)
+    assert.match(service, /^\s*-\s*Authorization\s*$/m)
+    assert.match(service, /^\s*allowedMethods:\s*$/m)
+    assert.match(service, /^\s*-\s*OPTIONS\s*$/m)
+  })
+
   it('keeps runtime secrets external and scopes Lambda permissions', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
 

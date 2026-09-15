@@ -8,6 +8,21 @@ provider:
   stage: ${opt:stage, 'dev'}
   region: ${opt:region, 'sa-east-1'}
   logRetentionInDays: ${param:logRetentionInDays}
+  httpApi:
+    cors:
+      allowedOrigins:
+        - capacitor://localhost
+        - http://localhost
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PATCH
+        - PUT
+        - DELETE
+        - OPTIONS
   environment:
     APP_ENV: ${sls:stage}
     MONGODB_SECRET_ARN:

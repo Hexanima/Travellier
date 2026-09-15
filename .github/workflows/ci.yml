@@ -19,5 +19,3 @@ jobs:
       - run: corepack yarn typecheck
       - run: corepack yarn test
       - run: corepack yarn build
-      - run: corepack yarn infrastructure:print:dev
-      - run: corepack yarn infrastructure:print:prod

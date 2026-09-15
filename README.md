@@ -50,6 +50,8 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 
 La API se despliega con Serverless Framework mediante [serverless.yml](serverless.yml). Los stages soportados son `dev` y `prod`; cada uno crea su propia API, Lambda y secretos de Secrets Manager.
 
+Los comandos de Serverless requieren una sesión iniciada con `serverless login` o un `SERVERLESS_ACCESS_KEY`; el workflow de calidad no requiere esas credenciales.
+
 Antes de desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
 
 El secreto MongoDB debe cargarse luego del primer despliegue con este formato, sin versionarlo:
