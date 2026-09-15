@@ -46,6 +46,9 @@ describe('quality contract', () => {
     assert.ok(existsSync(workflowPath), 'missing CI workflow')
 
     const workflow = readFileSync(workflowPath, 'utf8')
+    assert.match(workflow, /actions\/setup-node@v5/)
+    assert.doesNotMatch(workflow, /cache:\s*yarn/)
+    assert.match(workflow, /corepack enable/)
     assert.match(workflow, /corepack yarn install --immutable/)
 
     for (const command of requiredCommands) {
