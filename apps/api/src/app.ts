@@ -8,30 +8,41 @@ export interface HealthResponse {
   status: "ready";
 }
 
+export interface ApiResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  body: string;
+}
+
 export const createHealthResponse = async (): Promise<HealthResponse> => ({
   app: "travellier",
   status: "ready",
 });
 
-const sendJson = (
-  response: ServerResponse,
-  statusCode: number,
-  payload: unknown,
-) => {
-  response.writeHead(statusCode, { "content-type": "application/json" });
-  response.end(JSON.stringify(payload));
+const jsonResponse = (statusCode: number, payload: unknown): ApiResponse => ({
+  statusCode,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(payload),
+});
+
+export const handleApiRequest = async (request: {
+  method?: string;
+  url?: string;
+}): Promise<ApiResponse> => {
+  if (request.method === "GET" && request.url === "/health") {
+    return jsonResponse(200, await createHealthResponse());
+  }
+
+  return jsonResponse(404, { error: "NotFound" });
 };
 
 export const requestHandler = async (
   request: IncomingMessage,
   response: ServerResponse,
 ) => {
-  if (request.method === "GET" && request.url === "/health") {
-    sendJson(response, 200, await createHealthResponse());
-    return;
-  }
-
-  sendJson(response, 404, { error: "NotFound" });
+  const apiResponse = await handleApiRequest(request);
+  response.writeHead(apiResponse.statusCode, apiResponse.headers);
+  response.end(apiResponse.body);
 };
 
 export const createApp = () => createServer(requestHandler);

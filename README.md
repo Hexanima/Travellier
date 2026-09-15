@@ -45,3 +45,23 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn build`
 - `corepack yarn workspace api dev`
 - `corepack yarn workspace web dev`
+
+## Infraestructura AWS
+
+La API se despliega con Serverless Framework mediante [serverless.yml](serverless.yml). Los stages soportados son `dev` y `prod`; cada uno crea su propia API, Lambda y secretos de Secrets Manager.
+
+Antes de desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
+
+El secreto MongoDB debe cargarse luego del primer despliegue con este formato, sin versionarlo:
+
+```json
+{"uri":"mongodb+srv://...","databaseName":"travellier"}
+```
+
+El secreto JWT se genera automáticamente. La conectividad de MongoDB Atlas debe habilitarse para la red desde la que corra la Lambda.
+
+- `corepack yarn infrastructure:print:dev`
+- `corepack yarn infrastructure:print:prod`
+- `corepack yarn infrastructure:package:dev`
+- `corepack yarn infrastructure:deploy:dev --param photoBucketName=<bucket>`
+- `corepack yarn infrastructure:deploy:prod --param photoBucketName=<bucket>`
