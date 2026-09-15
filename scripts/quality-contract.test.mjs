@@ -48,6 +48,7 @@ describe('quality contract', () => {
     const workflow = readFileSync(workflowPath, 'utf8')
     assert.match(workflow, /actions\/setup-node@v5/)
     assert.doesNotMatch(workflow, /cache:\s*yarn/)
+    assert.match(workflow, /package-manager-cache:\s*false/)
     assert.match(workflow, /corepack enable/)
     assert.match(workflow, /corepack yarn install --immutable/)
 
