@@ -55,5 +55,7 @@ describe('quality contract', () => {
     for (const command of requiredCommands) {
       assert.match(workflow, new RegExp(`corepack yarn ${command}`))
     }
+
+    assert.doesNotMatch(workflow, /infrastructure:print/)
   })
 })

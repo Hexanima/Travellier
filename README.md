@@ -45,3 +45,30 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn build`
 - `corepack yarn workspace api dev`
 - `corepack yarn workspace web dev`
+
+## Infraestructura AWS
+
+La API se despliega con Serverless Framework mediante [serverless.yml](serverless.yml). Los stages soportados son `dev` y `prod`; cada uno crea su propia API, Lambda y secretos de Secrets Manager.
+
+Los comandos de Serverless requieren una sesión iniciada con `serverless login` o un `SERVERLESS_ACCESS_KEY`; el workflow de calidad no requiere esas credenciales.
+
+Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el stage en Serverless Dashboard o pasalo por CLI. El bucket es provisto por T06 y no se crea en este servicio. La Lambda recibe únicamente `s3:PutObject` sobre `trips/*` para emitir URLs presignadas.
+
+Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado.
+
+Los comandos `infrastructure:deploy:*` requieren `MONGODB_URI` y `MONGODB_DATABASE_NAME` en el entorno de despliegue, inyectados desde secretos del entorno de CI correspondientes a `dev` y `prod`. Después de desplegar el stack, el comando toma el output `MongoConfigurationSecretArn`, crea la primera versión si no existe `AWSCURRENT` y sólo escribe otra cuando la configuración cambió. La URI nunca se incluye en el template de CloudFormation, los parámetros de Serverless ni argumentos de CLI:
+
+```json
+{"uri":"mongodb+srv://...","databaseName":"travellier"}
+```
+
+La identidad de despliegue necesita `cloudformation:DescribeStacks`, `secretsmanager:GetSecretValue` y `secretsmanager:PutSecretValue` sobre los recursos del stage, además de los permisos habituales de Serverless. La Lambda mantiene solamente `secretsmanager:GetSecretValue` sobre los secretos del stack.
+
+El secreto JWT se genera automáticamente. La conectividad de MongoDB Atlas debe habilitarse para la red desde la que corra la Lambda.
+
+- `corepack yarn infrastructure:print:dev --param photoBucketName=<dev-bucket>`
+- `corepack yarn infrastructure:print:prod --param photoBucketName=<prod-bucket>`
+- `corepack yarn infrastructure:package:dev --param photoBucketName=<dev-bucket>`
+- `corepack yarn infrastructure:package:prod --param photoBucketName=<prod-bucket>`
+- `corepack yarn infrastructure:deploy:dev --param photoBucketName=<bucket>`
+- `corepack yarn infrastructure:deploy:prod --param photoBucketName=<bucket>`
