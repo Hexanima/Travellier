@@ -56,13 +56,13 @@ Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el 
 
 Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado.
 
-Los comandos `infrastructure:deploy:*` requieren `MONGODB_URI` y `MONGODB_DATABASE_NAME` en el entorno de despliegue, inyectados desde secretos del entorno de CI correspondientes a `dev` y `prod`. Después de desplegar el stack, el comando toma el output `MongoConfigurationSecretArn` y escribe este JSON directamente en Secrets Manager con una operación idempotente. La URI nunca se incluye en el template de CloudFormation, los parámetros de Serverless ni argumentos de CLI:
+Los comandos `infrastructure:deploy:*` requieren `MONGODB_URI` y `MONGODB_DATABASE_NAME` en el entorno de despliegue, inyectados desde secretos del entorno de CI correspondientes a `dev` y `prod`. Después de desplegar el stack, el comando toma el output `MongoConfigurationSecretArn`, compara el valor `AWSCURRENT` y sólo escribe una nueva versión cuando la configuración cambió. La URI nunca se incluye en el template de CloudFormation, los parámetros de Serverless ni argumentos de CLI:
 
 ```json
 {"uri":"mongodb+srv://...","databaseName":"travellier"}
 ```
 
-La identidad de despliegue necesita `cloudformation:DescribeStacks` sobre el stack del stage y `secretsmanager:PutSecretValue` sobre el secreto MongoDB, además de los permisos habituales de Serverless. La Lambda mantiene solamente `secretsmanager:GetSecretValue` sobre los secretos del stack.
+La identidad de despliegue necesita `cloudformation:DescribeStacks`, `secretsmanager:GetSecretValue` y `secretsmanager:PutSecretValue` sobre los recursos del stage, además de los permisos habituales de Serverless. La Lambda mantiene solamente `secretsmanager:GetSecretValue` sobre los secretos del stack.
 
 El secreto JWT se genera automáticamente. La conectividad de MongoDB Atlas debe habilitarse para la red desde la que corra la Lambda.
 

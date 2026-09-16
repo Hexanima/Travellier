@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 
@@ -22,12 +22,10 @@ const createMongoConfiguration = (environment) =>
     databaseName: requiredSetting(environment, 'MONGODB_DATABASE_NAME'),
   })
 
-const createClientRequestToken = (secretString) =>
-  createHash('sha256').update(secretString).digest('hex')
-
 export const createInfrastructureDeployer = ({
   runServerless,
   getMongoSecretArn,
+  getMongoSecretValue,
   putMongoSecretValue,
 }) =>
   async ({ stage, region, serverlessArguments, environment }) => {
@@ -41,12 +39,16 @@ export const createInfrastructureDeployer = ({
       throw new Error('MongoConfigurationSecretArn is missing from the deployed stack')
     }
 
-    await putMongoSecretValue({
-      region,
-      secretId,
-      secretString,
-      clientRequestToken: createClientRequestToken(secretString),
-    })
+    const currentSecretString = await getMongoSecretValue({ region, secretId })
+
+    if (currentSecretString !== secretString) {
+      await putMongoSecretValue({
+        region,
+        secretId,
+        secretString,
+        clientRequestToken: randomUUID(),
+      })
+    }
   }
 
 const readOption = (argumentsList, name, fallback) => {
@@ -111,6 +113,21 @@ const putMongoSecretValue = async ({ region, secretId, secretString, clientReque
   )
 }
 
+const getMongoSecretValue = async ({ region, secretId }) => {
+  const { GetSecretValueCommand, SecretsManagerClient } = await import(
+    '@aws-sdk/client-secrets-manager'
+  )
+  const client = new SecretsManagerClient({ region })
+  const response = await client.send(
+    new GetSecretValueCommand({
+      SecretId: secretId,
+      VersionStage: 'AWSCURRENT',
+    }),
+  )
+
+  return response.SecretString
+}
+
 const main = async () => {
   const serverlessArguments = process.argv.slice(2)
   const stage = readOption(serverlessArguments, '--stage')
@@ -122,6 +139,7 @@ const main = async () => {
   await createInfrastructureDeployer({
     runServerless,
     getMongoSecretArn,
+    getMongoSecretValue,
     putMongoSecretValue,
   })({
     stage,
