@@ -22,6 +22,9 @@ const createMongoConfiguration = (environment) =>
     databaseName: requiredSetting(environment, 'MONGODB_DATABASE_NAME'),
   })
 
+const isMissingSecretValue = (error) =>
+  typeof error === 'object' && error !== null && error.name === 'ResourceNotFoundException'
+
 export const createInfrastructureDeployer = ({
   runServerless,
   getMongoSecretArn,
@@ -39,7 +42,15 @@ export const createInfrastructureDeployer = ({
       throw new Error('MongoConfigurationSecretArn is missing from the deployed stack')
     }
 
-    const currentSecretString = await getMongoSecretValue({ region, secretId })
+    let currentSecretString
+
+    try {
+      currentSecretString = await getMongoSecretValue({ region, secretId })
+    } catch (error) {
+      if (!isMissingSecretValue(error)) {
+        throw error
+      }
+    }
 
     if (currentSecretString !== secretString) {
       await putMongoSecretValue({

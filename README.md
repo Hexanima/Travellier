@@ -56,7 +56,7 @@ Antes de imprimir, empaquetar o desplegar, configurá `photoBucketName` para el 
 
 Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado.
 
-Los comandos `infrastructure:deploy:*` requieren `MONGODB_URI` y `MONGODB_DATABASE_NAME` en el entorno de despliegue, inyectados desde secretos del entorno de CI correspondientes a `dev` y `prod`. Después de desplegar el stack, el comando toma el output `MongoConfigurationSecretArn`, compara el valor `AWSCURRENT` y sólo escribe una nueva versión cuando la configuración cambió. La URI nunca se incluye en el template de CloudFormation, los parámetros de Serverless ni argumentos de CLI:
+Los comandos `infrastructure:deploy:*` requieren `MONGODB_URI` y `MONGODB_DATABASE_NAME` en el entorno de despliegue, inyectados desde secretos del entorno de CI correspondientes a `dev` y `prod`. Después de desplegar el stack, el comando toma el output `MongoConfigurationSecretArn`, crea la primera versión si no existe `AWSCURRENT` y sólo escribe otra cuando la configuración cambió. La URI nunca se incluye en el template de CloudFormation, los parámetros de Serverless ni argumentos de CLI:
 
 ```json
 {"uri":"mongodb+srv://...","databaseName":"travellier"}

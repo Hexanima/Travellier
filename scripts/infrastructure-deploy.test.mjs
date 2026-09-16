@@ -97,6 +97,37 @@ describe('infrastructure deployer', () => {
       assert.equal(writes, 0)
     })
 
+    it('creates the first MongoDB secret version when AWSCURRENT is absent', async () => {
+      let writtenSecret
+      const deploy = deploymentModule.createInfrastructureDeployer({
+        runServerless: async () => undefined,
+        getMongoSecretArn: async () => 'arn:aws:secretsmanager:sa-east-1:123456789012:secret:mongo',
+        getMongoSecretValue: async () => {
+          const error = new Error('secret version not found')
+          error.name = 'ResourceNotFoundException'
+          throw error
+        },
+        putMongoSecretValue: async (input) => {
+          writtenSecret = input.secretString
+        },
+      })
+
+      await deploy({
+        stage: 'dev',
+        region: 'sa-east-1',
+        serverlessArguments: ['--stage', 'dev'],
+        environment: {
+          MONGODB_URI: 'mongodb+srv://travellier.example/database',
+          MONGODB_DATABASE_NAME: 'travellier_dev',
+        },
+      })
+
+      assert.equal(
+        writtenSecret,
+        '{"uri":"mongodb+srv://travellier.example/database","databaseName":"travellier_dev"}',
+      )
+    })
+
     it('fails before deploying when MongoDB deployment settings are missing', async () => {
       let wasDeployed = false
       const deploy = deploymentModule.createInfrastructureDeployer({
