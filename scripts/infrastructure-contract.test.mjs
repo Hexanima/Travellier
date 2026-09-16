@@ -75,7 +75,7 @@ describe('Serverless infrastructure contract', () => {
     assert.doesNotMatch(service, /mongodb\+srv:\/\//)
   })
 
-  it('provisions a photo bucket that accepts direct PUT uploads from approved origins', () => {
+  it('provisions a private photo bucket that accepts direct PUT uploads from approved origins', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
 
     const service = readFileSync(servicePath, 'utf8')
@@ -93,30 +93,23 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*PublicAccessBlockConfiguration:\s*$/m)
     assert.match(service, /^\s*BlockPublicAcls:\s*true$/m)
     assert.match(service, /^\s*IgnorePublicAcls:\s*true$/m)
-    assert.match(service, /^\s*BlockPublicPolicy:\s*false$/m)
-    assert.match(service, /^\s*RestrictPublicBuckets:\s*false$/m)
+    assert.match(service, /^\s*BlockPublicPolicy:\s*true$/m)
+    assert.match(service, /^\s*RestrictPublicBuckets:\s*true$/m)
     assert.match(service, /^\s*OwnershipControls:\s*$/m)
     assert.match(service, /^\s*-\s*ObjectOwnership:\s*BucketOwnerEnforced$/m)
     assert.match(service, /^\s*BucketEncryption:\s*$/m)
     assert.match(service, /^\s*SSEAlgorithm:\s*AES256$/m)
   })
 
-  it('serves trip photos by direct object URL without granting public writes', () => {
+  it('keeps trip photos private until the API authorizes a signed read', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
 
     const service = readFileSync(servicePath, 'utf8')
-    const photoBucketPolicy = service.slice(service.indexOf('    PhotoBucketReadPolicy:'))
 
-    assert.match(photoBucketPolicy, /^\s*PhotoBucketReadPolicy:\s*$/m)
-    assert.match(photoBucketPolicy, /^\s*Type:\s*AWS::S3::BucketPolicy$/m)
-    assert.match(photoBucketPolicy, /^\s*Bucket:\s*$/m)
-    assert.match(photoBucketPolicy, /^\s*Ref:\s*PhotoBucket$/m)
-    assert.match(photoBucketPolicy, /^\s*-\s*Sid:\s*AllowPublicTripPhotoRead$/m)
-    assert.match(photoBucketPolicy, /^\s*Principal:\s*'\*'$/m)
-    assert.match(photoBucketPolicy, /^\s*-\s*s3:GetObject\s*$/m)
-    assert.match(photoBucketPolicy, /^\s*Fn::Sub:\s*'\$\{PhotoBucket\.Arn\}\/trips\/\*'$/m)
-    assert.doesNotMatch(photoBucketPolicy, /s3:PutObject/)
-    assert.doesNotMatch(photoBucketPolicy, /s3:\*/)
+    assert.doesNotMatch(service, /^\s*Type:\s*AWS::S3::BucketPolicy$/m)
+    assert.doesNotMatch(service, /^\s*Principal:\s*'\*'$/m)
+    assert.doesNotMatch(service, /AllowPublicTripPhotoRead/)
+    assert.doesNotMatch(service, /s3:GetObject/)
   })
 
   it('does not require callers to provide a photo bucket for stage commands', () => {

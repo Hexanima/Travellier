@@ -94,24 +94,9 @@ resources:
             - ObjectOwnership: BucketOwnerEnforced
         PublicAccessBlockConfiguration:
           BlockPublicAcls: true
-          BlockPublicPolicy: false
+          BlockPublicPolicy: true
           IgnorePublicAcls: true
-          RestrictPublicBuckets: false
-    PhotoBucketReadPolicy:
-      Type: AWS::S3::BucketPolicy
-      Properties:
-        Bucket:
-          Ref: PhotoBucket
-        PolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Sid: AllowPublicTripPhotoRead
-              Effect: Allow
-              Principal: '*'
-              Action:
-                - s3:GetObject
-              Resource:
-                Fn::Sub: '${PhotoBucket.Arn}/trips/*'
+          RestrictPublicBuckets: true
     MongoConfigurationSecret:
       Type: AWS::SecretsManager::Secret
       DeletionPolicy: Delete

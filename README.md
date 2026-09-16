@@ -52,7 +52,7 @@ La API se despliega con Serverless Framework mediante [serverless.yml](serverles
 
 Los comandos de Serverless requieren una sesión iniciada con `serverless login` o un `SERVERLESS_ACCESS_KEY`; el workflow de calidad no requiere esas credenciales.
 
-Cada stack crea su propio bucket de fotos. Las escrituras son exclusivamente mediante URLs presignadas emitidas por Lambda; las fotos bajo `trips/*` se leen directamente desde S3 usando la URL del objeto. El cliente no recibe credenciales AWS. Los objetos se cargan bajo `trips/{tripId}/posts/{postId}/...`; el endpoint de firma se incorpora en T48.
+Cada stack crea su propio bucket privado de fotos. Las escrituras y lecturas son exclusivamente mediante URLs presignadas emitidas por la API tras autorizar al miembro; el cliente no recibe credenciales AWS. Los objetos se cargan bajo `trips/{tripId}/posts/{postId}/...`; los endpoints de firma se incorporan en T48.
 
 Los secretos pertenecen al ciclo de vida de cada stage: `serverless remove --stage <stage>` los elimina. CloudFormation asigna un nombre físico único en cada despliegue, por lo que un redeploy no depende de que la eliminación anterior haya terminado.
 
