@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -7,6 +7,14 @@ import { dirname, join } from 'node:path'
 const rootDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const servicePath = join(rootDirectory, 'serverless.yml')
 const packagePath = join(rootDirectory, 'package.json')
+const webDirectory = join(rootDirectory, 'apps', 'web')
+
+const listFiles = (directory) =>
+  readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name)
+
+    return entry.isDirectory() ? listFiles(path) : [path]
+  })
 
 describe('Serverless infrastructure contract', () => {
   it('defines the Travellier HTTP API Lambda for configurable stages', () => {
@@ -48,9 +56,11 @@ describe('Serverless infrastructure contract', () => {
 
     assert.match(service, /^\s*MONGODB_SECRET_ARN:\s*$/m)
     assert.match(service, /^\s*JWT_SECRET_ARN:\s*$/m)
-    assert.match(service, /^\s*S3_BUCKET_NAME:\s*\$\{param:photoBucketName\}$/m)
+    assert.match(service, /^\s*S3_BUCKET_NAME:\s*$/m)
+    assert.match(service, /^\s*Ref:\s*PhotoBucket$/m)
     assert.match(service, /^\s*-\s*secretsmanager:GetSecretValue\s*$/m)
     assert.match(service, /^\s*-\s*s3:PutObject\s*$/m)
+    assert.match(service, /^\s*Fn::Sub:\s*'\$\{PhotoBucket\.Arn\}\/trips\/\*'$/m)
     assert.match(service, /^\s*Type:\s*AWS::SecretsManager::Secret$/m)
     assert.match(service, /^\s*stackName:\s*\$\{self:service\}-\$\{sls:stage\}\s*$/m)
     assert.match(service, /^\s*DeletionPolicy:\s*Delete$/m)
@@ -58,13 +68,51 @@ describe('Serverless infrastructure contract', () => {
     assert.doesNotMatch(service, /^\s*(?:DeletionPolicy|UpdateReplacePolicy):\s*Retain$/m)
     assert.doesNotMatch(service, /^\s*Name:\s*/m)
     assert.doesNotMatch(service, /^\s*SecretString:\s*/m)
+    assert.doesNotMatch(service, /photoBucketName/)
     assert.doesNotMatch(service, /s3:\*/)
     assert.doesNotMatch(service, /secretsmanager:\*/)
     assert.doesNotMatch(service, /Action:\s*["']\*["']/)
     assert.doesNotMatch(service, /mongodb\+srv:\/\//)
   })
 
-  it('requires an explicit photo bucket for every stage command', () => {
+  it('provisions a private photo bucket that accepts direct PUT uploads from approved origins', () => {
+    assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
+
+    const service = readFileSync(servicePath, 'utf8')
+
+    assert.match(service, /^\s*PhotoBucket:\s*$/m)
+    assert.match(service, /^\s*Type:\s*AWS::S3::Bucket$/m)
+    assert.match(service, /^\s*CorsConfiguration:\s*$/m)
+    assert.match(service, /^\s*AllowedOrigins:\s*$/m)
+    assert.match(service, /^\s*-\s*capacitor:\/\/localhost\s*$/m)
+    assert.match(service, /^\s*-\s*http:\/\/localhost\s*$/m)
+    assert.match(service, /^\s*AllowedMethods:\s*$/m)
+    assert.match(service, /^\s*-\s*PUT\s*$/m)
+    assert.match(service, /^\s*-\s*AllowedHeaders:\s*$/m)
+    assert.match(service, /^\s*-\s*Content-Type\s*$/m)
+    assert.match(service, /^\s*PublicAccessBlockConfiguration:\s*$/m)
+    assert.match(service, /^\s*BlockPublicAcls:\s*true$/m)
+    assert.match(service, /^\s*IgnorePublicAcls:\s*true$/m)
+    assert.match(service, /^\s*BlockPublicPolicy:\s*true$/m)
+    assert.match(service, /^\s*RestrictPublicBuckets:\s*true$/m)
+    assert.match(service, /^\s*OwnershipControls:\s*$/m)
+    assert.match(service, /^\s*-\s*ObjectOwnership:\s*BucketOwnerEnforced$/m)
+    assert.match(service, /^\s*BucketEncryption:\s*$/m)
+    assert.match(service, /^\s*SSEAlgorithm:\s*AES256$/m)
+  })
+
+  it('keeps trip photos private until the API authorizes a signed read', () => {
+    assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
+
+    const service = readFileSync(servicePath, 'utf8')
+
+    assert.doesNotMatch(service, /^\s*Type:\s*AWS::S3::BucketPolicy$/m)
+    assert.doesNotMatch(service, /^\s*Principal:\s*'\*'$/m)
+    assert.doesNotMatch(service, /AllowPublicTripPhotoRead/)
+    assert.doesNotMatch(service, /s3:GetObject/)
+  })
+
+  it('does not require callers to provide a photo bucket for stage commands', () => {
     const manifest = JSON.parse(readFileSync(packagePath, 'utf8'))
 
     for (const [stage, command] of [
@@ -77,6 +125,14 @@ describe('Serverless infrastructure contract', () => {
 
       assert.match(script, new RegExp(`--stage ${stage}`))
       assert.doesNotMatch(script, /photoBucketName=/)
+    }
+  })
+
+  it('keeps AWS credentials out of the mobile client', () => {
+    const credentialPattern = /AWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)|accessKeyId|secretAccessKey/
+
+    for (const path of listFiles(webDirectory)) {
+      assert.doesNotMatch(readFileSync(path, 'utf8'), credentialPattern, path)
     }
   })
 

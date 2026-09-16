@@ -42,7 +42,7 @@ describe('infrastructure deployer', () => {
       await deploy({
         stage: 'dev',
         region: 'sa-east-1',
-        serverlessArguments: ['--stage', 'dev', '--param', 'photoBucketName=dev-photos'],
+        serverlessArguments: ['--stage', 'dev'],
         environment: {
           MONGODB_URI: 'mongodb+srv://travellier.example/database',
           MONGODB_DATABASE_NAME: 'travellier_dev',
@@ -51,7 +51,7 @@ describe('infrastructure deployer', () => {
 
       assert.deepEqual(calls[0], [
         'deploy',
-        ['--stage', 'dev', '--param', 'photoBucketName=dev-photos'],
+        ['--stage', 'dev'],
       ])
       assert.deepEqual(calls[1], ['secretArn', { stage: 'dev', region: 'sa-east-1' }])
       assert.deepEqual(calls[2], [
