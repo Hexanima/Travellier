@@ -48,6 +48,7 @@ export type HttpClientDependencies = {
 type RequestOptions = {
   headers?: Record<string, string>;
   body?: unknown;
+  authenticated?: boolean;
 };
 
 export type HttpClient = {
@@ -136,18 +137,20 @@ export const createHttpClient = ({
     path: string,
     options: RequestOptions = {},
   ): AsyncResult<TResponse, ApiClientError> => {
-    let accessToken: string | null;
-
-    try {
-      accessToken = await getAccessToken();
-    } catch {
-      return err(new ApiClientError("client", "AccessTokenError", clientRequestError));
-    }
-
     const headers = { ...options.headers };
 
-    if (accessToken) {
-      headers.Authorization = `Bearer ${accessToken}`;
+    if (options.authenticated !== false) {
+      let accessToken: string | null;
+
+      try {
+        accessToken = await getAccessToken();
+      } catch {
+        return err(new ApiClientError("client", "AccessTokenError", clientRequestError));
+      }
+
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
     }
 
     if (options.body !== undefined) {

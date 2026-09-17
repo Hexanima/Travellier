@@ -50,6 +50,36 @@ describe("createHttpClient", () => {
     });
   });
 
+  it("sends public requests without reading the access token", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ accessToken: "new-token" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const getAccessToken = vi.fn().mockRejectedValue(new Error("Storage must not be used"));
+    const client = createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch,
+      getAccessToken,
+      onUnauthorized: vi.fn(),
+    });
+
+    const result = await client.post(
+      "/auth/login",
+      { email: "user@example.test", password: "secret" },
+      { authenticated: false },
+    );
+
+    expect(result).toEqual({ ok: true, value: { accessToken: "new-token" } });
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledWith("https://api.example.test/auth/login", {
+      body: JSON.stringify({ email: "user@example.test", password: "secret" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  });
+
   it("returns a UI-safe error when access-token retrieval fails", async () => {
     const fetch = vi.fn();
     const client = createHttpClient({
