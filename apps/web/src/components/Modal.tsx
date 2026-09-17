@@ -21,7 +21,7 @@ export function Modal({
   title,
 }: ModalProps) {
   const titleId = useId();
-  const cannotClose = disabled || loading || !onClose;
+  const cannotClose = loading || !onClose;
 
   if (!isOpen) {
     return null;

@@ -42,6 +42,7 @@ export function ListItem({ children, className, disabled = false, ...props }: Li
       {...props}
       className={["ui-list__item", className].filter(Boolean).join(" ")}
       aria-disabled={disabled || undefined}
+      inert={disabled || undefined}
     >
       {children}
     </li>

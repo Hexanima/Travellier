@@ -36,4 +36,14 @@ describe("Modal", () => {
 
     expect(markup).toMatch(/<fieldset[^>]*disabled=""/);
   });
+
+  it("keeps its close action available when only its form is disabled", () => {
+    const markup = renderToStaticMarkup(
+      <Modal isOpen title="Editar viaje" disabled onClose={() => undefined}>
+        <input aria-label="Nombre del viaje" />
+      </Modal>,
+    );
+
+    expect(markup).not.toContain("aria-label=\"Cerrar\" disabled=\"\"");
+  });
 });

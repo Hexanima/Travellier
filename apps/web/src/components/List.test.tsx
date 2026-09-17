@@ -39,4 +39,14 @@ describe("List", () => {
 
     expect(markup).toContain("inert=\"\"");
   });
+
+  it("prevents interaction with controls in a disabled item", () => {
+    const markup = renderToStaticMarkup(
+      <ListItem disabled>
+        <button type="button">Eliminar</button>
+      </ListItem>,
+    );
+
+    expect(markup).toContain("inert=\"\"");
+  });
 });
