@@ -50,6 +50,27 @@ describe("createHttpClient", () => {
     });
   });
 
+  it("returns a UI-safe error when access-token retrieval fails", async () => {
+    const fetch = vi.fn();
+    const client = createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch,
+      getAccessToken: vi.fn().mockRejectedValue(new Error("Preferences unavailable")),
+      onUnauthorized: vi.fn(),
+    });
+
+    await expect(client.get("/trips")).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        tag: "ApiClientError",
+        kind: "client",
+        code: "AccessTokenError",
+        message: "No pudimos preparar la solicitud. Intentá nuevamente.",
+      }),
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("serializes API validation errors for UI feedback", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(
@@ -157,5 +178,31 @@ describe("createHttpClient", () => {
         code: "Unauthorized",
       }),
     });
+  });
+
+  it("returns the unauthorized result when its central handler fails", async () => {
+    const onUnauthorized = vi.fn().mockRejectedValue(new Error("Session cleanup failed"));
+    const client = createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch: vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+      getAccessToken: vi.fn().mockResolvedValue("expired-token"),
+      onUnauthorized,
+    });
+
+    await expect(client.get("/trips")).resolves.toEqual({
+      ok: false,
+      error: expect.objectContaining({
+        tag: "ApiClientError",
+        kind: "unauthorized",
+        code: "Unauthorized",
+        status: 401,
+      }),
+    });
+    expect(onUnauthorized).toHaveBeenCalledOnce();
   });
 });

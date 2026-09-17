@@ -1,6 +1,7 @@
 import { err, ok, type AsyncResult, TaggedError } from "app-domain";
 
 export type ApiErrorKind =
+  | "client"
   | "network"
   | "unauthorized"
   | "validation"
@@ -56,6 +57,7 @@ export type HttpClient = {
 
 const genericRequestError = "No pudimos completar la solicitud. Intentá nuevamente.";
 const networkError = "No pudimos conectarnos. Verificá tu conexión e intentá nuevamente.";
+const clientRequestError = "No pudimos preparar la solicitud. Intentá nuevamente.";
 
 const joinUrl = (baseUrl: string, path: string): string =>
   `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
@@ -134,7 +136,14 @@ export const createHttpClient = ({
     path: string,
     options: RequestOptions = {},
   ): AsyncResult<TResponse, ApiClientError> => {
-    const accessToken = await getAccessToken();
+    let accessToken: string | null;
+
+    try {
+      accessToken = await getAccessToken();
+    } catch {
+      return err(new ApiClientError("client", "AccessTokenError", clientRequestError));
+    }
+
     const headers = { ...options.headers };
 
     if (accessToken) {
@@ -176,7 +185,11 @@ export const createHttpClient = ({
     const error = toApiClientError(response.status, payload);
 
     if (error.kind === "unauthorized") {
-      await onUnauthorized();
+      try {
+        await onUnauthorized();
+      } catch {
+        return err(error);
+      }
     }
 
     return err(error);
