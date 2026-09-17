@@ -25,4 +25,15 @@ describe("Modal", () => {
     expect(markup).toContain("No se pudo guardar");
     expect(markup).toContain("disabled=\"\"");
   });
+
+  it("disables controls rendered in its content", () => {
+    const markup = renderToStaticMarkup(
+      <Modal isOpen title="Crear viaje" disabled>
+        <input aria-label="Nombre del viaje" />
+        <button type="submit">Guardar</button>
+      </Modal>,
+    );
+
+    expect(markup).toMatch(/<fieldset[^>]*disabled=""/);
+  });
 });

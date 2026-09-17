@@ -52,7 +52,9 @@ export function Modal({
           </button>
         </header>
         {error ? <p className="ui-modal__error" role="alert">{error}</p> : null}
-        <div className="ui-modal__content">{children}</div>
+        <fieldset className="ui-modal__content" disabled={disabled || loading}>
+          {children}
+        </fieldset>
       </section>
     </div>
   );

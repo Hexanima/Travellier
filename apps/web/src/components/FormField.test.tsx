@@ -27,4 +27,19 @@ describe("form fields", () => {
 
     expect(markup.match(/disabled=""/g)).toHaveLength(2);
   });
+
+  it("disables every field and exposes a busy state while loading", () => {
+    const markup = renderToStaticMarkup(
+      <>
+        <TextField id="name" label="Nombre" loading />
+        <SelectField id="trip" label="Viaje" loading>
+          <option>Patagonia</option>
+        </SelectField>
+        <TextAreaField id="notes" label="Notas" loading />
+      </>,
+    );
+
+    expect(markup.match(/disabled=""/g)).toHaveLength(3);
+    expect(markup.match(/aria-busy="true"/g)).toHaveLength(3);
+  });
 });

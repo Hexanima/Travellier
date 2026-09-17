@@ -7,6 +7,7 @@ interface BaseFieldProps {
   helpText?: string;
   id?: string;
   label: ReactNode;
+  loading?: boolean;
 }
 
 interface FieldLayoutProps extends BaseFieldProps {
@@ -18,21 +19,22 @@ interface FieldLayoutProps extends BaseFieldProps {
   }) => ReactNode;
 }
 
-function FieldLayout({ children, disabled = false, error, helpText, id, label }: FieldLayoutProps) {
+function FieldLayout({ children, disabled = false, error, helpText, id, label, loading = false }: FieldLayoutProps) {
   const generatedId = useId();
   const controlId = id ?? generatedId;
+  const isDisabled = disabled || loading;
   const descriptionIds = [helpText ? `${controlId}-help` : undefined, error ? `${controlId}-error` : undefined]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <div className="ui-field" data-error={Boolean(error) || undefined}>
+    <div className="ui-field" data-error={Boolean(error) || undefined} aria-busy={loading || undefined}>
       <label className="ui-field__label" htmlFor={controlId}>
         {label}
       </label>
       {children({
         id: controlId,
-        disabled,
+        disabled: isDisabled,
         "aria-invalid": Boolean(error),
         "aria-describedby": descriptionIds || undefined,
       })}
@@ -53,10 +55,10 @@ function FieldLayout({ children, disabled = false, error, helpText, id, label }:
 export interface TextFieldProps extends BaseFieldProps, Omit<InputHTMLAttributes<HTMLInputElement>, "disabled" | "id"> {}
 
 export function TextField({ className, type = "text", ...props }: TextFieldProps) {
-  const { disabled, error, helpText, id, label, ...inputProps } = props;
+  const { disabled, error, helpText, id, label, loading, ...inputProps } = props;
 
   return (
-    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label}>
+    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label} loading={loading}>
       {(controlProps) => (
         <input
           {...inputProps}
@@ -72,10 +74,10 @@ export function TextField({ className, type = "text", ...props }: TextFieldProps
 export interface SelectFieldProps extends BaseFieldProps, Omit<SelectHTMLAttributes<HTMLSelectElement>, "disabled" | "id"> {}
 
 export function SelectField({ children, className, ...props }: SelectFieldProps) {
-  const { disabled, error, helpText, id, label, ...selectProps } = props;
+  const { disabled, error, helpText, id, label, loading, ...selectProps } = props;
 
   return (
-    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label}>
+    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label} loading={loading}>
       {(controlProps) => (
         <select
           {...selectProps}
@@ -92,10 +94,10 @@ export function SelectField({ children, className, ...props }: SelectFieldProps)
 export interface TextAreaFieldProps extends BaseFieldProps, Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "disabled" | "id"> {}
 
 export function TextAreaField({ className, ...props }: TextAreaFieldProps) {
-  const { disabled, error, helpText, id, label, ...textareaProps } = props;
+  const { disabled, error, helpText, id, label, loading, ...textareaProps } = props;
 
   return (
-    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label}>
+    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label} loading={loading}>
       {(controlProps) => (
         <textarea
           {...textareaProps}

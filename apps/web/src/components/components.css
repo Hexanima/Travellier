@@ -158,7 +158,12 @@
 .ui-modal__title { margin: 0; font-size: 1.25rem; }
 .ui-modal__close { min-width: 36px; min-height: 36px; background: var(--ui-color-surface); color: var(--ui-color-text); }
 .ui-modal__error { margin: var(--ui-space-3) 0 0; }
-.ui-modal__content { margin-top: var(--ui-space-4); }
+.ui-modal__content {
+  min-inline-size: 0;
+  margin-top: var(--ui-space-4);
+  border: 0;
+  padding: 0;
+}
 
 @keyframes ui-spin {
   to { transform: rotate(360deg); }
