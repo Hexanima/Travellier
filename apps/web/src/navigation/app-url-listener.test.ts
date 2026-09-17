@@ -28,7 +28,7 @@ function createNativeAppUrlApi(launchUrl?: string): {
 
 describe("initializeAppUrlListener", () => {
   it("navigates to the URL that launched the application", async () => {
-    const { api } = createNativeAppUrlApi("com.tuapp://invite/VIAJE-X7K2");
+    const { api } = createNativeAppUrlApi("com.travellier.app://invite/VIAJE-X7K2");
     const navigate = vi.fn();
 
     await initializeAppUrlListener(api, navigate);
@@ -41,7 +41,7 @@ describe("initializeAppUrlListener", () => {
     const navigate = vi.fn();
     const stopListening = await initializeAppUrlListener(api, navigate);
 
-    emitUrl("com.tuapp://verify/token-123");
+    emitUrl("com.travellier.app://verify/token-123");
     await stopListening();
 
     expect(navigate).toHaveBeenCalledWith("/verify/token-123");

@@ -4,7 +4,7 @@ import { resolveDeepLinkUrl } from "./deep-link.js";
 
 describe("resolveDeepLinkUrl", () => {
   it("maps a custom-scheme URL to an internal route", () => {
-    expect(resolveDeepLinkUrl("com.tuapp://invite/VIAJE-X7K2?source=share")).toBe(
+    expect(resolveDeepLinkUrl("com.travellier.app://invite/VIAJE-X7K2?source=share")).toBe(
       "/invite/VIAJE-X7K2?source=share",
     );
   });
@@ -17,6 +17,10 @@ describe("resolveDeepLinkUrl", () => {
 
   it("ignores URLs outside the application scheme", () => {
     expect(resolveDeepLinkUrl("https://example.com/invite/VIAJE-X7K2")).toBeNull();
+  });
+
+  it("ignores the deprecated placeholder scheme", () => {
+    expect(resolveDeepLinkUrl("com.tuapp://invite/VIAJE-X7K2")).toBeNull();
   });
 
   it("ignores malformed URLs", () => {

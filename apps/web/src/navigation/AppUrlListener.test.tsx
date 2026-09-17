@@ -28,7 +28,9 @@ describe("AppUrlListener", () => {
     const remove = vi.fn().mockResolvedValue(undefined);
     const nativeApp: NativeAppUrlApi = {
       addListener: vi.fn().mockResolvedValue({ remove }),
-      getLaunchUrl: vi.fn().mockResolvedValue({ url: "com.tuapp://invite/VIAJE-X7K2" }),
+      getLaunchUrl: vi.fn().mockResolvedValue({
+        url: "com.travellier.app://invite/VIAJE-X7K2",
+      }),
     };
     const container = document.createElement("div");
     const root = createRoot(container);

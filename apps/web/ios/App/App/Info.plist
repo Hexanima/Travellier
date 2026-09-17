@@ -16,7 +16,6 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.travellier.app</string>
-				<string>com.tuapp</string>
 			</array>
 		</dict>
 	</array>

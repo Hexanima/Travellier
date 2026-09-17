@@ -1,4 +1,4 @@
-const appUrlSchemes = new Set(["com.tuapp:", "com.travellier.app:"]);
+const appUrlSchemes = new Set(["com.travellier.app:"]);
 
 export function resolveDeepLinkUrl(url: string): string | null {
   let parsedUrl: URL;
