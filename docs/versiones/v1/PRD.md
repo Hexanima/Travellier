@@ -40,7 +40,7 @@ Aplicación **mobile** para **organizar viajes grupales**: planificar el transpo
 | Base de datos | MongoDB Atlas |
 | Almacenamiento de fotos | AWS S3 (presigned URLs) |
 | Uploads | Presigned URLs (upload directo cliente → S3, sin pasar por Lambda) |
-| Deep links | Custom URL Scheme (`com.tuapp://`) interceptado por Capacitor |
+| Deep links | Custom URL Scheme (`com.travellier.app://`) interceptado por Capacitor |
 
 ---
 
@@ -92,7 +92,7 @@ GET https://api.tuapp.com/invite/:code
         │
 Lambda valida el código y devuelve HTML con JS
         │
-JS intenta abrir → com.tuapp://invite/:code
+JS intenta abrir → com.travellier.app://invite/:code
         │
         ├── App instalada: el OS la intercepta y abre la pantalla de join
         │
@@ -101,7 +101,7 @@ JS intenta abrir → com.tuapp://invite/:code
             para descargar/instalar la app
 ```
 
-El mismo patrón aplica para el link de confirmación de email (`/auth/verify/:token` → `com.tuapp://verify/:token`).
+El mismo patrón aplica para el link de confirmación de email (`/auth/verify/:token` → `com.travellier.app://verify/:token`).
 
 #### Roles
 
@@ -676,7 +676,7 @@ Cliente ──► POST /auth/refresh  ──► Lambda (valida refresh token) �
 ### Unirse a un Trip
 1. Usuario recibe código corto o link de invitación.
 2. **Por código:** lo ingresa manualmente en la app → pantalla de confirmación de join.
-3. **Por link:** la API devuelve HTML que intenta abrir `com.tuapp://invite/:code`. Si la app está instalada, Capacitor la intercepta y abre la pantalla de join. Si no está instalada, después de ~1500ms muestra el HTML de fallback con instrucciones de instalación.
+3. **Por link:** la API devuelve HTML que intenta abrir `com.travellier.app://invite/:code`. Si la app está instalada, Capacitor la intercepta y abre la pantalla de join. Si no está instalada, después de ~1500ms muestra el HTML de fallback con instrucciones de instalación.
 4. Usuario confirma unirse → queda como participante.
 
 ### Crear una actividad

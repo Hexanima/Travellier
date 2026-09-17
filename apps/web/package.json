@@ -9,14 +9,25 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "build": "tsc && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:sync": "yarn build && cap sync",
+    "cap:sync:android": "yarn build && cap sync android",
+    "cap:sync:ios": "yarn build && cap sync ios",
+    "cap:build:android": "yarn cap:sync:android && cap build android",
+    "cap:build:ios": "yarn cap:sync:ios && cap build ios"
   },
   "dependencies": {
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.2",
     "app-domain": "workspace:^",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "7.18.4"
   },
   "devDependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/ios": "8.5.2",
     "@eslint/js": "^9.36.0",
     "@types/node": "^24.6.0",
     "@types/react": "^19.1.16",
@@ -26,6 +37,7 @@
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
+    "jsdom": "26.1.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.45.0",
     "vite": "^7.1.7",

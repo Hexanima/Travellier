@@ -33,7 +33,7 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 
 - `domain`: entidades, casos de uso, contratos de resultado y puertos sin dependencias de frameworks.
 - `apps/api`: adaptador HTTP; evolucionará hacia las funciones Lambda de la API.
-- `apps/web`: cliente React; evolucionará hacia el cliente mobile empaquetado con Capacitor.
+- `apps/web`: cliente React mobile empaquetable con Capacitor para iOS y Android.
 - `docs/versiones/v1/PRD.md`: especificación funcional y modelo de datos.
 - `AGENTS.md`: contexto e instrucciones para agentes que trabajen en el repositorio.
 
@@ -45,6 +45,9 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn build`
 - `corepack yarn workspace api dev`
 - `corepack yarn workspace web dev`
+- `corepack yarn workspace web cap:sync`
+- `corepack yarn workspace web cap:build:android`
+- `corepack yarn workspace web cap:build:ios` (macOS con Xcode)
 
 ## Infraestructura AWS
 
