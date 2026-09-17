@@ -10,6 +10,10 @@
 
     /* Bundler mode */
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "app-domain": ["../../domain/src/index.ts"]
+    },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,

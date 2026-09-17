@@ -7,8 +7,11 @@ export interface ValidationIssue {
 }
 
 export class ValidationError extends TaggedError<"ValidationError"> {
-  constructor(readonly issues: readonly ValidationIssue[]) {
+  readonly issues: readonly ValidationIssue[];
+
+  constructor(issues: readonly ValidationIssue[]) {
     super("ValidationError");
+    this.issues = issues;
     this.message = issues.map((issue) => issue.message).join(" ");
   }
 }
