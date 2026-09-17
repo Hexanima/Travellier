@@ -14,6 +14,7 @@ export function List({ children, className, disabled = false, error, loading = f
       className={["ui-list", className].filter(Boolean).join(" ")}
       aria-disabled={disabled || undefined}
       aria-busy={loading || undefined}
+      inert={disabled || undefined}
     >
       {loading ? (
         <li className="ui-list__state" role="status">

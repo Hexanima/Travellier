@@ -27,4 +27,16 @@ describe("List", () => {
     expect(markup).toContain("role=\"alert\"");
     expect(markup).toContain("No se pudieron cargar los viajes");
   });
+
+  it("prevents interaction with controls in a disabled list", () => {
+    const markup = renderToStaticMarkup(
+      <List disabled>
+        <ListItem>
+          <button type="button">Eliminar</button>
+        </ListItem>
+      </List>,
+    );
+
+    expect(markup).toContain("inert=\"\"");
+  });
 });
