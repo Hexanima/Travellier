@@ -4,7 +4,7 @@ React/Vite client packaged with Capacitor for Android and iOS.
 
 The client owns React routing and the native Capacitor adapters. It imports the domain package through `app-domain`; native concerns do not reach `domain`.
 
-The native projects register `com.travellier.app://` and the shell resolves URLs delivered by the Capacitor App plugin. T18 will add the invitation and verification flows.
+The native projects register the PRD scheme `com.tuapp://` and `com.travellier.app://` for compatibility. The shell resolves URLs delivered by the Capacitor App plugin; T18 will add the invitation and verification flows.
 
 ## Commands
 

@@ -27,6 +27,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="com.travellier.app" />
+                <data android:scheme="com.tuapp" />
             </intent-filter>
 
         </activity>

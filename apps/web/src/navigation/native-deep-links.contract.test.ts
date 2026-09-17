@@ -28,11 +28,15 @@ describe("native deep link configuration", () => {
     expect(androidManifest).toMatch(
       /<data android:scheme="com\.travellier\.app" \/>/,
     );
+    expect(androidManifest).toMatch(/<data android:scheme="com\.tuapp" \/>/);
   });
 
   it("registers the application scheme in iOS", () => {
     expect(iosInfoPlist).toMatch(
       /<key>CFBundleURLTypes<\/key>[\s\S]*?<key>CFBundleURLSchemes<\/key>[\s\S]*?<string>com\.travellier\.app<\/string>/,
+    );
+    expect(iosInfoPlist).toMatch(
+      /<key>CFBundleURLSchemes<\/key>[\s\S]*?<string>com\.tuapp<\/string>/,
     );
   });
 });
