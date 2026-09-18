@@ -7,8 +7,7 @@ type AuthenticationDomain = typeof domain & {
     execute: (
       dependencies: {
         sessions: {
-          findByTokenHash: (tokenHash: string) => Promise<unknown>;
-          delete: (id: string) => Promise<unknown>;
+          consume: (tokenHash: string) => Promise<unknown>;
         };
         tokens: { hashRefreshToken: (token: string) => Promise<unknown> };
       },
@@ -24,7 +23,7 @@ describe("revokeSession", () => {
     const hashRefreshToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "refresh-token-hash" });
-    const findByTokenHash = vi.fn().mockResolvedValue({
+    const consume = vi.fn().mockResolvedValue({
       ok: true,
       value: {
         id: "507f1f77bcf86cd799439012",
@@ -34,20 +33,18 @@ describe("revokeSession", () => {
         createdAt: new Date("2026-09-18T10:00:00.000Z"),
       },
     });
-    const deleteSession = vi.fn().mockResolvedValue({ ok: true, value: undefined });
 
     expect("revokeSession" in domain).toBe(true);
 
     const result = await authDomain.revokeSession.execute(
       {
-        sessions: { findByTokenHash, delete: deleteSession },
+        sessions: { consume },
         tokens: { hashRefreshToken },
       },
       { refreshToken: "refresh-token" },
     );
 
-    expect(findByTokenHash).toHaveBeenCalledWith("refresh-token-hash");
-    expect(deleteSession).toHaveBeenCalledWith("507f1f77bcf86cd799439012");
+    expect(consume).toHaveBeenCalledWith("refresh-token-hash");
     expect(result).toEqual({ ok: true, value: undefined });
   });
 
@@ -55,12 +52,11 @@ describe("revokeSession", () => {
     const hashRefreshToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "unknown-refresh-token-hash" });
-    const findByTokenHash = vi.fn().mockResolvedValue({ ok: true, value: undefined });
-    const deleteSession = vi.fn();
+    const consume = vi.fn().mockResolvedValue({ ok: true, value: undefined });
 
     const result = await authDomain.revokeSession.execute(
       {
-        sessions: { findByTokenHash, delete: deleteSession },
+        sessions: { consume },
         tokens: { hashRefreshToken },
       },
       { refreshToken: "unknown-refresh-token" },
@@ -70,6 +66,5 @@ describe("revokeSession", () => {
       ok: false,
       error: { tag: "InvalidSessionError" },
     });
-    expect(deleteSession).not.toHaveBeenCalled();
   });
 });

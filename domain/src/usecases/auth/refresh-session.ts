@@ -45,7 +45,7 @@ export const refreshSession: UseCase<
       return currentTokenHash;
     }
 
-    const currentSession = await dependencies.sessions.findByTokenHash(
+    const currentSession = await dependencies.sessions.consume(
       currentTokenHash.value,
     );
 
@@ -58,19 +58,7 @@ export const refreshSession: UseCase<
     }
 
     if (currentSession.value.expiresAt.getTime() <= dependencies.now().getTime()) {
-      const deletedSession = await dependencies.sessions.delete(currentSession.value.id);
-
-      if (!deletedSession.ok) {
-        return deletedSession;
-      }
-
       return err(new SessionExpiredError());
-    }
-
-    const deletedSession = await dependencies.sessions.delete(currentSession.value.id);
-
-    if (!deletedSession.ok) {
-      return deletedSession;
     }
 
     const refreshToken = await dependencies.tokens.createRefreshToken();

@@ -7,8 +7,7 @@ type AuthenticationDomain = typeof domain & {
     execute: (
       dependencies: {
         sessions: {
-          findByTokenHash: (tokenHash: string) => Promise<unknown>;
-          delete: (id: string) => Promise<unknown>;
+          consume: (tokenHash: string) => Promise<unknown>;
           create: (session: unknown) => Promise<unknown>;
         };
         tokens: {
@@ -35,8 +34,7 @@ const session = {
 
 describe("refreshSession", () => {
   it("rotates a valid session and persists only the replacement token hash", async () => {
-    const findByTokenHash = vi.fn().mockResolvedValue({ ok: true, value: session });
-    const deleteSession = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const consume = vi.fn().mockResolvedValue({ ok: true, value: session });
     const create = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const hashRefreshToken = vi
       .fn()
@@ -53,7 +51,7 @@ describe("refreshSession", () => {
 
     const result = await authDomain.refreshSession.execute(
       {
-        sessions: { findByTokenHash, delete: deleteSession, create },
+        sessions: { consume, create },
         tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
@@ -61,7 +59,7 @@ describe("refreshSession", () => {
       { refreshToken: "old-refresh-token" },
     );
 
-    expect(deleteSession).toHaveBeenCalledWith(session.id);
+    expect(consume).toHaveBeenCalledWith("old-refresh-token-hash");
     expect(create).toHaveBeenCalledWith({
       userId: session.userId,
       tokenHash: "new-refresh-token-hash",
@@ -74,8 +72,7 @@ describe("refreshSession", () => {
   });
 
   it("rejects a refresh token that has no active session", async () => {
-    const findByTokenHash = vi.fn().mockResolvedValue({ ok: true, value: undefined });
-    const deleteSession = vi.fn();
+    const consume = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const create = vi.fn();
     const hashRefreshToken = vi
       .fn()
@@ -85,7 +82,7 @@ describe("refreshSession", () => {
 
     const result = await authDomain.refreshSession.execute(
       {
-        sessions: { findByTokenHash, delete: deleteSession, create },
+        sessions: { consume, create },
         tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
@@ -97,7 +94,6 @@ describe("refreshSession", () => {
       ok: false,
       error: { tag: "InvalidSessionError" },
     });
-    expect(deleteSession).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
     expect(createAccessToken).not.toHaveBeenCalled();
   });
@@ -107,10 +103,9 @@ describe("refreshSession", () => {
       ...session,
       expiresAt: new Date("2026-09-18T11:59:59.999Z"),
     };
-    const findByTokenHash = vi
+    const consume = vi
       .fn()
       .mockResolvedValue({ ok: true, value: expiredSession });
-    const deleteSession = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const create = vi.fn();
     const hashRefreshToken = vi
       .fn()
@@ -120,7 +115,7 @@ describe("refreshSession", () => {
 
     const result = await authDomain.refreshSession.execute(
       {
-        sessions: { findByTokenHash, delete: deleteSession, create },
+        sessions: { consume, create },
         tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
@@ -132,8 +127,58 @@ describe("refreshSession", () => {
       ok: false,
       error: { tag: "SessionExpiredError" },
     });
-    expect(deleteSession).toHaveBeenCalledWith(expiredSession.id);
+    expect(consume).toHaveBeenCalledWith("expired-refresh-token-hash");
     expect(create).not.toHaveBeenCalled();
     expect(createAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("allows only one concurrent refresh to consume and rotate a session", async () => {
+    const consume = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, value: session })
+      .mockResolvedValueOnce({ ok: true, value: undefined });
+    const create = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const hashRefreshToken = vi.fn().mockImplementation((token: string) =>
+      Promise.resolve({
+        ok: true,
+        value:
+          token === "old-refresh-token"
+            ? "old-refresh-token-hash"
+            : "new-refresh-token-hash",
+      }),
+    );
+    const createRefreshToken = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: "new-refresh-token" });
+    const createAccessToken = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: "new-access-token" });
+    const dependencies = {
+      sessions: { consume, create },
+      tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
+      now: () => new Date("2026-09-18T12:00:00.000Z"),
+      refreshTokenLifetimeMs: 86_400_000,
+    };
+
+    const results = await Promise.all([
+      authDomain.refreshSession.execute(dependencies, {
+        refreshToken: "old-refresh-token",
+      }),
+      authDomain.refreshSession.execute(dependencies, {
+        refreshToken: "old-refresh-token",
+      }),
+    ]);
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ ok: true }),
+        expect.objectContaining({
+          ok: false,
+          error: expect.objectContaining({ tag: "InvalidSessionError" }),
+        }),
+      ]),
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(createAccessToken).toHaveBeenCalledTimes(1);
   });
 });

@@ -4,7 +4,7 @@ import type {
   RefreshSessionRepository,
 } from "../../ports/authentication-port.js";
 import type { TaggedError } from "../../types/error.js";
-import { err, type AsyncResult } from "../../types/result.js";
+import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 
 export interface RevokeSessionPayload {
@@ -14,7 +14,7 @@ export interface RevokeSessionPayload {
 export interface RevokeSessionDependencies<
   TError extends TaggedError = TaggedError,
 > {
-  sessions: Pick<RefreshSessionRepository<TError>, "findByTokenHash" | "delete">;
+  sessions: Pick<RefreshSessionRepository<TError>, "consume">;
   tokens: Pick<AuthenticationTokenPort<TError>, "hashRefreshToken">;
 }
 
@@ -33,7 +33,7 @@ export const revokeSession: UseCase<
       return tokenHash;
     }
 
-    const session = await dependencies.sessions.findByTokenHash(tokenHash.value);
+    const session = await dependencies.sessions.consume(tokenHash.value);
 
     if (!session.ok) {
       return session;
@@ -43,6 +43,6 @@ export const revokeSession: UseCase<
       return err(new InvalidSessionError());
     }
 
-    return dependencies.sessions.delete(session.value.id);
+    return ok(undefined);
   },
 };

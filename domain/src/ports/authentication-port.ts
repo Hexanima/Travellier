@@ -21,11 +21,10 @@ export interface PasswordHasher<TError extends TaggedError = TaggedError> {
 export interface RefreshSessionRepository<
   TError extends TaggedError = TaggedError,
 > {
-  findByTokenHash: (
+  consume: (
     tokenHash: string,
   ) => AsyncResult<RefreshSession | undefined, TError>;
   create: (session: NewRefreshSession) => AsyncResult<void, TError>;
-  delete: (id: ObjectId) => AsyncResult<void, TError>;
 }
 
 export interface AuthenticationTokenPort<
