@@ -2,3 +2,7 @@ export * from "./unauthorized-error.js";
 export * from "./unknown-error.js";
 export * from "./invalid-object-id-error.js";
 export * from "./validation-error.js";
+export * from "./email-already-registered-error.js";
+export * from "./invalid-credentials-error.js";
+export * from "./invalid-session-error.js";
+export * from "./session-expired-error.js";
