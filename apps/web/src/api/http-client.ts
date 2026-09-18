@@ -54,6 +54,9 @@ type RequestOptions = {
 export type HttpClient = {
   get: <TResponse>(path: string, options?: Omit<RequestOptions, "body">) => AsyncResult<TResponse, ApiClientError>;
   post: <TResponse>(path: string, body?: unknown, options?: Omit<RequestOptions, "body">) => AsyncResult<TResponse, ApiClientError>;
+  put: <TResponse>(path: string, body?: unknown, options?: Omit<RequestOptions, "body">) => AsyncResult<TResponse, ApiClientError>;
+  patch: <TResponse>(path: string, body?: unknown, options?: Omit<RequestOptions, "body">) => AsyncResult<TResponse, ApiClientError>;
+  delete: <TResponse>(path: string, options?: Omit<RequestOptions, "body">) => AsyncResult<TResponse, ApiClientError>;
 };
 
 const genericRequestError = "No pudimos completar la solicitud. Intentá nuevamente.";
@@ -133,7 +136,7 @@ export const createHttpClient = ({
   onUnauthorized,
 }: HttpClientDependencies): HttpClient => {
   const request = async <TResponse>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     options: RequestOptions = {},
   ): AsyncResult<TResponse, ApiClientError> => {
@@ -201,5 +204,8 @@ export const createHttpClient = ({
   return {
     get: (path, options) => request("GET", path, options),
     post: (path, body, options) => request("POST", path, { ...options, body }),
+    put: (path, body, options) => request("PUT", path, { ...options, body }),
+    patch: (path, body, options) => request("PATCH", path, { ...options, body }),
+    delete: (path, options) => request("DELETE", path, options),
   };
 };

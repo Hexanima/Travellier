@@ -11,7 +11,7 @@ describe("MongoDB connection configuration", () => {
     expect(
       readMongoDatabaseConfig({
         MONGODB_URI: "mongodb://localhost:27017",
-        MONGODB_DATABASE: "travellier",
+        MONGODB_DATABASE_NAME: "travellier",
       }),
     ).toEqual({
       uri: "mongodb://localhost:27017",
@@ -20,14 +20,14 @@ describe("MongoDB connection configuration", () => {
   });
 
   it("rejects a missing MongoDB URI", () => {
-    expect(() => readMongoDatabaseConfig({ MONGODB_DATABASE: "travellier" })).toThrow(
+    expect(() => readMongoDatabaseConfig({ MONGODB_DATABASE_NAME: "travellier" })).toThrow(
       "MONGODB_URI is required",
     );
   });
 
   it("rejects a missing MongoDB database name", () => {
     expect(() => readMongoDatabaseConfig({ MONGODB_URI: "mongodb://localhost" })).toThrow(
-      "MONGODB_DATABASE is required",
+      "MONGODB_DATABASE_NAME is required",
     );
   });
 });

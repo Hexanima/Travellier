@@ -29,7 +29,7 @@ export const readMongoDatabaseConfig = (
   environment: MongoEnvironment = process.env,
 ): MongoDatabaseConfig => ({
   uri: requiredSetting(environment, "MONGODB_URI"),
-  databaseName: requiredSetting(environment, "MONGODB_DATABASE"),
+  databaseName: requiredSetting(environment, "MONGODB_DATABASE_NAME"),
 });
 
 export const connectMongoDatabase = async (

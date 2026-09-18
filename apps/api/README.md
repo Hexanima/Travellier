@@ -16,12 +16,12 @@ The `/health` endpoint composes a response from the domain use case exported by 
 El adaptador de MongoDB usa estas variables de entorno:
 
 - `MONGODB_URI`: URI de conexión de MongoDB Atlas.
-- `MONGODB_DATABASE`: nombre de la base de datos de Travellier.
+- `MONGODB_DATABASE_NAME`: nombre de la base de datos de Travellier.
 
 Para crear o actualizar el esquema versionado y sus índices:
 
 ```bash
-MONGODB_URI=<uri> MONGODB_DATABASE=travellier yarn workspace api migrate:mongodb
+MONGODB_URI=<uri> MONGODB_DATABASE_NAME=travellier yarn workspace api migrate:mongodb
 ```
 
 El runner registra la migración aplicada en la colección técnica `_migrations`.
