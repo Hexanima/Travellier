@@ -13,7 +13,7 @@
     "cap:sync": "yarn build && cap sync",
     "cap:sync:android": "yarn build && cap sync android",
     "cap:sync:ios": "yarn build && cap sync ios",
-    "cap:build:android": "yarn cap:sync:android && cap build android",
+    "cap:build:android": "node ../../scripts/android-build-environment.mjs",
     "cap:build:ios": "yarn cap:sync:ios && cap build ios"
   },
   "dependencies": {

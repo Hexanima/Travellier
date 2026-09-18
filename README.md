@@ -49,6 +49,10 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn workspace web cap:build:android`
 - `corepack yarn workspace web cap:build:ios` (macOS con Xcode)
 
+Para compilar Android, `cap:build:android` usa automáticamente un JDK 17 a 21. En Windows también detecta el JBR de Android Studio. Si no está disponible, configurá `ANDROID_JAVA_HOME` o `JAVA_HOME`; el JDK 25 no es compatible con la versión de Gradle incluida en el proyecto.
+
+El comando genera el APK debug en `apps/web/android/app/build/outputs/apk/debug/app-debug.apk`; un release firmado requiere las credenciales de firma correspondientes.
+
 ## Infraestructura AWS
 
 La API se despliega con Serverless Framework mediante [serverless.yml](serverless.yml). Los stages soportados son `dev` y `prod`; cada uno crea su propia API, Lambda y secretos de Secrets Manager.

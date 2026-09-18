@@ -80,6 +80,46 @@ describe("createHttpClient", () => {
     });
   });
 
+  it("supports the mutation verbs required by the API", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "trip-1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch,
+      getAccessToken: vi.fn().mockResolvedValue("access-token"),
+      onUnauthorized: vi.fn(),
+    });
+
+    await client.put("/trips/trip-1", { name: "Actualizado" });
+    await client.patch("/trips/trip-1", { coverPhotoId: "photo-1" });
+    await client.delete("/trips/trip-1");
+
+    expect(fetch).toHaveBeenNthCalledWith(1, "https://api.example.test/trips/trip-1", {
+      body: JSON.stringify({ name: "Actualizado" }),
+      headers: {
+        Authorization: "Bearer access-token",
+        "content-type": "application/json",
+      },
+      method: "PUT",
+    });
+    expect(fetch).toHaveBeenNthCalledWith(2, "https://api.example.test/trips/trip-1", {
+      body: JSON.stringify({ coverPhotoId: "photo-1" }),
+      headers: {
+        Authorization: "Bearer access-token",
+        "content-type": "application/json",
+      },
+      method: "PATCH",
+    });
+    expect(fetch).toHaveBeenNthCalledWith(3, "https://api.example.test/trips/trip-1", {
+      headers: { Authorization: "Bearer access-token" },
+      method: "DELETE",
+    });
+  });
+
   it("returns a UI-safe error when access-token retrieval fails", async () => {
     const fetch = vi.fn();
     const client = createHttpClient({
