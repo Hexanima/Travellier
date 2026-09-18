@@ -1,6 +1,25 @@
+import { createHmac } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { createLambdaHandler } from "./lambda.js";
+
+const jwtSecret = "jwt-signing-secret";
+const authenticatedUserId = "507f1f77bcf86cd799439011";
+
+const createAccessToken = (userId: string): string => {
+  const header = Buffer.from(
+    JSON.stringify({ alg: "HS256", typ: "JWT" }),
+  ).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({ sub: userId, exp: 1_900_000_000 }),
+  ).toString("base64url");
+  const signature = createHmac("sha256", jwtSecret)
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+
+  return `${header}.${payload}.${signature}`;
+};
 
 describe("Lambda API handler", () => {
   it("returns the health response without requiring runtime secrets", async () => {
@@ -59,7 +78,7 @@ describe("Lambda API handler", () => {
             uri: "mongodb+srv://travellier.example/database",
             databaseName: "travellier_dev",
           },
-          jwtSecret: "jwt-signing-secret",
+          jwtSecret,
           photoBucketName: "travellier-dev-photos",
         };
       },
@@ -71,9 +90,75 @@ describe("Lambda API handler", () => {
     });
 
     expect(response).toMatchObject({
-      statusCode: 404,
-      body: JSON.stringify({ error: "NotFound" }),
+      statusCode: 401,
+      body: JSON.stringify({ error: "Unauthorized" }),
     });
     expect(runtimeConfigurationLoads).toBe(1);
+  });
+
+  it.each([undefined, "Basic access-token", "Bearer invalid-token"])(
+    "returns 401 when a private route has no valid JWT (%s)",
+    async (authorization) => {
+      const handler = createLambdaHandler({
+        loadRuntimeConfig: async () => ({
+          environment: "dev",
+          mongo: {
+            uri: "mongodb+srv://travellier.example/database",
+            databaseName: "travellier_dev",
+          },
+          jwtSecret,
+          photoBucketName: "travellier-dev-photos",
+        }),
+      });
+
+      const response = await handler({
+        rawPath: "/trips",
+        headers: authorization === undefined ? {} : { authorization },
+        requestContext: { http: { method: "GET" } },
+      });
+
+      expect(response).toMatchObject({
+        statusCode: 401,
+        body: JSON.stringify({ error: "Unauthorized" }),
+      });
+    },
+  );
+
+  it("passes the authenticated user to private handlers instead of reading it from the body", async () => {
+    let receivedRequest: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev",
+        mongo: {
+          uri: "mongodb+srv://travellier.example/database",
+          databaseName: "travellier_dev",
+        },
+        jwtSecret,
+        photoBucketName: "travellier-dev-photos",
+      }),
+      handleRequest: async (request) => {
+        receivedRequest = request;
+
+        return {
+          statusCode: 204,
+          headers: {},
+          body: "",
+        };
+      },
+    });
+
+    const response = await handler({
+      rawPath: "/trips",
+      headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` },
+      body: JSON.stringify({ userId: "507f191e810c19729de860ea" }),
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(receivedRequest).toEqual({
+      method: "POST",
+      url: "/trips",
+      authenticatedUserId,
+    });
   });
 });

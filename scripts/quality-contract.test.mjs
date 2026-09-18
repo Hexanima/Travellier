@@ -40,6 +40,20 @@ describe('quality contract', () => {
     }
   })
 
+  it('allows the API to typecheck against the domain source before a build', () => {
+    const apiTypeScriptConfig = readJson('apps/api/tsconfig.json')
+
+    assert.deepEqual(apiTypeScriptConfig.compilerOptions?.paths, {
+      'app-domain': ['../../domain/src/index.ts'],
+    })
+  })
+
+  it('builds the API against the compiled domain package', () => {
+    const apiBuildTypeScriptConfig = readJson('apps/api/tsconfig.build.json')
+
+    assert.deepEqual(apiBuildTypeScriptConfig.compilerOptions?.paths, {})
+  })
+
   it('defines a mandatory CI quality gate', () => {
     const workflowPath = join(rootDirectory, '.github/workflows/ci.yml')
 

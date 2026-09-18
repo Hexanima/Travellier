@@ -3,6 +3,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { ObjectId } from "app-domain";
+
 export interface HealthResponse {
   app: "travellier";
   status: "ready";
@@ -12,6 +14,12 @@ export interface ApiResponse {
   statusCode: number;
   headers: Record<string, string>;
   body: string;
+}
+
+export interface ApiRequest {
+  method?: string;
+  url?: string;
+  authenticatedUserId?: ObjectId;
 }
 
 export const createHealthResponse = async (): Promise<HealthResponse> => ({
@@ -25,10 +33,9 @@ const jsonResponse = (statusCode: number, payload: unknown): ApiResponse => ({
   body: JSON.stringify(payload),
 });
 
-export const handleApiRequest = async (request: {
-  method?: string;
-  url?: string;
-}): Promise<ApiResponse> => {
+export const handleApiRequest = async (
+  request: ApiRequest,
+): Promise<ApiResponse> => {
   if (request.method === "GET" && request.url === "/health") {
     return jsonResponse(200, await createHealthResponse());
   }
