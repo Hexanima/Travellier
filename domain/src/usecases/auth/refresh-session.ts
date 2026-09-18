@@ -37,6 +37,22 @@ export const refreshSession: UseCase<
     AuthenticatedSession,
     RefreshSessionError
   > => {
+    const tokenExpiration = await dependencies.tokens.readRefreshTokenExpiration(
+      payload.refreshToken,
+    );
+
+    if (!tokenExpiration.ok) {
+      return tokenExpiration;
+    }
+
+    if (tokenExpiration.value === undefined) {
+      return err(new InvalidSessionError());
+    }
+
+    if (tokenExpiration.value.getTime() <= dependencies.now().getTime()) {
+      return err(new SessionExpiredError());
+    }
+
     const currentTokenHash = await dependencies.tokens.hashRefreshToken(
       payload.refreshToken,
     );
@@ -61,7 +77,12 @@ export const refreshSession: UseCase<
       return err(new SessionExpiredError());
     }
 
-    const refreshToken = await dependencies.tokens.createRefreshToken();
+    const refreshTokenExpiresAt = new Date(
+      dependencies.now().getTime() + dependencies.refreshTokenLifetimeMs,
+    );
+    const refreshToken = await dependencies.tokens.createRefreshToken(
+      refreshTokenExpiresAt,
+    );
 
     if (!refreshToken.ok) {
       return refreshToken;
@@ -78,9 +99,7 @@ export const refreshSession: UseCase<
     const createdSession = await dependencies.sessions.create({
       userId: currentSession.value.userId,
       tokenHash: refreshTokenHash.value,
-      expiresAt: new Date(
-        dependencies.now().getTime() + dependencies.refreshTokenLifetimeMs,
-      ),
+      expiresAt: refreshTokenExpiresAt,
     });
 
     if (!createdSession.ok) {

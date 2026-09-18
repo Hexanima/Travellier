@@ -94,7 +94,12 @@ export const loginUser: UseCase<
       return err(new InvalidCredentialsError());
     }
 
-    const refreshToken = await dependencies.tokens.createRefreshToken();
+    const refreshTokenExpiresAt = new Date(
+      dependencies.now().getTime() + dependencies.refreshTokenLifetimeMs,
+    );
+    const refreshToken = await dependencies.tokens.createRefreshToken(
+      refreshTokenExpiresAt,
+    );
 
     if (!refreshToken.ok) {
       return refreshToken;
@@ -111,9 +116,7 @@ export const loginUser: UseCase<
     const session = await dependencies.sessions.create({
       userId: user.value.id,
       tokenHash: refreshTokenHash.value,
-      expiresAt: new Date(
-        dependencies.now().getTime() + dependencies.refreshTokenLifetimeMs,
-      ),
+      expiresAt: refreshTokenExpiresAt,
     });
 
     if (!session.ok) {

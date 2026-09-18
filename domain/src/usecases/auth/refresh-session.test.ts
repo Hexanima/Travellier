@@ -12,7 +12,8 @@ type AuthenticationDomain = typeof domain & {
         };
         tokens: {
           hashRefreshToken: (token: string) => Promise<unknown>;
-          createRefreshToken: () => Promise<unknown>;
+          readRefreshTokenExpiration: (token: string) => Promise<unknown>;
+          createRefreshToken: (expiresAt: Date) => Promise<unknown>;
           createAccessToken: (userId: string) => Promise<unknown>;
         };
         now: () => Date;
@@ -40,6 +41,9 @@ describe("refreshSession", () => {
       .fn()
       .mockResolvedValueOnce({ ok: true, value: "old-refresh-token-hash" })
       .mockResolvedValueOnce({ ok: true, value: "new-refresh-token-hash" });
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: new Date("2026-09-19T12:00:00.000Z") });
     const createRefreshToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "new-refresh-token" });
@@ -52,7 +56,12 @@ describe("refreshSession", () => {
     const result = await authDomain.refreshSession.execute(
       {
         sessions: { consume, create },
-        tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
+        tokens: {
+          hashRefreshToken,
+          readRefreshTokenExpiration,
+          createRefreshToken,
+          createAccessToken,
+        },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
       },
@@ -60,6 +69,9 @@ describe("refreshSession", () => {
     );
 
     expect(consume).toHaveBeenCalledWith("old-refresh-token-hash");
+    expect(createRefreshToken).toHaveBeenCalledWith(
+      new Date("2026-09-19T12:00:00.000Z"),
+    );
     expect(create).toHaveBeenCalledWith({
       userId: session.userId,
       tokenHash: "new-refresh-token-hash",
@@ -77,13 +89,21 @@ describe("refreshSession", () => {
     const hashRefreshToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "unknown-refresh-token-hash" });
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: new Date("2026-09-19T12:00:00.000Z") });
     const createRefreshToken = vi.fn();
     const createAccessToken = vi.fn();
 
     const result = await authDomain.refreshSession.execute(
       {
         sessions: { consume, create },
-        tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
+        tokens: {
+          hashRefreshToken,
+          readRefreshTokenExpiration,
+          createRefreshToken,
+          createAccessToken,
+        },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
       },
@@ -98,6 +118,39 @@ describe("refreshSession", () => {
     expect(createAccessToken).not.toHaveBeenCalled();
   });
 
+  it("rejects a refresh token whose expiration cannot be verified", async () => {
+    const consume = vi.fn();
+    const create = vi.fn();
+    const hashRefreshToken = vi.fn();
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: undefined });
+    const createRefreshToken = vi.fn();
+    const createAccessToken = vi.fn();
+
+    const result = await authDomain.refreshSession.execute(
+      {
+        sessions: { consume, create },
+        tokens: {
+          hashRefreshToken,
+          readRefreshTokenExpiration,
+          createRefreshToken,
+          createAccessToken,
+        },
+        now: () => new Date("2026-09-18T12:00:00.000Z"),
+        refreshTokenLifetimeMs: 86_400_000,
+      },
+      { refreshToken: "malformed-refresh-token" },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { tag: "InvalidSessionError" },
+    });
+    expect(hashRefreshToken).not.toHaveBeenCalled();
+    expect(consume).not.toHaveBeenCalled();
+  });
+
   it("returns a session-expired error instead of invalid credentials for an expired session", async () => {
     const expiredSession = {
       ...session,
@@ -110,13 +163,21 @@ describe("refreshSession", () => {
     const hashRefreshToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "expired-refresh-token-hash" });
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: new Date("2026-09-19T12:00:00.000Z") });
     const createRefreshToken = vi.fn();
     const createAccessToken = vi.fn();
 
     const result = await authDomain.refreshSession.execute(
       {
         sessions: { consume, create },
-        tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
+        tokens: {
+          hashRefreshToken,
+          readRefreshTokenExpiration,
+          createRefreshToken,
+          createAccessToken,
+        },
         now: () => new Date("2026-09-18T12:00:00.000Z"),
         refreshTokenLifetimeMs: 86_400_000,
       },
@@ -153,9 +214,17 @@ describe("refreshSession", () => {
     const createAccessToken = vi
       .fn()
       .mockResolvedValue({ ok: true, value: "new-access-token" });
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: new Date("2026-09-19T12:00:00.000Z") });
     const dependencies = {
       sessions: { consume, create },
-      tokens: { hashRefreshToken, createRefreshToken, createAccessToken },
+      tokens: {
+        hashRefreshToken,
+        readRefreshTokenExpiration,
+        createRefreshToken,
+        createAccessToken,
+      },
       now: () => new Date("2026-09-18T12:00:00.000Z"),
       refreshTokenLifetimeMs: 86_400_000,
     };
@@ -180,5 +249,42 @@ describe("refreshSession", () => {
     );
     expect(create).toHaveBeenCalledTimes(1);
     expect(createAccessToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns session expired when MongoDB TTL already removed the session", async () => {
+    const consume = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const create = vi.fn();
+    const hashRefreshToken = vi.fn();
+    const readRefreshTokenExpiration = vi
+      .fn()
+      .mockResolvedValue({ ok: true, value: new Date("2026-09-18T11:59:59.999Z") });
+    const createRefreshToken = vi.fn();
+    const createAccessToken = vi.fn();
+
+    const result = await authDomain.refreshSession.execute(
+      {
+        sessions: { consume, create },
+        tokens: {
+          hashRefreshToken,
+          readRefreshTokenExpiration,
+          createRefreshToken,
+          createAccessToken,
+        },
+        now: () => new Date("2026-09-18T12:00:00.000Z"),
+        refreshTokenLifetimeMs: 86_400_000,
+      },
+      { refreshToken: "expired-and-deleted-refresh-token" },
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { tag: "SessionExpiredError" },
+    });
+    expect(readRefreshTokenExpiration).toHaveBeenCalledWith(
+      "expired-and-deleted-refresh-token",
+    );
+    expect(consume).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(createAccessToken).not.toHaveBeenCalled();
   });
 });

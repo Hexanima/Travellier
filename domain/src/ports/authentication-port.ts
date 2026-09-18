@@ -31,6 +31,9 @@ export interface AuthenticationTokenPort<
   TError extends TaggedError = TaggedError,
 > {
   createAccessToken: (userId: ObjectId) => AsyncResult<string, TError>;
-  createRefreshToken: () => AsyncResult<string, TError>;
+  createRefreshToken: (expiresAt: Date) => AsyncResult<string, TError>;
+  readRefreshTokenExpiration: (
+    token: string,
+  ) => AsyncResult<Date | undefined, TError>;
   hashRefreshToken: (token: string) => AsyncResult<string, TError>;
 }

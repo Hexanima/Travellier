@@ -13,7 +13,7 @@ type AuthenticationDomain = typeof domain & {
         sessions: { create: (session: unknown) => Promise<unknown> };
         tokens: {
           createAccessToken: (userId: string) => Promise<unknown>;
-          createRefreshToken: () => Promise<unknown>;
+          createRefreshToken: (expiresAt: Date) => Promise<unknown>;
           hashRefreshToken: (token: string) => Promise<unknown>;
         };
         now: () => Date;
@@ -63,6 +63,9 @@ describe("loginUser", () => {
     );
 
     expect(verify).toHaveBeenCalledWith("secret-pass", "bcrypt-hash");
+    expect(createRefreshToken).toHaveBeenCalledWith(
+      new Date("2026-09-19T12:00:00.000Z"),
+    );
     expect(create).toHaveBeenCalledWith({
       userId: user.id,
       tokenHash: "refresh-token-hash",
