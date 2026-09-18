@@ -1,29 +1,52 @@
-import { FilterOperators, isOk, ok } from 'app-domain'
-import './App.css'
+import { Route, Routes } from 'react-router-dom'
 
-const domainStatus = isOk(ok(FilterOperators.Eq)) ? 'ready' : 'error'
+import './App.css'
+import { AppUrlListener } from './navigation/AppUrlListener.js'
 
 function App() {
   return (
+    <>
+      <AppUrlListener />
+      <Routes>
+        <Route path="/" element={<PublicHome />} />
+        <Route path="/trips/*" element={<ProtectedRoute />} />
+        <Route path="/profile" element={<ProtectedRoute />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
+  )
+}
+
+function PublicHome() {
+  return (
     <main className="app-shell">
       <section className="status-panel">
-        <p className="eyebrow">TypeScript monorepo</p>
-        <h1>Clean Architecture Template</h1>
-        <dl>
-          <div>
-            <dt>Domain layer</dt>
-            <dd>{domainStatus}</dd>
-          </div>
-          <div>
-            <dt>Dependency rule</dt>
-            <dd>inward</dd>
-          </div>
-          <div>
-            <dt>Result contract</dt>
-            <dd>discriminated</dd>
-          </div>
-        </dl>
-        <p className="domain-check">Domain layer: {domainStatus}</p>
+        <p className="eyebrow">Viajes en grupo</p>
+        <h1>Travellier</h1>
+        <p className="domain-check">Inicio</p>
+      </section>
+    </main>
+  )
+}
+
+function ProtectedRoute() {
+  return (
+    <main className="app-shell">
+      <section className="status-panel">
+        <p className="eyebrow">Travellier</p>
+        <h1>Acceso protegido</h1>
+        <p className="domain-check">La sesión se integrará en el flujo de autenticación.</p>
+      </section>
+    </main>
+  )
+}
+
+function NotFound() {
+  return (
+    <main className="app-shell">
+      <section className="status-panel">
+        <p className="eyebrow">Travellier</p>
+        <h1>Página no encontrada</h1>
       </section>
     </main>
   )

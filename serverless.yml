@@ -1,0 +1,129 @@
+service: travellier-api
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  architecture: arm64
+  stage: ${opt:stage, 'dev'}
+  stackName: ${self:service}-${sls:stage}
+  region: ${opt:region, 'sa-east-1'}
+  logRetentionInDays: ${param:logRetentionInDays}
+  httpApi:
+    cors:
+      allowedOrigins:
+        - capacitor://localhost
+        - http://localhost
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods:
+        - GET
+        - POST
+        - PATCH
+        - PUT
+        - DELETE
+        - OPTIONS
+  environment:
+    APP_ENV: ${sls:stage}
+    MONGODB_SECRET_ARN:
+      Ref: MongoConfigurationSecret
+    JWT_SECRET_ARN:
+      Ref: JwtSigningSecret
+    S3_BUCKET_NAME:
+      Ref: PhotoBucket
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - secretsmanager:GetSecretValue
+          Resource:
+            - Fn::GetAtt:
+                - MongoConfigurationSecret
+                - Arn
+            - Fn::GetAtt:
+                - JwtSigningSecret
+                - Arn
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+          Resource:
+            Fn::Sub: '${PhotoBucket.Arn}/trips/*'
+
+functions:
+  api:
+    handler: apps/api/src/lambda.handler
+    events:
+      - httpApi:
+          path: /{proxy+}
+          method: '*'
+
+stages:
+  default:
+    params:
+      logRetentionInDays: 14
+  dev:
+    params:
+      logRetentionInDays: 14
+  prod:
+    params:
+      logRetentionInDays: 90
+
+resources:
+  Resources:
+    PhotoBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        CorsConfiguration:
+          CorsRules:
+            - AllowedHeaders:
+                - Content-Type
+              AllowedMethods:
+                - PUT
+              AllowedOrigins:
+                - capacitor://localhost
+                - http://localhost
+              MaxAge: 3000
+        OwnershipControls:
+          Rules:
+            - ObjectOwnership: BucketOwnerEnforced
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+    MongoConfigurationSecret:
+      Type: AWS::SecretsManager::Secret
+      DeletionPolicy: Delete
+      UpdateReplacePolicy: Delete
+      Properties:
+        Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
+    JwtSigningSecret:
+      Type: AWS::SecretsManager::Secret
+      DeletionPolicy: Delete
+      UpdateReplacePolicy: Delete
+      Properties:
+        Description: JWT signing secret for the Travellier ${sls:stage} environment.
+        GenerateSecretString:
+          PasswordLength: 64
+          ExcludePunctuation: true
+  Outputs:
+    ApiUrl:
+      Description: HTTP API endpoint for the deployed environment.
+      Value:
+        Fn::GetAtt:
+          - HttpApi
+          - ApiEndpoint
+    MongoConfigurationSecretArn:
+      Description: ARN of the MongoDB configuration secret.
+      Value:
+        Ref: MongoConfigurationSecret
+    JwtSigningSecretArn:
+      Description: ARN of the JWT signing secret.
+      Value:
+        Ref: JwtSigningSecret

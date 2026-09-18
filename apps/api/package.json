@@ -6,15 +6,27 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "yarn clean && tsc -p tsconfig.build.json",
     "dev": "tsx watch src/app.ts",
+    "migrate:mongodb": "tsx src/adapters/mongodb/run-migrations.ts",
     "start": "node dist/app.js",
-    "test": "vitest"
+    "test": "vitest",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
+    "@eslint/js": "^9.36.0",
     "@types/node": "^24.6.0",
+    "eslint": "^9.36.0",
+    "globals": "^16.4.0",
+    "mongodb-memory-server": "^11.2.0",
     "tsx": "^4.20.6",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.45.0",
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "app-domain": "workspace:^"
+    "@aws-sdk/client-secrets-manager": "3.1132.0",
+    "app-domain": "workspace:^",
+    "jose": "^6.2.12",
+    "mongodb": "^7.6.0"
   }
 }

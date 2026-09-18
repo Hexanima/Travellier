@@ -202,7 +202,7 @@
 
 **Criterios de aceptación:**
 
-- Un token válido abre `com.tuapp://verify/:token`.
+- Un token válido abre `com.travellier.app://verify/:token`.
 - Un token inválido muestra una página de error segura.
 
 **Estimación:** M (4hs)
@@ -214,8 +214,8 @@
 
 **Criterios de aceptación:**
 
-- `com.tuapp://invite/:code` abre el flujo de unión.
-- `com.tuapp://verify/:token` abre la pantalla de verificación.
+- `com.travellier.app://invite/:code` abre el flujo de unión.
+- `com.travellier.app://verify/:token` abre la pantalla de verificación.
 
 **Estimación:** M (4hs)
 **Dependencias:** T07, T17

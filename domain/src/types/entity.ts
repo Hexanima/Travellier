@@ -1,5 +1,5 @@
-import { UUID } from "./uuid.js";
+import type { ObjectId } from "../value-objects/object-id.js";
 
 export interface BaseEntity {
-  id: UUID;
+  id: ObjectId;
 }
