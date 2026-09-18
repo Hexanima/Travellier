@@ -26,6 +26,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "3.1132.0",
     "app-domain": "workspace:^",
+    "jose": "^6.2.12",
     "mongodb": "^7.6.0"
   }
 }
