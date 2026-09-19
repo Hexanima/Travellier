@@ -1,14 +1,45 @@
-import { Route, Routes } from 'react-router-dom'
+import { useRef } from 'react'
+import { Link, Route, Routes, useNavigate } from 'react-router-dom'
 
 import './App.css'
+import { createHttpClient } from './api/index.js'
+import { AuthScreen } from './auth/AuthScreen.js'
+import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/auth-api.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 
-function App() {
+type AppProps = {
+  auth?: Partial<AuthApi>
+}
+
+function App({ auth }: AppProps) {
+  const navigate = useNavigate()
+  const session = useRef<AuthenticatedSession | undefined>(undefined)
+  const defaultAuth = useRef<AuthApi | undefined>(undefined)
+
+  if (defaultAuth.current === undefined) {
+    const client = createHttpClient({
+      baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+      fetch: (input, init) => globalThis.fetch(input, init),
+      getAccessToken: async () => session.current?.accessToken ?? null,
+      onUnauthorized: () => {
+        session.current = undefined
+      },
+    })
+    defaultAuth.current = createAuthApi(client)
+  }
+
+  const onAuthenticated = (authenticatedSession: AuthenticatedSession) => {
+    session.current = authenticatedSession
+    navigate('/trips')
+  }
+
   return (
     <>
       <AppUrlListener />
       <Routes>
         <Route path="/" element={<PublicHome />} />
+        <Route path="/login" element={<AuthScreen auth={auth ?? defaultAuth.current} mode="login" onAuthenticated={onAuthenticated} />} />
+        <Route path="/register" element={<AuthScreen auth={auth ?? defaultAuth.current} mode="register" />} />
         <Route path="/trips/*" element={<ProtectedRoute />} />
         <Route path="/profile" element={<ProtectedRoute />} />
         <Route path="*" element={<NotFound />} />
@@ -24,6 +55,10 @@ function PublicHome() {
         <p className="eyebrow">Viajes en grupo</p>
         <h1>Travellier</h1>
         <p className="domain-check">Inicio</p>
+        <p className="auth-links">
+          <Link to="/login">Iniciar sesión</Link>
+          <Link to="/register">Crear cuenta</Link>
+        </p>
       </section>
     </main>
   )
