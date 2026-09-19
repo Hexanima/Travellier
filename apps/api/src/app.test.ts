@@ -1,6 +1,8 @@
+import type { AddressInfo } from "node:net";
+
 import { describe, expect, it, vi } from "vitest";
 
-import { createHealthResponse, handleApiRequest } from "./app.js";
+import { createApp, createHealthResponse, handleApiRequest } from "./app.js";
 
 describe("api app", () => {
   it("builds the Travellier health response", async () => {
@@ -10,6 +12,41 @@ describe("api app", () => {
       app: "travellier",
       status: "ready",
     });
+  });
+
+  it("uses injected authentication dependencies in the Node HTTP server", async () => {
+    const server = createApp({
+      auth: {
+        login: async () => ({
+          ok: true as const,
+          value: { accessToken: "access-token", refreshToken: "refresh-token" },
+        }),
+      },
+    } as never);
+
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const { port } = server.address() as AddressInfo;
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "nico@example.test",
+          password: "secret-pass",
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error === undefined ? resolve() : reject(error))),
+      );
+    }
   });
 
   it("registers a user without exposing the password hash", async () => {

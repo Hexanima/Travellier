@@ -5,9 +5,9 @@
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "yarn clean && tsc -p tsconfig.build.json",
-    "dev": "tsx watch src/app.ts",
+    "dev": "tsx watch src/local.ts",
     "migrate:mongodb": "tsx src/adapters/mongodb/run-migrations.ts",
-    "start": "node dist/app.js",
+    "start": "node dist/local.js",
     "test": "vitest",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json"

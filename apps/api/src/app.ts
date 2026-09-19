@@ -252,20 +252,24 @@ const readRequestBody = async (request: IncomingMessage): Promise<string> => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-export const requestHandler = async (
-  request: IncomingMessage,
-  response: ServerResponse,
-) => {
-  const apiResponse = await handleApiRequest({
-    method: request.method,
-    url: request.url,
-    body: await readRequestBody(request),
-  });
-  response.writeHead(apiResponse.statusCode, apiResponse.headers);
-  response.end(apiResponse.body);
-};
+export const createRequestHandler = (dependencies: ApiDependencies = {}) =>
+  async (request: IncomingMessage, response: ServerResponse) => {
+    const apiResponse = await handleApiRequest(
+      {
+        method: request.method,
+        url: request.url,
+        body: await readRequestBody(request),
+      },
+      dependencies,
+    );
+    response.writeHead(apiResponse.statusCode, apiResponse.headers);
+    response.end(apiResponse.body);
+  };
 
-export const createApp = () => createServer(requestHandler);
+export const requestHandler = createRequestHandler();
+
+export const createApp = (dependencies: ApiDependencies = {}) =>
+  createServer(createRequestHandler(dependencies));
 
 const isEntrypoint =
   process.argv[1] !== undefined &&
