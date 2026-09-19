@@ -14,7 +14,23 @@ describe("App", () => {
 
     expect(markup).toContain("Travellier");
     expect(markup).toContain("Inicio");
+    expect(markup).toContain('href="/login"');
+    expect(markup).toContain('href="/register"');
     expect(markup).not.toContain("Clean Architecture Template");
+  });
+
+  it.each([
+    ["/login", "Iniciar sesión"],
+    ["/register", "Crear cuenta"],
+  ])("renders the public auth route %s", (route, title) => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={[route]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain(title);
+    expect(markup).toContain('type="password"');
   });
 
   it("renders a protected route without reading an authentication session", () => {
