@@ -17,6 +17,7 @@ El adaptador de MongoDB usa estas variables de entorno:
 
 - `MONGODB_URI`: URI de conexión de MongoDB Atlas.
 - `MONGODB_DATABASE_NAME`: nombre de la base de datos de Travellier.
+- `JWT_SECRET`: secreto para firmar access y refresh tokens durante el desarrollo local.
 
 Para crear o actualizar el esquema versionado y sus índices:
 

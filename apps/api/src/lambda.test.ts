@@ -96,6 +96,69 @@ describe("Lambda API handler", () => {
     expect(runtimeConfigurationLoads).toBe(1);
   });
 
+  it("loads runtime configuration before processing a public authentication route", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+
+        return {
+          environment: "dev",
+          mongo: {
+            uri: "mongodb+srv://travellier.example/database",
+            databaseName: "travellier_dev",
+          },
+          jwtSecret,
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+      handleRequest: async () => ({ statusCode: 201, headers: {}, body: "" }),
+    });
+
+    const response = await handler({
+      rawPath: "/auth/register",
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(runtimeConfigurationLoads).toBe(1);
+  });
+
+  it("builds the authentication API from runtime configuration for public authentication routes", async () => {
+    const runtimeConfiguration = {
+      environment: "dev",
+      mongo: {
+        uri: "mongodb+srv://travellier.example/database",
+        databaseName: "travellier_dev",
+      },
+      jwtSecret,
+      photoBucketName: "travellier-dev-photos",
+    };
+    const auth = { register: async () => ({ ok: true as const, value: {} }) };
+    let factoryConfiguration: unknown;
+    let receivedDependencies: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => runtimeConfiguration,
+      createAuthenticationApi: async (configuration: unknown) => {
+        factoryConfiguration = configuration;
+        return auth;
+      },
+      handleRequest: (async (_request: unknown, dependencies: unknown) => {
+        receivedDependencies = dependencies;
+        return { statusCode: 201, headers: {}, body: "" };
+      }) as never,
+    } as never);
+
+    const response = await handler({
+      rawPath: "/auth/register",
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(factoryConfiguration).toEqual(runtimeConfiguration);
+    expect(receivedDependencies).toEqual({ auth });
+  });
+
   it.each([undefined, "Basic access-token", "Bearer invalid-token"])(
     "returns 401 when a private route has no valid JWT (%s)",
     async (authorization) => {
@@ -159,6 +222,39 @@ describe("Lambda API handler", () => {
       method: "POST",
       url: "/trips",
       authenticatedUserId,
+    });
+  });
+
+  it("passes the refresh token to the public logout route without requiring an access token", async () => {
+    let receivedRequest: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev",
+        mongo: {
+          uri: "mongodb+srv://travellier.example/database",
+          databaseName: "travellier_dev",
+        },
+        jwtSecret,
+        photoBucketName: "travellier-dev-photos",
+      }),
+      handleRequest: async (request) => {
+        receivedRequest = request;
+
+        return { statusCode: 204, headers: {}, body: "" };
+      },
+    });
+
+    const response = await handler({
+      rawPath: "/auth/logout",
+      body: JSON.stringify({ refreshToken: "refresh-token" }),
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(receivedRequest).toEqual({
+      method: "POST",
+      url: "/auth/logout",
+      body: JSON.stringify({ refreshToken: "refresh-token" }),
     });
   });
 });
