@@ -132,7 +132,7 @@ describe("App authentication", () => {
       root.render(
         <MemoryRouter initialEntries={["/trips"]}>
           <App
-            auth={{ refresh: vi.fn().mockResolvedValue({ ok: false, error: {} }) }}
+            auth={{ refresh: vi.fn().mockResolvedValue({ ok: false, error: { kind: "unauthorized" } }) }}
             sessionStorage={sessionStorage}
           />
         </MemoryRouter>,
@@ -140,6 +140,31 @@ describe("App authentication", () => {
     });
 
     expect(sessionStorage.clear).toHaveBeenCalledOnce();
+  });
+
+  it("preserves persisted tokens when refresh fails transiently", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "expired-access-token",
+      refreshToken: "valid-refresh-token",
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/trips"]}>
+          <App
+            auth={{ refresh: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } }) }}
+            sessionStorage={sessionStorage}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(sessionStorage.clear).not.toHaveBeenCalled();
   });
 
   it("clears the native session when the user logs out locally", async () => {
