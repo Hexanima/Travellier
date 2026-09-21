@@ -210,4 +210,67 @@ describe("App authentication", () => {
     expect(sessionStorage.clear).toHaveBeenCalledOnce();
     expect(sessionStorage.save).not.toHaveBeenCalled();
   });
+
+  it("clears the session after a pending restore save resolves following logout", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token",
+      refreshToken: "persisted-refresh-token",
+    });
+    let persisted = false;
+    let resolveSave: () => void = () => {
+      throw new Error("Restore save did not start");
+    };
+    vi.mocked(sessionStorage.save).mockImplementation(
+      () => new Promise<void>((resolve) => {
+        resolveSave = () => {
+          persisted = true;
+          resolve();
+        };
+      }),
+    );
+    vi.mocked(sessionStorage.clear).mockImplementation(async () => {
+      persisted = false;
+    });
+    let resolveRefresh: (value: {
+      ok: true;
+      value: { accessToken: string; refreshToken: string };
+    }) => void = () => {
+      throw new Error("Refresh did not start");
+    };
+    const refresh = vi.fn(
+      () => new Promise<typeof resolveRefresh extends (value: infer TValue) => void ? TValue : never>((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/trips"]}>
+          <App auth={{ refresh }} sessionStorage={sessionStorage} />
+        </MemoryRouter>,
+      );
+    });
+    await act(async () => {
+      resolveRefresh({
+        ok: true,
+        value: { accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token" },
+      });
+    });
+
+    await act(async () => {
+      container.querySelector("button")?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await act(async () => {
+      resolveSave();
+    });
+
+    expect(persisted).toBe(false);
+  });
 });

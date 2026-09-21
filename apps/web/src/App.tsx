@@ -1,5 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { Link, Route, Routes, useNavigate } from 'react-router-dom'
 
 import './App.css'
@@ -37,8 +37,15 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
+  const storageOperations = useRef<Promise<void>>(Promise.resolve())
   const storage = sessionStorage ?? (defaultSessionStorage.current ??= createNativeSessionStorage(Preferences))
   const hasApiConfiguration = auth !== undefined || isHttpApiBaseUrl(apiBaseUrl)
+  const queueStorageOperation = useCallback((operation: () => Promise<void>) => {
+    const next = storageOperations.current.then(operation, operation)
+
+    storageOperations.current = next.catch(() => undefined)
+    return next
+  }, [])
 
   if (auth === undefined && hasApiConfiguration && defaultAuth.current === undefined) {
     const client = createHttpClient({
@@ -78,20 +85,25 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       }
 
       if (result?.ok) {
-        await storage.save(result.value)
+        await queueStorageOperation(() => storage.save(result.value))
+
+        if (sessionRevision.current !== restorationRevision) {
+          return
+        }
+
         session.current = result.value
         return
       }
 
-      await storage.clear()
+      await queueStorageOperation(() => storage.clear())
     }
 
     void restoreSession()
-  }, [activeAuth, hasApiConfiguration, storage])
+  }, [activeAuth, hasApiConfiguration, queueStorageOperation, storage])
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
-    await storage.save(authenticatedSession)
+    await queueStorageOperation(() => storage.save(authenticatedSession))
     session.current = authenticatedSession
     navigate('/trips')
   }
@@ -99,7 +111,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const onLocalLogout = async () => {
     sessionRevision.current += 1
     session.current = undefined
-    await storage.clear()
+    await queueStorageOperation(() => storage.clear())
     navigate('/login')
   }
 
