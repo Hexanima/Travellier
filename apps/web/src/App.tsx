@@ -97,7 +97,10 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
       if (result?.error.kind === 'unauthorized') {
         await queueStorageOperation(() => storage.clear())
+        return
       }
+
+      session.current = persistedSession
     }
 
     void restoreSession()

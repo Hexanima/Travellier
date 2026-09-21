@@ -5,6 +5,23 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const httpClient = vi.hoisted(() => ({
+  getAccessToken: undefined as undefined | (() => Promise<string | null>),
+  post: vi.fn(),
+}));
+
+vi.mock("./api/index.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./api/index.js")>();
+
+  return {
+    ...original,
+    createHttpClient: vi.fn((dependencies) => {
+      httpClient.getAccessToken = dependencies.getAccessToken;
+      return { post: httpClient.post };
+    }),
+  };
+});
+
 import App from "./App.js";
 import type { NativeSessionStorage } from "./auth/native-session-storage.js";
 
@@ -18,6 +35,8 @@ afterEach(async () => {
     mountedRoots.splice(0).forEach((root) => root.unmount());
   });
   document.body.replaceChildren();
+  httpClient.getAccessToken = undefined;
+  httpClient.post.mockReset();
 });
 
 const setValue = async (input: HTMLInputElement, value: string) => {
@@ -165,6 +184,33 @@ describe("App authentication", () => {
     });
 
     expect(sessionStorage.clear).not.toHaveBeenCalled();
+  });
+
+  it("restores the persisted access token in memory when refresh fails transiently", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token",
+      refreshToken: "valid-refresh-token",
+    });
+    httpClient.post.mockResolvedValue({ ok: false, error: { kind: "network" } });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/trips"]}>
+          <App apiBaseUrl="https://api.example.test" sessionStorage={sessionStorage} />
+        </MemoryRouter>,
+      );
+    });
+
+    if (httpClient.getAccessToken === undefined) {
+      throw new Error("HTTP client was not created");
+    }
+
+    await expect(httpClient.getAccessToken()).resolves.toBe("persisted-access-token");
   });
 
   it("clears the native session when the user logs out locally", async () => {
