@@ -92,6 +92,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         }
 
         session.current = result.value
+        navigate('/trips')
         return
       }
 
@@ -104,7 +105,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     }
 
     void restoreSession()
-  }, [activeAuth, hasApiConfiguration, queueStorageOperation, storage])
+  }, [activeAuth, hasApiConfiguration, navigate, queueStorageOperation, storage])
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1

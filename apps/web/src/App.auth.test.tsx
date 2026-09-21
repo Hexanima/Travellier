@@ -106,6 +106,36 @@ describe("App authentication", () => {
     expect(container.textContent).toContain("Acceso protegido");
   });
 
+  it("navigates from the public route after restoring a session", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token",
+      refreshToken: "persisted-refresh-token",
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/"]}>
+          <App
+            auth={{
+              refresh: vi.fn().mockResolvedValue({
+                ok: true,
+                value: { accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token" },
+              }),
+            }}
+            sessionStorage={sessionStorage}
+          />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(container.textContent).toContain("Acceso protegido");
+  });
+
   it("restores and rotates the persisted session when the app opens", async () => {
     const container = document.createElement("div");
     document.body.append(container);
