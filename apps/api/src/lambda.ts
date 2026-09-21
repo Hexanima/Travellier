@@ -109,11 +109,17 @@ export const createLambdaHandler = ({
       return unauthorizedResponse();
     }
 
-    return handleRequest({
-      method,
-      url: event.rawPath,
-      authenticatedUserId: authenticatedRequest.authenticatedUserId,
-    });
+    const auth = await buildAuthenticationApi?.(runtimeConfig);
+
+    return handleRequest(
+      {
+        method,
+        url: event.rawPath,
+        body: requestBody(event),
+        authenticatedUserId: authenticatedRequest.authenticatedUserId,
+      },
+      auth === undefined ? undefined : { auth },
+    );
   };
 
 const secretValueReader = createSecretsManagerSecretValueReader();

@@ -221,8 +221,48 @@ describe("Lambda API handler", () => {
     expect(receivedRequest).toEqual({
       method: "POST",
       url: "/trips",
+      body: JSON.stringify({ userId: "507f191e810c19729de860ea" }),
       authenticatedUserId,
     });
+  });
+
+  it("passes the parsed profile update body and authenticated user to the private API", async () => {
+    const auth = { updateProfile: async () => ({ ok: true as const, value: {} }) };
+    let receivedRequest: unknown;
+    let receivedDependencies: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev",
+        mongo: {
+          uri: "mongodb+srv://travellier.example/database",
+          databaseName: "travellier_dev",
+        },
+        jwtSecret,
+        photoBucketName: "travellier-dev-photos",
+      }),
+      createAuthenticationApi: async () => auth as never,
+      handleRequest: (async (request: unknown, dependencies: unknown) => {
+        receivedRequest = request;
+        receivedDependencies = dependencies;
+        return { statusCode: 200, headers: {}, body: "" };
+      }) as never,
+    });
+
+    const response = await handler({
+      rawPath: "/profile",
+      headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` },
+      body: JSON.stringify({ name: "Nico", avatar: "avatars/nico.jpg" }),
+      requestContext: { http: { method: "PATCH" } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(receivedRequest).toEqual({
+      method: "PATCH",
+      url: "/profile",
+      body: JSON.stringify({ name: "Nico", avatar: "avatars/nico.jpg" }),
+      authenticatedUserId,
+    });
+    expect(receivedDependencies).toEqual({ auth });
   });
 
   it("passes the refresh token to the public logout route without requiring an access token", async () => {

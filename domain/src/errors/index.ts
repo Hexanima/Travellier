@@ -1,5 +1,6 @@
 export * from "./unauthorized-error.js";
 export * from "./unknown-error.js";
+export * from "./user-not-found-error.js";
 export * from "./invalid-object-id-error.js";
 export * from "./validation-error.js";
 export * from "./email-already-registered-error.js";

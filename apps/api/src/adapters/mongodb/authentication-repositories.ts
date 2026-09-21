@@ -41,6 +41,7 @@ const toUser = (document: UserDocument) => {
         id: id.value,
         email: document.email,
         name: document.name,
+        avatarS3Key: document.avatarS3Key,
         passwordHash: document.passwordHash,
         createdAt: document.createdAt,
       })
@@ -90,6 +91,15 @@ export const createMongoAuthenticationRepositories = (database: Db): {
           return err(unknownError());
         }
       },
+      findById: async (id) => {
+        try {
+          const user = await users.findOne({ _id: new MongoObjectId(id) });
+
+          return user === null ? ok(undefined) : toUser(user);
+        } catch {
+          return err(unknownError());
+        }
+      },
       create: async (user) => {
         try {
           const document: UserDocument = {
@@ -108,6 +118,19 @@ export const createMongoAuthenticationRepositories = (database: Db): {
             return err(new EmailAlreadyRegisteredError());
           }
 
+          return err(unknownError());
+        }
+      },
+      updateProfile: async (id, profile) => {
+        try {
+          const user = await users.findOneAndUpdate(
+            { _id: new MongoObjectId(id) },
+            { $set: profile },
+            { returnDocument: "after" },
+          );
+
+          return user === null ? ok(undefined) : toUser(user);
+        } catch {
           return err(unknownError());
         }
       },

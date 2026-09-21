@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   type AsyncResult,
+  type AuthenticatedUserProfile,
   type AuthenticatedSession,
   type ObjectId,
   type RegisterUserPayload,
@@ -42,6 +43,12 @@ export interface AuthenticationApi {
     payload: RefreshSessionPayload,
   ) => AsyncResult<AuthenticatedSession>;
   logout: (payload: RevokeSessionPayload) => AsyncResult<void>;
+  getProfile: (payload: { authenticatedUserId: ObjectId }) => AsyncResult<AuthenticatedUserProfile>;
+  updateProfile: (payload: {
+    authenticatedUserId: ObjectId;
+    name?: string;
+    avatar?: string | null;
+  }) => AsyncResult<AuthenticatedUserProfile>;
 }
 
 export interface ApiDependencies {
@@ -100,6 +107,15 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     });
   }
 
+  if (error.tag === "UserNotFoundError") {
+    return jsonResponse(404, {
+      error: {
+        code: error.tag,
+        message: "Profile not found.",
+      },
+    });
+  }
+
   return jsonResponse(500, {
     error: {
       code: "InternalError",
@@ -149,6 +165,26 @@ const refreshTokenPayload = (
 ): RefreshSessionPayload | undefined =>
   isString(payload.refreshToken) ? { refreshToken: payload.refreshToken } : undefined;
 
+const profileUpdatePayload = (
+  payload: Record<string, unknown>,
+): { name?: string; avatar?: string | null } | undefined => {
+  const hasName = Object.hasOwn(payload, "name");
+  const hasAvatar = Object.hasOwn(payload, "avatar");
+
+  if (
+    (!hasName && !hasAvatar) ||
+    (hasName && !isString(payload.name)) ||
+    (hasAvatar && !isString(payload.avatar) && payload.avatar !== null)
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(hasName ? { name: payload.name as string } : {}),
+    ...(hasAvatar ? { avatar: payload.avatar as string | null } : {}),
+  };
+};
+
 const unavailableResponse = (): ApiResponse =>
   jsonResponse(503, {
     error: {
@@ -167,6 +203,49 @@ export const handleApiRequest = async (
 
   const payload = parsePayload(request.body);
   const auth = dependencies.auth;
+
+  if (request.method === "GET" && request.url === "/profile") {
+    if (auth === undefined) {
+      return unavailableResponse();
+    }
+
+    if (request.authenticatedUserId === undefined) {
+      return jsonResponse(401, { error: "Unauthorized" });
+    }
+
+    const result = await auth.getProfile({
+      authenticatedUserId: request.authenticatedUserId,
+    });
+
+    return result.ok
+      ? jsonResponse(200, { profile: result.value })
+      : errorResponse(result.error);
+  }
+
+  if (request.method === "PATCH" && request.url === "/profile") {
+    const input = payload === undefined ? undefined : profileUpdatePayload(payload);
+
+    if (input === undefined) {
+      return invalidRequestResponse();
+    }
+
+    if (auth === undefined) {
+      return unavailableResponse();
+    }
+
+    if (request.authenticatedUserId === undefined) {
+      return jsonResponse(401, { error: "Unauthorized" });
+    }
+
+    const result = await auth.updateProfile({
+      authenticatedUserId: request.authenticatedUserId,
+      ...input,
+    });
+
+    return result.ok
+      ? jsonResponse(200, { profile: result.value })
+      : errorResponse(result.error);
+  }
 
   if (
     request.method === "POST" &&
