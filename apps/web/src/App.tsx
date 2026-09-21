@@ -9,16 +9,35 @@ import { AppUrlListener } from './navigation/AppUrlListener.js'
 
 type AppProps = {
   auth?: Partial<AuthApi>
+  apiBaseUrl?: string
 }
 
-function App({ auth }: AppProps) {
+const isHttpApiBaseUrl = (value: string | undefined): value is string => {
+  if (value === undefined) {
+    return false
+  }
+
+  try {
+    const url = new URL(value)
+
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL }: AppProps) {
   const navigate = useNavigate()
   const session = useRef<AuthenticatedSession | undefined>(undefined)
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
 
-  if (defaultAuth.current === undefined) {
+  if (auth === undefined && !isHttpApiBaseUrl(apiBaseUrl)) {
+    return <ApiConfigurationError />
+  }
+
+  if (auth === undefined && defaultAuth.current === undefined) {
     const client = createHttpClient({
-      baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+      baseUrl: apiBaseUrl,
       fetch: (input, init) => globalThis.fetch(input, init),
       getAccessToken: async () => session.current?.accessToken ?? null,
       onUnauthorized: () => {
@@ -45,6 +64,18 @@ function App({ auth }: AppProps) {
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
+  )
+}
+
+function ApiConfigurationError() {
+  return (
+    <main className="app-shell">
+      <section className="status-panel">
+        <p className="eyebrow">Travellier</p>
+        <h1>Configuración de API requerida</h1>
+        <p className="domain-check">Definí una URL HTTP(S) en VITE_API_BASE_URL antes de generar la app mobile.</p>
+      </section>
+    </main>
   )
 }
 

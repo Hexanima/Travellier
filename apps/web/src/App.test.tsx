@@ -4,11 +4,24 @@ import { describe, expect, it } from "vitest";
 
 import App from "./App.js";
 
+const apiBaseUrl = "https://api.example.test";
+
 describe("App", () => {
-  it("renders the public initial route", () => {
+  it("does not expose auth entry points when the API URL is not configured", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/"]}>
         <App />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Configuración de API requerida");
+    expect(markup).not.toContain('href="/login"');
+  });
+
+  it("renders the public initial route", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/"]}>
+        <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
@@ -25,7 +38,7 @@ describe("App", () => {
   ])("renders the public auth route %s", (route, title) => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={[route]}>
-        <App />
+        <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
@@ -36,7 +49,7 @@ describe("App", () => {
   it("renders a protected route without reading an authentication session", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/trips"]}>
-        <App />
+        <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
@@ -46,7 +59,7 @@ describe("App", () => {
   it("renders a fallback for an unknown route", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/missing"]}>
-        <App />
+        <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
