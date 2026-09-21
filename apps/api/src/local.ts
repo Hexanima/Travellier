@@ -7,6 +7,7 @@ import {
   readMongoDatabaseConfig,
 } from "./adapters/mongodb/connection.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
+import { createJwtMiddleware } from "./auth/jwt-middleware.js";
 
 type LocalEnvironment = Record<string, string | undefined>;
 
@@ -24,12 +25,13 @@ export const createLocalApi = async (
   environment: LocalEnvironment = process.env,
 ) => {
   const connection = await connectMongoDatabase(readMongoDatabaseConfig(environment));
+  const jwtSecret = requiredSetting(environment, "JWT_SECRET");
   const app = createApp({
     auth: createAuthenticationApi({
       database: connection.database,
-      jwtSecret: requiredSetting(environment, "JWT_SECRET"),
+      jwtSecret,
     }),
-  });
+  }, createJwtMiddleware({ jwtSecret }));
 
   return {
     app,

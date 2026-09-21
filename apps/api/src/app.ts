@@ -55,6 +55,10 @@ export interface ApiDependencies {
   auth?: AuthenticationApi;
 }
 
+export type RequestAuthenticator = (
+  authorization: string | undefined,
+) => Promise<{ authenticatedUserId: ObjectId } | undefined>;
+
 export const createHealthResponse = async (): Promise<HealthResponse> => ({
   app: "travellier",
   status: "ready",
@@ -331,13 +335,18 @@ const readRequestBody = async (request: IncomingMessage): Promise<string> => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-export const createRequestHandler = (dependencies: ApiDependencies = {}) =>
+export const createRequestHandler = (
+  dependencies: ApiDependencies = {},
+  authenticate?: RequestAuthenticator,
+) =>
   async (request: IncomingMessage, response: ServerResponse) => {
+    const authenticated = await authenticate?.(request.headers.authorization);
     const apiResponse = await handleApiRequest(
       {
         method: request.method,
         url: request.url,
         body: await readRequestBody(request),
+        authenticatedUserId: authenticated?.authenticatedUserId,
       },
       dependencies,
     );
@@ -347,8 +356,10 @@ export const createRequestHandler = (dependencies: ApiDependencies = {}) =>
 
 export const requestHandler = createRequestHandler();
 
-export const createApp = (dependencies: ApiDependencies = {}) =>
-  createServer(createRequestHandler(dependencies));
+export const createApp = (
+  dependencies: ApiDependencies = {},
+  authenticate?: RequestAuthenticator,
+) => createServer(createRequestHandler(dependencies, authenticate));
 
 const isEntrypoint =
   process.argv[1] !== undefined &&
