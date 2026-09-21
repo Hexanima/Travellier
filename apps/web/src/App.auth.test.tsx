@@ -166,4 +166,48 @@ describe("App authentication", () => {
     expect(sessionStorage.clear).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Iniciar sesión");
   });
+
+  it("does not persist a restored session after local logout", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token",
+      refreshToken: "persisted-refresh-token",
+    });
+    let resolveRefresh: (value: {
+      ok: true;
+      value: { accessToken: string; refreshToken: string };
+    }) => void;
+    const refresh = vi.fn(
+      () => new Promise<typeof resolveRefresh extends (value: infer TValue) => void ? TValue : never>((resolve) => {
+        resolveRefresh = resolve;
+      }),
+    );
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/trips"]}>
+          <App auth={{ refresh }} sessionStorage={sessionStorage} />
+        </MemoryRouter>,
+      );
+    });
+
+    await act(async () => {
+      container.querySelector("button")?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true }),
+      );
+    });
+    await act(async () => {
+      resolveRefresh({
+        ok: true,
+        value: { accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token" },
+      });
+    });
+
+    expect(sessionStorage.clear).toHaveBeenCalledOnce();
+    expect(sessionStorage.save).not.toHaveBeenCalled();
+  });
 });

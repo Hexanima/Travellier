@@ -36,6 +36,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
+  const sessionRevision = useRef(0)
   const storage = sessionStorage ?? (defaultSessionStorage.current ??= createNativeSessionStorage(Preferences))
   const hasApiConfiguration = auth !== undefined || isHttpApiBaseUrl(apiBaseUrl)
 
@@ -61,15 +62,20 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     restoredSession.current = true
 
     const restoreSession = async () => {
+      const restorationRevision = sessionRevision.current
       const persistedSession = await storage.read()
 
-      if (persistedSession === null) {
+      if (persistedSession === null || sessionRevision.current !== restorationRevision) {
         return
       }
 
       const result = await activeAuth?.refresh?.({
         refreshToken: persistedSession.refreshToken,
       })
+
+      if (sessionRevision.current !== restorationRevision) {
+        return
+      }
 
       if (result?.ok) {
         await storage.save(result.value)
@@ -84,12 +90,14 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   }, [activeAuth, hasApiConfiguration, storage])
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
+    sessionRevision.current += 1
     await storage.save(authenticatedSession)
     session.current = authenticatedSession
     navigate('/trips')
   }
 
   const onLocalLogout = async () => {
+    sessionRevision.current += 1
     session.current = undefined
     await storage.clear()
     navigate('/login')
