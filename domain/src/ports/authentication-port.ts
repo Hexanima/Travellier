@@ -10,7 +10,12 @@ import type { ObjectId } from "../value-objects/object-id.js";
 
 export interface UserRepository<TError extends TaggedError = TaggedError> {
   findByEmail: (email: string) => AsyncResult<User | undefined, TError>;
+  findById: (id: ObjectId) => AsyncResult<User | undefined, TError>;
   create: (user: NewUser) => AsyncResult<User, TError>;
+  updateProfile: (
+    id: ObjectId,
+    profile: { name?: string; avatarS3Key?: string | null },
+  ) => AsyncResult<User | undefined, TError>;
 }
 
 export interface PasswordHasher<TError extends TaggedError = TaggedError> {

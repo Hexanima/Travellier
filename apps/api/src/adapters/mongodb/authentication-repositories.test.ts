@@ -75,4 +75,44 @@ describe("Mongo authentication repositories", () => {
       error: { tag: "EmailAlreadyRegisteredError" },
     });
   });
+
+  it("reads and updates only the requested user's profile", async () => {
+    const { users } = createMongoAuthenticationRepositories(database);
+    const first = await users.create({
+      email: "profile-first@example.test",
+      name: "First",
+      passwordHash: "first-hash",
+    });
+    const second = await users.create({
+      email: "profile-second@example.test",
+      name: "Second",
+      passwordHash: "second-hash",
+    });
+
+    if (!first.ok || !second.ok) {
+      throw new Error("Unable to create profile test users");
+    }
+
+    const updated = await users.updateProfile(first.value.id, {
+      name: "First updated",
+      avatarS3Key: "avatars/first.jpg",
+    });
+
+    expect(updated).toMatchObject({
+      ok: true,
+      value: {
+        id: first.value.id,
+        name: "First updated",
+        avatarS3Key: "avatars/first.jpg",
+      },
+    });
+    expect(await users.findById(first.value.id)).toMatchObject({
+      ok: true,
+      value: { email: "profile-first@example.test", name: "First updated" },
+    });
+    expect(await users.findById(second.value.id)).toMatchObject({
+      ok: true,
+      value: { email: "profile-second@example.test", name: "Second", avatarS3Key: null },
+    });
+  });
 });

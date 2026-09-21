@@ -132,4 +132,39 @@ describe("authentication API", () => {
     });
     expect(JSON.stringify(result)).not.toContain("accessToken");
   });
+
+  it("reads and updates the authenticated user's public profile", async () => {
+    const auth = createAuthenticationApi({ database, jwtSecret });
+    const registered = await auth.register({
+      email: "profile@example.test",
+      name: "Profile",
+      password: "secret-pass",
+    });
+
+    if (!registered.ok) {
+      throw new Error("Unable to create profile test user");
+    }
+
+    await expect(
+      auth.getProfile({ authenticatedUserId: registered.value.id }),
+    ).resolves.toEqual({
+      ok: true,
+      value: { name: "Profile", email: "profile@example.test", avatar: null },
+    });
+
+    await expect(
+      auth.updateProfile({
+        authenticatedUserId: registered.value.id,
+        name: "Updated profile",
+        avatar: "avatars/profile.jpg",
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      value: {
+        name: "Updated profile",
+        email: "profile@example.test",
+        avatar: "avatars/profile.jpg",
+      },
+    });
+  });
 });

@@ -40,6 +40,25 @@ describe("local API entrypoint", () => {
       await expect(response.json()).resolves.toMatchObject({
         user: { email: "local@example.test", name: "Local" },
       });
+
+      const login = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "local@example.test",
+          password: "secret-pass",
+        }),
+      });
+      const session = await login.json() as { accessToken: string };
+
+      const profile = await fetch(`http://127.0.0.1:${port}/profile`, {
+        headers: { authorization: `Bearer ${session.accessToken}` },
+      });
+
+      expect(profile.status).toBe(200);
+      await expect(profile.json()).resolves.toEqual({
+        profile: { name: "Local", email: "local@example.test", avatar: null },
+      });
     } finally {
       await new Promise<void>((resolve, reject) =>
         localApi.app.close((error) =>

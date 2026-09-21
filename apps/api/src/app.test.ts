@@ -190,4 +190,81 @@ describe("api app", () => {
 
     expect(response.statusCode).toBe(400);
   });
+
+  it("returns the authenticated user's profile without sensitive fields", async () => {
+    const getProfile = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        name: "Nico",
+        email: "nico@example.test",
+        avatar: "avatars/nico.jpg",
+      },
+    });
+
+    const response = await handleApiRequest(
+      {
+        method: "GET",
+        url: "/profile",
+        authenticatedUserId: "507f1f77bcf86cd799439011",
+      } as never,
+      { auth: { getProfile } } as never,
+    );
+
+    expect(getProfile).toHaveBeenCalledWith({
+      authenticatedUserId: "507f1f77bcf86cd799439011",
+    });
+    expect(response).toEqual({
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        profile: {
+          name: "Nico",
+          email: "nico@example.test",
+          avatar: "avatars/nico.jpg",
+        },
+      }),
+    });
+    expect(response.body).not.toContain("passwordHash");
+  });
+
+  it("updates the profile identified by the JWT subject instead of a body user ID", async () => {
+    const updateProfile = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        name: "Nicolás",
+        email: "nico@example.test",
+        avatar: "avatars/nicolas.jpg",
+      },
+    });
+
+    const response = await handleApiRequest(
+      {
+        method: "PATCH",
+        url: "/profile",
+        authenticatedUserId: "507f1f77bcf86cd799439011",
+        body: JSON.stringify({
+          name: "Nicolás",
+          avatar: "avatars/nicolas.jpg",
+          userId: "507f191e810c19729de860ea",
+        }),
+      } as never,
+      { auth: { updateProfile } } as never,
+    );
+
+    expect(updateProfile).toHaveBeenCalledWith({
+      authenticatedUserId: "507f1f77bcf86cd799439011",
+      name: "Nicolás",
+      avatar: "avatars/nicolas.jpg",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(
+      JSON.stringify({
+        profile: {
+          name: "Nicolás",
+          email: "nico@example.test",
+          avatar: "avatars/nicolas.jpg",
+        },
+      }),
+    );
+  });
 });

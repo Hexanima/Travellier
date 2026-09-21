@@ -4,6 +4,7 @@ export interface User {
   id: ObjectId;
   email: string;
   name: string;
+  avatarS3Key: string | null;
   passwordHash: string;
   createdAt: Date;
 }
@@ -20,8 +21,24 @@ export interface UserProfile {
   name: string;
 }
 
+export interface AuthenticatedUserProfile {
+  email: string;
+  name: string;
+  avatar: string | null;
+}
+
 export const toUserProfile = ({ id, email, name }: User): UserProfile => ({
   id,
   email,
   name,
+});
+
+export const toAuthenticatedUserProfile = ({
+  email,
+  name,
+  avatarS3Key,
+}: User): AuthenticatedUserProfile => ({
+  email,
+  name,
+  avatar: avatarS3Key,
 });

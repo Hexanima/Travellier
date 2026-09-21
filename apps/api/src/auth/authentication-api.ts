@@ -2,9 +2,11 @@ import type { Db } from "mongodb";
 
 import {
   loginUser,
+  getAuthenticatedProfile,
   refreshSession,
   registerUser,
   revokeSession,
+  updateAuthenticatedProfile,
 } from "app-domain";
 
 import type { AuthenticationApi } from "../app.js";
@@ -56,5 +58,7 @@ export const createAuthenticationApi = ({
         payload,
       ),
     logout: (payload) => revokeSession.execute({ sessions, tokens }, payload),
+    getProfile: (payload) => getAuthenticatedProfile.execute({ users }, payload),
+    updateProfile: (payload) => updateAuthenticatedProfile.execute({ users }, payload),
   };
 };
