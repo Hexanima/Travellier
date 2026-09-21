@@ -15,6 +15,22 @@
   width: min(760px, 100%);
 }
 
+.auth-panel {
+  width: min(440px, 100%);
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.auth-links,
+.auth-switch {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0 0;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #4b6b7a;
