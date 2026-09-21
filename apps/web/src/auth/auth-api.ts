@@ -15,6 +15,7 @@ export type AuthResult<TValue> =
 
 export type AuthApi = {
   login: (payload: { email: string; password: string }) => Promise<AuthResult<AuthenticatedSession>>;
+  refresh: (payload: { refreshToken: string }) => Promise<AuthResult<AuthenticatedSession>>;
   register: (payload: { email: string; name: string; password: string }) => Promise<AuthResult<{ id: string }>>;
 };
 
@@ -58,6 +59,19 @@ export const createAuthApi = (client: Pick<HttpClient, "post">): AuthApi => ({
   },
   login: async (payload) => {
     const result = await client.post<AuthenticatedSession>("/auth/login", payload, {
+      authenticated: false,
+    });
+
+    if (!result.ok) {
+      return { ok: false, error: toFailure(result.error) };
+    }
+
+    return isAuthenticatedSession(result.value)
+      ? { ok: true, value: result.value }
+      : { ok: false, error: {} };
+  },
+  refresh: async (payload) => {
+    const result = await client.post<AuthenticatedSession>("/auth/refresh", payload, {
       authenticated: false,
     });
 
