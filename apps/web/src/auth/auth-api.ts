@@ -1,4 +1,4 @@
-import type { ApiClientError, HttpClient } from "../api/index.js";
+import type { ApiClientError, ApiErrorKind, HttpClient } from "../api/index.js";
 
 export type AuthenticatedSession = {
   accessToken: string;
@@ -6,6 +6,7 @@ export type AuthenticatedSession = {
 };
 
 export type AuthFailure = {
+  kind: ApiErrorKind;
   fields?: readonly { field: string; message: string }[];
 };
 
@@ -15,6 +16,7 @@ export type AuthResult<TValue> =
 
 export type AuthApi = {
   login: (payload: { email: string; password: string }) => Promise<AuthResult<AuthenticatedSession>>;
+  refresh: (payload: { refreshToken: string }) => Promise<AuthResult<AuthenticatedSession>>;
   register: (payload: { email: string; name: string; password: string }) => Promise<AuthResult<{ id: string }>>;
 };
 
@@ -22,8 +24,8 @@ type RegistrationResponse = { user: { id: string } };
 
 const toFailure = (error: ApiClientError): AuthFailure =>
   error.kind === "validation" && error.fields !== undefined
-    ? { fields: error.fields.map(({ field, message }) => ({ field, message })) }
-    : {};
+    ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
+    : { kind: error.kind };
 
 const isRegistrationResponse = (value: unknown): value is RegistrationResponse =>
   typeof value === "object" &&
@@ -54,7 +56,7 @@ export const createAuthApi = (client: Pick<HttpClient, "post">): AuthApi => ({
 
     return isRegistrationResponse(result.value)
       ? { ok: true, value: result.value.user }
-      : { ok: false, error: {} };
+      : { ok: false, error: { kind: "server" } };
   },
   login: async (payload) => {
     const result = await client.post<AuthenticatedSession>("/auth/login", payload, {
@@ -67,6 +69,19 @@ export const createAuthApi = (client: Pick<HttpClient, "post">): AuthApi => ({
 
     return isAuthenticatedSession(result.value)
       ? { ok: true, value: result.value }
-      : { ok: false, error: {} };
+      : { ok: false, error: { kind: "server" } };
+  },
+  refresh: async (payload) => {
+    const result = await client.post<AuthenticatedSession>("/auth/refresh", payload, {
+      authenticated: false,
+    });
+
+    if (!result.ok) {
+      return { ok: false, error: toFailure(result.error) };
+    }
+
+    return isAuthenticatedSession(result.value)
+      ? { ok: true, value: result.value }
+      : { ok: false, error: { kind: "server" } };
   },
 });

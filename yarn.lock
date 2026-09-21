@@ -528,6 +528,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@capacitor/preferences@npm:8.0.1":
+  version: 8.0.1
+  resolution: "@capacitor/preferences@npm:8.0.1"
+  peerDependencies:
+    "@capacitor/core": ">=8.0.0"
+  checksum: 10c0/cbed0229a685f484c396fd043354688fdeec69264f322180b62c5adb0322561b288a63eb38ee9b38cf78ea7dbc3b9dc8dd8c2e52b54a7f752a1b2f07bfd29f0d
+  languageName: node
+  linkType: hard
+
 "@csstools/color-helpers@npm:^5.1.0":
   version: 5.1.0
   resolution: "@csstools/color-helpers@npm:5.1.0"
@@ -4974,6 +4983,7 @@ __metadata:
     "@capacitor/cli": "npm:8.5.2"
     "@capacitor/core": "npm:8.5.2"
     "@capacitor/ios": "npm:8.5.2"
+    "@capacitor/preferences": "npm:8.0.1"
     "@eslint/js": "npm:^9.36.0"
     "@types/node": "npm:^24.6.0"
     "@types/react": "npm:^19.1.16"

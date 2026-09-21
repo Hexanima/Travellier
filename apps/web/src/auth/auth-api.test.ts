@@ -44,6 +44,38 @@ describe("createAuthApi", () => {
     });
   });
 
+  it("refreshes a persisted session without reading an access token", async () => {
+    const post = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token" },
+    });
+    const auth = createAuthApi({ post } as never);
+
+    const result = await auth.refresh({ refreshToken: "persisted-refresh-token" });
+
+    expect(post).toHaveBeenCalledWith(
+      "/auth/refresh",
+      { refreshToken: "persisted-refresh-token" },
+      { authenticated: false },
+    );
+    expect(result).toEqual({
+      ok: true,
+      value: { accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token" },
+    });
+  });
+
+  it("preserves the refresh failure kind for session restoration", async () => {
+    const post = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { kind: "network", fields: undefined },
+    });
+    const auth = createAuthApi({ post } as never);
+
+    const result = await auth.refresh({ refreshToken: "persisted-refresh-token" });
+
+    expect(result).toEqual({ ok: false, error: { kind: "network" } });
+  });
+
   it("passes structured validation errors through to the form", async () => {
     const post = vi.fn().mockResolvedValue({
       ok: false,
@@ -58,7 +90,7 @@ describe("createAuthApi", () => {
 
     expect(result).toEqual({
       ok: false,
-      error: { fields: [{ field: "email", message: "Email inválido." }] },
+      error: { kind: "validation", fields: [{ field: "email", message: "Email inválido." }] },
     });
   });
 });

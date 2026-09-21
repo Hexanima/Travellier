@@ -9,7 +9,7 @@ export type AuthScreenMode = "login" | "register";
 type AuthScreenProps = {
   auth?: Partial<AuthApi>;
   mode: AuthScreenMode;
-  onAuthenticated?: (session: AuthenticatedSession) => void;
+  onAuthenticated?: (session: AuthenticatedSession) => void | Promise<void>;
 };
 
 const validationMessages = {
@@ -78,7 +78,7 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
       const result = await auth?.login?.({ email, password });
 
       if (result?.ok) {
-        onAuthenticated?.(result.value);
+        await onAuthenticated?.(result.value);
         return;
       }
 
