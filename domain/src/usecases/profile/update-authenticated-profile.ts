@@ -45,6 +45,13 @@ const validate = (
     });
   }
 
+  if (payload.avatar !== undefined && payload.avatar !== null &&
+    !payload.avatar.startsWith(`avatars/${payload.authenticatedUserId}/`)) {
+    issues.push({
+      field: "avatar", code: "invalid", message: "Avatar does not belong to this user.",
+    });
+  }
+
   return issues.length === 0 ? undefined : new ValidationError(issues);
 };
 

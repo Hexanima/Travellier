@@ -93,4 +93,90 @@ describe("createAuthApi", () => {
       error: { kind: "validation", fields: [{ field: "email", message: "Email inválido." }] },
     });
   });
+
+  it("reads the authenticated profile", async () => {
+    const get = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        profile: { name: "Nico", email: "nico@example.test", avatar: null },
+      },
+    });
+    const auth = createAuthApi({ get } as never);
+
+    expect(auth).toHaveProperty("getProfile");
+
+    const result = await (auth as never as { getProfile: () => Promise<unknown> }).getProfile();
+
+    expect(get).toHaveBeenCalledWith("/profile");
+    expect(result).toEqual({
+      ok: true,
+      value: { name: "Nico", email: "nico@example.test", avatar: null },
+    });
+  });
+
+  it("updates the authenticated profile and preserves validation feedback", async () => {
+    const patch = vi.fn().mockResolvedValue({
+      ok: false,
+      error: {
+        kind: "validation",
+        fields: [{ field: "name", code: "required", message: "Ingresá tu nombre." }],
+      },
+    });
+    const auth = createAuthApi({ patch } as never);
+
+    expect(auth).toHaveProperty("updateProfile");
+
+    const result = await (
+      auth as never as {
+        updateProfile: (payload: { name: string }) => Promise<unknown>;
+      }
+    ).updateProfile({ name: "" });
+
+    expect(patch).toHaveBeenCalledWith("/profile", { name: "" });
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: "validation",
+        fields: [{ field: "name", message: "Ingresá tu nombre." }],
+      },
+    });
+  });
+
+  it("uploads an avatar directly to the signed S3 URL before returning its key", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true, value: {
+      avatar: "avatars/user/id.jpg", uploadUrl: "https://s3.example.test/upload",
+      headers: { "content-type": "image/jpeg" }, expiresAt: "2026-09-23T12:05:00Z",
+    } });
+    const upload = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    const auth = createAuthApi({ post } as never, upload);
+    const file = new File(["image"], "avatar.jpg", { type: "image/jpeg" });
+
+    const result = await auth.uploadAvatar(file);
+
+    expect(post).toHaveBeenCalledWith("/profile/avatar-upload", { contentType: "image/jpeg" });
+    expect(upload).toHaveBeenCalledWith("https://s3.example.test/upload", {
+      method: "PUT", headers: { "content-type": "image/jpeg" }, body: file,
+    });
+    expect(result).toEqual({ ok: true, value: { avatar: "avatars/user/id.jpg" } });
+  });
+
+  it("does not return an avatar key if the S3 upload fails", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true, value: {
+      avatar: "avatars/user/id.jpg", uploadUrl: "https://s3.example.test/upload",
+      headers: { "content-type": "image/jpeg" }, expiresAt: "2026-09-23T12:05:00Z",
+    } });
+    const auth = createAuthApi({ post } as never, vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+
+    expect(await auth.uploadAvatar(new File(["image"], "avatar.jpg", { type: "image/jpeg" }))).toEqual({
+      ok: false, error: { kind: "server" },
+    });
+  });
+
+  it("reads the temporary view URL for the stored avatar", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { url: "https://s3.example.test/view" } });
+    const auth = createAuthApi({ get } as never);
+
+    expect(await auth.getAvatarUrl()).toEqual({ ok: true, value: { url: "https://s3.example.test/view" } });
+    expect(get).toHaveBeenCalledWith("/profile/avatar-url");
+  });
 });

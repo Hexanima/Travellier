@@ -1,14 +1,15 @@
 import { Preferences } from '@capacitor/preferences'
-import { useCallback, useEffect, useRef } from 'react'
-import { Link, Route, Routes, useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 
 import './App.css'
 import { createHttpClient } from './api/index.js'
 import { AuthScreen } from './auth/AuthScreen.js'
 import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/auth-api.js'
 import { createNativeSessionStorage, type NativeSessionStorage } from './auth/native-session-storage.js'
-import { Button } from './components/index.js'
+import { Button, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
+import { ProfileScreen } from './profile/ProfileScreen.js'
 
 type AppProps = {
   auth?: Partial<AuthApi>
@@ -32,7 +33,10 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
 
 function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage }: AppProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const session = useRef<AuthenticatedSession | undefined>(undefined)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [hasSession, setHasSession] = useState(false)
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
@@ -54,6 +58,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       getAccessToken: async () => session.current?.accessToken ?? null,
       onUnauthorized: () => {
         session.current = undefined
+        setHasSession(false)
       },
     })
     defaultAuth.current = createAuthApi(client)
@@ -92,7 +97,10 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         }
 
         session.current = result.value
-        navigate('/trips')
+        setHasSession(true)
+        if (location.pathname === '/' || location.pathname === '/login') {
+          navigate('/trips')
+        }
         return
       }
 
@@ -102,21 +110,25 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       }
 
       session.current = persistedSession
+      setHasSession(true)
     }
 
-    void restoreSession()
-  }, [activeAuth, hasApiConfiguration, navigate, queueStorageOperation, storage])
+    void restoreSession().catch(() => undefined).finally(() => setSessionReady(true))
+  }, [activeAuth, hasApiConfiguration, location.pathname, navigate, queueStorageOperation, storage])
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
     await queueStorageOperation(() => storage.save(authenticatedSession))
     session.current = authenticatedSession
+    setHasSession(true)
+    setSessionReady(true)
     navigate('/trips')
   }
 
   const onLocalLogout = async () => {
     sessionRevision.current += 1
     session.current = undefined
+    setHasSession(false)
     await queueStorageOperation(() => storage.clear())
     navigate('/login')
   }
@@ -133,7 +145,13 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
         <Route path="/trips/*" element={<ProtectedRoute onLocalLogout={onLocalLogout} />} />
-        <Route path="/profile" element={<ProtectedRoute onLocalLogout={onLocalLogout} />} />
+        <Route path="/profile" element={
+          !sessionReady
+            ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
+            : hasSession
+              ? <ProfileScreen auth={activeAuth} />
+              : <Navigate to="/login" replace />
+        } />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
@@ -175,6 +193,7 @@ function ProtectedRoute({ onLocalLogout }: { onLocalLogout: () => Promise<void> 
         <p className="eyebrow">Travellier</p>
         <h1>Acceso protegido</h1>
         <p className="domain-check">La sesión se integrará en el flujo de autenticación.</p>
+        <Link to="/profile">Mi perfil</Link>
         <Button onClick={() => void onLocalLogout()}>Cerrar sesión</Button>
       </section>
     </main>

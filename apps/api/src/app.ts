@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   type AsyncResult,
   type AuthenticatedUserProfile,
+  type AvatarUpload,
   type AuthenticatedSession,
   type ObjectId,
   type RegisterUserPayload,
@@ -49,6 +50,8 @@ export interface AuthenticationApi {
     name?: string;
     avatar?: string | null;
   }) => AsyncResult<AuthenticatedUserProfile>;
+  createAvatarUpload: (payload: { authenticatedUserId: ObjectId; contentType: string }) => AsyncResult<AvatarUpload>;
+  getAvatarUrl: (payload: { authenticatedUserId: ObjectId }) => AsyncResult<{ url: string | null }>;
 }
 
 export interface ApiDependencies {
@@ -224,6 +227,24 @@ export const handleApiRequest = async (
     return result.ok
       ? jsonResponse(200, { profile: result.value })
       : errorResponse(result.error);
+  }
+
+  if (request.method === "POST" && request.url === "/profile/avatar-upload") {
+    if (auth === undefined) return unavailableResponse();
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (payload === undefined || !isString(payload.contentType)) return invalidRequestResponse();
+    const result = await auth.createAvatarUpload({
+      authenticatedUserId: request.authenticatedUserId,
+      contentType: payload.contentType,
+    });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  if (request.method === "GET" && request.url === "/profile/avatar-url") {
+    if (auth === undefined) return unavailableResponse();
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const result = await auth.getAvatarUrl({ authenticatedUserId: request.authenticatedUserId });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
   }
 
   if (request.method === "PATCH" && request.url === "/profile") {

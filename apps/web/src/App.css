@@ -24,6 +24,21 @@
   gap: 16px;
 }
 
+.profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-avatar--empty {
+  display: grid;
+  place-items: center;
+  background: #d6dde3;
+  color: #18202f;
+  font-size: 0.875rem;
+}
+
 .auth-links,
 .auth-switch {
   display: flex;

@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { randomUUID } from "node:crypto";
 
 import {
   loginUser,
@@ -7,6 +8,11 @@ import {
   registerUser,
   revokeSession,
   updateAuthenticatedProfile,
+  createAvatarUpload,
+  getAvatarUrl,
+  err,
+  UnknownError,
+  type ObjectStoragePort,
 } from "app-domain";
 
 import type { AuthenticationApi } from "../app.js";
@@ -21,11 +27,13 @@ const bcryptSaltRounds = 12;
 export interface AuthenticationApiDependencies {
   database: Db;
   jwtSecret: string;
+  storage?: ObjectStoragePort;
 }
 
 export const createAuthenticationApi = ({
   database,
   jwtSecret,
+  storage,
 }: AuthenticationApiDependencies): AuthenticationApi => {
   const { users, sessions } = createMongoAuthenticationRepositories(database);
   const passwordHasher = createBcryptPasswordHasher({
@@ -60,5 +68,11 @@ export const createAuthenticationApi = ({
     logout: (payload) => revokeSession.execute({ sessions, tokens }, payload),
     getProfile: (payload) => getAuthenticatedProfile.execute({ users }, payload),
     updateProfile: (payload) => updateAuthenticatedProfile.execute({ users }, payload),
+    createAvatarUpload: (payload) => storage === undefined
+      ? Promise.resolve(err(new UnknownError("Avatar storage is not configured.")))
+      : createAvatarUpload.execute({ storage, createId: randomUUID }, payload),
+    getAvatarUrl: (payload) => storage === undefined
+      ? Promise.resolve(err(new UnknownError("Avatar storage is not configured.")))
+      : getAvatarUrl.execute({ users, storage }, payload),
   };
 };
