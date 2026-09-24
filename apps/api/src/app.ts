@@ -16,6 +16,7 @@ import {
   type RevokeSessionPayload,
   ValidationError,
 } from "app-domain";
+import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
 
 export interface HealthResponse {
   app: "travellier";
@@ -36,6 +37,7 @@ export interface ApiRequest {
 }
 
 export interface AuthenticationApi {
+  verifyEmailToken: (payload: { token: string }) => AsyncResult<void>;
   register: (
     payload: RegisterUserPayload,
   ) => AsyncResult<UserProfile>;
@@ -210,6 +212,24 @@ export const handleApiRequest = async (
 
   const payload = parsePayload(request.body);
   const auth = dependencies.auth;
+
+  if (request.method === "GET" && request.url !== undefined) {
+    const pathname = new URL(request.url, "http://localhost").pathname;
+    if (pathname === "/auth/verify" || pathname.startsWith("/auth/verify/")) {
+      const token = pathname.slice("/auth/verify/".length);
+      if (token.length === 0 || token.length > 4_096 || !/^[A-Za-z0-9_.-]+$/.test(token)) {
+        return emailVerificationErrorPage();
+      }
+      if (auth === undefined) {
+        return emailVerificationErrorPage(503);
+      }
+
+      const result = await auth.verifyEmailToken({ token });
+      return result.ok
+        ? emailVerificationBridgePage(token)
+        : emailVerificationErrorPage(result.error.tag === "InvalidEmailVerificationTokenError" ? 400 : 500);
+    }
+  }
 
   if (request.method === "GET" && request.url === "/profile") {
     if (auth === undefined) {

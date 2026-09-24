@@ -1,10 +1,82 @@
 import type { AddressInfo } from "node:net";
+import { runInNewContext } from "node:vm";
 
 import { describe, expect, it, vi } from "vitest";
 
 import { createApp, createHealthResponse, handleApiRequest } from "./app.js";
 
 describe("api app", () => {
+  it("serves a verified email link as an HTML bridge to the native app", async () => {
+    const verifyEmailToken = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const response = await handleApiRequest(
+      { method: "GET", url: "/auth/verify/signed.token.value" },
+      { auth: { verifyEmailToken } } as never,
+    );
+
+    expect(verifyEmailToken).toHaveBeenCalledWith({ token: "signed.token.value" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["referrer-policy"]).toBe("no-referrer");
+    expect(response.headers["content-security-policy"]).toContain("default-src 'none'");
+    expect(response.headers["content-security-policy"]).not.toContain("unsafe-inline");
+    expect(response.body).toContain("com.travellier.app://verify/signed.token.value");
+    expect(response.body).toContain("setTimeout");
+    expect(response.body).toContain("1500");
+
+    const nonce = response.body.match(/<script nonce="([^"]+)">/)?.[1];
+    const script = response.body.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+    expect(nonce).toBeDefined();
+    expect(response.headers["content-security-policy"]).toContain(`'nonce-${nonce}'`);
+    expect(script).toBeDefined();
+    const assign = vi.fn();
+    const fallback = { hidden: true };
+    let timeout: (() => void) | undefined;
+    runInNewContext(script ?? "", {
+      document: {
+        getElementById: () => fallback,
+        visibilityState: "visible",
+        addEventListener: vi.fn(),
+      },
+      window: { location: { assign } },
+      setTimeout: (callback: () => void) => { timeout = callback; return 1; },
+      clearTimeout: vi.fn(),
+    });
+    expect(assign).toHaveBeenCalledWith("com.travellier.app://verify/signed.token.value");
+    expect(fallback.hidden).toBe(true);
+    timeout?.();
+    expect(fallback.hidden).toBe(false);
+  });
+
+  it("shows a safe HTML error without reflecting an invalid token", async () => {
+    const verifyEmailToken = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { tag: "InvalidEmailVerificationTokenError" },
+    });
+    const response = await handleApiRequest(
+      { method: "GET", url: "/auth/verify/bad-token" },
+      { auth: { verifyEmailToken } } as never,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.body).toContain("inválido o vencido");
+    expect(response.body).not.toContain("bad-token");
+    expect(response.body).not.toContain("com.travellier.app://verify/");
+  });
+
+  it("rejects unsafe verification paths with the same safe HTML error", async () => {
+    const verifyEmailToken = vi.fn();
+    const response = await handleApiRequest(
+      { method: "GET", url: "/auth/verify/%3Cscript%3E" },
+      { auth: { verifyEmailToken } } as never,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).not.toContain("script");
+    expect(verifyEmailToken).not.toHaveBeenCalled();
+  });
+
   it("builds the Travellier health response", async () => {
     const response = await createHealthResponse();
 

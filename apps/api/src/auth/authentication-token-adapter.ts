@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { compactVerify, decodeJwt, SignJWT } from "jose";
+import { compactVerify, decodeJwt, jwtVerify, SignJWT } from "jose";
 
-import { err, ok, UnknownError, type AuthenticationTokenPort } from "app-domain";
+import { createObjectId, err, ok, UnknownError, type AuthenticationTokenPort, type EmailVerificationTokenPort } from "app-domain";
 
 export interface AuthenticationTokenAdapterDependencies {
   jwtSecret: string;
@@ -14,7 +14,7 @@ const tokenTypeClaim = "tokenType";
 
 const signToken = async (
   secret: Uint8Array,
-  type: "access" | "refresh",
+  type: "access" | "refresh" | "email-verification",
   expiresAt: Date,
   now: Date,
   subject?: string,
@@ -35,7 +35,7 @@ export const createAuthenticationTokenAdapter = ({
   jwtSecret,
   accessTokenLifetimeMs,
   now = () => new Date(),
-}: AuthenticationTokenAdapterDependencies): AuthenticationTokenPort => {
+}: AuthenticationTokenAdapterDependencies): AuthenticationTokenPort & EmailVerificationTokenPort => {
   const secret = new TextEncoder().encode(jwtSecret);
 
   return {
@@ -85,5 +85,32 @@ export const createAuthenticationTokenAdapter = ({
     },
     hashRefreshToken: async (token) =>
       ok(createHash("sha256").update(token).digest("hex")),
+    createEmailVerificationToken: async (userId, expiresAt) => {
+      try {
+        return ok(await signToken(secret, "email-verification", expiresAt, now(), userId));
+      } catch {
+        return err(new UnknownError("Unable to create email verification token."));
+      }
+    },
+    readEmailVerificationTokenSubject: async (token) => {
+      if (token.length > 4_096 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token)) {
+        return ok(undefined);
+      }
+
+      try {
+        const { payload } = await jwtVerify(token, secret, {
+          algorithms: ["HS256"],
+          currentDate: now(),
+        });
+        if (payload[tokenTypeClaim] !== "email-verification" || typeof payload.sub !== "string" || typeof payload.exp !== "number") {
+          return ok(undefined);
+        }
+
+        const userId = createObjectId(payload.sub);
+        return ok(userId.ok ? userId.value : undefined);
+      } catch {
+        return ok(undefined);
+      }
+    },
   };
 };

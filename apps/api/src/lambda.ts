@@ -51,13 +51,12 @@ const isPublicRoute = (path: string, method: string): boolean =>
       path,
     )) ||
   (method === "GET" &&
-    (path.startsWith("/auth/verify/") || path.startsWith("/invite/")));
+    (path === "/auth/verify" || path.startsWith("/auth/verify/") || path.startsWith("/invite/")));
 
 const isAuthenticationRoute = (path: string, method: string): boolean =>
-  method === "POST" &&
-  ["/auth/register", "/auth/login", "/auth/refresh", "/auth/logout"].includes(
-    path,
-  );
+  (method === "POST" &&
+    ["/auth/register", "/auth/login", "/auth/refresh", "/auth/logout"].includes(path)) ||
+  (method === "GET" && (path === "/auth/verify" || path.startsWith("/auth/verify/")));
 
 const authorizationHeader = (
   headers: ApiGatewayHttpApiEvent["headers"],

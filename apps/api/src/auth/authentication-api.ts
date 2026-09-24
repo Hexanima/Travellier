@@ -7,6 +7,7 @@ import {
   refreshSession,
   registerUser,
   revokeSession,
+  verifyEmailToken,
   updateAuthenticatedProfile,
   createAvatarUpload,
   getAvatarUrl,
@@ -46,6 +47,8 @@ export const createAuthenticationApi = ({
   const now = () => new Date();
 
   return {
+    verifyEmailToken: (payload) =>
+      verifyEmailToken.execute({ users, tokens }, payload),
     register: (payload) =>
       registerUser.execute({ users, passwordHasher }, payload),
     login: (payload) =>

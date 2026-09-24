@@ -26,6 +26,37 @@ describe("authentication API", () => {
     await server?.stop();
   });
 
+  it("validates a signed email token only while its user exists", async () => {
+    const auth = createAuthenticationApi({ database, jwtSecret }) as ReturnType<typeof createAuthenticationApi> & {
+      verifyEmailToken?: (payload: { token: string }) => Promise<unknown>;
+    };
+    const registered = await auth.register({
+      email: "verify@example.test",
+      name: "Verify",
+      password: "secret-pass",
+    });
+    if (!registered.ok) throw new Error("Unable to create verification test user");
+
+    const tokens = createAuthenticationTokenAdapter({
+      jwtSecret,
+      accessTokenLifetimeMs: 900_000,
+    });
+    const token = await tokens.createEmailVerificationToken(
+      registered.value.id,
+      new Date(Date.now() + 60_000),
+    );
+    if (!token.ok) throw new Error("Unable to create verification test token");
+
+    expect(await auth.verifyEmailToken?.({ token: token.value })).toEqual({
+      ok: true,
+      value: undefined,
+    });
+    expect(await auth.verifyEmailToken?.({ token: "invalid-token" })).toMatchObject({
+      ok: false,
+      error: { tag: "InvalidEmailVerificationTokenError" },
+    });
+  });
+
   it("registers, rotates, and revokes a session without persisting a raw refresh token", async () => {
     const auth = createAuthenticationApi({ database, jwtSecret });
     const registered = await auth.register({

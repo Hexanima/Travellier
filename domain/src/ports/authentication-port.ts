@@ -42,3 +42,15 @@ export interface AuthenticationTokenPort<
   ) => AsyncResult<Date | undefined, TError>;
   hashRefreshToken: (token: string) => AsyncResult<string, TError>;
 }
+
+export interface EmailVerificationTokenPort<
+  TError extends TaggedError = TaggedError,
+> {
+  createEmailVerificationToken: (
+    userId: ObjectId,
+    expiresAt: Date,
+  ) => AsyncResult<string, TError>;
+  readEmailVerificationTokenSubject: (
+    token: string,
+  ) => AsyncResult<ObjectId | undefined, TError>;
+}

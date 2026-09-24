@@ -7,3 +7,4 @@ export * from "./email-already-registered-error.js";
 export * from "./invalid-credentials-error.js";
 export * from "./invalid-session-error.js";
 export * from "./session-expired-error.js";
+export * from "./invalid-email-verification-token-error.js";
