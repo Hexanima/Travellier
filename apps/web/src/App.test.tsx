@@ -57,15 +57,15 @@ describe("App", () => {
     expect(markup).toContain('href="/profile"');
   });
 
-  it("mounts the profile screen on the profile route", () => {
+  it("waits for session restoration before mounting the profile screen", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/profile"]}>
         <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Mi perfil");
-    expect(markup).toContain('href="/trips"');
+    expect(markup).toContain("Restaurando sesión…");
+    expect(markup).not.toContain("Mi perfil");
   });
 
   it("renders a fallback for an unknown route", () => {

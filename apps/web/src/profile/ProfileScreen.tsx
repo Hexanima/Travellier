@@ -4,9 +4,9 @@ import { Link } from "react-router-dom";
 import type { AuthApi, AuthenticatedProfile } from "../auth/auth-api.js";
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
 
-type ProfileScreenProps = { auth?: Partial<AuthApi>; ready?: boolean };
+type ProfileScreenProps = { auth?: Partial<AuthApi> };
 
-export function ProfileScreen({ auth, ready = true }: ProfileScreenProps) {
+export function ProfileScreen({ auth }: ProfileScreenProps) {
   const [profile, setProfile] = useState<AuthenticatedProfile>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -47,9 +47,8 @@ export function ProfileScreen({ auth, ready = true }: ProfileScreenProps) {
   }, [auth, showAvatar]);
 
   useEffect(() => {
-    if (!ready) return;
     void loadProfile();
-  }, [loadProfile, ready]);
+  }, [loadProfile]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

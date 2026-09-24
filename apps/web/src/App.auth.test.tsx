@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const httpClient = vi.hoisted(() => ({
   getAccessToken: undefined as undefined | (() => Promise<string | null>),
+  onUnauthorized: undefined as undefined | (() => void),
   get: vi.fn(),
   post: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock("./api/index.js", async (importOriginal) => {
     ...original,
     createHttpClient: vi.fn((dependencies) => {
       httpClient.getAccessToken = dependencies.getAccessToken;
+      httpClient.onUnauthorized = dependencies.onUnauthorized;
       return { get: httpClient.get, post: httpClient.post };
     }),
   };
@@ -37,6 +39,7 @@ afterEach(async () => {
   });
   document.body.replaceChildren();
   httpClient.getAccessToken = undefined;
+  httpClient.onUnauthorized = undefined;
   httpClient.post.mockReset();
   httpClient.get.mockReset();
 });
@@ -55,6 +58,69 @@ const createSessionStorage = (): NativeSessionStorage => ({
 });
 
 describe("App authentication", () => {
+  it("redirects an unauthenticated profile visit to login without fetching profile data", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const getProfile = vi.fn();
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App auth={{ getProfile }} sessionStorage={createSessionStorage()} />
+      </MemoryRouter>,
+    ));
+
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(container.textContent).not.toContain("Mi perfil");
+    expect(getProfile).not.toHaveBeenCalled();
+  });
+
+  it("redirects the profile visit after an invalid persisted session", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const storage = createSessionStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "expired", refreshToken: "invalid" });
+    const getProfile = vi.fn();
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App auth={{
+          refresh: vi.fn().mockResolvedValue({ ok: false, error: { kind: "unauthorized" } }),
+          getProfile,
+        }} sessionStorage={storage} />
+      </MemoryRouter>,
+    ));
+
+    expect(storage.clear).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(getProfile).not.toHaveBeenCalled();
+  });
+
+  it("leaves the profile route when an authenticated request becomes unauthorized", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const storage = createSessionStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "access", refreshToken: "refresh" });
+    httpClient.post.mockResolvedValue({ ok: true, value: { accessToken: "renewed", refreshToken: "renewed-refresh" } });
+    httpClient.get.mockImplementation(async () => {
+      httpClient.onUnauthorized?.();
+      return { ok: false, error: { kind: "unauthorized" } };
+    });
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App apiBaseUrl="https://api.example.test" sessionStorage={storage} />
+      </MemoryRouter>,
+    ));
+
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(container.textContent).not.toContain("Mi perfil");
+  });
   it("does not read stored tokens when the API is not configured", async () => {
     const container = document.createElement("div");
     document.body.append(container);
