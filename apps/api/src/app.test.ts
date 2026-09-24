@@ -267,4 +267,34 @@ describe("api app", () => {
       }),
     );
   });
+
+  it("requests a signed avatar upload for the authenticated user", async () => {
+    const createAvatarUpload = vi.fn().mockResolvedValue({ ok: true, value: {
+      avatar: "avatars/507f1f77bcf86cd799439011/id.jpg",
+      uploadUrl: "https://s3.example.test/upload",
+      headers: { "content-type": "image/jpeg" },
+      expiresAt: new Date("2026-09-23T12:05:00Z"),
+    } });
+    const response = await handleApiRequest({
+      method: "POST", url: "/profile/avatar-upload",
+      authenticatedUserId: "507f1f77bcf86cd799439011",
+      body: JSON.stringify({ contentType: "image/jpeg", userId: "507f191e810c19729de860ea" }),
+    } as never, { auth: { createAvatarUpload } } as never);
+
+    expect(createAvatarUpload).toHaveBeenCalledWith({
+      authenticatedUserId: "507f1f77bcf86cd799439011", contentType: "image/jpeg",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toMatchObject({ avatar: "avatars/507f1f77bcf86cd799439011/id.jpg" });
+  });
+
+  it("returns only the authenticated user's avatar URL", async () => {
+    const getAvatarUrl = vi.fn().mockResolvedValue({ ok: true, value: { url: "https://s3.example.test/view" } });
+    const response = await handleApiRequest({
+      method: "GET", url: "/profile/avatar-url", authenticatedUserId: "507f1f77bcf86cd799439011",
+    } as never, { auth: { getAvatarUrl } } as never);
+
+    expect(getAvatarUrl).toHaveBeenCalledWith({ authenticatedUserId: "507f1f77bcf86cd799439011" });
+    expect(response).toMatchObject({ statusCode: 200, body: JSON.stringify({ url: "https://s3.example.test/view" }) });
+  });
 });

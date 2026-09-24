@@ -8,6 +8,7 @@ import {
   type LambdaRuntimeConfig,
 } from "./adapters/aws/runtime-config.js";
 import { createSecretsManagerSecretValueReader } from "./adapters/aws/secrets-manager-reader.js";
+import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
@@ -140,7 +141,11 @@ const createRuntimeAuthenticationApi = async (
 ): Promise<AuthenticationApi> => {
   authenticationApi ??= connectMongoDatabase(configuration.mongo).then(
     ({ database }) =>
-      createAuthenticationApi({ database, jwtSecret: configuration.jwtSecret }),
+      createAuthenticationApi({
+        database,
+        jwtSecret: configuration.jwtSecret,
+        storage: createS3ObjectStorage({ bucketName: configuration.photoBucketName }),
+      }),
   );
 
   return authenticationApi;

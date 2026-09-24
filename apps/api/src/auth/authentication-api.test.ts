@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MongoClient, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
@@ -156,15 +156,37 @@ describe("authentication API", () => {
       auth.updateProfile({
         authenticatedUserId: registered.value.id,
         name: "Updated profile",
-        avatar: "avatars/profile.jpg",
+        avatar: `avatars/${registered.value.id}/profile.jpg`,
       }),
     ).resolves.toEqual({
       ok: true,
       value: {
         name: "Updated profile",
         email: "profile@example.test",
-        avatar: "avatars/profile.jpg",
+        avatar: `avatars/${registered.value.id}/profile.jpg`,
       },
     });
+  });
+
+  it("signs an avatar upload and its read URL for the authenticated profile", async () => {
+    const storage = {
+      createUploadTarget: vi.fn().mockResolvedValue({ ok: true, value: {
+        uploadUrl: "https://s3.example.test/upload", headers: { "content-type": "image/jpeg" }, expiresAt: new Date(),
+      } }),
+      createDownloadTarget: vi.fn().mockResolvedValue({ ok: true, value: { downloadUrl: "https://s3.example.test/view" } }),
+    };
+    const auth = createAuthenticationApi({ database, jwtSecret, storage });
+    const registered = await auth.register({ email: "avatar@example.test", name: "Avatar", password: "secret-pass" });
+    if (!registered.ok) throw new Error("Unable to register avatar test user");
+
+    const target = await auth.createAvatarUpload({ authenticatedUserId: registered.value.id, contentType: "image/jpeg" });
+    expect(target).toMatchObject({ ok: true, value: { uploadUrl: "https://s3.example.test/upload" } });
+    if (!target.ok) return;
+    expect(target.value.avatar).toMatch(new RegExp(`^avatars/${registered.value.id}/.+\\.jpg$`));
+    await auth.updateProfile({ authenticatedUserId: registered.value.id, avatar: target.value.avatar });
+    const view = await auth.getAvatarUrl({ authenticatedUserId: registered.value.id });
+
+    expect(storage.createDownloadTarget).toHaveBeenCalledWith({ objectKey: target.value.avatar, expiresInSeconds: 300 });
+    expect(view).toEqual({ ok: true, value: { url: "https://s3.example.test/view" } });
   });
 });

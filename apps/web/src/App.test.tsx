@@ -54,6 +54,18 @@ describe("App", () => {
     );
 
     expect(markup).toContain("Acceso protegido");
+    expect(markup).toContain('href="/profile"');
+  });
+
+  it("mounts the profile screen on the profile route", () => {
+    const markup = renderToStaticMarkup(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App apiBaseUrl={apiBaseUrl} />
+      </MemoryRouter>,
+    );
+
+    expect(markup).toContain("Mi perfil");
+    expect(markup).toContain('href="/trips"');
   });
 
   it("renders a fallback for an unknown route", () => {

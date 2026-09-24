@@ -109,7 +109,13 @@ describe('Serverless infrastructure contract', () => {
     assert.doesNotMatch(service, /^\s*Type:\s*AWS::S3::BucketPolicy$/m)
     assert.doesNotMatch(service, /^\s*Principal:\s*'\*'$/m)
     assert.doesNotMatch(service, /AllowPublicTripPhotoRead/)
-    assert.doesNotMatch(service, /s3:GetObject/)
+    const policies = service.split(/^\s*- Effect: Allow\s*$/m).slice(1)
+    const tripPolicy = policies.find((policy) => policy.includes("${PhotoBucket.Arn}/trips/*"))
+    const avatarPolicy = policies.find((policy) => policy.includes("${PhotoBucket.Arn}/avatars/*"))
+    assert.ok(tripPolicy)
+    assert.ok(avatarPolicy)
+    assert.doesNotMatch(tripPolicy, /s3:GetObject/)
+    assert.match(avatarPolicy, /s3:GetObject/)
   })
 
   it('does not require callers to provide a photo bucket for stage commands', () => {

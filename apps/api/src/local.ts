@@ -7,6 +7,7 @@ import {
   readMongoDatabaseConfig,
 } from "./adapters/mongodb/connection.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
+import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
 
 type LocalEnvironment = Record<string, string | undefined>;
@@ -30,6 +31,7 @@ export const createLocalApi = async (
     auth: createAuthenticationApi({
       database: connection.database,
       jwtSecret,
+      ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
     }),
   }, createJwtMiddleware({ jwtSecret }));
 

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const httpClient = vi.hoisted(() => ({
   getAccessToken: undefined as undefined | (() => Promise<string | null>),
+  get: vi.fn(),
   post: vi.fn(),
 }));
 
@@ -17,7 +18,7 @@ vi.mock("./api/index.js", async (importOriginal) => {
     ...original,
     createHttpClient: vi.fn((dependencies) => {
       httpClient.getAccessToken = dependencies.getAccessToken;
-      return { post: httpClient.post };
+      return { get: httpClient.get, post: httpClient.post };
     }),
   };
 });
@@ -37,6 +38,7 @@ afterEach(async () => {
   document.body.replaceChildren();
   httpClient.getAccessToken = undefined;
   httpClient.post.mockReset();
+  httpClient.get.mockReset();
 });
 
 const setValue = async (input: HTMLInputElement, value: string) => {
@@ -134,6 +136,64 @@ describe("App authentication", () => {
     });
 
     expect(container.textContent).toContain("Acceso protegido");
+  });
+
+  it("keeps the profile route when restoring a session", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token", refreshToken: "persisted-refresh-token",
+    });
+    const getProfile = vi.fn().mockResolvedValue({ ok: true, value: {
+      name: "Nico", email: "nico@example.test", avatar: null,
+    } });
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App auth={{
+          refresh: vi.fn().mockResolvedValue({ ok: true, value: {
+            accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token",
+          } }),
+          getProfile,
+        }} sessionStorage={sessionStorage} />
+      </MemoryRouter>,
+    ));
+
+    expect(container.textContent).toContain("Mi perfil");
+    expect(getProfile).toHaveBeenCalled();
+  });
+
+  it("waits for native session restoration before requesting the profile", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token", refreshToken: "persisted-refresh-token",
+    });
+    httpClient.post.mockResolvedValue({ ok: true, value: {
+      accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token",
+    } });
+    const tokensAtGet: (string | null)[] = [];
+    httpClient.get.mockImplementation(async () => {
+      tokensAtGet.push(await httpClient.getAccessToken?.() ?? null);
+      return { ok: true, value: { profile: {
+        name: "Nico", email: "nico@example.test", avatar: null,
+      } } };
+    });
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App apiBaseUrl="https://api.example.test" sessionStorage={sessionStorage} />
+      </MemoryRouter>,
+    ));
+
+    expect(tokensAtGet).toEqual(["renewed-access-token"]);
+    expect(container.textContent).toContain("nico@example.test");
   });
 
   it("restores and rotates the persisted session when the app opens", async () => {
