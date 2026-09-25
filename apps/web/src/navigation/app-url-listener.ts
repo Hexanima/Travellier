@@ -18,6 +18,7 @@ export async function initializeAppUrlListener(
   nativeApp: NativeAppUrlApi,
   navigate: (path: string) => void,
 ): Promise<() => Promise<void>> {
+  let receivedOpenEvent = false;
   const navigateToUrl = (url: string) => {
     const path = resolveDeepLinkUrl(url);
 
@@ -26,11 +27,12 @@ export async function initializeAppUrlListener(
     }
   };
   const listenerHandle = await nativeApp.addListener("appUrlOpen", (event) => {
+    receivedOpenEvent = true;
     navigateToUrl(event.url);
   });
   const launchUrl = await nativeApp.getLaunchUrl();
 
-  if (launchUrl) {
+  if (launchUrl && !receivedOpenEvent) {
     navigateToUrl(launchUrl.url);
   }
 

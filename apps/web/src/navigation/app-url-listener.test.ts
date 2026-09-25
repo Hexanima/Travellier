@@ -47,4 +47,20 @@ describe("initializeAppUrlListener", () => {
     expect(navigate).toHaveBeenCalledWith("/verify/token-123");
     expect(remove).toHaveBeenCalledOnce();
   });
+
+  it("does not replace a newer event with a late launch URL", async () => {
+    const { api, emitUrl } = createNativeAppUrlApi();
+    let resolveLaunchUrl: (value: { url: string }) => void = () => undefined;
+    api.getLaunchUrl = vi.fn(() => new Promise<{ url: string } | undefined>((resolve) => { resolveLaunchUrl = resolve; }));
+    const navigate = vi.fn();
+    const pending = initializeAppUrlListener(api, navigate);
+
+    await vi.waitFor(() => expect(api.getLaunchUrl).toHaveBeenCalledOnce());
+    emitUrl("com.travellier.app://verify/new-token");
+    resolveLaunchUrl({ url: "com.travellier.app://invite/old-code" });
+    await pending;
+
+    expect(navigate).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledWith("/verify/new-token");
+  });
 });

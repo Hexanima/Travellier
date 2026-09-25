@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createLambdaHandler } from "./lambda.js";
 
@@ -12,7 +12,7 @@ const createAccessToken = (userId: string): string => {
     JSON.stringify({ alg: "HS256", typ: "JWT" }),
   ).toString("base64url");
   const payload = Buffer.from(
-    JSON.stringify({ sub: userId, exp: 1_900_000_000 }),
+    JSON.stringify({ sub: userId, exp: 1_900_000_000, tokenType: "access" }),
   ).toString("base64url");
   const signature = createHmac("sha256", jwtSecret)
     .update(`${header}.${payload}`)
@@ -22,6 +22,53 @@ const createAccessToken = (userId: string): string => {
 };
 
 describe("Lambda API handler", () => {
+  it("requires an access token and routes an invitation join to the trip API", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev", mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
+        jwtSecret, photoBucketName: "travellier-dev-photos",
+      }),
+      createTripInvitationApi: async () => ({ joinByCode }),
+    });
+    const request = {
+      rawPath: "/trips/join", body: JSON.stringify({ code: "VIAJE-X7K2" }), requestContext: { http: { method: "POST" } },
+    };
+
+    expect((await handler(request)).statusCode).toBe(401);
+    expect(joinByCode).not.toHaveBeenCalled();
+    const response = await handler({ ...request, headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` } });
+    expect(response.statusCode).toBe(200);
+    expect(joinByCode).toHaveBeenCalledWith({ authenticatedUserId, code: "VIAJE-X7K2" });
+  });
+
+  it("loads verification dependencies for the public email link without a session JWT", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+        return {
+          environment: "dev",
+          mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
+          jwtSecret,
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+      createAuthenticationApi: async () => ({
+        verifyEmailToken: async () => ({ ok: true as const, value: undefined }),
+      }) as never,
+    });
+
+    const response = await handler({
+      rawPath: "/auth/verify/signed.token.value",
+      requestContext: { http: { method: "GET" } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("com.travellier.app://verify/signed.token.value");
+    expect(runtimeConfigurationLoads).toBe(1);
+  });
+
   it("returns the health response without requiring runtime secrets", async () => {
     let runtimeConfigurationLoads = 0;
     const handler = createLambdaHandler({
@@ -96,6 +143,69 @@ describe("Lambda API handler", () => {
     expect(runtimeConfigurationLoads).toBe(1);
   });
 
+  it("loads runtime configuration before processing a public authentication route", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+
+        return {
+          environment: "dev",
+          mongo: {
+            uri: "mongodb+srv://travellier.example/database",
+            databaseName: "travellier_dev",
+          },
+          jwtSecret,
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+      handleRequest: async () => ({ statusCode: 201, headers: {}, body: "" }),
+    });
+
+    const response = await handler({
+      rawPath: "/auth/register",
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(runtimeConfigurationLoads).toBe(1);
+  });
+
+  it("builds the authentication API from runtime configuration for public authentication routes", async () => {
+    const runtimeConfiguration = {
+      environment: "dev",
+      mongo: {
+        uri: "mongodb+srv://travellier.example/database",
+        databaseName: "travellier_dev",
+      },
+      jwtSecret,
+      photoBucketName: "travellier-dev-photos",
+    };
+    const auth = { register: async () => ({ ok: true as const, value: {} }) };
+    let factoryConfiguration: unknown;
+    let receivedDependencies: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => runtimeConfiguration,
+      createAuthenticationApi: async (configuration: unknown) => {
+        factoryConfiguration = configuration;
+        return auth;
+      },
+      handleRequest: (async (_request: unknown, dependencies: unknown) => {
+        receivedDependencies = dependencies;
+        return { statusCode: 201, headers: {}, body: "" };
+      }) as never,
+    } as never);
+
+    const response = await handler({
+      rawPath: "/auth/register",
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(factoryConfiguration).toEqual(runtimeConfiguration);
+    expect(receivedDependencies).toEqual({ auth });
+  });
+
   it.each([undefined, "Basic access-token", "Bearer invalid-token"])(
     "returns 401 when a private route has no valid JWT (%s)",
     async (authorization) => {
@@ -158,7 +268,80 @@ describe("Lambda API handler", () => {
     expect(receivedRequest).toEqual({
       method: "POST",
       url: "/trips",
+      body: JSON.stringify({ userId: "507f191e810c19729de860ea" }),
       authenticatedUserId,
+    });
+  });
+
+  it("passes the parsed profile update body and authenticated user to the private API", async () => {
+    const auth = { updateProfile: async () => ({ ok: true as const, value: {} }) };
+    let receivedRequest: unknown;
+    let receivedDependencies: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev",
+        mongo: {
+          uri: "mongodb+srv://travellier.example/database",
+          databaseName: "travellier_dev",
+        },
+        jwtSecret,
+        photoBucketName: "travellier-dev-photos",
+      }),
+      createAuthenticationApi: async () => auth as never,
+      handleRequest: (async (request: unknown, dependencies: unknown) => {
+        receivedRequest = request;
+        receivedDependencies = dependencies;
+        return { statusCode: 200, headers: {}, body: "" };
+      }) as never,
+    });
+
+    const response = await handler({
+      rawPath: "/profile",
+      headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` },
+      body: JSON.stringify({ name: "Nico", avatar: "avatars/nico.jpg" }),
+      requestContext: { http: { method: "PATCH" } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(receivedRequest).toEqual({
+      method: "PATCH",
+      url: "/profile",
+      body: JSON.stringify({ name: "Nico", avatar: "avatars/nico.jpg" }),
+      authenticatedUserId,
+    });
+    expect(receivedDependencies).toEqual({ auth });
+  });
+
+  it("passes the refresh token to the public logout route without requiring an access token", async () => {
+    let receivedRequest: unknown;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev",
+        mongo: {
+          uri: "mongodb+srv://travellier.example/database",
+          databaseName: "travellier_dev",
+        },
+        jwtSecret,
+        photoBucketName: "travellier-dev-photos",
+      }),
+      handleRequest: async (request) => {
+        receivedRequest = request;
+
+        return { statusCode: 204, headers: {}, body: "" };
+      },
+    });
+
+    const response = await handler({
+      rawPath: "/auth/logout",
+      body: JSON.stringify({ refreshToken: "refresh-token" }),
+      requestContext: { http: { method: "POST" } },
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(receivedRequest).toEqual({
+      method: "POST",
+      url: "/auth/logout",
+      body: JSON.stringify({ refreshToken: "refresh-token" }),
     });
   });
 });

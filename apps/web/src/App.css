@@ -15,6 +15,37 @@
   width: min(760px, 100%);
 }
 
+.auth-panel {
+  width: min(440px, 100%);
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.profile-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-avatar--empty {
+  display: grid;
+  place-items: center;
+  background: #d6dde3;
+  color: #18202f;
+  font-size: 0.875rem;
+}
+
+.auth-links,
+.auth-switch {
+  display: flex;
+  gap: 16px;
+  margin: 20px 0 0;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: #4b6b7a;

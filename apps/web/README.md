@@ -6,6 +6,10 @@ The client owns React routing and the native Capacitor adapters. It imports the 
 
 The native projects register `com.travellier.app://`. The shell resolves URLs delivered by the Capacitor App plugin; T18 will add the invitation and verification flows.
 
+## API endpoint for mobile builds
+
+Before generating a Capacitor build, copy `.env.example` to `.env.production.local` and set `VITE_API_BASE_URL` to the deployed API Gateway HTTP(S) URL. Vite embeds this value in the native web bundle; without a valid URL, the app blocks the authentication entry points instead of sending relative requests to the WebView origin.
+
 ## Commands
 
 - `yarn workspace web dev`

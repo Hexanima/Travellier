@@ -47,4 +47,35 @@ describe("AppUrlListener", () => {
 
     expect(container.textContent).toBe("/invite/VIAJE-X7K2");
   });
+
+  it("ignores a launch URL from a listener that was replaced", async () => {
+    let resolveLaunchUrl: (value: { url: string }) => void = () => undefined;
+    const firstApp: NativeAppUrlApi = {
+      addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+      getLaunchUrl: vi.fn(() => new Promise<{ url: string } | undefined>((resolve) => { resolveLaunchUrl = resolve; })),
+    };
+    const secondApp: NativeAppUrlApi = {
+      addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+      getLaunchUrl: vi.fn().mockResolvedValue(undefined),
+    };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    mountedRoots.push(root);
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AppUrlListener nativeApp={firstApp} />
+        <CurrentPath />
+      </MemoryRouter>,
+    ));
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/"]}>
+        <AppUrlListener nativeApp={secondApp} />
+        <CurrentPath />
+      </MemoryRouter>,
+    ));
+    await act(async () => resolveLaunchUrl({ url: "com.travellier.app://invite/old-code" }));
+
+    expect(container.textContent).toBe("/");
+  });
 });

@@ -32,6 +32,7 @@ const objectStoragePort: ObjectStoragePort = {
       headers: { "content-type": "image/jpeg" },
       expiresAt: new Date("2026-09-14T12:00:00.000Z"),
     }),
+  createDownloadTarget: async () => ok({ downloadUrl: "https://downloads.example.test/photo.jpg" }),
 };
 
 const notificationPort: NotificationPort = {

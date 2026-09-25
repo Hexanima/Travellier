@@ -50,6 +50,12 @@ provider:
             - s3:PutObject
           Resource:
             Fn::Sub: '${PhotoBucket.Arn}/trips/*'
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+          Resource:
+            Fn::Sub: '${PhotoBucket.Arn}/avatars/*'
 
 functions:
   api:
