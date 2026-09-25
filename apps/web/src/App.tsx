@@ -1,6 +1,6 @@
 import { Preferences } from '@capacitor/preferences'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import './App.css'
 import { createHttpClient } from './api/index.js'
@@ -9,12 +9,20 @@ import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/a
 import { createNativeSessionStorage, type NativeSessionStorage } from './auth/native-session-storage.js'
 import { Button, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
+import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 
 type AppProps = {
   auth?: Partial<AuthApi>
   apiBaseUrl?: string
   sessionStorage?: NativeSessionStorage
+  nativeApp?: NativeAppUrlApi
+}
+
+const invitationDestination = (state: unknown): string | null => {
+  if (typeof state !== 'object' || state === null || !('from' in state)) return null
+  const from = state.from
+  return typeof from === 'string' && /^\/invite\/[^/?#]+(?:\?[^#]*)?$/.test(from) ? from : null
 }
 
 const isHttpApiBaseUrl = (value: string | undefined): value is string => {
@@ -31,9 +39,11 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const latestLocation = useRef(location)
+  latestLocation.current = location
   const session = useRef<AuthenticatedSession | undefined>(undefined)
   const [sessionReady, setSessionReady] = useState(false)
   const [hasSession, setHasSession] = useState(false)
@@ -98,8 +108,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
         session.current = result.value
         setHasSession(true)
-        if (location.pathname === '/' || location.pathname === '/login') {
-          navigate('/trips')
+        if (latestLocation.current.pathname === '/' || latestLocation.current.pathname === '/login') {
+          navigate(invitationDestination(latestLocation.current.state) ?? '/trips')
         }
         return
       }
@@ -114,7 +124,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     }
 
     void restoreSession().catch(() => undefined).finally(() => setSessionReady(true))
-  }, [activeAuth, hasApiConfiguration, location.pathname, navigate, queueStorageOperation, storage])
+  }, [activeAuth, hasApiConfiguration, navigate, queueStorageOperation, storage])
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
@@ -122,7 +132,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     session.current = authenticatedSession
     setHasSession(true)
     setSessionReady(true)
-    navigate('/trips')
+    navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true })
   }
 
   const onLocalLogout = async () => {
@@ -139,11 +149,13 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   return (
     <>
-      <AppUrlListener />
+      <AppUrlListener nativeApp={nativeApp} />
       <Routes>
         <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
+        <Route path="/invite/:code" element={<InviteEntry sessionReady={sessionReady} hasSession={hasSession} />} />
+        <Route path="/verify/:token" element={<VerificationScreen />} />
         <Route path="/trips/*" element={<ProtectedRoute onLocalLogout={onLocalLogout} />} />
         <Route path="/profile" element={
           !sessionReady
@@ -155,6 +167,40 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="*" element={<NotFound />} />
       </Routes>
     </>
+  )
+}
+
+function InviteEntry({ sessionReady, hasSession }: { sessionReady: boolean; hasSession: boolean }) {
+  const { code } = useParams()
+  const location = useLocation()
+  const destination = `${location.pathname}${location.search}`
+
+  return (
+    <main className="app-shell">
+      <section className="status-panel">
+        <p className="eyebrow">Invitación</p>
+        <h1>Unirse a un viaje</h1>
+        <p>Tu código de invitación: <strong>{code}</strong></p>
+        {!sessionReady
+          ? <LoadingState label="Restaurando sesión…" />
+          : hasSession
+            ? <p>Usá este código para confirmar tu ingreso al viaje.</p>
+            : <p>Iniciá sesión para continuar. <Link to="/login" state={{ from: destination }}>Iniciar sesión</Link></p>}
+      </section>
+    </main>
+  )
+}
+
+function VerificationScreen() {
+  return (
+    <main className="app-shell">
+      <section className="status-panel">
+        <p className="eyebrow">Cuenta</p>
+        <h1>Verificación de email</h1>
+        <p>El enlace de verificación abrió Travellier.</p>
+        <Link to="/login">Iniciar sesión</Link>
+      </section>
+    </main>
   )
 }
 

@@ -1,5 +1,5 @@
 import { App } from "@capacitor/app";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -20,12 +20,16 @@ export function AppUrlListener({
   nativeApp = capacitorAppUrlApi,
 }: AppUrlListenerProps) {
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   useEffect(() => {
     let disposed = false;
     let stopListening: (() => Promise<void>) | undefined;
 
-    void initializeAppUrlListener(nativeApp, navigate).then((stop) => {
+    void initializeAppUrlListener(nativeApp, (path) => {
+      if (!disposed) navigateRef.current(path);
+    }).then((stop) => {
       if (disposed) {
         void stop();
         return;
@@ -40,7 +44,7 @@ export function AppUrlListener({
         void stopListening();
       }
     };
-  }, [nativeApp, navigate]);
+  }, [nativeApp]);
 
   return null;
 }

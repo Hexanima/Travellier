@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { Button, Feedback, TextField } from "../components/index.js";
 import type { AuthApi, AuthenticatedSession, AuthFailure } from "./auth-api.js";
@@ -22,6 +22,7 @@ const fieldErrors = (error: AuthFailure): Record<string, string> =>
   Object.fromEntries((error.fields ?? []).map(({ field, message }) => [field, message]));
 
 export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
+  const location = useLocation();
   const isRegister = mode === "register";
   const title = isRegister ? "Crear cuenta" : "Iniciar sesión";
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -114,7 +115,7 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
         </form>
         <p className="auth-switch">
           {isRegister ? "¿Ya tenés cuenta?" : "¿Todavía no tenés cuenta?"}{" "}
-          <Link to={isRegister ? "/login" : "/register"}>
+          <Link to={isRegister ? "/login" : "/register"} state={location.state}>
             {isRegister ? "Iniciar sesión" : "Crear cuenta"}
           </Link>
         </p>
