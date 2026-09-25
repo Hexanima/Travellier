@@ -53,6 +53,25 @@ describe("expelTripParticipant", () => {
     expect(result).toEqual({ ok: true, value: undefined });
   });
 
+  it.each([
+    ["trip", { tripId: id(tripId.toUpperCase()) }],
+    ["admin", { actorUserId: id(adminUserId.toUpperCase()) }],
+    ["participant", { targetUserId: id(participantUserId.toUpperCase()) }],
+  ])("accepts an uppercase %s ID for the same membership", async (_label, overrides) => {
+    const findByTripAndUser = vi.fn()
+      .mockResolvedValueOnce(ok(admin))
+      .mockResolvedValueOnce(ok(participant));
+    const removeParticipant = vi.fn(async () => ok(undefined));
+
+    const result = await expelTripParticipant.execute(
+      { members: { findByTripAndUser, removeParticipant } },
+      { tripId, actorUserId: adminUserId, targetUserId: participantUserId, ...overrides },
+    );
+
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id);
+  });
+
   it("rejects a participant without reading or removing the target", async () => {
     const findByTripAndUser = vi.fn(async () => ok(participant));
     const removeParticipant = vi.fn(async () => ok(undefined));
