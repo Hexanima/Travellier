@@ -16,6 +16,12 @@ import {
   type RevokeSessionPayload,
   type JoinTripByCodePayload,
   type JoinTripByCodeResult,
+  type CreateTripPayload,
+  type GetTripPayload,
+  type ListUserTripsPayload,
+  type UpdateTripConfigurationPayload,
+  type TripView,
+  createObjectId,
   ValidationError,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
@@ -60,11 +66,18 @@ export interface AuthenticationApi {
 
 export interface ApiDependencies {
   auth?: AuthenticationApi;
-  trips?: TripInvitationApi;
+  trips?: TripApi;
 }
 
 export interface TripInvitationApi {
   joinByCode: (payload: JoinTripByCodePayload) => AsyncResult<JoinTripByCodeResult>;
+}
+
+export interface TripApi extends TripInvitationApi {
+  create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
+  get?: (payload: GetTripPayload) => AsyncResult<TripView>;
+  list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
+  updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
 }
 
 export type RequestAuthenticator = (
@@ -138,6 +151,12 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     });
   }
 
+  if (error.tag === "TripNotFoundError") {
+    return jsonResponse(404, {
+      error: { code: "TripNotFoundError", message: "Trip not found." },
+    });
+  }
+
   return jsonResponse(500, {
     error: {
       code: "InternalError",
@@ -187,6 +206,33 @@ const refreshTokenPayload = (
 ): RefreshSessionPayload | undefined =>
   isString(payload.refreshToken) ? { refreshToken: payload.refreshToken } : undefined;
 
+const createTripPayload = (payload: Record<string, unknown>): Omit<CreateTripPayload, "authenticatedUserId"> | undefined => {
+  if (!isString(payload.name) || !isString(payload.primaryDestination) ||
+    (Object.hasOwn(payload, "description") && !isString(payload.description) && payload.description !== null)) {
+    return undefined;
+  }
+  return {
+    name: payload.name,
+    primaryDestination: payload.primaryDestination,
+    ...(Object.hasOwn(payload, "description") ? { description: payload.description as string | null } : {}),
+  };
+};
+
+const configurationPayload = (payload: Record<string, unknown>): Omit<UpdateTripConfigurationPayload, "authenticatedUserId" | "tripId"> | undefined => {
+  const hasVisibility = Object.hasOwn(payload, "visibility");
+  const hasVoting = Object.hasOwn(payload, "votingEnabled");
+  const hasExpense = Object.hasOwn(payload, "expenseMode");
+  if ((!hasVisibility && !hasVoting && !hasExpense) ||
+    (hasVisibility && !isString(payload.visibility)) ||
+    (hasVoting && typeof payload.votingEnabled !== "boolean") ||
+    (hasExpense && !isString(payload.expenseMode))) return undefined;
+  return {
+    ...(hasVisibility ? { visibility: payload.visibility as UpdateTripConfigurationPayload["visibility"] } : {}),
+    ...(hasVoting ? { votingEnabled: payload.votingEnabled as boolean } : {}),
+    ...(hasExpense ? { expenseMode: payload.expenseMode as UpdateTripConfigurationPayload["expenseMode"] } : {}),
+  };
+};
+
 const profileUpdatePayload = (
   payload: Record<string, unknown>,
 ): { name?: string; avatar?: string | null } | undefined => {
@@ -211,7 +257,7 @@ const unavailableResponse = (): ApiResponse =>
   jsonResponse(503, {
     error: {
       code: "ServiceUnavailable",
-      message: "Authentication is not configured.",
+      message: "API service is not configured.",
     },
   });
 
@@ -235,6 +281,41 @@ export const handleApiRequest = async (
       code: payload.code,
     });
     return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  if (request.method === "POST" && request.url === "/trips") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const input = payload === undefined ? undefined : createTripPayload(payload);
+    if (input === undefined) return invalidRequestResponse();
+    if (dependencies.trips?.create === undefined) return unavailableResponse();
+    const result = await dependencies.trips.create({ authenticatedUserId: request.authenticatedUserId, ...input });
+    return result.ok ? jsonResponse(201, { trip: result.value }) : errorResponse(result.error);
+  }
+
+  if (request.method === "GET" && request.url === "/trips") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (dependencies.trips?.list === undefined) return unavailableResponse();
+    const result = await dependencies.trips.list({ authenticatedUserId: request.authenticatedUserId });
+    return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  const detailMatch = request.url?.match(/^\/trips\/([^/?]+)$/);
+  const configMatch = request.url?.match(/^\/trips\/([^/?]+)\/config$/);
+  if ((request.method === "GET" && detailMatch !== null && detailMatch !== undefined) ||
+    (request.method === "PATCH" && configMatch !== null && configMatch !== undefined)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((detailMatch ?? configMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (request.method === "GET") {
+      if (dependencies.trips?.get === undefined) return unavailableResponse();
+      const result = await dependencies.trips.get({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+      return result.ok ? jsonResponse(200, { trip: result.value }) : errorResponse(result.error);
+    }
+    const input = payload === undefined ? undefined : configurationPayload(payload);
+    if (input === undefined) return invalidRequestResponse();
+    if (dependencies.trips?.updateConfiguration === undefined) return unavailableResponse();
+    const result = await dependencies.trips.updateConfiguration({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value, ...input });
+    return result.ok ? jsonResponse(200, { trip: result.value }) : errorResponse(result.error);
   }
 
   if (request.method === "GET" && request.url !== undefined) {

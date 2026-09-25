@@ -2,7 +2,7 @@ import {
   handleApiRequest,
   type ApiResponse,
   type AuthenticationApi,
-  type TripInvitationApi,
+  type TripApi,
 } from "./app.js";
 import {
   readLambdaRuntimeConfig,
@@ -13,7 +13,7 @@ import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
-import { createTripInvitationApi } from "./trips/trip-invitation-api.js";
+import { createTripApi } from "./trips/trip-api.js";
 
 export interface ApiGatewayHttpApiEvent {
   rawPath: string;
@@ -37,7 +37,7 @@ export interface LambdaHandlerDependencies {
   createAuthenticationApi?: (
     runtimeConfig: LambdaRuntimeConfig,
   ) => Promise<AuthenticationApi>;
-  createTripInvitationApi?: (runtimeConfig: LambdaRuntimeConfig) => Promise<TripInvitationApi>;
+  createTripApi?: (runtimeConfig: LambdaRuntimeConfig) => Promise<TripApi>;
   handleRequest?: typeof handleApiRequest;
 }
 
@@ -78,7 +78,7 @@ const requestBody = (event: ApiGatewayHttpApiEvent): string | undefined => {
 export const createLambdaHandler = ({
   loadRuntimeConfig,
   createAuthenticationApi: buildAuthenticationApi,
-  createTripInvitationApi: buildTripInvitationApi,
+  createTripApi: buildTripApi,
   handleRequest = handleApiRequest,
 }: LambdaHandlerDependencies) =>
   async (
@@ -114,7 +114,7 @@ export const createLambdaHandler = ({
     }
 
     const auth = await buildAuthenticationApi?.(runtimeConfig);
-    const trips = await buildTripInvitationApi?.(runtimeConfig);
+    const trips = await buildTripApi?.(runtimeConfig);
 
     return handleRequest(
       {
@@ -130,7 +130,7 @@ export const createLambdaHandler = ({
 const secretValueReader = createSecretsManagerSecretValueReader();
 let runtimeConfig: LambdaRuntimeConfig | undefined;
 let authenticationApi: Promise<AuthenticationApi> | undefined;
-let tripInvitationApi: Promise<TripInvitationApi> | undefined;
+let tripApi: Promise<TripApi> | undefined;
 let databaseConnection: ReturnType<typeof connectMongoDatabase> | undefined;
 
 const loadDatabase = (configuration: LambdaRuntimeConfig) =>
@@ -160,13 +160,13 @@ const createRuntimeAuthenticationApi = async (
   return authenticationApi;
 };
 
-const createRuntimeTripInvitationApi = async (configuration: LambdaRuntimeConfig): Promise<TripInvitationApi> => {
-  tripInvitationApi ??= loadDatabase(configuration).then(({ database }) => createTripInvitationApi(database));
-  return tripInvitationApi;
+const createRuntimeTripApi = async (configuration: LambdaRuntimeConfig): Promise<TripApi> => {
+  tripApi ??= loadDatabase(configuration).then(({ database }) => createTripApi(database));
+  return tripApi;
 };
 
 export const handler = createLambdaHandler({
   loadRuntimeConfig,
   createAuthenticationApi: createRuntimeAuthenticationApi,
-  createTripInvitationApi: createRuntimeTripInvitationApi,
+  createTripApi: createRuntimeTripApi,
 });
