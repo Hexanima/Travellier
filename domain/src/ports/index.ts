@@ -4,3 +4,4 @@ export * from "./notification-port.js";
 export * from "./authentication-port.js";
 export * from "./trip-invitation-port.js";
 export * from "./trip-member-management-port.js";
+export * from "./trip-management-port.js";

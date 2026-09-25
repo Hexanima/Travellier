@@ -9,7 +9,7 @@ import {
 import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
-import { createTripInvitationApi } from "./trips/trip-invitation-api.js";
+import { createTripApi } from "./trips/trip-api.js";
 
 type LocalEnvironment = Record<string, string | undefined>;
 
@@ -34,7 +34,7 @@ export const createLocalApi = async (
       jwtSecret,
       ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
     }),
-    trips: createTripInvitationApi(connection.database),
+    trips: createTripApi(connection.database),
   }, createJwtMiddleware({ jwtSecret }));
 
   return {
