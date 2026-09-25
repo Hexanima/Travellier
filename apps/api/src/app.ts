@@ -14,6 +14,8 @@ import {
   type LoginUserPayload,
   type RefreshSessionPayload,
   type RevokeSessionPayload,
+  type JoinTripByCodePayload,
+  type JoinTripByCodeResult,
   ValidationError,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
@@ -58,6 +60,11 @@ export interface AuthenticationApi {
 
 export interface ApiDependencies {
   auth?: AuthenticationApi;
+  trips?: TripInvitationApi;
+}
+
+export interface TripInvitationApi {
+  joinByCode: (payload: JoinTripByCodePayload) => AsyncResult<JoinTripByCodeResult>;
 }
 
 export type RequestAuthenticator = (
@@ -122,6 +129,12 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
         code: error.tag,
         message: "Profile not found.",
       },
+    });
+  }
+
+  if (error.tag === "InvalidInviteCodeError") {
+    return jsonResponse(404, {
+      error: { code: "InvalidInviteCodeError", message: "Invitation code not found." },
     });
   }
 
@@ -212,6 +225,17 @@ export const handleApiRequest = async (
 
   const payload = parsePayload(request.body);
   const auth = dependencies.auth;
+
+  if (request.method === "POST" && request.url === "/trips/join") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (payload === undefined || !isString(payload.code)) return invalidRequestResponse();
+    if (dependencies.trips === undefined) return unavailableResponse();
+    const result = await dependencies.trips.joinByCode({
+      authenticatedUserId: request.authenticatedUserId,
+      code: payload.code,
+    });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
 
   if (request.method === "GET" && request.url !== undefined) {
     const pathname = new URL(request.url, "http://localhost").pathname;

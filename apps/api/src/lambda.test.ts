@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createLambdaHandler } from "./lambda.js";
 
@@ -22,6 +22,26 @@ const createAccessToken = (userId: string): string => {
 };
 
 describe("Lambda API handler", () => {
+  it("requires an access token and routes an invitation join to the trip API", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev", mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
+        jwtSecret, photoBucketName: "travellier-dev-photos",
+      }),
+      createTripInvitationApi: async () => ({ joinByCode }),
+    });
+    const request = {
+      rawPath: "/trips/join", body: JSON.stringify({ code: "VIAJE-X7K2" }), requestContext: { http: { method: "POST" } },
+    };
+
+    expect((await handler(request)).statusCode).toBe(401);
+    expect(joinByCode).not.toHaveBeenCalled();
+    const response = await handler({ ...request, headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` } });
+    expect(response.statusCode).toBe(200);
+    expect(joinByCode).toHaveBeenCalledWith({ authenticatedUserId, code: "VIAJE-X7K2" });
+  });
+
   it("loads verification dependencies for the public email link without a session JWT", async () => {
     let runtimeConfigurationLoads = 0;
     const handler = createLambdaHandler({
