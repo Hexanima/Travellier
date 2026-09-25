@@ -6,6 +6,28 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp, createHealthResponse, handleApiRequest } from "./app.js";
 
 describe("api app", () => {
+  it("confirms an invitation only for the authenticated user", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
+    const request = { method: "POST", url: "/trips/join", body: JSON.stringify({ code: "VIAJE-X7K2" }) };
+    const dependencies = { trips: { joinByCode } } as never;
+
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
+    const response = await handleApiRequest({ ...request, authenticatedUserId: "507f1f77bcf86cd799439011" as never }, dependencies);
+
+    expect(joinByCode).toHaveBeenCalledWith({ authenticatedUserId: "507f1f77bcf86cd799439011", code: "VIAJE-X7K2" });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ tripId: "507f191e810c19729de860ea", joined: true });
+  });
+
+  it("reports an unknown invitation code without creating a membership", async () => {
+    const response = await handleApiRequest({
+      method: "POST", url: "/trips/join", body: { code: "missing" }, authenticatedUserId: "507f1f77bcf86cd799439011" as never,
+    }, { trips: { joinByCode: vi.fn().mockResolvedValue({ ok: false, error: { tag: "InvalidInviteCodeError" } }) } } as never);
+
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain("missing");
+  });
+
   it("serves a verified email link as an HTML bridge to the native app", async () => {
     const verifyEmailToken = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const response = await handleApiRequest(

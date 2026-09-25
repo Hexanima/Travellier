@@ -43,7 +43,7 @@ function CurrentPath() {
   return <output data-testid="path">{location.pathname}{location.search}</output>;
 }
 
-async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStorage(), auth: Record<string, unknown> = {}) {
+async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStorage(), auth: Record<string, unknown> = {}, trips: Record<string, unknown> = {}) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -51,7 +51,7 @@ async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStor
   await act(async () => {
     root.render(
       <MemoryRouter initialEntries={["/"]}>
-        <App auth={auth} sessionStorage={sessionStorage} nativeApp={nativeApp} />
+        <App auth={auth} trips={trips} sessionStorage={sessionStorage} nativeApp={nativeApp} />
         <CurrentPath />
       </MemoryRouter>,
     );
@@ -60,6 +60,39 @@ async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStor
 }
 
 describe("App deep links", () => {
+  it("lets an authenticated invitee confirm and complete the join", async () => {
+    const storage = createStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "old", refreshToken: "refresh" });
+    const refresh = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } });
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
+    const { nativeApp } = createNativeApp("com.travellier.app://invite/VIAJE-X7K2");
+    const container = await renderApp(nativeApp, storage, { refresh }, { joinByCode });
+
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2");
+    expect(container.querySelector("button")?.textContent).toBe("Confirmar unión");
+    await act(async () => container.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(joinByCode).toHaveBeenCalledWith("VIAJE-X7K2");
+    expect(container.textContent).toContain("Te uniste al viaje");
+  });
+
+  it("starts a fresh confirmation when a second invitation arrives", async () => {
+    const storage = createStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "old", refreshToken: "refresh" });
+    const refresh = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } });
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
+    const { nativeApp, emit } = createNativeApp("com.travellier.app://invite/FIRST");
+    const container = await renderApp(nativeApp, storage, { refresh }, { joinByCode });
+
+    await act(async () => container.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.textContent).toContain("Te uniste al viaje");
+    await act(async () => emit("com.travellier.app://invite/SECOND"));
+
+    expect(container.textContent).toContain("SECOND");
+    expect(container.querySelector("button")?.textContent).toBe("Confirmar unión");
+    expect(container.textContent).not.toContain("Te uniste al viaje");
+  });
+
   it("opens the invitation entry with the original code on cold launch", async () => {
     const { nativeApp } = createNativeApp("com.travellier.app://invite/VIAJE-X7K2?source=share");
     const container = await renderApp(nativeApp);

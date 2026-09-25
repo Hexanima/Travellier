@@ -2,6 +2,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoClient, ObjectId } from "mongodb";
 import { createObjectId } from "app-domain";
 
 import { createLocalApi } from "./local.js";
@@ -95,6 +96,52 @@ describe("local API entrypoint", () => {
         ),
       );
       await localApi.close();
+    }
+  });
+
+  it("joins an invited trip through the authenticated local API", async () => {
+    const databaseName = "travellier_join_test";
+    const client = new MongoClient(mongo.getUri());
+    await client.connect();
+    const database = client.db(databaseName);
+    const tripId = new ObjectId();
+    await database.collection("trips").insertOne({ _id: tripId, inviteCode: "VIAJE-X7K2" });
+    await database.collection("tripMembers").createIndex({ tripId: 1, userId: 1 }, { unique: true });
+    const localApi = await createLocalApi({
+      MONGODB_URI: mongo.getUri(), MONGODB_DATABASE_NAME: databaseName, JWT_SECRET: "local-jwt-signing-secret",
+    });
+    await new Promise<void>((resolve) => localApi.app.listen(0, resolve));
+    const { port } = localApi.app.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      const registration = await fetch(`${baseUrl}/auth/register`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "join@example.test", name: "Joiner", password: "secret-pass" }),
+      });
+      expect(registration.status).toBe(201);
+      const { user } = await registration.json() as { user: { id: string } };
+      const login = await fetch(`${baseUrl}/auth/login`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "join@example.test", password: "secret-pass" }),
+      });
+      const { accessToken } = await login.json() as { accessToken: string };
+      const join = () => fetch(`${baseUrl}/trips/join`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ code: "VIAJE-X7K2" }),
+      });
+
+      const first = await join();
+      expect(first.status).toBe(200);
+      await expect(first.json()).resolves.toEqual({ tripId: tripId.toHexString(), joined: true });
+      const second = await join();
+      await expect(second.json()).resolves.toEqual({ tripId: tripId.toHexString(), joined: false });
+      expect(await database.collection("tripMembers").countDocuments({ tripId, userId: new ObjectId(user.id) })).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => localApi.app.close((error) => error === undefined ? resolve() : reject(error)));
+      await localApi.close();
+      await client.close();
     }
   });
 });
