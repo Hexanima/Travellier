@@ -35,7 +35,7 @@ export const createJwtMiddleware = ({
         algorithms: ["HS256"],
       });
 
-      if (typeof payload.sub !== "string" || typeof payload.exp !== "number") {
+      if (payload.tokenType !== "access" || typeof payload.sub !== "string" || typeof payload.exp !== "number") {
         return undefined;
       }
 

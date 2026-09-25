@@ -12,7 +12,7 @@ const createAccessToken = (userId: string): string => {
     JSON.stringify({ alg: "HS256", typ: "JWT" }),
   ).toString("base64url");
   const payload = Buffer.from(
-    JSON.stringify({ sub: userId, exp: 1_900_000_000 }),
+    JSON.stringify({ sub: userId, exp: 1_900_000_000, tokenType: "access" }),
   ).toString("base64url");
   const signature = createHmac("sha256", jwtSecret)
     .update(`${header}.${payload}`)
@@ -22,6 +22,33 @@ const createAccessToken = (userId: string): string => {
 };
 
 describe("Lambda API handler", () => {
+  it("loads verification dependencies for the public email link without a session JWT", async () => {
+    let runtimeConfigurationLoads = 0;
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => {
+        runtimeConfigurationLoads += 1;
+        return {
+          environment: "dev",
+          mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
+          jwtSecret,
+          photoBucketName: "travellier-dev-photos",
+        };
+      },
+      createAuthenticationApi: async () => ({
+        verifyEmailToken: async () => ({ ok: true as const, value: undefined }),
+      }) as never,
+    });
+
+    const response = await handler({
+      rawPath: "/auth/verify/signed.token.value",
+      requestContext: { http: { method: "GET" } },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("com.travellier.app://verify/signed.token.value");
+    expect(runtimeConfigurationLoads).toBe(1);
+  });
+
   it("returns the health response without requiring runtime secrets", async () => {
     let runtimeConfigurationLoads = 0;
     const handler = createLambdaHandler({
