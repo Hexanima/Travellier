@@ -23,7 +23,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-async function renderTrips(trips: TripManagementApi, path = "/trips") {
+async function renderTrips(trips: Pick<TripManagementApi, "list" | "create">, path = "/trips") {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -56,6 +56,7 @@ describe("Trip screens", () => {
     expect(container.textContent).toContain("Patagonia");
     expect(container.textContent).toContain("Bariloche");
     expect(container.querySelector('a[href="/trips/new"]')).not.toBeNull();
+    expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).not.toBeNull();
   });
 
   it("shows an empty state with a creation action", async () => {

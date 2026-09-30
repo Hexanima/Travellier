@@ -8,27 +8,60 @@ export type TripSummary = {
 };
 
 export type CreateTripInput = { name: string; primaryDestination: string; description?: string };
+export type TripVisibility = "private" | "public";
+export type TripExpenseMode = "register" | "balance";
+export type TripConfigurationUpdate = {
+  visibility?: TripVisibility;
+  votingEnabled?: boolean;
+  expenseMode?: TripExpenseMode;
+};
+export type MemberTripDetail = TripSummary & {
+  kind: "member";
+  visibility: TripVisibility;
+  votingEnabled: boolean;
+  expenseMode: TripExpenseMode;
+};
+export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
+export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type TripFailure = { kind: ApiErrorKind; fields?: readonly { field: string; message: string }[] };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;
   create: (input: CreateTripInput) => Promise<TripResult<TripSummary>>;
+  get: (tripId: string) => Promise<TripResult<TripDetail>>;
+  updateConfiguration: (tripId: string, input: TripConfigurationUpdate) => Promise<TripResult<MemberTripDetail>>;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const isTripSummary = (value: unknown): value is TripSummary =>
+const isTripSummary = (value: unknown): value is TripSummary & Record<string, unknown> =>
   isRecord(value) && typeof value.id === "string" && typeof value.name === "string" &&
   (typeof value.description === "string" || value.description === null) &&
   isRecord(value.primaryDestination) && typeof value.primaryDestination.name === "string";
+
+const isMemberTrip = (value: unknown): value is Omit<MemberTripDetail, "kind"> =>
+  isTripSummary(value) && isRecord(value) &&
+  (value.visibility === "private" || value.visibility === "public") &&
+  typeof value.votingEnabled === "boolean" &&
+  (value.expenseMode === "register" || value.expenseMode === "balance");
+
+const isPublicTrip = (value: unknown): value is Omit<PublicTripDetail, "kind"> =>
+  isTripSummary(value) && isRecord(value) && value.visibility === "public" &&
+  !("votingEnabled" in value) && !("expenseMode" in value);
+
+const parseTripDetail = (value: unknown): TripDetail | undefined => {
+  if (isMemberTrip(value)) return { ...value, kind: "member" };
+  if (isPublicTrip(value)) return { ...value, kind: "public" };
+  return undefined;
+};
 
 const toFailure = (error: ApiClientError): TripFailure =>
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
     : { kind: error.kind };
 
-export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post">): TripManagementApi => ({
+export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripManagementApi => ({
   list: async () => {
     const result = await client.get<unknown>("/trips");
     if (!result.ok) return { ok: false, error: toFailure(result.error) };
@@ -41,6 +74,22 @@ export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post">
     if (!result.ok) return { ok: false, error: toFailure(result.error) };
     return isRecord(result.value) && isTripSummary(result.value.trip)
       ? { ok: true, value: result.value.trip }
+      : { ok: false, error: { kind: "server" } };
+  },
+  get: async (tripId) => {
+    const result = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}`);
+    if (!result.ok) return { ok: false, error: toFailure(result.error) };
+    const trip = isRecord(result.value) ? parseTripDetail(result.value.trip) : undefined;
+    return trip === undefined
+      ? { ok: false, error: { kind: "server" } }
+      : { ok: true, value: trip };
+  },
+  updateConfiguration: async (tripId, input) => {
+    const result = await client.patch<unknown>(`/trips/${encodeURIComponent(tripId)}/config`, input);
+    if (!result.ok) return { ok: false, error: toFailure(result.error) };
+    const trip = isRecord(result.value) ? parseTripDetail(result.value.trip) : undefined;
+    return trip?.kind === "member"
+      ? { ok: true, value: trip }
       : { ok: false, error: { kind: "server" } };
   },
 });
