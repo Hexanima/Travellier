@@ -87,6 +87,29 @@ describe("Trip management routes", () => {
     expect(list).toHaveBeenCalledWith({ authenticatedUserId: actorId });
   });
 
+  it("lists public trip previews for an authenticated user", async () => {
+    const preview = { id: tripId, name: "Patagonia", description: null, visibility: "public", primaryDestination: { name: "Bariloche" } };
+    const listPublic = vi.fn().mockResolvedValue(ok([preview]));
+    const dependencies = { trips: { listPublic } } as never;
+    expect((await handleApiRequest({ method: "GET", url: "/trips/public" }, dependencies)).statusCode).toBe(401);
+    const response = await handleApiRequest({ method: "GET", url: "/trips/public", authenticatedUserId: actorId as never }, dependencies);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ trips: [preview] });
+    expect(listPublic).toHaveBeenCalledWith({ authenticatedUserId: actorId });
+  });
+
+  it("joins a public trip using the JWT user and path ID", async () => {
+    const joinPublic = vi.fn().mockResolvedValue(ok({ tripId, joined: true }));
+    const dependencies = { trips: { joinPublic } } as never;
+    const request = { method: "POST", url: `/trips/${tripId}/join`, body: { authenticatedUserId: "spoofed" } };
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
+    const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ tripId, joined: true });
+    expect(joinPublic).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId });
+    expect((await handleApiRequest({ method: "POST", url: "/trips/not-an-id/join", authenticatedUserId: actorId as never }, dependencies)).statusCode).toBe(400);
+  });
+
   it("returns 404 for a private stranger's trip without exposing its data", async () => {
     const get = vi.fn().mockResolvedValue({ ok: false, error: new TripNotFoundError() });
     const response = await handleApiRequest({ method: "GET", url: `/trips/${tripId}`, authenticatedUserId: actorId as never }, { trips: { get } } as never);

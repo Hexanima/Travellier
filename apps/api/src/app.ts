@@ -16,6 +16,8 @@ import {
   type RevokeSessionPayload,
   type JoinTripByCodePayload,
   type JoinTripByCodeResult,
+  type JoinPublicTripPayload,
+  type ListPublicTripsPayload,
   type ResolveTripInvitationPayload,
   type CreateTripPayload,
   type GetTripPayload,
@@ -23,6 +25,7 @@ import {
   type UpdateTripConfigurationPayload,
   type TripView,
   type TripDetail,
+  type PublicTripPreview,
   type TripMemberSummary,
   type ListTripMembersPayload,
   type ExpelTripParticipantPayload,
@@ -84,6 +87,8 @@ export interface TripApi extends TripInvitationApi {
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
+  listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
+  joinPublic?: (payload: JoinPublicTripPayload) => AsyncResult<JoinTripByCodeResult>;
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
   listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
   expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
@@ -318,6 +323,23 @@ export const handleApiRequest = async (
     if (dependencies.trips?.list === undefined) return unavailableResponse();
     const result = await dependencies.trips.list({ authenticatedUserId: request.authenticatedUserId });
     return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  if (request.method === "GET" && request.url === "/trips/public") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (dependencies.trips?.listPublic === undefined) return unavailableResponse();
+    const result = await dependencies.trips.listPublic({ authenticatedUserId: request.authenticatedUserId });
+    return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  const publicJoinMatch = request.url?.match(/^\/trips\/([^/?]+)\/join$/);
+  if (request.method === "POST" && publicJoinMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(publicJoinMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.joinPublic === undefined) return unavailableResponse();
+    const result = await dependencies.trips.joinPublic({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
   }
 
   const membersMatch = request.url?.match(/^\/trips\/([^/?]+)\/members$/);

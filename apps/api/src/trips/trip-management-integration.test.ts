@@ -72,7 +72,37 @@ describe("local Trip API", () => {
           primaryDestination: { name: "Bariloche" },
         },
       });
-      expect((await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers: outsiderHeaders, body: JSON.stringify({ visibility: "private" }) })).status).toBe(404);
+
+      const another = await fetch(`${baseUrl}/trips`, { method: "POST", headers, body: JSON.stringify({ name: "Privado", primaryDestination: "Ushuaia" }) });
+      expect(another.status).toBe(201);
+      const privateTrip = (await another.json() as { trip: { id: string } }).trip;
+      expect((await fetch(`${baseUrl}/trips/public`)).status).toBe(401);
+      const publicList = await fetch(`${baseUrl}/trips/public`, { headers: outsiderHeaders });
+      expect(publicList.status).toBe(200);
+      expect(await publicList.json()).toEqual({ trips: [{
+        id: response.trip.id,
+        name: "Patagonia",
+        description: null,
+        visibility: "public",
+        primaryDestination: { name: "Bariloche" },
+      }] });
+
+      const joinUrl = `${baseUrl}/trips/${response.trip.id}/join`;
+      expect((await fetch(joinUrl, { method: "POST" })).status).toBe(401);
+      expect((await fetch(`${baseUrl}/trips/not-an-id/join`, { method: "POST", headers: outsiderHeaders })).status).toBe(400);
+      expect((await fetch(`${baseUrl}/trips/${privateTrip.id}/join`, { method: "POST", headers: outsiderHeaders })).status).toBe(404);
+      const joined = await fetch(joinUrl, { method: "POST", headers: outsiderHeaders });
+      expect(joined.status).toBe(200);
+      expect(await joined.json()).toEqual({ tripId: response.trip.id, joined: true });
+      const duplicate = await fetch(joinUrl, { method: "POST", headers: outsiderHeaders });
+      expect(await duplicate.json()).toEqual({ tripId: response.trip.id, joined: false });
+      expect(await database.collection("tripMembers").findOne({ tripId: new ObjectId(response.trip.id), userId: new ObjectId(outsider.value) }))
+        .toMatchObject({ role: "participant" });
+      expect(await database.collection("tripMembers").countDocuments({ tripId: new ObjectId(response.trip.id), userId: new ObjectId(outsider.value) })).toBe(1);
+
+      expect((await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers, body: JSON.stringify({ visibility: "private" }) })).status).toBe(200);
+      expect(await (await fetch(`${baseUrl}/trips/public`, { headers: outsiderHeaders })).json()).toEqual({ trips: [] });
+      expect((await fetch(joinUrl, { method: "POST", headers: outsiderHeaders })).status).toBe(404);
     } finally {
       await new Promise<void>((resolve, reject) => localApi.app.close((error) => error === undefined ? resolve() : reject(error)));
       await localApi.close();

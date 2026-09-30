@@ -157,6 +157,38 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         return err(unknownError());
       }
     },
+    listPublic: async () => {
+      try {
+        const documents = await trips.find(
+          { visibility: "public" },
+          { projection: { _id: 1, name: 1, description: 1, visibility: 1 } },
+        ).sort({ createdAt: -1, _id: -1 }).toArray();
+        if (documents.length === 0) return ok([]);
+        const primaryDestinations = await destinations.find(
+          { tripId: { $in: documents.map((trip) => trip._id) }, order: 1 },
+          { projection: { tripId: 1, name: 1 } },
+        ).toArray();
+        const destinationByTrip = new Map(primaryDestinations.map((destination) => [destination.tripId.toHexString(), destination]));
+        return ok(documents.map((trip) => {
+          const destination = destinationByTrip.get(trip._id.toHexString());
+          if (destination === undefined) throw new Error("Trip has no primary destination.");
+          return toPublicPreview(trip, destination);
+        }));
+      } catch {
+        return err(unknownError());
+      }
+    },
+    findPublicById: async (tripId) => {
+      try {
+        const trip = await trips.findOne(
+          { _id: new MongoObjectId(tripId), visibility: "public" },
+          { projection: { _id: 1 } },
+        );
+        return ok(trip === null ? undefined : { id: domainId(trip._id) });
+      } catch {
+        return err(unknownError());
+      }
+    },
     updateConfigurationForMember: async (tripId, userId, update: TripConfigurationUpdate) => {
       try {
         const mongoTripId = new MongoObjectId(tripId);
