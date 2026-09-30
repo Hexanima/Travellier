@@ -45,4 +45,19 @@ describe("Mongo trip invitation repositories", () => {
     expect(await members.addParticipant(tripId.toHexString() as never, userId.toHexString() as never)).toEqual({ ok: true, value: false });
     expect(await database.collection("tripMembers").findOne({ tripId, userId })).toMatchObject({ role: "admin" });
   });
+
+  it("keeps one membership when two joins arrive at the same time", async () => {
+    const tripId = new ObjectId();
+    const userId = new ObjectId();
+    const { members } = createMongoTripInvitationRepositories(database);
+
+    const results = await Promise.all([
+      members.addParticipant(tripId.toHexString() as never, userId.toHexString() as never),
+      members.addParticipant(tripId.toHexString() as never, userId.toHexString() as never),
+    ]);
+
+    expect(results).toContainEqual({ ok: true, value: true });
+    expect(results).toContainEqual({ ok: true, value: false });
+    expect(await database.collection("tripMembers").countDocuments({ tripId, userId })).toBe(1);
+  });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { TripNotFoundError, ok } from "app-domain";
+import { TripMemberNotFoundError, TripNotFoundError, UnauthorizedError, ok } from "app-domain";
 import { handleApiRequest } from "../app.js";
 
 const actorId = "507f1f77bcf86cd799439011";
@@ -8,6 +8,61 @@ const tripId = "507f191e810c19729de860ea";
 const trip = { id: tripId, name: "Patagonia", primaryDestination: { name: "Bariloche" } };
 
 describe("Trip management routes", () => {
+  it("lists members only for the authenticated trip member", async () => {
+    const member = { id: "507f1f77bcf86cd799439013", userId: actorId, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
+    const listMembers = vi.fn().mockResolvedValue(ok([member]));
+    const dependencies = { trips: { listMembers } } as never;
+    const request = { method: "GET", url: `/trips/${tripId}/members` };
+
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
+    const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ members: [member] });
+    expect(listMembers).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId });
+  });
+
+  it("expels a participant using only the JWT actor and path IDs", async () => {
+    const targetUserId = "507f1f77bcf86cd799439012";
+    const expelMember = vi.fn().mockResolvedValue(ok(undefined));
+    const dependencies = { trips: { expelMember } } as never;
+    const request = { method: "DELETE", url: `/trips/${tripId}/members/${targetUserId}`, body: { actorUserId: targetUserId } };
+
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
+    const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
+    expect(response.statusCode).toBe(204);
+    expect(expelMember).toHaveBeenCalledWith({ tripId, actorUserId: actorId, targetUserId });
+  });
+
+  it("does not expose members of a trip to an outsider", async () => {
+    const listMembers = vi.fn().mockResolvedValue({ ok: false, error: new TripNotFoundError() });
+    const response = await handleApiRequest(
+      { method: "GET", url: `/trips/${tripId}/members`, authenticatedUserId: actorId as never },
+      { trips: { listMembers } } as never,
+    );
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain("members");
+  });
+
+  it("rejects participant expulsions and reports a missing target", async () => {
+    const expelMember = vi.fn().mockResolvedValueOnce({ ok: false, error: new UnauthorizedError() })
+      .mockResolvedValueOnce({ ok: false, error: new TripMemberNotFoundError() });
+    const request = { method: "DELETE", url: `/trips/${tripId}/members/507f1f77bcf86cd799439012`, authenticatedUserId: actorId as never };
+    const dependencies = { trips: { expelMember } } as never;
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(403);
+    expect((await handleApiRequest(request, dependencies)).statusCode).toBe(404);
+  });
+
+  it("rejects invalid member route IDs before reading memberships", async () => {
+    const listMembers = vi.fn();
+    const expelMember = vi.fn();
+    const dependencies = { trips: { listMembers, expelMember } } as never;
+    const authenticatedUserId = actorId as never;
+    expect((await handleApiRequest({ method: "GET", url: "/trips/not-an-id/members", authenticatedUserId }, dependencies)).statusCode).toBe(400);
+    expect((await handleApiRequest({ method: "DELETE", url: `/trips/${tripId}/members/not-an-id`, authenticatedUserId }, dependencies)).statusCode).toBe(400);
+    expect(listMembers).not.toHaveBeenCalled();
+    expect(expelMember).not.toHaveBeenCalled();
+  });
+
   it("creates a trip for the JWT user and ignores body user IDs", async () => {
     const create = vi.fn().mockResolvedValue(ok(trip));
     const request = {

@@ -22,6 +22,9 @@ import {
   type UpdateTripConfigurationPayload,
   type TripView,
   type TripDetail,
+  type TripMemberSummary,
+  type ListTripMembersPayload,
+  type ExpelTripParticipantPayload,
   createObjectId,
   ValidationError,
 } from "app-domain";
@@ -79,6 +82,8 @@ export interface TripApi extends TripInvitationApi {
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
+  listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
+  expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
 }
 
 export type RequestAuthenticator = (
@@ -155,6 +160,18 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   if (error.tag === "TripNotFoundError") {
     return jsonResponse(404, {
       error: { code: "TripNotFoundError", message: "Trip not found." },
+    });
+  }
+
+  if (error.tag === "TripMemberNotFoundError") {
+    return jsonResponse(404, {
+      error: { code: "TripMemberNotFoundError", message: "Trip member not found." },
+    });
+  }
+
+  if (error.tag === "UnauthorizedError") {
+    return jsonResponse(403, {
+      error: { code: "Forbidden", message: "This action is not allowed." },
     });
   }
 
@@ -298,6 +315,31 @@ export const handleApiRequest = async (
     if (dependencies.trips?.list === undefined) return unavailableResponse();
     const result = await dependencies.trips.list({ authenticatedUserId: request.authenticatedUserId });
     return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  const membersMatch = request.url?.match(/^\/trips\/([^/?]+)\/members$/);
+  const expelMemberMatch = request.url?.match(/^\/trips\/([^/?]+)\/members\/([^/?]+)$/);
+  if ((request.method === "GET" && membersMatch) || (request.method === "DELETE" && expelMemberMatch)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((membersMatch ?? expelMemberMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (request.method === "GET") {
+      if (dependencies.trips?.listMembers === undefined) return unavailableResponse();
+      const result = await dependencies.trips.listMembers({
+        authenticatedUserId: request.authenticatedUserId,
+        tripId: tripId.value,
+      });
+      return result.ok ? jsonResponse(200, { members: result.value }) : errorResponse(result.error);
+    }
+    const targetUserId = createObjectId(expelMemberMatch?.[2] ?? "");
+    if (!targetUserId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.expelMember === undefined) return unavailableResponse();
+    const result = await dependencies.trips.expelMember({
+      tripId: tripId.value,
+      actorUserId: request.authenticatedUserId,
+      targetUserId: targetUserId.value,
+    });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
   }
 
   const detailMatch = request.url?.match(/^\/trips\/([^/?]+)$/);

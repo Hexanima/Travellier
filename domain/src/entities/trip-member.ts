@@ -9,3 +9,11 @@ export interface TripMember {
   role: TripRole;
   joinedAt: Date;
 }
+
+export interface TripMemberSummary {
+  id: ObjectId;
+  userId: ObjectId;
+  name: string;
+  role: TripRole;
+  joinedAt: Date;
+}
