@@ -29,7 +29,7 @@ describe("Lambda API handler", () => {
         environment: "dev", mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
         jwtSecret, photoBucketName: "travellier-dev-photos",
       }),
-      createTripInvitationApi: async () => ({ joinByCode }),
+      createTripApi: async () => ({ joinByCode }),
     });
     const request = {
       rawPath: "/trips/join", body: JSON.stringify({ code: "VIAJE-X7K2" }), requestContext: { http: { method: "POST" } },
