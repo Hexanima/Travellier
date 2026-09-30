@@ -14,7 +14,7 @@ describe("local Trip API", () => {
 
   beforeAll(async () => {
     replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await replSet?.stop();

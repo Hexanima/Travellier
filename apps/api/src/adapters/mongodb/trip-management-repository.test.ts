@@ -23,7 +23,7 @@ describe("Mongo Trip management repository", () => {
     await client.connect();
     database = client.db("travellier_trip_management_test");
     await migrateMongoSchema(database);
-  });
+  }, 120_000);
 
   beforeEach(async () => {
     await Promise.all([
