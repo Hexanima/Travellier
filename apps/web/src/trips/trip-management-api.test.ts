@@ -12,6 +12,7 @@ const trip = {
 const configuredTrip = {
   ...trip,
   visibility: "private",
+  inviteCode: "VIAJE-X7K2",
   votingEnabled: false,
   expenseMode: "register",
 };
@@ -67,6 +68,14 @@ describe("createTripManagementApi", () => {
 
   it("rejects a malformed configuration response", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: { ...configuredTrip, expenseMode: "unknown" } } });
+    const api = createTripManagementApi({ get, post: vi.fn(), patch: vi.fn() } as never);
+
+    expect(await api.get(trip.id)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+
+  it("requires an invitation code for a member Trip", async () => {
+    const withoutCode = Object.fromEntries(Object.entries(configuredTrip).filter(([key]) => key !== "inviteCode"));
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: withoutCode } });
     const api = createTripManagementApi({ get, post: vi.fn(), patch: vi.fn() } as never);
 
     expect(await api.get(trip.id)).toEqual({ ok: false, error: { kind: "server" } });

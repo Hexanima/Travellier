@@ -3,6 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import { createHttpClient } from "./http-client.js";
 
 describe("createHttpClient", () => {
+  it("classifies a forbidden member action separately from a server failure", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code: "Forbidden" } }), { status: 403 }));
+    const client = createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch,
+      getAccessToken: vi.fn().mockResolvedValue("access-token"),
+      onUnauthorized: vi.fn(),
+    });
+
+    const result = await client.delete("/trips/trip-1/members/user-1");
+    expect(result).toMatchObject({ ok: false, error: { kind: "forbidden", status: 403 } });
+  });
   it("adds the current access token to authenticated requests", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ id: "trip-1" }), {

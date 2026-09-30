@@ -56,6 +56,8 @@ describe("Trip screens", () => {
     expect(container.textContent).toContain("Patagonia");
     expect(container.textContent).toContain("Bariloche");
     expect(container.querySelector('a[href="/trips/new"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
+    expect(container.querySelector(`a[href="/trips/${trip.id}/members"]`)).not.toBeNull();
     expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).not.toBeNull();
   });
 
@@ -64,6 +66,7 @@ describe("Trip screens", () => {
 
     expect(container.textContent).toContain("Todavía no tenés viajes");
     expect(container.querySelector('a[href="/trips/new"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
   });
 
   it("shows a loading error and retries", async () => {

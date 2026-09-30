@@ -22,6 +22,23 @@ const createAccessToken = (userId: string): string => {
 };
 
 describe("Lambda API handler", () => {
+  it("loads Trip validation for a public invitation without requiring a JWT", async () => {
+    const resolveInvitation = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const createTripApi = vi.fn().mockResolvedValue({ resolveInvitation });
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({
+        environment: "dev", mongo: { uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" },
+        jwtSecret, photoBucketName: "travellier-dev-photos",
+      }),
+      createTripApi,
+    });
+    const response = await handler({ rawPath: "/invite/VIAJE-X7K2", requestContext: { http: { method: "GET" } } });
+
+    expect(createTripApi).toHaveBeenCalledOnce();
+    expect(resolveInvitation).toHaveBeenCalledWith({ code: "VIAJE-X7K2" });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("com.travellier.app://invite/VIAJE-X7K2");
+  });
   it("requires an access token and routes an invitation join to the trip API", async () => {
     const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
     const handler = createLambdaHandler({

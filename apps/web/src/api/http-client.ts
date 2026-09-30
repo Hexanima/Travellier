@@ -4,6 +4,7 @@ export type ApiErrorKind =
   | "client"
   | "network"
   | "unauthorized"
+  | "forbidden"
   | "validation"
   | "not-found"
   | "server";
@@ -69,6 +70,10 @@ const joinUrl = (baseUrl: string, path: string): string =>
 const getErrorKind = (status: number): ApiErrorKind => {
   if (status === 401) {
     return "unauthorized";
+  }
+
+  if (status === 403) {
+    return "forbidden";
   }
 
   if (status === 400 || status === 422) {
