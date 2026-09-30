@@ -2,7 +2,7 @@ import { TripMemberNotFoundError } from "../../errors/trip-member-not-found-erro
 import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import type { TripMemberManagementPort } from "../../ports/trip-member-management-port.js";
 import type { TaggedError } from "../../types/error.js";
-import { err } from "../../types/result.js";
+import { err, ok } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
 
@@ -35,6 +35,8 @@ export const expelTripParticipant: UseCase<
     if (target.value.role !== "participant" || target.value.tripId !== tripId || target.value.userId !== targetUserId) {
       return err(new UnauthorizedError());
     }
-    return members.removeParticipant(target.value.id);
+    const removed = await members.removeParticipant(target.value.id, tripId, targetUserId);
+    if (!removed.ok) return removed;
+    return removed.value ? ok(undefined) : err(new TripMemberNotFoundError());
   },
 };

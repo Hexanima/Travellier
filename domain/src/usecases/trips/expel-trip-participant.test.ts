@@ -40,7 +40,7 @@ describe("expelTripParticipant", () => {
     ]);
     const findByTripAndUser = vi.fn(async (requestedTripId: ObjectId, userId: ObjectId) =>
       ok(requestedTripId === tripId ? memberships.get(userId) : undefined));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -49,7 +49,7 @@ describe("expelTripParticipant", () => {
 
     expect(findByTripAndUser).toHaveBeenNthCalledWith(1, tripId, adminUserId);
     expect(findByTripAndUser).toHaveBeenNthCalledWith(2, tripId, participantUserId);
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
     expect(result).toEqual({ ok: true, value: undefined });
   });
 
@@ -61,7 +61,7 @@ describe("expelTripParticipant", () => {
     const findByTripAndUser = vi.fn()
       .mockResolvedValueOnce(ok(admin))
       .mockResolvedValueOnce(ok(participant));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -69,12 +69,12 @@ describe("expelTripParticipant", () => {
     );
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
   });
 
   it("rejects a participant without reading or removing the target", async () => {
     const findByTripAndUser = vi.fn(async () => ok(participant));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -88,7 +88,7 @@ describe("expelTripParticipant", () => {
 
   it("rejects a user with no membership in the trip", async () => {
     const findByTripAndUser = vi.fn(async () => ok(undefined));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -102,7 +102,7 @@ describe("expelTripParticipant", () => {
 
   it("does not expel another admin", async () => {
     const findByTripAndUser = vi.fn(async () => ok(admin));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -115,7 +115,7 @@ describe("expelTripParticipant", () => {
 
   it("rejects an admin membership from another trip", async () => {
     const findByTripAndUser = vi.fn(async () => ok({ ...admin, tripId: otherTripId }));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -129,7 +129,7 @@ describe("expelTripParticipant", () => {
 
   it("rejects a membership belonging to a different actor", async () => {
     const findByTripAndUser = vi.fn(async () => ok({ ...admin, userId: participantUserId }));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -144,7 +144,7 @@ describe("expelTripParticipant", () => {
   it("does not expel a participant from another trip", async () => {
     const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
       ok(userId === adminUserId ? admin : { ...participant, tripId: otherTripId }));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -158,7 +158,7 @@ describe("expelTripParticipant", () => {
   it("does not expel a membership belonging to a different target user", async () => {
     const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
       ok(userId === adminUserId ? admin : { ...participant, userId: adminUserId }));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -172,7 +172,7 @@ describe("expelTripParticipant", () => {
   it("reports a missing target member without removing anything", async () => {
     const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
       ok(userId === adminUserId ? admin : undefined));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -186,7 +186,7 @@ describe("expelTripParticipant", () => {
   it("propagates an actor lookup failure without removing anything", async () => {
     const databaseError = new UnknownError("database failure");
     const findByTripAndUser = vi.fn(async () => err(databaseError));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -203,7 +203,7 @@ describe("expelTripParticipant", () => {
     const findByTripAndUser = vi.fn()
       .mockResolvedValueOnce(ok(admin))
       .mockResolvedValueOnce(err(databaseError));
-    const removeParticipant = vi.fn(async () => ok(undefined));
+    const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
       { members: { findByTripAndUser, removeParticipant } },
@@ -226,6 +226,19 @@ describe("expelTripParticipant", () => {
     );
 
     expect(result).toEqual(err(databaseError));
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
+  });
+
+  it("reports a participant removed concurrently as missing", async () => {
+    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
+      ok(userId === adminUserId ? admin : participant));
+    const removeParticipant = vi.fn(async () => ok(false));
+
+    const result = await expelTripParticipant.execute(
+      { members: { findByTripAndUser, removeParticipant } },
+      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
+    );
+
+    expect(result).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
   });
 });
