@@ -96,6 +96,9 @@ describe("local Trip API", () => {
       expect(await joined.json()).toEqual({ tripId: response.trip.id, joined: true });
       const duplicate = await fetch(joinUrl, { method: "POST", headers: outsiderHeaders });
       expect(await duplicate.json()).toEqual({ tripId: response.trip.id, joined: false });
+      const joinedTripList = await fetch(`${baseUrl}/trips`, { headers: outsiderHeaders });
+      expect(joinedTripList.status).toBe(200);
+      expect(await joinedTripList.json()).toMatchObject({ trips: [{ id: response.trip.id, name: "Patagonia" }] });
       expect(await database.collection("tripMembers").findOne({ tripId: new ObjectId(response.trip.id), userId: new ObjectId(outsider.value) }))
         .toMatchObject({ role: "participant" });
       expect(await database.collection("tripMembers").countDocuments({ tripId: new ObjectId(response.trip.id), userId: new ObjectId(outsider.value) })).toBe(1);

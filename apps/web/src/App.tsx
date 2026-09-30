@@ -13,6 +13,7 @@ import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
+import { PublicTripConfirmationScreen, TripExploreScreen } from './trips/TripExploreScreen.js'
 import { TripJoinScreen } from './trips/TripJoinScreen.js'
 import { TripMembersScreen } from './trips/TripMembersScreen.js'
 import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
@@ -94,6 +95,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeMembers = members ?? defaultMembers.current
   const tripManagement = useMemo<TripManagementApi>(() => ({
     list: activeTrips?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    listPublic: activeTrips?.listPublic ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    joinPublic: activeTrips?.joinPublic ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeTrips?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     get: activeTrips?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     updateConfiguration: activeTrips?.updateConfiguration ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -200,6 +203,16 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/trips/join" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <TripJoinScreen />
+          </TripRoute>
+        } />
+        <Route path="/trips/explore" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripExploreScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/explore/:tripId" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <PublicTripConfirmationScreen trips={tripManagement} />
           </TripRoute>
         } />
         <Route path="/trips/:tripId/members" element={

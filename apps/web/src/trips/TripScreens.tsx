@@ -37,7 +37,10 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
           </div>
           <Link className="trips-create-link" to="/trips/new">Crear viaje</Link>
         </header>
-        <Link className="trips-join-link" to="/trips/join">Unirse con código</Link>
+        <nav className="trips-entry-actions" aria-label="Unirse a un viaje">
+          <Link className="trips-join-link" to="/trips/join">Unirse con código</Link>
+          <Link className="trips-join-link" to="/trips/explore">Explorar viajes públicos</Link>
+        </nav>
 
         {loading ? <LoadingState label="Cargando viajes…" /> : null}
         {!loading && loadError ? (

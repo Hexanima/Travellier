@@ -47,6 +47,128 @@ async function render(path: string, session: boolean, trips: Record<string, unkn
 }
 
 describe("App Trip routes", () => {
+  const publicTrip = {
+    kind: "public", id: tripId, name: "Patagonia", description: "Lagos y senderos",
+    primaryDestination: { name: "Bariloche" }, visibility: "public",
+  };
+
+  it("guards public discovery before login", async () => {
+    const listPublic = vi.fn();
+    const container = await render("/trips/explore", false, { listPublic });
+
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(listPublic).not.toHaveBeenCalled();
+  });
+
+  it("guards the confirmation route before login", async () => {
+    const get = vi.fn();
+    const joinPublic = vi.fn();
+    const container = await render(`/trips/explore/${tripId}`, false, { get, joinPublic });
+
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(get).not.toHaveBeenCalled();
+    expect(joinPublic).not.toHaveBeenCalled();
+  });
+
+  it("shows only public Trips and their decision fields in discovery", async () => {
+    const listPublic = vi.fn().mockResolvedValue({ ok: true, value: [
+      publicTrip,
+      { ...publicTrip, id: "507f191e810c19729de860eb", name: "Privado", visibility: "private" },
+    ] });
+    const container = await render("/trips/explore", true, { listPublic });
+
+    expect(listPublic).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Patagonia");
+    expect(container.textContent).toContain("Bariloche");
+    expect(container.textContent).toContain("Lagos y senderos");
+    expect(container.textContent).not.toContain("Privado");
+    expect(container.querySelector(`a[href="/trips/explore/${tripId}"]`)).not.toBeNull();
+  });
+
+  it("offers discovery from an empty Trip list", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [] });
+    const container = await render("/trips", true, { list });
+
+    expect(container.querySelector('a[href="/trips/explore"]')).not.toBeNull();
+  });
+
+  it("retries a failed discovery request and shows the empty state", async () => {
+    const listPublic = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { kind: "network" } })
+      .mockResolvedValueOnce({ ok: true, value: [] });
+    const container = await render("/trips/explore", true, { listPublic });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar");
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Reintentar")?.click());
+    expect(listPublic).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("No hay viajes públicos");
+    expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
+  });
+
+  it("shows a public preview before joining, then reloads My Trips", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: publicTrip });
+    const joinPublic = vi.fn().mockResolvedValue({ ok: true, value: { tripId, joined: true } });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [publicTrip] });
+    const container = await render(`/trips/explore/${tripId}`, true, { get, joinPublic, list });
+
+    expect(get).toHaveBeenCalledWith(tripId);
+    expect(container.textContent).toContain("Patagonia");
+    expect(container.textContent).toContain("Bariloche");
+    expect(container.textContent).toContain("Lagos y senderos");
+    expect(joinPublic).not.toHaveBeenCalled();
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar unión")?.click());
+    expect(joinPublic).toHaveBeenCalledWith(tripId);
+    expect(list).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(container.textContent).toContain("Patagonia");
+  });
+
+  it("does not show a private Trip in the confirmation screen", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { ...memberTrip, name: "Viaje secreto" } });
+    const joinPublic = vi.fn();
+    const container = await render(`/trips/explore/${tripId}`, true, { get, joinPublic });
+
+    expect(container.textContent).not.toContain("Viaje secreto");
+    expect(container.textContent).toContain("no está disponible");
+    expect(joinPublic).not.toHaveBeenCalled();
+  });
+
+  it("does not offer joining when the user is already a public Trip member", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { ...memberTrip, visibility: "public" } });
+    const joinPublic = vi.fn();
+    const container = await render(`/trips/explore/${tripId}`, true, { get, joinPublic });
+
+    expect(container.textContent).toContain("Ya sos parte");
+    expect(container.querySelector('a[href="/trips"]')).not.toBeNull();
+    expect(container.querySelector("button")).toBeNull();
+    expect(joinPublic).not.toHaveBeenCalled();
+  });
+
+  it("prevents a second public join while confirmation is pending", async () => {
+    let resolveJoin: (result: unknown) => void = () => undefined;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: publicTrip });
+    const joinPublic = vi.fn(() => new Promise((resolve) => { resolveJoin = resolve; }));
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [publicTrip] });
+    const container = await render(`/trips/explore/${tripId}`, true, { get, joinPublic, list });
+
+    await act(async () => { container.querySelector("button")?.click(); });
+    expect(container.querySelector("button")).toHaveProperty("disabled", true);
+    await act(async () => { container.querySelector("button")?.click(); });
+    expect(joinPublic).toHaveBeenCalledOnce();
+    await act(async () => resolveJoin({ ok: true, value: { tripId, joined: true } }));
+    expect(container.textContent).toContain("Mis viajes");
+  });
+
+  it("handles a Trip made private after preview without showing it again", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: publicTrip });
+    const joinPublic = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
+    const container = await render(`/trips/explore/${tripId}`, true, { get, joinPublic });
+
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar unión")?.click());
+    expect(container.textContent).not.toContain("Patagonia");
+    expect(container.textContent).toContain("no está disponible");
+    expect(joinPublic).toHaveBeenCalledOnce();
+  });
   it("lets a signed-in user enter a code and confirms joining before sending it", async () => {
     const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId, joined: true } });
     const container = await render("/trips/join", true, { joinByCode });
