@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createObjectId, err, InviteCodeConflictError, ok, type Trip } from "../../index.js";
-import { createTrip, getTrip, listUserTrips, updateTripConfiguration } from "./index.js";
+import { createTrip, getTrip, joinPublicTrip, listPublicTrips, listUserTrips, updateTripConfiguration } from "./index.js";
 
 const id = (value: string) => {
   const result = createObjectId(value);
@@ -90,6 +90,35 @@ describe("Trip use cases", () => {
     } as never, { authenticatedUserId: userId });
     expect(seen).toEqual([userId]);
     expect(result).toEqual(ok([view]));
+  });
+
+  it("lists public previews through the public-trip lookup", async () => {
+    const previews = [{ id: tripId, name: "Patagonia", description: null, visibility: "public", primaryDestination: { name: "Bariloche" } }];
+    const result = await listPublicTrips.execute({ trips: { listPublic: async () => ok(previews) } } as never, { authenticatedUserId: userId });
+    expect(result).toEqual(ok(previews));
+  });
+
+  it("joins a public trip through the guarded membership operation", async () => {
+    const calls: unknown[][] = [];
+    const dependencies = {
+      members: { addPublicParticipant: async (...args: unknown[]) => { calls.push(args); return ok(true); } },
+    };
+    expect(await joinPublicTrip.execute(dependencies as never, { authenticatedUserId: userId, tripId }))
+      .toEqual(ok({ tripId, joined: true }));
+    expect(calls).toEqual([[tripId, userId]]);
+  });
+
+  it("uses the guarded write result when visibility is no longer public", async () => {
+    let joined = false;
+    const result = await joinPublicTrip.execute({
+      members: {
+        addParticipant: async () => { joined = true; return ok(true); },
+        addPublicParticipant: async () => ok(undefined),
+      },
+    } as never, { authenticatedUserId: userId, tripId });
+
+    expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    expect(joined).toBe(false);
   });
 
   it("validates configuration before a member-scoped update", async () => {

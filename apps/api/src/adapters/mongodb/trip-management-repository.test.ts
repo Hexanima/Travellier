@@ -121,6 +121,25 @@ describe("Mongo Trip management repository", () => {
     });
   });
 
+  it("lists only public trips with decision fields", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    expect(repository.listPublic).toBeTypeOf("function");
+    const first = record("VIAJE-PUBLIC1");
+    first.trip.visibility = "public";
+    const second = record("VIAJE-PRIVATE");
+    const third = record("VIAJE-PUBLIC2");
+    third.trip.visibility = "public";
+    third.trip.createdAt = new Date("2026-09-25T12:00:00.000Z");
+    await repository.createWithAdminAndDestination(first);
+    await repository.createWithAdminAndDestination(second);
+    await repository.createWithAdminAndDestination(third);
+
+    expect(await repository.listPublic()).toEqual({ ok: true, value: [
+      { id: third.trip.id, name: "Patagonia", description: null, visibility: "public", primaryDestination: { name: "Bariloche" } },
+      { id: first.trip.id, name: "Patagonia", description: null, visibility: "public", primaryDestination: { name: "Bariloche" } },
+    ] });
+  });
+
   it("updates configuration only when the user is a member", async () => {
     const repository = createMongoTripManagementRepository(database);
     const input = record();

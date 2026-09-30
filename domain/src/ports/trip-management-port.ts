@@ -35,6 +35,7 @@ export interface TripManagementPort<TError extends TaggedError = TaggedError> {
   createWithAdminAndDestination: (record: TripCreationRecord) => AsyncResult<void, TError>;
   findByIdForViewer: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripDetail | undefined, TError>;
   listForMember: (userId: ObjectId) => AsyncResult<TripView[], TError>;
+  listPublic: () => AsyncResult<PublicTripPreview[], TError>;
   updateConfigurationForMember: (
     tripId: ObjectId,
     userId: ObjectId,
