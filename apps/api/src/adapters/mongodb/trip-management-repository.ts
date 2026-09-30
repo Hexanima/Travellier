@@ -11,6 +11,7 @@ import {
   type TripConfigurationUpdate,
   type TripCreationRecord,
   type TripDestination,
+  type PublicTripPreview,
   type TripManagementPort,
   type TripView,
 } from "app-domain";
@@ -76,6 +77,14 @@ const toView = (trip: TripDocument, destination: DestinationDocument): TripView 
   },
 });
 
+const toPublicPreview = (trip: TripDocument, destination: DestinationDocument): PublicTripPreview => ({
+  id: domainId(trip._id),
+  name: trip.name,
+  description: trip.description,
+  visibility: "public",
+  primaryDestination: { name: destination.name },
+});
+
 const unknownError = () => new UnknownError("Trip database operation failed.");
 
 export const createMongoTripManagementRepository = (database: Db): TripManagementPort => {
@@ -114,11 +123,18 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         await session.endSession();
       }
     },
-    findByIdForMember: async (tripId, userId) => {
+    findByIdForViewer: async (tripId, userId) => {
       try {
         const mongoTripId = new MongoObjectId(tripId);
         const member = await members.findOne({ tripId: mongoTripId, userId: new MongoObjectId(userId) }, { projection: { _id: 1 } });
-        if (member === null) return ok(undefined);
+        if (member === null) {
+          const publicTrip = await trips.findOne(
+            { _id: mongoTripId, visibility: "public" },
+            { projection: { _id: 1, name: 1, description: 1, visibility: 1 } },
+          );
+          if (publicTrip === null) return ok(undefined);
+          return ok(toPublicPreview(publicTrip, await findDestination(mongoTripId)));
+        }
         const trip = await trips.findOne({ _id: mongoTripId });
         if (trip === null) return ok(undefined);
         return ok(toView(trip, await findDestination(mongoTripId)));

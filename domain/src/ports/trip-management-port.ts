@@ -9,6 +9,16 @@ export interface TripView extends Trip {
   primaryDestination: TripDestination;
 }
 
+export interface PublicTripPreview {
+  id: ObjectId;
+  name: string;
+  description: string | null;
+  visibility: "public";
+  primaryDestination: { name: string };
+}
+
+export type TripDetail = TripView | PublicTripPreview;
+
 export interface TripCreationRecord {
   trip: Trip;
   creatorMembership: TripMember;
@@ -23,7 +33,7 @@ export interface TripConfigurationUpdate {
 
 export interface TripManagementPort<TError extends TaggedError = TaggedError> {
   createWithAdminAndDestination: (record: TripCreationRecord) => AsyncResult<void, TError>;
-  findByIdForMember: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripView | undefined, TError>;
+  findByIdForViewer: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripDetail | undefined, TError>;
   listForMember: (userId: ObjectId) => AsyncResult<TripView[], TError>;
   updateConfigurationForMember: (
     tripId: ObjectId,

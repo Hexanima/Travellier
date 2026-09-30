@@ -21,6 +21,7 @@ import {
   type ListUserTripsPayload,
   type UpdateTripConfigurationPayload,
   type TripView,
+  type TripDetail,
   createObjectId,
   ValidationError,
 } from "app-domain";
@@ -75,7 +76,7 @@ export interface TripInvitationApi {
 
 export interface TripApi extends TripInvitationApi {
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
-  get?: (payload: GetTripPayload) => AsyncResult<TripView>;
+  get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
 }

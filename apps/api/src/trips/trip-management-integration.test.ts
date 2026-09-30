@@ -60,6 +60,19 @@ describe("local Trip API", () => {
       expect(await updated.json()).toMatchObject({ trip: { visibility: "public", votingEnabled: true, expenseMode: "balance" } });
       const fetched = await fetch(`${baseUrl}/trips/${response.trip.id}`, { headers });
       expect(await fetched.json()).toMatchObject({ trip: { visibility: "public", votingEnabled: true, expenseMode: "balance" } });
+
+      const publicResponse = await fetch(`${baseUrl}/trips/${response.trip.id}`, { headers: outsiderHeaders });
+      expect(publicResponse.status).toBe(200);
+      expect(await publicResponse.json()).toEqual({
+        trip: {
+          id: response.trip.id,
+          name: "Patagonia",
+          description: null,
+          visibility: "public",
+          primaryDestination: { name: "Bariloche" },
+        },
+      });
+      expect((await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers: outsiderHeaders, body: JSON.stringify({ visibility: "private" }) })).status).toBe(404);
     } finally {
       await new Promise<void>((resolve, reject) => localApi.app.close((error) => error === undefined ? resolve() : reject(error)));
       await localApi.close();

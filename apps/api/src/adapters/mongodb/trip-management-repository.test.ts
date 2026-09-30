@@ -92,9 +92,33 @@ describe("Mongo Trip management repository", () => {
     await repository.createWithAdminAndDestination(ownTrip);
     await repository.createWithAdminAndDestination(otherTrip);
 
-    expect(await repository.findByIdForMember(ownTrip.trip.id, domainId(owner))).toMatchObject({ ok: true, value: { id: ownTrip.trip.id, primaryDestination: { name: "Bariloche" } } });
-    expect(await repository.findByIdForMember(otherTrip.trip.id, domainId(owner))).toEqual({ ok: true, value: undefined });
+    expect(await repository.findByIdForViewer(ownTrip.trip.id, domainId(owner))).toMatchObject({ ok: true, value: { id: ownTrip.trip.id, primaryDestination: { name: "Bariloche" } } });
+    expect(await repository.findByIdForViewer(otherTrip.trip.id, domainId(owner))).toEqual({ ok: true, value: undefined });
     expect(await repository.listForMember(domainId(owner))).toMatchObject({ ok: true, value: [{ id: ownTrip.trip.id }] });
+  });
+
+  it("returns a limited public preview to a non-member", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    const input = record();
+    input.trip.visibility = "public";
+    expect(await repository.createWithAdminAndDestination(input)).toMatchObject({ ok: true });
+
+    const outsider = domainId(new ObjectId());
+    expect(await repository.findByIdForViewer(input.trip.id, outsider)).toEqual({
+      ok: true,
+      value: {
+        id: input.trip.id,
+        name: "Patagonia",
+        description: null,
+        visibility: "public",
+        primaryDestination: { name: "Bariloche" },
+      },
+    });
+    expect(await repository.listForMember(outsider)).toEqual({ ok: true, value: [] });
+    expect(await repository.findByIdForViewer(input.trip.id, input.trip.createdBy)).toMatchObject({
+      ok: true,
+      value: { inviteCode: input.trip.inviteCode, createdBy: input.trip.createdBy },
+    });
   });
 
   it("updates configuration only when the user is a member", async () => {

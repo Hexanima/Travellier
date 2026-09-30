@@ -77,7 +77,7 @@ describe("Trip use cases", () => {
 
   it("returns a trip only through the member-scoped lookup", async () => {
     const seen: unknown[] = [];
-    const repository = { findByIdForMember: async (...args: unknown[]) => { seen.push(args); return ok(undefined); } };
+    const repository = { findByIdForViewer: async (...args: unknown[]) => { seen.push(args); return ok(undefined); } };
     const result = await getTrip.execute({ trips: repository } as never, { authenticatedUserId: userId, tripId });
     expect(seen).toEqual([[tripId, userId]]);
     expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });

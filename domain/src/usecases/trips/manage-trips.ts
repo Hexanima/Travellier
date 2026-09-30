@@ -2,7 +2,7 @@ import { createTripWithAdmin, type TripExpenseMode, type TripVisibility } from "
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
-import type { TripConfigurationUpdate, TripManagementPort, TripView } from "../../ports/trip-management-port.js";
+import type { TripConfigurationUpdate, TripDetail, TripManagementPort, TripView } from "../../ports/trip-management-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
@@ -82,9 +82,9 @@ export const createTrip: UseCase<CreateTripDependencies, CreateTripPayload, Trip
   },
 };
 
-export const getTrip: UseCase<TripManagementDependencies, GetTripPayload, TripView, TaggedError> = {
+export const getTrip: UseCase<TripManagementDependencies, GetTripPayload, TripDetail, TaggedError> = {
   execute: async ({ trips }, { authenticatedUserId, tripId }) => {
-    const result = await trips.findByIdForMember(tripId, authenticatedUserId);
+    const result = await trips.findByIdForViewer(tripId, authenticatedUserId);
     if (!result.ok) return result;
     return result.value === undefined ? err(new TripNotFoundError()) : ok(result.value);
   },
