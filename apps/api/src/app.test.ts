@@ -43,6 +43,75 @@ describe("api app", () => {
     expect(fallback.hidden).toBe(false);
   });
 
+  it("shows the invitation fallback only after 1500ms without a response from the app", async () => {
+    const response = await handleApiRequest(
+      { method: "GET", url: "/invite/VIAJE-X7K2" },
+      { trips: { resolveInvitation: async () => ({ ok: true, value: undefined }) } } as never,
+    );
+    const script = response.body.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeDefined();
+
+    vi.useFakeTimers();
+    try {
+      const fallback = { hidden: true };
+      const assign = vi.fn();
+      runInNewContext(script ?? "", {
+        document: {
+          getElementById: () => fallback,
+          visibilityState: "visible",
+          addEventListener: vi.fn(),
+        },
+        window: { location: { assign } },
+        setTimeout,
+        clearTimeout,
+      });
+
+      expect(assign).toHaveBeenCalledWith("com.travellier.app://invite/VIAJE-X7K2");
+      vi.advanceTimersByTime(1499);
+      expect(fallback.hidden).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(fallback.hidden).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the invitation fallback hidden when the app takes focus", async () => {
+    const response = await handleApiRequest(
+      { method: "GET", url: "/invite/VIAJE-X7K2" },
+      { trips: { resolveInvitation: async () => ({ ok: true, value: undefined }) } } as never,
+    );
+    const script = response.body.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+    expect(script).toBeDefined();
+
+    vi.useFakeTimers();
+    try {
+      const fallback = { hidden: true };
+      const document = {
+        getElementById: () => fallback,
+        visibilityState: "visible",
+        addEventListener: vi.fn(),
+      };
+      runInNewContext(script ?? "", {
+        document,
+        window: { location: { assign: vi.fn() } },
+        setTimeout,
+        clearTimeout,
+      });
+
+      vi.advanceTimersByTime(1000);
+      document.visibilityState = "hidden";
+      const onVisibilityChange = document.addEventListener.mock.calls.find(([event]) => event === "visibilitychange")?.[1];
+      expect(onVisibilityChange).toBeDefined();
+      onVisibilityChange?.();
+      vi.advanceTimersByTime(500);
+      expect(fallback.hidden).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("returns a safe HTML error for unknown and unsafe invitation codes", async () => {
     const resolveInvitation = vi.fn().mockResolvedValue({ ok: false, error: { tag: "InvalidInviteCodeError" } });
     const dependencies = { trips: { resolveInvitation } } as never;
