@@ -156,6 +156,11 @@ dd {
 .trips-item p { margin: 0; }
 .trips-destination { color: #286053; font-weight: 700; }
 .trips-item .trips-description { margin-top: 8px; }
+.trips-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.trips-settings-link { flex: none; color: #286053; font-weight: 700; text-underline-offset: 3px; }
+.trips-settings-link:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
+.trip-config-name { margin: 0 0 24px; color: #526270; }
+.trip-config-form { margin-top: 24px; }
 
 .trips-empty {
   border: 1px solid #d6dde3;
@@ -173,4 +178,5 @@ dd {
   .trips-header { align-items: stretch; flex-direction: column; }
   .trips-create-link { align-self: flex-start; }
   .trips-empty { padding: 20px; }
+  .trips-item { align-items: flex-start; flex-direction: column; }
 }

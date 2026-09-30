@@ -4,7 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState, TextAreaField, TextField } from "../components/index.js";
 import type { TripManagementApi, TripSummary } from "./trip-management-api.js";
 
-type TripsListScreenProps = { trips: TripManagementApi; onLocalLogout: () => Promise<void> };
+type TripsListScreenProps = { trips: Pick<TripManagementApi, "list">; onLocalLogout: () => Promise<void> };
 
 export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) {
   const [items, setItems] = useState<TripSummary[]>([]);
@@ -61,6 +61,7 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
                   <p className="trips-destination">{trip.primaryDestination.name}</p>
                   {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                 </div>
+                <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
               </ListItem>
             ))}
           </List>
@@ -75,7 +76,7 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
   );
 }
 
-export function CreateTripScreen({ trips }: { trips: TripManagementApi }) {
+export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "create"> }) {
   const navigate = useNavigate();
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);

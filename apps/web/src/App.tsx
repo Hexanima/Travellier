@@ -12,6 +12,7 @@ import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
+import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
 import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
 import { createTripManagementApi, type TripManagementApi } from './trips/trip-management-api.js'
 
@@ -87,6 +88,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const tripManagement = useMemo<TripManagementApi>(() => ({
     list: activeTrips?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeTrips?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    get: activeTrips?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    updateConfiguration: activeTrips?.updateConfiguration ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeTrips])
 
   useEffect(() => {
@@ -181,6 +184,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/trips/new" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <CreateTripScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/:tripId/config" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripConfigurationScreen trips={tripManagement} />
           </TripRoute>
         } />
         <Route path="/profile" element={
