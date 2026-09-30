@@ -16,6 +16,7 @@ import {
   type RevokeSessionPayload,
   type JoinTripByCodePayload,
   type JoinTripByCodeResult,
+  type ResolveTripInvitationPayload,
   type CreateTripPayload,
   type GetTripPayload,
   type ListUserTripsPayload,
@@ -29,6 +30,7 @@ import {
   ValidationError,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
+import { tripInvitationBridgePage, tripInvitationErrorPage } from "./trips/trip-invitation-page.js";
 
 export interface HealthResponse {
   app: "travellier";
@@ -75,6 +77,7 @@ export interface ApiDependencies {
 
 export interface TripInvitationApi {
   joinByCode: (payload: JoinTripByCodePayload) => AsyncResult<JoinTripByCodeResult>;
+  resolveInvitation?: (payload: ResolveTripInvitationPayload) => AsyncResult<void>;
 }
 
 export interface TripApi extends TripInvitationApi {
@@ -365,6 +368,21 @@ export const handleApiRequest = async (
 
   if (request.method === "GET" && request.url !== undefined) {
     const pathname = new URL(request.url, "http://localhost").pathname;
+    if (pathname === "/invite" || pathname.startsWith("/invite/")) {
+      const encodedCode = pathname.slice("/invite/".length);
+      let code: string;
+      try {
+        code = decodeURIComponent(encodedCode);
+      } catch {
+        return tripInvitationErrorPage(400);
+      }
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(code)) return tripInvitationErrorPage(400);
+      if (dependencies.trips?.resolveInvitation === undefined) return tripInvitationErrorPage(503);
+      const result = await dependencies.trips.resolveInvitation({ code });
+      return result.ok
+        ? tripInvitationBridgePage(code)
+        : tripInvitationErrorPage(result.error.tag === "InvalidInviteCodeError" ? 404 : 500);
+    }
     if (pathname === "/auth/verify" || pathname.startsWith("/auth/verify/")) {
       const token = pathname.slice("/auth/verify/".length);
       if (token.length === 0 || token.length > 4_096 || !/^[A-Za-z0-9_.-]+$/.test(token)) {

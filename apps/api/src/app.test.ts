@@ -6,6 +6,57 @@ import { describe, expect, it, vi } from "vitest";
 import { createApp, createHealthResponse, handleApiRequest } from "./app.js";
 
 describe("api app", () => {
+  it("serves a valid invitation as an HTML bridge to the native join screen", async () => {
+    const resolveInvitation = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const response = await handleApiRequest(
+      { method: "GET", url: "/invite/VIAJE-X7K2" },
+      { trips: { resolveInvitation } } as never,
+    );
+
+    expect(resolveInvitation).toHaveBeenCalledWith({ code: "VIAJE-X7K2" });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/html");
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["content-security-policy"]).toContain("default-src 'none'");
+    expect(response.body).toContain("com.travellier.app://invite/VIAJE-X7K2");
+    const nonce = response.body.match(/<script nonce="([^"]+)">/)?.[1];
+    const script = response.body.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+    expect(nonce).toBeDefined();
+    expect(response.headers["content-security-policy"]).toContain(`'nonce-${nonce}'`);
+    expect(script).toBeDefined();
+    const assign = vi.fn();
+    const fallback = { hidden: true };
+    let timeout: (() => void) | undefined;
+    runInNewContext(script ?? "", {
+      document: {
+        getElementById: () => fallback,
+        visibilityState: "visible",
+        addEventListener: vi.fn(),
+      },
+      window: { location: { assign } },
+      setTimeout: (callback: () => void, delay: number) => { expect(delay).toBe(1500); timeout = callback; return 1; },
+      clearTimeout: vi.fn(),
+    });
+    expect(assign).toHaveBeenCalledWith("com.travellier.app://invite/VIAJE-X7K2");
+    expect(fallback.hidden).toBe(true);
+    timeout?.();
+    expect(fallback.hidden).toBe(false);
+  });
+
+  it("returns a safe HTML error for unknown and unsafe invitation codes", async () => {
+    const resolveInvitation = vi.fn().mockResolvedValue({ ok: false, error: { tag: "InvalidInviteCodeError" } });
+    const dependencies = { trips: { resolveInvitation } } as never;
+    const unknown = await handleApiRequest({ method: "GET", url: "/invite/MISSING" }, dependencies);
+    const unsafe = await handleApiRequest({ method: "GET", url: "/invite/%3Cscript%3E" }, dependencies);
+
+    expect(unknown.statusCode).toBe(404);
+    expect(unknown.headers["content-type"]).toContain("text/html");
+    expect(unknown.body).not.toContain("MISSING");
+    expect(unknown.body).not.toContain("com.travellier.app://invite/");
+    expect(unsafe.statusCode).toBe(400);
+    expect(unsafe.body).not.toContain("script");
+    expect(resolveInvitation).toHaveBeenCalledTimes(1);
+  });
   it("confirms an invitation only for the authenticated user", async () => {
     const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId: "507f191e810c19729de860ea", joined: true } });
     const request = { method: "POST", url: "/trips/join", body: JSON.stringify({ code: "VIAJE-X7K2" }) };

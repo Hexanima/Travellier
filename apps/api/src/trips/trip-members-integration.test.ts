@@ -58,6 +58,16 @@ describe("local Trip member API", () => {
       const { trip } = await created.json() as { trip: { id: string; inviteCode: string } };
       const memberUrl = `${baseUrl}/trips/${trip.id}/members`;
 
+      const invitePage = await fetch(`${baseUrl}/invite/${encodeURIComponent(trip.inviteCode)}`);
+      expect(invitePage.status).toBe(200);
+      expect(invitePage.headers.get("content-type")).toContain("text/html");
+      const inviteHtml = await invitePage.text();
+      expect(inviteHtml).toContain(`com.travellier.app://invite/${trip.inviteCode}`);
+      expect(inviteHtml).toContain("1500");
+      const missingInvite = await fetch(`${baseUrl}/invite/MISSING`);
+      expect(missingInvite.status).toBe(404);
+      expect(missingInvite.headers.get("content-type")).toContain("text/html");
+
       expect((await fetch(memberUrl)).status).toBe(401);
       expect((await fetch(memberUrl, { headers: outsiderHeaders })).status).toBe(404);
       const publicTrip = await fetch(`${baseUrl}/trips/${trip.id}/config`, {

@@ -54,12 +54,15 @@ const isPublicRoute = (path: string, method: string): boolean =>
       path,
     )) ||
   (method === "GET" &&
-    (path === "/auth/verify" || path.startsWith("/auth/verify/") || path.startsWith("/invite/")));
+    (path === "/auth/verify" || path.startsWith("/auth/verify/") || path === "/invite" || path.startsWith("/invite/")));
 
 const isAuthenticationRoute = (path: string, method: string): boolean =>
   (method === "POST" &&
     ["/auth/register", "/auth/login", "/auth/refresh", "/auth/logout"].includes(path)) ||
   (method === "GET" && (path === "/auth/verify" || path.startsWith("/auth/verify/")));
+
+const isInvitationRoute = (path: string, method: string): boolean =>
+  method === "GET" && (path === "/invite" || path.startsWith("/invite/"));
 
 const authorizationHeader = (
   headers: ApiGatewayHttpApiEvent["headers"],
@@ -88,17 +91,19 @@ export const createLambdaHandler = ({
 
     if (isPublicRoute(event.rawPath, method)) {
       let auth: AuthenticationApi | undefined;
+      let trips: TripApi | undefined;
 
-      if (isAuthenticationRoute(event.rawPath, method)) {
+      if (isAuthenticationRoute(event.rawPath, method) || isInvitationRoute(event.rawPath, method)) {
         const runtimeConfig = await loadRuntimeConfig();
-        auth = await buildAuthenticationApi?.(runtimeConfig);
+        if (isAuthenticationRoute(event.rawPath, method)) auth = await buildAuthenticationApi?.(runtimeConfig);
+        if (isInvitationRoute(event.rawPath, method)) trips = await buildTripApi?.(runtimeConfig);
       }
 
       return handleRequest({
         method,
         url: event.rawPath,
         body: requestBody(event),
-      }, auth === undefined ? undefined : { auth });
+      }, { ...(auth === undefined ? {} : { auth }), ...(trips === undefined ? {} : { trips }) });
     }
 
     const runtimeConfig = await loadRuntimeConfig();
