@@ -8,4 +8,5 @@ export interface TripInvitationRepository<TError extends TaggedError = TaggedErr
 
 export interface TripMembershipRepository<TError extends TaggedError = TaggedError> {
   addParticipant: (tripId: ObjectId, userId: ObjectId) => AsyncResult<boolean, TError>;
+  addPublicParticipant: (tripId: ObjectId, userId: ObjectId) => AsyncResult<boolean | undefined, TError>;
 }

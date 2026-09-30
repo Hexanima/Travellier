@@ -43,7 +43,7 @@ export const createTripApi = (database: Db): TripApi => {
     get: (payload) => getTrip.execute({ trips }, payload),
     list: (payload) => listUserTrips.execute({ trips }, payload),
     listPublic: (payload) => listPublicTrips.execute({ trips }, payload),
-    joinPublic: (payload) => joinPublicTrip.execute({ trips, members: publicJoinMembers }, payload),
+    joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers }, payload),
     updateConfiguration: (payload) => updateTripConfiguration.execute({ trips }, payload),
     listMembers: (payload) => listTripMembers.execute({ members }, payload),
     expelMember: (payload) => expelTripParticipant.execute({ members }, payload),

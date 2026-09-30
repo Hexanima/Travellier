@@ -178,17 +178,6 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         return err(unknownError());
       }
     },
-    findPublicById: async (tripId) => {
-      try {
-        const trip = await trips.findOne(
-          { _id: new MongoObjectId(tripId), visibility: "public" },
-          { projection: { _id: 1 } },
-        );
-        return ok(trip === null ? undefined : { id: domainId(trip._id) });
-      } catch {
-        return err(unknownError());
-      }
-    },
     updateConfigurationForMember: async (tripId, userId, update: TripConfigurationUpdate) => {
       try {
         const mongoTripId = new MongoObjectId(tripId);

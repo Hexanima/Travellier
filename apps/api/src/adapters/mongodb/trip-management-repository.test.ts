@@ -140,16 +140,6 @@ describe("Mongo Trip management repository", () => {
     ] });
   });
 
-  it("finds a public trip by ID without accepting a private trip", async () => {
-    const repository = createMongoTripManagementRepository(database);
-    expect(repository.findPublicById).toBeTypeOf("function");
-    const input = record();
-    await repository.createWithAdminAndDestination(input);
-    expect(await repository.findPublicById(input.trip.id)).toEqual({ ok: true, value: undefined });
-    await database.collection("trips").updateOne({ _id: new ObjectId(input.trip.id) }, { $set: { visibility: "public" } });
-    expect(await repository.findPublicById(input.trip.id)).toEqual({ ok: true, value: { id: input.trip.id } });
-  });
-
   it("updates configuration only when the user is a member", async () => {
     const repository = createMongoTripManagementRepository(database);
     const input = record();

@@ -15,7 +15,7 @@ export interface JoinPublicTripPayload extends ListPublicTripsPayload {
   tripId: ObjectId;
 }
 
-type PublicTripRepository = Pick<TripManagementPort, "listPublic" | "findPublicById">;
+type PublicTripRepository = Pick<TripManagementPort, "listPublic">;
 
 export const listPublicTrips: UseCase<
   { trips: PublicTripRepository },
@@ -27,17 +27,16 @@ export const listPublicTrips: UseCase<
 };
 
 export const joinPublicTrip: UseCase<
-  { trips: PublicTripRepository; members: TripMembershipRepository },
+  { members: Pick<TripMembershipRepository, "addPublicParticipant"> },
   JoinPublicTripPayload,
   JoinTripByCodeResult,
   TaggedError
 > = {
-  execute: async ({ trips, members }, { authenticatedUserId, tripId }) => {
-    const found = await trips.findPublicById(tripId);
-    if (!found.ok) return found;
-    if (found.value === undefined) return err(new TripNotFoundError());
-
-    const joined = await members.addParticipant(tripId, authenticatedUserId);
-    return joined.ok ? ok({ tripId, joined: joined.value }) : joined;
+  execute: async ({ members }, { authenticatedUserId, tripId }) => {
+    const joined = await members.addPublicParticipant(tripId, authenticatedUserId);
+    if (!joined.ok) return joined;
+    return joined.value === undefined
+      ? err(new TripNotFoundError())
+      : ok({ tripId, joined: joined.value });
   },
 };

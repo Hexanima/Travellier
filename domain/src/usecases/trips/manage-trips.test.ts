@@ -98,25 +98,27 @@ describe("Trip use cases", () => {
     expect(result).toEqual(ok(previews));
   });
 
-  it("joins a public trip using the existing membership operation", async () => {
+  it("joins a public trip through the guarded membership operation", async () => {
     const calls: unknown[][] = [];
     const dependencies = {
-      trips: { findPublicById: async (...args: unknown[]) => { calls.push(args); return ok({ id: tripId }); } },
-      members: { addParticipant: async (...args: unknown[]) => { calls.push(args); return ok(true); } },
+      members: { addPublicParticipant: async (...args: unknown[]) => { calls.push(args); return ok(true); } },
     };
     expect(await joinPublicTrip.execute(dependencies as never, { authenticatedUserId: userId, tripId }))
       .toEqual(ok({ tripId, joined: true }));
-    expect(calls).toEqual([[tripId], [tripId, userId]]);
+    expect(calls).toEqual([[tripId, userId]]);
   });
 
-  it("rejects private or missing trips before creating a membership", async () => {
-    let membershipCalled = false;
+  it("uses the guarded write result when visibility is no longer public", async () => {
+    let joined = false;
     const result = await joinPublicTrip.execute({
-      trips: { findPublicById: async () => ok(undefined) },
-      members: { addParticipant: async () => { membershipCalled = true; return ok(true); } },
+      members: {
+        addParticipant: async () => { joined = true; return ok(true); },
+        addPublicParticipant: async () => ok(undefined),
+      },
     } as never, { authenticatedUserId: userId, tripId });
+
     expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
-    expect(membershipCalled).toBe(false);
+    expect(joined).toBe(false);
   });
 
   it("validates configuration before a member-scoped update", async () => {
