@@ -37,6 +37,7 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
           </div>
           <Link className="trips-create-link" to="/trips/new">Crear viaje</Link>
         </header>
+        <Link className="trips-join-link" to="/trips/join">Unirse con código</Link>
 
         {loading ? <LoadingState label="Cargando viajes…" /> : null}
         {!loading && loadError ? (
@@ -62,6 +63,7 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
                   {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                 </div>
                 <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
+                <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
               </ListItem>
             ))}
           </List>

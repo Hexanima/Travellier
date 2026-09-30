@@ -329,7 +329,9 @@ export const handleApiRequest = async (
         authenticatedUserId: request.authenticatedUserId,
         tripId: tripId.value,
       });
-      return result.ok ? jsonResponse(200, { members: result.value }) : errorResponse(result.error);
+      return result.ok
+        ? jsonResponse(200, { members: result.value, currentUserId: request.authenticatedUserId })
+        : errorResponse(result.error);
     }
     const targetUserId = createObjectId(expelMemberMatch?.[2] ?? "");
     if (!targetUserId.ok) return invalidRequestResponse();

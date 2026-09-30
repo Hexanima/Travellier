@@ -12,12 +12,12 @@ describe("Trip management routes", () => {
     const member = { id: "507f1f77bcf86cd799439013", userId: actorId, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
     const listMembers = vi.fn().mockResolvedValue(ok([member]));
     const dependencies = { trips: { listMembers } } as never;
-    const request = { method: "GET", url: `/trips/${tripId}/members` };
+    const request = { method: "GET", url: `/trips/${tripId}/members`, body: { currentUserId: "spoofed" } };
 
     expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
     const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({ members: [member] });
+    expect(JSON.parse(response.body)).toEqual({ members: [member], currentUserId: actorId });
     expect(listMembers).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId });
   });
 

@@ -146,8 +146,10 @@ dd {
 }
 
 .trips-create-link:hover { background: #1c4c42; }
+.trips-join-link { display: inline-block; margin: 0 0 24px; color: #286053; font-weight: 700; text-underline-offset: 3px; }
 .trips-create-link:focus-visible,
 .trips-back:focus-visible,
+.trips-join-link:focus-visible,
 .trips-secondary a:focus-visible,
 .trips-empty a:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
 
@@ -161,6 +163,16 @@ dd {
 .trips-settings-link:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
 .trip-config-name { margin: 0 0 24px; color: #526270; }
 .trip-config-form { margin-top: 24px; }
+.trip-members-section { margin: 24px 0; border: 1px solid #d6dde3; border-radius: 8px; padding: 20px; background: #fff; }
+.trip-members-section h2 { margin: 0 0 8px; font-size: 1.3rem; }
+.trip-members-section p { color: #526270; line-height: 1.5; }
+.trip-invite-code { margin: 18px 0; font-size: 1.5rem; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+.trip-members-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.trip-invite-url { overflow-wrap: anywhere; font-size: 0.875rem; }
+.trip-member-item, .trip-member-admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trip-member-role { color: #526270; }
+.trip-members-admin { border-color: #bdcdd2; }
+.trip-member-admin-row + .trip-member-admin-row { margin-top: 12px; }
 
 .trips-empty {
   border: 1px solid #d6dde3;
@@ -179,4 +191,5 @@ dd {
   .trips-create-link { align-self: flex-start; }
   .trips-empty { padding: 20px; }
   .trips-item { align-items: flex-start; flex-direction: column; }
+  .trip-member-admin-row { align-items: flex-start; flex-direction: column; }
 }

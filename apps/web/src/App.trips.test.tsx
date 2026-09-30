@@ -47,6 +47,33 @@ async function render(path: string, session: boolean, trips: Record<string, unkn
 }
 
 describe("App Trip routes", () => {
+  it("lets a signed-in user enter a code and confirms joining before sending it", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId, joined: true } });
+    const container = await render("/trips/join", true, { joinByCode });
+    expect(container.textContent).toContain("Ingresar código");
+    const input = container.querySelector('[name="code"]') as HTMLInputElement;
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(container.textContent).toContain("Ingresá un código");
+    expect(joinByCode).not.toHaveBeenCalled();
+    await act(async () => { input.value = " VIAJE-X7K2 "; });
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(container.textContent).toContain("Confirmar unión");
+    expect(joinByCode).not.toHaveBeenCalled();
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar unión")?.click());
+    expect(joinByCode).toHaveBeenCalledWith("VIAJE-X7K2");
+    expect(container.textContent).toContain("Te uniste al viaje");
+  });
+
+  it("guards the manual code and member screens before login", async () => {
+    const get = vi.fn();
+    const listMembers = vi.fn();
+    const join = await render("/trips/join", false, {});
+    expect(join.textContent).toContain("Iniciar sesión");
+    const members = await render(`/trips/${tripId}/members`, false, { get, listMembers });
+    expect(members.textContent).toContain("Iniciar sesión");
+    expect(get).not.toHaveBeenCalled();
+    expect(listMembers).not.toHaveBeenCalled();
+  });
   it("guards the Trip list without requesting private data before login", async () => {
     const list = vi.fn();
     const container = await render("/trips", false, { list });

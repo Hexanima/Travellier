@@ -18,6 +18,7 @@ export type TripConfigurationUpdate = {
 export type MemberTripDetail = TripSummary & {
   kind: "member";
   visibility: TripVisibility;
+  inviteCode: string;
   votingEnabled: boolean;
   expenseMode: TripExpenseMode;
 };
@@ -43,6 +44,7 @@ const isTripSummary = (value: unknown): value is TripSummary & Record<string, un
 const isMemberTrip = (value: unknown): value is Omit<MemberTripDetail, "kind"> =>
   isTripSummary(value) && isRecord(value) &&
   (value.visibility === "private" || value.visibility === "public") &&
+  typeof value.inviteCode === "string" && value.inviteCode.trim() !== "" &&
   typeof value.votingEnabled === "boolean" &&
   (value.expenseMode === "register" || value.expenseMode === "balance");
 
