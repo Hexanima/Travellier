@@ -12,3 +12,6 @@ export * from "./invalid-invite-code-error.js";
 export * from "./trip-member-not-found-error.js";
 export * from "./trip-not-found-error.js";
 export * from "./invite-code-conflict-error.js";
+export * from "./destination-not-found-error.js";
+export * from "./transport-not-found-error.js";
+export * from "./journey-conflict-error.js";
