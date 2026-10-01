@@ -1,4 +1,5 @@
 import { createTripWithAdmin, type TripExpenseMode, type TripVisibility } from "../../entities/trip.js";
+import { createTripDestination } from "../../entities/trip-destination.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
@@ -42,14 +43,23 @@ export interface UpdateTripConfigurationPayload extends GetTripPayload {
 
 export const createTrip: UseCase<CreateTripDependencies, CreateTripPayload, TripView, TaggedError> = {
   execute: async ({ trips, createId, createInviteCode, now }, payload) => {
-    if (payload.primaryDestination.trim() === "") {
-      return err(new ValidationError([{ field: "primaryDestination", code: "required", message: "Primary destination is required." }]));
-    }
-
     const tripId = createId();
     const creatorMembershipId = createId();
     const destinationId = createId();
     const createdAt = now();
+    const destination = createTripDestination({
+      id: destinationId,
+      tripId,
+      name: payload.primaryDestination,
+      order: 1,
+      createdAt,
+    });
+    if (!destination.ok) {
+      return err(new ValidationError(destination.error.issues.map((issue) => ({
+        ...issue,
+        field: issue.field === "name" ? "primaryDestination" : issue.field,
+      }))));
+    }
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const created = createTripWithAdmin({
@@ -63,18 +73,11 @@ export const createTrip: UseCase<CreateTripDependencies, CreateTripPayload, Trip
       });
       if (!created.ok) return created;
 
-      const primaryDestination = {
-        id: destinationId,
-        tripId,
-        name: payload.primaryDestination,
-        order: 1,
-        createdAt,
-      };
       const result = await trips.createWithAdminAndDestination({
         ...created.value,
-        primaryDestination,
+        primaryDestination: destination.value,
       });
-      if (result.ok) return ok({ ...created.value.trip, primaryDestination });
+      if (result.ok) return ok({ ...created.value.trip, primaryDestination: destination.value });
       if (result.error.tag !== "InviteCodeConflictError") return result;
     }
 
