@@ -70,6 +70,8 @@ describe("Mongo Trip journey repository", () => {
     expect(await database.collection("transports").countDocuments({})).toBe(0);
     const valid = transport(tripId, firstId);
     expect(await repository.insertTransport(valid)).toMatchObject({ ok: true, value: { id: valid.id } });
+    expect(await repository.findTransport(domainId(tripId), domainId(firstId), valid.id)).toMatchObject({ ok: true, value: { id: valid.id } });
+    expect(await repository.findTransport(domainId(otherTripId), domainId(firstId), valid.id)).toEqual({ ok: true, value: undefined });
     expect(await repository.replaceTransport({ ...valid, tripId: domainId(otherTripId) })).toEqual({ ok: true, value: undefined });
     expect(await repository.listTransports(domainId(tripId), domainId(firstId))).toMatchObject({ ok: true, value: [{ id: valid.id }] });
     expect(await repository.findDestination(domainId(otherTripId), domainId(firstId))).toEqual({ ok: true, value: undefined });

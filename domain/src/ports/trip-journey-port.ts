@@ -10,6 +10,7 @@ export interface TripJourneyPort<TError extends TaggedError = TaggedError> {
   findDestination: (tripId: ObjectId, destinationId: ObjectId) => AsyncResult<TripDestination | undefined, TError>;
   updateDestination: (tripId: ObjectId, destinationId: ObjectId, update: { name?: string; order?: number }) => AsyncResult<TripDestination | undefined, TError>;
   listTransports: (tripId: ObjectId, destinationId: ObjectId) => AsyncResult<Transport[], TError>;
+  findTransport: (tripId: ObjectId, destinationId: ObjectId, transportId: ObjectId) => AsyncResult<Transport | undefined, TError>;
   insertTransport: (transport: Transport) => AsyncResult<Transport | undefined, TError>;
   replaceTransport: (transport: Transport) => AsyncResult<Transport | undefined, TError>;
 }

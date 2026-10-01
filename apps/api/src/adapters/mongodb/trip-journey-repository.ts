@@ -100,6 +100,13 @@ export const createMongoTripJourneyRepository = (database: Db): TripJourneyPort 
         return ok(documents.map(toTransport));
       } catch (error) { return failure(error); }
     },
+    findTransport: async (tripId, destinationId, transportId) => {
+      try {
+        const document = await transports.findOne({ _id: new MongoObjectId(transportId), tripId: new MongoObjectId(tripId),
+          destinationId: new MongoObjectId(destinationId) });
+        return ok(document === null ? undefined : toTransport(document));
+      } catch (error) { return failure(error); }
+    },
     insertTransport: async (transport) => {
       const session = database.client.startSession();
       try {

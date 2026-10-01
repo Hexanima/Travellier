@@ -30,7 +30,8 @@ export interface JourneyTransportFields {
   details: Transport["details"];
 }
 export interface CreateJourneyTransportPayload extends DestinationContext, JourneyTransportFields {}
-export interface UpdateJourneyTransportPayload extends CreateJourneyTransportPayload { transportId: ObjectId }
+export type UpdateJourneyTransportPayload = DestinationContext & { transportId: ObjectId } &
+  Partial<Omit<JourneyTransportFields, "details">> & { details?: Record<string, unknown> };
 
 const authorize = async ({ members }: JourneyDependencies, { tripId, authenticatedUserId }: JourneyContext): AsyncResult<void> => {
   const membership = await members.findByTripAndUser(tripId, authenticatedUserId);
@@ -111,7 +112,24 @@ export const updateJourneyTransport: UseCase<JourneyDependencies, UpdateJourneyT
     const destination = await dependencies.journeys.findDestination(payload.tripId, payload.destinationId);
     if (!destination.ok) return destination;
     if (destination.value?.tripId !== payload.tripId) return err(new DestinationNotFoundError());
-    const candidate = createTransport(transportFromPayload(payload, payload.transportId));
+    const existing = await dependencies.journeys.findTransport(payload.tripId, payload.destinationId, payload.transportId);
+    if (!existing.ok) return existing;
+    if (existing.value?.id !== payload.transportId || existing.value.tripId !== payload.tripId ||
+      existing.value.destinationId !== payload.destinationId) return err(new TransportNotFoundError());
+    const current = existing.value;
+    const details = payload.details === undefined ? current.details :
+      payload.type !== undefined && payload.type !== current.type ? payload.details : { ...current.details, ...payload.details };
+    const candidate = createTransport(transportFromPayload({
+      authenticatedUserId: payload.authenticatedUserId, tripId: payload.tripId, destinationId: payload.destinationId,
+      direction: payload.direction === undefined ? current.direction : payload.direction,
+      type: payload.type === undefined ? current.type : payload.type,
+      departurePlace: payload.departurePlace === undefined ? current.departurePlace : payload.departurePlace,
+      departureAt: payload.departureAt === undefined ? current.departureAt : payload.departureAt,
+      arrivalPlace: payload.arrivalPlace === undefined ? current.arrivalPlace : payload.arrivalPlace,
+      arrivalAt: payload.arrivalAt === undefined ? current.arrivalAt : payload.arrivalAt,
+      costPerPerson: payload.costPerPerson === undefined ? current.costPerPerson : payload.costPerPerson,
+      details: details as Transport["details"],
+    }, payload.transportId));
     if (!candidate.ok) return candidate;
     const saved = await dependencies.journeys.replaceTransport(candidate.value);
     if (!saved.ok) return saved;

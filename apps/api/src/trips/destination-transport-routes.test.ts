@@ -45,6 +45,19 @@ describe("destination and transport routes", () => {
     expect(JSON.parse(listed.body)).toEqual({ transports: [{ id: transport }] });
   });
 
+  it("accepts a partial transport PATCH and rejects an empty update", async () => {
+    const updateTransport = vi.fn().mockResolvedValue(ok({ id: transport, arrivalPlace: "Nuevo destino" }));
+    const dependencies = { trips: { updateTransport } } as never;
+    const url = `/trips/${trip}/destinations/${destination}/transports/${transport}`;
+    const response = await handleApiRequest({ method: "PATCH", url, authenticatedUserId: actor as never,
+      body: JSON.stringify({ arrivalPlace: "Nuevo destino" }) }, dependencies);
+    expect(response.statusCode).toBe(200);
+    expect(updateTransport).toHaveBeenCalledWith({ authenticatedUserId: actor, tripId: trip, destinationId: destination,
+      transportId: transport, arrivalPlace: "Nuevo destino" });
+    expect((await handleApiRequest({ method: "PATCH", url, authenticatedUserId: actor as never, body: "{}" }, dependencies)).statusCode).toBe(400);
+    expect(updateTransport).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects malformed route IDs before accessing data", async () => {
     const listDestinations = vi.fn();
     const listTransports = vi.fn();

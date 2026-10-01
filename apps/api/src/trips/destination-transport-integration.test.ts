@@ -63,12 +63,16 @@ describe("local destination and transport API", () => {
       const savedTransport = (await saved.json() as { transport: { id: string } }).transport;
       expect((await post(transportPath, transportBody)).status).toBe(409);
       const updated = await fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
-        body: JSON.stringify({ ...transportBody, arrivalPlace: "Nuevo destino" }) });
+        body: JSON.stringify({ arrivalPlace: "Nuevo destino" }) });
       expect(updated.status).toBe(200);
-      expect(await updated.json()).toMatchObject({ transport: { id: savedTransport.id, arrivalPlace: "Nuevo destino" } });
+      expect(await updated.json()).toMatchObject({ transport: { id: savedTransport.id, arrivalPlace: "Nuevo destino",
+        departurePlace: transportBody.departurePlace, direction: transportBody.direction } });
+      const invalidTime = await fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
+        body: JSON.stringify({ arrivalAt: "2026-09-24T07:00:00Z" }) });
+      expect(invalidTime.status).toBe(422);
       expect((await fetch(`${base}${transportPath}`, { headers: outsiderHeaders })).status).toBe(404);
       expect(await (await fetch(`${base}${transportPath}`, { headers })).json()).toMatchObject({ transports: [
-        { id: savedTransport.id, arrivalPlace: "Nuevo destino" },
+        { id: savedTransport.id, arrivalPlace: "Nuevo destino", arrivalAt: transportBody.arrivalAt.replace("Z", ".000Z") },
       ] });
       expect((await fetch(`${base}/trips/${second.id}/destinations/${first.primaryDestination.id}/transports/${savedTransport.id}`,
         { method: "PATCH", headers, body: JSON.stringify(transportBody) })).status).toBe(404);

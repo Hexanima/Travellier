@@ -303,6 +303,28 @@ const transportPayload = (payload: Record<string, unknown>): JourneyTransportFie
   };
 };
 
+const transportUpdatePayload = (
+  payload: Record<string, unknown>,
+): Omit<UpdateJourneyTransportPayload, "authenticatedUserId" | "tripId" | "destinationId" | "transportId"> | undefined => {
+  const fields = ["direction", "type", "departurePlace", "departureAt", "arrivalPlace", "arrivalAt", "costPerPerson", "details"] as const;
+  const has = (field: typeof fields[number]) => Object.hasOwn(payload, field);
+  if (!fields.some(has) ||
+    (["direction", "type", "departurePlace", "departureAt", "arrivalPlace", "arrivalAt"] as const)
+      .some((field) => has(field) && !isString(payload[field])) ||
+    (has("costPerPerson") && !(payload.costPerPerson === null || typeof payload.costPerPerson === "number")) ||
+    (has("details") && (typeof payload.details !== "object" || payload.details === null || Array.isArray(payload.details)))) return undefined;
+  return {
+    ...(has("direction") ? { direction: payload.direction as JourneyTransportFields["direction"] } : {}),
+    ...(has("type") ? { type: payload.type as JourneyTransportFields["type"] } : {}),
+    ...(has("departurePlace") ? { departurePlace: payload.departurePlace as string } : {}),
+    ...(has("departureAt") ? { departureAt: new Date(payload.departureAt as string) } : {}),
+    ...(has("arrivalPlace") ? { arrivalPlace: payload.arrivalPlace as string } : {}),
+    ...(has("arrivalAt") ? { arrivalAt: new Date(payload.arrivalAt as string) } : {}),
+    ...(has("costPerPerson") ? { costPerPerson: payload.costPerPerson as number | null } : {}),
+    ...(has("details") ? { details: payload.details as Record<string, unknown> } : {}),
+  };
+};
+
 const profileUpdatePayload = (
   payload: Record<string, unknown>,
 ): { name?: string; avatar?: string | null } | undefined => {
@@ -433,7 +455,7 @@ export const handleApiRequest = async (
     if (transportDetailMatch && request.method === "PATCH" && destinationId?.ok) {
       const transportId = createObjectId(transportDetailMatch[3] ?? "");
       if (!transportId.ok) return invalidRequestResponse();
-      const input = payload === undefined ? undefined : transportPayload(payload);
+      const input = payload === undefined ? undefined : transportUpdatePayload(payload);
       if (input === undefined) return invalidRequestResponse();
       if (dependencies.trips?.updateTransport === undefined) return unavailableResponse();
       const result = await dependencies.trips.updateTransport({ authenticatedUserId: actor, tripId: tripId.value,

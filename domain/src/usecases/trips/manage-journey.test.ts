@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createObjectId, ok, type TripDestination, type Transport } from "../../index.js";
-import { createJourneyDestination, createJourneyTransport, listJourneyDestinations, updateJourneyDestination } from "./manage-journey.js";
+import { createJourneyDestination, createJourneyTransport, listJourneyDestinations, updateJourneyDestination, updateJourneyTransport } from "./manage-journey.js";
 
 const id = (value: string) => {
   const result = createObjectId(value);
@@ -61,5 +61,54 @@ describe("journey use cases", () => {
     const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId });
     expect(result).toEqual(ok(transport));
     expect(insertTransport).toHaveBeenCalledWith(transport);
+  });
+
+  it("merges a partial transport update with the stored transport", async () => {
+    const replaceTransport = vi.fn(async (value: Transport) => ok(value));
+    const findTransport = vi.fn(async () => ok(transport));
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+      findDestination: async () => ok(destination), findTransport, replaceTransport,
+    } } as never;
+    const result = await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
+      transportId: transport.id, arrivalPlace: "Nuevo destino" } as never);
+    expect(result).toEqual(ok({ ...transport, arrivalPlace: "Nuevo destino" }));
+    expect(replaceTransport).toHaveBeenCalledWith({ ...transport, arrivalPlace: "Nuevo destino" });
+    expect(findTransport).toHaveBeenCalledWith(tripId, destinationId, transport.id);
+  });
+
+  it("keeps omitted nested transport details for the same type", async () => {
+    const flight: Transport = { ...transport, type: "flight", details: { flightNumber: "LA1", airline: "LATAM" } };
+    const replaceTransport = vi.fn(async (value: Transport) => ok(value));
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+      findDestination: async () => ok(destination), findTransport: async () => ok(flight), replaceTransport,
+    } } as never;
+    expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
+      transportId: flight.id, details: { flightNumber: "LA2" } } as never)).toEqual(ok({ ...flight,
+      details: { flightNumber: "LA2", airline: "LATAM" },
+    }));
+  });
+
+  it("does not save a partial update that makes the transport invalid", async () => {
+    const replaceTransport = vi.fn();
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+      findDestination: async () => ok(destination), findTransport: async () => ok(transport), replaceTransport,
+    } } as never;
+    expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
+      transportId: transport.id, arrivalAt: new Date("2026-09-24T07:00:00Z") } as never)).toMatchObject({
+      ok: false, error: { tag: "ValidationError" },
+    });
+    expect(replaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("does not update a transport found outside the requested Trip", async () => {
+    const replaceTransport = vi.fn();
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+      findDestination: async () => ok(destination), findTransport: async () => ok({ ...transport, tripId: otherTripId }), replaceTransport,
+    } } as never;
+    expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
+      transportId: transport.id, arrivalPlace: "Nuevo destino" } as never)).toMatchObject({
+      ok: false, error: { tag: "TransportNotFoundError" },
+    });
+    expect(replaceTransport).not.toHaveBeenCalled();
   });
 });
