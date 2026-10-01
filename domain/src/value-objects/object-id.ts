@@ -16,5 +16,5 @@ export const createObjectId = (
     return err(new InvalidObjectIdError(value));
   }
 
-  return ok(value as ObjectId);
+  return ok(value.toLowerCase() as ObjectId);
 };

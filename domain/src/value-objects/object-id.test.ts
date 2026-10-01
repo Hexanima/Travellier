@@ -16,6 +16,13 @@ describe("ObjectId", () => {
     }
   });
 
+  it("normalizes uppercase hexadecimal to MongoDB's canonical lowercase form", () => {
+    expect(domain.createObjectId("507F1F77BCF86CD799439011")).toEqual({
+      ok: true,
+      value: "507f1f77bcf86cd799439011",
+    });
+  });
+
   it.each([
     "",
     "507f1f77bcf86cd79943901",

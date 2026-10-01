@@ -16,9 +16,24 @@ import {
   type RevokeSessionPayload,
   type JoinTripByCodePayload,
   type JoinTripByCodeResult,
+  type JoinPublicTripPayload,
+  type ListPublicTripsPayload,
+  type ResolveTripInvitationPayload,
+  type CreateTripPayload,
+  type GetTripPayload,
+  type ListUserTripsPayload,
+  type UpdateTripConfigurationPayload,
+  type TripView,
+  type TripDetail,
+  type PublicTripPreview,
+  type TripMemberSummary,
+  type ListTripMembersPayload,
+  type ExpelTripParticipantPayload,
+  createObjectId,
   ValidationError,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
+import { tripInvitationBridgePage, tripInvitationErrorPage } from "./trips/trip-invitation-page.js";
 
 export interface HealthResponse {
   app: "travellier";
@@ -60,11 +75,23 @@ export interface AuthenticationApi {
 
 export interface ApiDependencies {
   auth?: AuthenticationApi;
-  trips?: TripInvitationApi;
+  trips?: TripApi;
 }
 
 export interface TripInvitationApi {
   joinByCode: (payload: JoinTripByCodePayload) => AsyncResult<JoinTripByCodeResult>;
+  resolveInvitation?: (payload: ResolveTripInvitationPayload) => AsyncResult<void>;
+}
+
+export interface TripApi extends TripInvitationApi {
+  create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
+  get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
+  list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
+  listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
+  joinPublic?: (payload: JoinPublicTripPayload) => AsyncResult<JoinTripByCodeResult>;
+  updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
+  listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
+  expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
 }
 
 export type RequestAuthenticator = (
@@ -138,6 +165,24 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     });
   }
 
+  if (error.tag === "TripNotFoundError") {
+    return jsonResponse(404, {
+      error: { code: "TripNotFoundError", message: "Trip not found." },
+    });
+  }
+
+  if (error.tag === "TripMemberNotFoundError") {
+    return jsonResponse(404, {
+      error: { code: "TripMemberNotFoundError", message: "Trip member not found." },
+    });
+  }
+
+  if (error.tag === "UnauthorizedError") {
+    return jsonResponse(403, {
+      error: { code: "Forbidden", message: "This action is not allowed." },
+    });
+  }
+
   return jsonResponse(500, {
     error: {
       code: "InternalError",
@@ -187,6 +232,33 @@ const refreshTokenPayload = (
 ): RefreshSessionPayload | undefined =>
   isString(payload.refreshToken) ? { refreshToken: payload.refreshToken } : undefined;
 
+const createTripPayload = (payload: Record<string, unknown>): Omit<CreateTripPayload, "authenticatedUserId"> | undefined => {
+  if (!isString(payload.name) || !isString(payload.primaryDestination) ||
+    (Object.hasOwn(payload, "description") && !isString(payload.description) && payload.description !== null)) {
+    return undefined;
+  }
+  return {
+    name: payload.name,
+    primaryDestination: payload.primaryDestination,
+    ...(Object.hasOwn(payload, "description") ? { description: payload.description as string | null } : {}),
+  };
+};
+
+const configurationPayload = (payload: Record<string, unknown>): Omit<UpdateTripConfigurationPayload, "authenticatedUserId" | "tripId"> | undefined => {
+  const hasVisibility = Object.hasOwn(payload, "visibility");
+  const hasVoting = Object.hasOwn(payload, "votingEnabled");
+  const hasExpense = Object.hasOwn(payload, "expenseMode");
+  if ((!hasVisibility && !hasVoting && !hasExpense) ||
+    (hasVisibility && !isString(payload.visibility)) ||
+    (hasVoting && typeof payload.votingEnabled !== "boolean") ||
+    (hasExpense && !isString(payload.expenseMode))) return undefined;
+  return {
+    ...(hasVisibility ? { visibility: payload.visibility as UpdateTripConfigurationPayload["visibility"] } : {}),
+    ...(hasVoting ? { votingEnabled: payload.votingEnabled as boolean } : {}),
+    ...(hasExpense ? { expenseMode: payload.expenseMode as UpdateTripConfigurationPayload["expenseMode"] } : {}),
+  };
+};
+
 const profileUpdatePayload = (
   payload: Record<string, unknown>,
 ): { name?: string; avatar?: string | null } | undefined => {
@@ -211,7 +283,7 @@ const unavailableResponse = (): ApiResponse =>
   jsonResponse(503, {
     error: {
       code: "ServiceUnavailable",
-      message: "Authentication is not configured.",
+      message: "API service is not configured.",
     },
   });
 
@@ -237,8 +309,102 @@ export const handleApiRequest = async (
     return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
   }
 
+  if (request.method === "POST" && request.url === "/trips") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const input = payload === undefined ? undefined : createTripPayload(payload);
+    if (input === undefined) return invalidRequestResponse();
+    if (dependencies.trips?.create === undefined) return unavailableResponse();
+    const result = await dependencies.trips.create({ authenticatedUserId: request.authenticatedUserId, ...input });
+    return result.ok ? jsonResponse(201, { trip: result.value }) : errorResponse(result.error);
+  }
+
+  if (request.method === "GET" && request.url === "/trips") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (dependencies.trips?.list === undefined) return unavailableResponse();
+    const result = await dependencies.trips.list({ authenticatedUserId: request.authenticatedUserId });
+    return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  if (request.method === "GET" && request.url === "/trips/public") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (dependencies.trips?.listPublic === undefined) return unavailableResponse();
+    const result = await dependencies.trips.listPublic({ authenticatedUserId: request.authenticatedUserId });
+    return result.ok ? jsonResponse(200, { trips: result.value }) : errorResponse(result.error);
+  }
+
+  const publicJoinMatch = request.url?.match(/^\/trips\/([^/?]+)\/join$/);
+  if (request.method === "POST" && publicJoinMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(publicJoinMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.joinPublic === undefined) return unavailableResponse();
+    const result = await dependencies.trips.joinPublic({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  const membersMatch = request.url?.match(/^\/trips\/([^/?]+)\/members$/);
+  const expelMemberMatch = request.url?.match(/^\/trips\/([^/?]+)\/members\/([^/?]+)$/);
+  if ((request.method === "GET" && membersMatch) || (request.method === "DELETE" && expelMemberMatch)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((membersMatch ?? expelMemberMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (request.method === "GET") {
+      if (dependencies.trips?.listMembers === undefined) return unavailableResponse();
+      const result = await dependencies.trips.listMembers({
+        authenticatedUserId: request.authenticatedUserId,
+        tripId: tripId.value,
+      });
+      return result.ok
+        ? jsonResponse(200, { members: result.value, currentUserId: request.authenticatedUserId })
+        : errorResponse(result.error);
+    }
+    const targetUserId = createObjectId(expelMemberMatch?.[2] ?? "");
+    if (!targetUserId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.expelMember === undefined) return unavailableResponse();
+    const result = await dependencies.trips.expelMember({
+      tripId: tripId.value,
+      actorUserId: request.authenticatedUserId,
+      targetUserId: targetUserId.value,
+    });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+  }
+
+  const detailMatch = request.url?.match(/^\/trips\/([^/?]+)$/);
+  const configMatch = request.url?.match(/^\/trips\/([^/?]+)\/config$/);
+  if ((request.method === "GET" && detailMatch !== null && detailMatch !== undefined) ||
+    (request.method === "PATCH" && configMatch !== null && configMatch !== undefined)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((detailMatch ?? configMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (request.method === "GET") {
+      if (dependencies.trips?.get === undefined) return unavailableResponse();
+      const result = await dependencies.trips.get({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+      return result.ok ? jsonResponse(200, { trip: result.value }) : errorResponse(result.error);
+    }
+    const input = payload === undefined ? undefined : configurationPayload(payload);
+    if (input === undefined) return invalidRequestResponse();
+    if (dependencies.trips?.updateConfiguration === undefined) return unavailableResponse();
+    const result = await dependencies.trips.updateConfiguration({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value, ...input });
+    return result.ok ? jsonResponse(200, { trip: result.value }) : errorResponse(result.error);
+  }
+
   if (request.method === "GET" && request.url !== undefined) {
     const pathname = new URL(request.url, "http://localhost").pathname;
+    if (pathname === "/invite" || pathname.startsWith("/invite/")) {
+      const encodedCode = pathname.slice("/invite/".length);
+      let code: string;
+      try {
+        code = decodeURIComponent(encodedCode);
+      } catch {
+        return tripInvitationErrorPage(400);
+      }
+      if (!/^[A-Za-z0-9-]{1,64}$/.test(code)) return tripInvitationErrorPage(400);
+      if (dependencies.trips?.resolveInvitation === undefined) return tripInvitationErrorPage(503);
+      const result = await dependencies.trips.resolveInvitation({ code });
+      return result.ok
+        ? tripInvitationBridgePage(code)
+        : tripInvitationErrorPage(result.error.tag === "InvalidInviteCodeError" ? 404 : 500);
+    }
     if (pathname === "/auth/verify" || pathname.startsWith("/auth/verify/")) {
       const token = pathname.slice("/auth/verify/".length);
       if (token.length === 0 || token.length > 4_096 || !/^[A-Za-z0-9_.-]+$/.test(token)) {

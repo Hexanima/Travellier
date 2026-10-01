@@ -1,5 +1,5 @@
 import { Preferences } from '@capacitor/preferences'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import './App.css'
@@ -12,13 +12,21 @@ import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
+import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
+import { PublicTripConfirmationScreen, TripExploreScreen } from './trips/TripExploreScreen.js'
+import { TripJoinScreen } from './trips/TripJoinScreen.js'
+import { TripMembersScreen } from './trips/TripMembersScreen.js'
+import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
+import { createTripManagementApi, type TripManagementApi } from './trips/trip-management-api.js'
+import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-api.js'
 
 type AppProps = {
   auth?: Partial<AuthApi>
   apiBaseUrl?: string
   sessionStorage?: NativeSessionStorage
   nativeApp?: NativeAppUrlApi
-  trips?: Partial<TripInvitationApi>
+  trips?: Partial<TripInvitationApi & TripManagementApi>
+  members?: Partial<TripMembersApi>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -41,7 +49,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, members }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -52,7 +60,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const [launchChecked, setLaunchChecked] = useState(false)
   const deepLinkReceived = useRef(false)
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
-  const defaultTrips = useRef<TripInvitationApi | undefined>(undefined)
+  const defaultTrips = useRef<(TripInvitationApi & TripManagementApi) | undefined>(undefined)
+  const defaultMembers = useRef<TripMembersApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -77,11 +86,25 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       },
     })
     defaultAuth.current = createAuthApi(client)
-    defaultTrips.current = createTripInvitationApi(client)
+    defaultTrips.current = { ...createTripInvitationApi(client), ...createTripManagementApi(client) }
+    defaultMembers.current = createTripMembersApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
   const activeTrips = trips ?? defaultTrips.current
+  const activeMembers = members ?? defaultMembers.current
+  const tripManagement = useMemo<TripManagementApi>(() => ({
+    list: activeTrips?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    listPublic: activeTrips?.listPublic ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    joinPublic: activeTrips?.joinPublic ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    create: activeTrips?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    get: activeTrips?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    updateConfiguration: activeTrips?.updateConfiguration ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeTrips])
+  const tripMembers = useMemo<TripMembersApi>(() => ({
+    list: activeMembers?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    expel: activeMembers?.expel ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeMembers])
 
   useEffect(() => {
     if (!hasApiConfiguration || restoredSession.current) {
@@ -167,7 +190,41 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
         <Route path="/invite/:code" element={<InviteRoute sessionReady={sessionReady} hasSession={hasSession} trips={activeTrips} />} />
         <Route path="/verify/:token" element={<VerificationScreen />} />
-        <Route path="/trips/*" element={<ProtectedRoute onLocalLogout={onLocalLogout} />} />
+        <Route path="/trips" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripsListScreen trips={tripManagement} onLocalLogout={onLocalLogout} />
+          </TripRoute>
+        } />
+        <Route path="/trips/new" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <CreateTripScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/join" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripJoinScreen />
+          </TripRoute>
+        } />
+        <Route path="/trips/explore" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripExploreScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/explore/:tripId" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <PublicTripConfirmationScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/:tripId/members" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripMembersScreen trips={tripManagement} members={tripMembers} apiBaseUrl={apiBaseUrl} />
+          </TripRoute>
+        } />
+        <Route path="/trips/:tripId/config" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripConfigurationScreen trips={tripManagement} />
+          </TripRoute>
+        } />
         <Route path="/profile" element={
           !sessionReady
             ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
@@ -217,7 +274,7 @@ function InviteEntry({ sessionReady, hasSession, trips, code }: InviteEntryProps
           : !hasSession
             ? <p>Iniciá sesión para continuar. <Link to="/login" state={{ from: destination }}>Iniciar sesión</Link></p>
             : result?.ok
-              ? <><p>{result.value.joined ? 'Te uniste al viaje.' : 'Ya sos parte de este viaje.'}</p><Link to="/trips">Volver a viajes</Link></>
+              ? <><p>{result.value.joined ? 'Te uniste al viaje.' : 'Ya sos parte de este viaje.'}</p><Link to={`/trips/${result.value.tripId}/members`}>Ver miembros</Link></>
               : <>
                   <Button onClick={() => void confirmJoin()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
                   {result && !result.ok
@@ -270,18 +327,9 @@ function PublicHome() {
   )
 }
 
-function ProtectedRoute({ onLocalLogout }: { onLocalLogout: () => Promise<void> }) {
-  return (
-    <main className="app-shell">
-      <section className="status-panel">
-        <p className="eyebrow">Travellier</p>
-        <h1>Acceso protegido</h1>
-        <p className="domain-check">La sesión se integrará en el flujo de autenticación.</p>
-        <Link to="/profile">Mi perfil</Link>
-        <Button onClick={() => void onLocalLogout()}>Cerrar sesión</Button>
-      </section>
-    </main>
-  )
+function TripRoute({ sessionReady, hasSession, children }: { sessionReady: boolean; hasSession: boolean; children: ReactNode }) {
+  if (!sessionReady) return <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
+  return hasSession ? children : <Navigate to="/login" replace />
 }
 
 function NotFound() {

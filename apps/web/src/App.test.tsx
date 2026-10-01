@@ -46,15 +46,15 @@ describe("App", () => {
     expect(markup).toContain('type="password"');
   });
 
-  it("renders a protected route without reading an authentication session", () => {
+  it("waits for session restoration before showing private Trips", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/trips"]}>
         <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Acceso protegido");
-    expect(markup).toContain('href="/profile"');
+    expect(markup).toContain("Restaurando sesión…");
+    expect(markup).not.toContain("Mis viajes");
   });
 
   it("waits for session restoration before mounting the profile screen", () => {

@@ -51,6 +51,9 @@ const setValue = async (input: HTMLInputElement, value: string) => {
   });
 };
 
+const logoutButton = (container: HTMLElement) =>
+  Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Cerrar sesión");
+
 const createSessionStorage = (): NativeSessionStorage => ({
   clear: vi.fn().mockResolvedValue(undefined),
   read: vi.fn().mockResolvedValue(null),
@@ -171,7 +174,7 @@ describe("App authentication", () => {
       accessToken: "access-token",
       refreshToken: "refresh-token",
     });
-    expect(container.textContent).toContain("Acceso protegido");
+    expect(container.textContent).toContain("Mis viajes");
   });
 
   it("navigates from the public route after restoring a session", async () => {
@@ -201,7 +204,7 @@ describe("App authentication", () => {
       );
     });
 
-    expect(container.textContent).toContain("Acceso protegido");
+    expect(container.textContent).toContain("Mis viajes");
   });
 
   it("keeps the profile route when restoring a session", async () => {
@@ -375,6 +378,7 @@ describe("App authentication", () => {
     const root = createRoot(container);
     mountedRoots.push(root);
     const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({ accessToken: "access", refreshToken: "refresh" });
 
     await act(async () => {
       root.render(
@@ -385,7 +389,7 @@ describe("App authentication", () => {
     });
 
     await act(async () => {
-      container.querySelector("button")?.dispatchEvent(
+      logoutButton(container)?.dispatchEvent(
         new MouseEvent("click", { bubbles: true }),
       );
     });
@@ -394,7 +398,7 @@ describe("App authentication", () => {
     expect(container.textContent).toContain("Iniciar sesión");
   });
 
-  it("does not persist a restored session after local logout", async () => {
+  it("waits for refresh before allowing local logout", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -422,11 +426,8 @@ describe("App authentication", () => {
       );
     });
 
-    await act(async () => {
-      container.querySelector("button")?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
-    });
+    expect(logoutButton(container)).toBeUndefined();
+    expect(container.textContent).toContain("Restaurando sesión");
     await act(async () => {
       resolveRefresh({
         ok: true,
@@ -434,11 +435,15 @@ describe("App authentication", () => {
       });
     });
 
+    await act(async () => {
+      logoutButton(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
     expect(sessionStorage.clear).toHaveBeenCalledOnce();
-    expect(sessionStorage.save).not.toHaveBeenCalled();
+    expect(sessionStorage.save).toHaveBeenCalledOnce();
   });
 
-  it("clears the session after a pending restore save resolves following logout", async () => {
+  it("waits for a restored session save before allowing local logout", async () => {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -489,13 +494,13 @@ describe("App authentication", () => {
       });
     });
 
-    await act(async () => {
-      container.querySelector("button")?.dispatchEvent(
-        new MouseEvent("click", { bubbles: true }),
-      );
-    });
+    expect(logoutButton(container)).toBeUndefined();
     await act(async () => {
       resolveSave();
+    });
+
+    await act(async () => {
+      logoutButton(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     expect(persisted).toBe(false);
