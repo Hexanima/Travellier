@@ -29,6 +29,13 @@ import {
   type TripMemberSummary,
   type ListTripMembersPayload,
   type ExpelTripParticipantPayload,
+  type CreateJourneyDestinationPayload,
+  type UpdateJourneyDestinationPayload,
+  type CreateJourneyTransportPayload,
+  type UpdateJourneyTransportPayload,
+  type JourneyTransportFields,
+  type TripDestination,
+  type Transport,
   createObjectId,
   ValidationError,
 } from "app-domain";
@@ -92,6 +99,12 @@ export interface TripApi extends TripInvitationApi {
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
   listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
   expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
+  createDestination?: (payload: CreateJourneyDestinationPayload) => AsyncResult<TripDestination>;
+  listDestinations?: (payload: { authenticatedUserId: ObjectId; tripId: ObjectId }) => AsyncResult<TripDestination[]>;
+  updateDestination?: (payload: UpdateJourneyDestinationPayload) => AsyncResult<TripDestination>;
+  createTransport?: (payload: CreateJourneyTransportPayload) => AsyncResult<Transport>;
+  listTransports?: (payload: { authenticatedUserId: ObjectId; tripId: ObjectId; destinationId: ObjectId }) => AsyncResult<Transport[]>;
+  updateTransport?: (payload: UpdateJourneyTransportPayload) => AsyncResult<Transport>;
 }
 
 export type RequestAuthenticator = (
@@ -177,6 +190,13 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     });
   }
 
+  if (error.tag === "DestinationNotFoundError" || error.tag === "TransportNotFoundError") {
+    return jsonResponse(404, { error: { code: error.tag, message: "Journey resource not found." } });
+  }
+  if (error.tag === "JourneyConflictError") {
+    return jsonResponse(409, { error: { code: error.tag, message: "Journey resource already exists." } });
+  }
+
   if (error.tag === "UnauthorizedError") {
     return jsonResponse(403, {
       error: { code: "Forbidden", message: "This action is not allowed." },
@@ -256,6 +276,30 @@ const configurationPayload = (payload: Record<string, unknown>): Omit<UpdateTrip
     ...(hasVisibility ? { visibility: payload.visibility as UpdateTripConfigurationPayload["visibility"] } : {}),
     ...(hasVoting ? { votingEnabled: payload.votingEnabled as boolean } : {}),
     ...(hasExpense ? { expenseMode: payload.expenseMode as UpdateTripConfigurationPayload["expenseMode"] } : {}),
+  };
+};
+
+const destinationUpdatePayload = (payload: Record<string, unknown>): Pick<UpdateJourneyDestinationPayload, "name" | "order"> | undefined => {
+  const hasName = Object.hasOwn(payload, "name");
+  const hasOrder = Object.hasOwn(payload, "order");
+  if ((!hasName && !hasOrder) || (hasName && !isString(payload.name)) || (hasOrder && typeof payload.order !== "number")) return undefined;
+  return { ...(hasName ? { name: payload.name as string } : {}), ...(hasOrder ? { order: payload.order as number } : {}) };
+};
+
+const transportPayload = (payload: Record<string, unknown>): JourneyTransportFields | undefined => {
+  if (!isString(payload.direction) || !isString(payload.type) || !isString(payload.departurePlace) ||
+    !isString(payload.departureAt) || !isString(payload.arrivalPlace) || !isString(payload.arrivalAt) ||
+    !(payload.costPerPerson === null || typeof payload.costPerPerson === "number") ||
+    typeof payload.details !== "object" || payload.details === null || Array.isArray(payload.details)) return undefined;
+  return {
+    direction: payload.direction as JourneyTransportFields["direction"],
+    type: payload.type as JourneyTransportFields["type"],
+    departurePlace: payload.departurePlace,
+    departureAt: new Date(payload.departureAt),
+    arrivalPlace: payload.arrivalPlace,
+    arrivalAt: new Date(payload.arrivalAt),
+    costPerPerson: payload.costPerPerson,
+    details: payload.details as JourneyTransportFields["details"],
   };
 };
 
@@ -340,6 +384,62 @@ export const handleApiRequest = async (
     if (dependencies.trips?.joinPublic === undefined) return unavailableResponse();
     const result = await dependencies.trips.joinPublic({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  const destinationListMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations$/);
+  const destinationDetailMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations\/([^/?]+)$/);
+  const transportListMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations\/([^/?]+)\/transports$/);
+  const transportDetailMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations\/([^/?]+)\/transports\/([^/?]+)$/);
+  if (destinationListMatch || destinationDetailMatch || transportListMatch || transportDetailMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((destinationListMatch ?? destinationDetailMatch ?? transportListMatch ?? transportDetailMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    const destinationId = destinationDetailMatch || transportListMatch || transportDetailMatch
+      ? createObjectId((destinationDetailMatch ?? transportListMatch ?? transportDetailMatch)?.[2] ?? "") : undefined;
+    if (destinationId !== undefined && !destinationId.ok) return invalidRequestResponse();
+    const actor = request.authenticatedUserId;
+    if (destinationListMatch && request.method === "GET") {
+      if (dependencies.trips?.listDestinations === undefined) return unavailableResponse();
+      const result = await dependencies.trips.listDestinations({ authenticatedUserId: actor, tripId: tripId.value });
+      return result.ok ? jsonResponse(200, { destinations: result.value }) : errorResponse(result.error);
+    }
+    if (destinationListMatch && request.method === "POST") {
+      if (payload === undefined || !isString(payload.name)) return invalidRequestResponse();
+      if (dependencies.trips?.createDestination === undefined) return unavailableResponse();
+      const result = await dependencies.trips.createDestination({ authenticatedUserId: actor, tripId: tripId.value, name: payload.name });
+      return result.ok ? jsonResponse(201, { destination: result.value }) : errorResponse(result.error);
+    }
+    if (destinationDetailMatch && request.method === "PATCH" && destinationId?.ok) {
+      const update = payload === undefined ? undefined : destinationUpdatePayload(payload);
+      if (update === undefined) return invalidRequestResponse();
+      if (dependencies.trips?.updateDestination === undefined) return unavailableResponse();
+      const result = await dependencies.trips.updateDestination({ authenticatedUserId: actor, tripId: tripId.value, destinationId: destinationId.value, ...update });
+      return result.ok ? jsonResponse(200, { destination: result.value }) : errorResponse(result.error);
+    }
+    if (transportListMatch && destinationId?.ok) {
+      if (request.method === "GET") {
+        if (dependencies.trips?.listTransports === undefined) return unavailableResponse();
+        const result = await dependencies.trips.listTransports({ authenticatedUserId: actor, tripId: tripId.value, destinationId: destinationId.value });
+        return result.ok ? jsonResponse(200, { transports: result.value }) : errorResponse(result.error);
+      }
+      if (request.method === "POST") {
+        const input = payload === undefined ? undefined : transportPayload(payload);
+        if (input === undefined) return invalidRequestResponse();
+        if (dependencies.trips?.createTransport === undefined) return unavailableResponse();
+        const result = await dependencies.trips.createTransport({ authenticatedUserId: actor, tripId: tripId.value, destinationId: destinationId.value, ...input });
+        return result.ok ? jsonResponse(201, { transport: result.value }) : errorResponse(result.error);
+      }
+    }
+    if (transportDetailMatch && request.method === "PATCH" && destinationId?.ok) {
+      const transportId = createObjectId(transportDetailMatch[3] ?? "");
+      if (!transportId.ok) return invalidRequestResponse();
+      const input = payload === undefined ? undefined : transportPayload(payload);
+      if (input === undefined) return invalidRequestResponse();
+      if (dependencies.trips?.updateTransport === undefined) return unavailableResponse();
+      const result = await dependencies.trips.updateTransport({ authenticatedUserId: actor, tripId: tripId.value,
+        destinationId: destinationId.value, transportId: transportId.value, ...input });
+      return result.ok ? jsonResponse(200, { transport: result.value }) : errorResponse(result.error);
+    }
   }
 
   const membersMatch = request.url?.match(/^\/trips\/([^/?]+)\/members$/);

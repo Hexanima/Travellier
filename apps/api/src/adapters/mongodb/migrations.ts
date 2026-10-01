@@ -5,6 +5,7 @@ import {
 } from "mongodb";
 
 export const MONGO_MIGRATION_ID = "0001-create-prd-schema";
+export const JOURNEY_MIGRATION_ID = "0002-unique-journey-order-and-direction";
 
 type CollectionSchema = {
   name: string;
@@ -164,20 +165,31 @@ export const migrateMongoSchema = async (database: Db): Promise<void> => {
   );
   await migrations.createIndex({ id: 1 }, { name: "id_unique", unique: true });
 
-  if (await migrations.findOne({ id: MONGO_MIGRATION_ID })) {
-    return;
-  }
-
-  for (const schema of collectionSchemas) {
-    await ensureCollection(database, schema.name);
-    await database.collection(schema.name).createIndexes(schema.indexes);
-  }
-
-  try {
-    await migrations.insertOne({ id: MONGO_MIGRATION_ID, appliedAt: new Date() });
-  } catch (error) {
-    if (!(error instanceof MongoServerError) || error.code !== 11000) {
-      throw error;
+  if (!(await migrations.findOne({ id: MONGO_MIGRATION_ID }))) {
+    for (const schema of collectionSchemas) {
+      await ensureCollection(database, schema.name);
+      await database.collection(schema.name).createIndexes(schema.indexes);
     }
+    await migrations.insertOne({ id: MONGO_MIGRATION_ID, appliedAt: new Date() });
+  }
+
+  if (!(await migrations.findOne({ id: JOURNEY_MIGRATION_ID }))) {
+    const destinations = database.collection("destinations");
+    const duplicates = await destinations.aggregate([
+      { $group: { _id: { tripId: "$tripId", order: "$order" }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 1 },
+    ]).next();
+    if (duplicates !== null) throw new Error("Duplicate destination positions must be resolved before migration.");
+
+    const indexes = await destinations.listIndexes().toArray();
+    if (indexes.some((index) => index.name === "tripId_order" && index.unique !== true)) {
+      await destinations.dropIndex("tripId_order");
+    }
+    await destinations.createIndex({ tripId: 1, order: 1 }, { name: "tripId_order", unique: true });
+    await database.collection("transports").createIndex(
+      { destinationId: 1, direction: 1 }, { name: "destinationId_direction_unique", unique: true },
+    );
+    await migrations.insertOne({ id: JOURNEY_MIGRATION_ID, appliedAt: new Date() });
   }
 };
