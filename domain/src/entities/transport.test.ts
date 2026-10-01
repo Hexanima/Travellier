@@ -72,6 +72,21 @@ describe("createTransport", () => {
     issue({ ...local, details: { steps: [{ ...local.details.steps[0], [field]: " " }] } }, `details.steps[0].${field}`, "required");
   });
 
+  it.each(["mañana", "24:00", "09:60", "9:00", "09:00Z", "09:00:00"])(
+    "rejects an invalid urban step time %s",
+    (estimatedTime) => {
+      issue({
+        ...local,
+        details: { steps: [local.details.steps[0], { ...local.details.steps[1], estimatedTime }] },
+      }, "details.steps[1].estimatedTime", "invalid");
+    },
+  );
+
+  it.each(["00:00", "23:59"])("accepts boundary urban step time %s", (estimatedTime) => {
+    const input = { ...local, details: { steps: [{ ...local.details.steps[0], estimatedTime }] } };
+    expect(createTransport(input)).toEqual({ ok: true, value: input });
+  });
+
   it("rejects details from a different transport type", () => {
     issue({ ...common, type: "flight", details: local.details }, "details", "invalid");
     issue({ ...common, type: "bus_long", details: local.details }, "details", "invalid");

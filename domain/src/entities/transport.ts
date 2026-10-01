@@ -9,6 +9,7 @@ export interface UrbanTransportStep {
   line: string;
   fromStop: string;
   toStop: string;
+  /** Local 24-hour clock time in HH:mm format. */
   estimatedTime: string;
 }
 
@@ -44,6 +45,8 @@ const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]): b
 
 const validOptionalText = (value: unknown): boolean =>
   value === undefined || value === null || (typeof value === "string" && value.trim() !== "");
+
+const localTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 export const createTransport = (
   input: CreateTransportInput,
@@ -87,6 +90,9 @@ export const createTransport = (
           if (!isRecord(step) || typeof step[field] !== "string" || step[field].trim() === "") {
             return invalid(`details.steps[${index}].${field}`, "required", `Urban bus step ${field} is required.`);
           }
+        }
+        if (!localTimePattern.test(step.estimatedTime)) {
+          return invalid(`details.steps[${index}].estimatedTime`, "invalid", "Urban bus step time must use HH:mm format.");
         }
       }
       break;

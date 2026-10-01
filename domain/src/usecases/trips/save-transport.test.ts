@@ -45,6 +45,23 @@ describe("saveTransport", () => {
     expect(saved).toEqual([]);
   });
 
+  it("does not call persistence for an invalid urban step time", async () => {
+    const saved: unknown[] = [];
+    const invalid: CreateTransportInput = {
+      ...transport,
+      details: { steps: [{ ...transport.details.steps[0], estimatedTime: "mañana" }] },
+    };
+    const result = await saveTransport.execute({
+      transports: { save: async (value: unknown) => { saved.push(value); return ok(undefined); } },
+    }, invalid);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { tag: "ValidationError", issues: [{ field: "details.steps[0].estimatedTime", code: "invalid" }] },
+    });
+    expect(saved).toEqual([]);
+  });
+
   it("saves a valid transport once and returns it", async () => {
     const saved: unknown[] = [];
     const result = await saveTransport.execute({
