@@ -24,10 +24,13 @@ export type MemberTripDetail = TripSummary & {
 };
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
 export type TripDetail = MemberTripDetail | PublicTripDetail;
+export type PublicTripJoinResult = { tripId: string; joined: boolean };
 export type TripFailure = { kind: ApiErrorKind; fields?: readonly { field: string; message: string }[] };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;
+  listPublic: () => Promise<TripResult<PublicTripDetail[]>>;
+  joinPublic: (tripId: string) => Promise<TripResult<PublicTripJoinResult>>;
   create: (input: CreateTripInput) => Promise<TripResult<TripSummary>>;
   get: (tripId: string) => Promise<TripResult<TripDetail>>;
   updateConfiguration: (tripId: string, input: TripConfigurationUpdate) => Promise<TripResult<MemberTripDetail>>;
@@ -50,11 +53,24 @@ const isMemberTrip = (value: unknown): value is Omit<MemberTripDetail, "kind"> =
 
 const isPublicTrip = (value: unknown): value is Omit<PublicTripDetail, "kind"> =>
   isTripSummary(value) && isRecord(value) && value.visibility === "public" &&
-  !("votingEnabled" in value) && !("expenseMode" in value);
+  !("inviteCode" in value) && !("votingEnabled" in value) && !("expenseMode" in value) &&
+  !("createdBy" in value) && !("createdAt" in value);
+
+const toPublicTrip = (value: Omit<PublicTripDetail, "kind">): PublicTripDetail => ({
+  id: value.id,
+  name: value.name,
+  description: value.description,
+  visibility: "public",
+  primaryDestination: { name: value.primaryDestination.name },
+  kind: "public",
+});
+
+const isPublicJoinResult = (value: unknown): value is PublicTripJoinResult =>
+  isRecord(value) && typeof value.tripId === "string" && typeof value.joined === "boolean";
 
 const parseTripDetail = (value: unknown): TripDetail | undefined => {
   if (isMemberTrip(value)) return { ...value, kind: "member" };
-  if (isPublicTrip(value)) return { ...value, kind: "public" };
+  if (isPublicTrip(value)) return toPublicTrip(value);
   return undefined;
 };
 
@@ -69,6 +85,20 @@ export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" 
     if (!result.ok) return { ok: false, error: toFailure(result.error) };
     return isRecord(result.value) && Array.isArray(result.value.trips) && result.value.trips.every(isTripSummary)
       ? { ok: true, value: result.value.trips }
+      : { ok: false, error: { kind: "server" } };
+  },
+  listPublic: async () => {
+    const result = await client.get<unknown>("/trips/public");
+    if (!result.ok) return { ok: false, error: toFailure(result.error) };
+    return isRecord(result.value) && Array.isArray(result.value.trips) && result.value.trips.every(isPublicTrip)
+      ? { ok: true, value: result.value.trips.map(toPublicTrip) }
+      : { ok: false, error: { kind: "server" } };
+  },
+  joinPublic: async (tripId) => {
+    const result = await client.post<unknown>(`/trips/${encodeURIComponent(tripId)}/join`);
+    if (!result.ok) return { ok: false, error: toFailure(result.error) };
+    return isPublicJoinResult(result.value) && result.value.tripId === tripId
+      ? { ok: true, value: result.value }
       : { ok: false, error: { kind: "server" } };
   },
   create: async (input) => {

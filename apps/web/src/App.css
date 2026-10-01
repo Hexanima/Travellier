@@ -146,7 +146,8 @@ dd {
 }
 
 .trips-create-link:hover { background: #1c4c42; }
-.trips-join-link { display: inline-block; margin: 0 0 24px; color: #286053; font-weight: 700; text-underline-offset: 3px; }
+.trips-entry-actions { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 24px; }
+.trips-join-link { display: inline-block; color: #286053; font-weight: 700; text-underline-offset: 3px; }
 .trips-create-link:focus-visible,
 .trips-back:focus-visible,
 .trips-join-link:focus-visible,
@@ -186,10 +187,26 @@ dd {
 .trips-secondary { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
 .trips-back { display: inline-block; margin-bottom: 28px; }
 
+.trip-public-preview {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid #d6dde3;
+  border-radius: 8px;
+  background: #fff;
+}
+.trip-public-preview h2 { margin: 0; font-size: 1.5rem; }
+.trip-public-preview p { margin: 0; line-height: 1.5; }
+.trip-public-preview .trips-description { color: #526270; }
+.trip-public-preview .ui-button { margin-top: 8px; }
+.trip-public-preview a:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
+
 @media (max-width: 540px) {
   .trips-header { align-items: stretch; flex-direction: column; }
   .trips-create-link { align-self: flex-start; }
   .trips-empty { padding: 20px; }
   .trips-item { align-items: flex-start; flex-direction: column; }
   .trip-member-admin-row { align-items: flex-start; flex-direction: column; }
+  .trip-public-preview { padding: 20px; }
 }

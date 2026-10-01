@@ -26,6 +26,36 @@ describe("createTripManagementApi", () => {
     expect(get).toHaveBeenCalledWith("/trips");
   });
 
+  it("loads only limited public Trip previews", async () => {
+    const publicTrip = { ...trip, visibility: "public" };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [publicTrip] } });
+    const api = createTripManagementApi({ get, post: vi.fn() } as never);
+
+    expect(await api.listPublic?.()).toEqual({ ok: true, value: [{ ...publicTrip, kind: "public" }] });
+    expect(get).toHaveBeenCalledWith("/trips/public");
+  });
+
+  it("does not accept private Trips or extra member fields in discovery", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [
+      { ...trip, visibility: "private" },
+      { ...trip, visibility: "public", inviteCode: "VIAJE-SECRET" },
+    ] } });
+    const api = createTripManagementApi({ get, post: vi.fn() } as never);
+
+    expect(await api.listPublic?.()).toEqual({ ok: false, error: { kind: "server" } });
+  });
+
+  it("joins a public Trip by ID and validates the response", async () => {
+    const post = vi.fn()
+      .mockResolvedValueOnce({ ok: true, value: { tripId: trip.id, joined: true } })
+      .mockResolvedValueOnce({ ok: true, value: { tripId: trip.id, joined: "yes" } });
+    const api = createTripManagementApi({ get: vi.fn(), post } as never);
+
+    expect(await api.joinPublic?.(trip.id)).toEqual({ ok: true, value: { tripId: trip.id, joined: true } });
+    expect(post).toHaveBeenCalledWith(`/trips/${trip.id}/join`);
+    expect(await api.joinPublic?.(trip.id)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+
   it("creates a Trip without sending dates", async () => {
     const post = vi.fn().mockResolvedValue({ ok: true, value: { trip } });
     const api = createTripManagementApi({ get: vi.fn(), post } as never);
