@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ok } from "app-domain";
+import { err, ItineraryConflictError, ok } from "app-domain";
 import { handleApiRequest } from "../app.js";
 
 const actor = "507f1f77bcf86cd799439011";
@@ -8,6 +8,14 @@ const destination = "507f1f77bcf86cd799439013";
 const transport = "507f1f77bcf86cd799439014";
 
 describe("destination and transport routes", () => {
+  it("returns a specific 409 for incompatible itinerary mutations", async () => {
+    const updateTransport = vi.fn().mockResolvedValue(err(new ItineraryConflictError()));
+    const response = await handleApiRequest({ method: "PATCH", url: `/trips/${trip}/destinations/${destination}/transports/${transport}`,
+      authenticatedUserId: actor as never, body: JSON.stringify({ arrivalAt: "2026-09-25T12:00:00Z" }) },
+    { trips: { updateTransport } } as never);
+    expect(response.statusCode).toBe(409);
+    expect(JSON.parse(response.body)).toMatchObject({ error: { code: "ItineraryConflictError" } });
+  });
   it("creates and lists destinations with the JWT actor and path Trip", async () => {
     const createDestination = vi.fn().mockResolvedValue(ok({ id: destination, tripId: trip, name: "Córdoba", order: 2 }));
     const listDestinations = vi.fn().mockResolvedValue(ok([{ id: destination, tripId: trip, name: "Córdoba", order: 2 }]));

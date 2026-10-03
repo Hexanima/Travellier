@@ -45,7 +45,7 @@ export const createTripApi = (database: Db): TripApi => {
   const members = createMongoTripMemberRepository(database);
   const publicJoinMembers = createMongoTripInvitationRepositories(database).members;
   const journeys = createMongoTripJourneyRepository(database);
-  const journeyDependencies = { journeys, members };
+  const journeyDependencies = { journeys, members, createId };
   return {
     ...createTripInvitationApi(database),
     create: (payload) => createTrip.execute({ trips, createId, createInviteCode, now: () => new Date() }, payload),

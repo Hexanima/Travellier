@@ -5,6 +5,7 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 import {
   MONGO_MIGRATION_ID,
   JOURNEY_MIGRATION_ID,
+  ITINERARY_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
 
@@ -134,7 +135,7 @@ describe("MongoDB schema migration", () => {
       [...prdCollections, "_migrations"].sort(),
     );
     expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
-      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID].sort(),
+      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID].sort(),
     );
   });
 
@@ -178,6 +179,33 @@ describe("MongoDB schema migration", () => {
       }),
     ).toBe(1);
     expect(await database.collection("_migrations").countDocuments({ id: JOURNEY_MIGRATION_ID })).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: ITINERARY_MIGRATION_ID })).toBe(1);
+  });
+
+  it("enforces itinerary identity while allowing different types and destinations on one date", async () => {
+    await migrateMongoSchema(database);
+    const collection = database.collection("itineraryDays");
+    const day = { tripId: "trip", destinationId: "destination", date: new Date("2026-09-25T00:00:00Z"), type: "activity", order: 1 };
+    await collection.insertOne({ ...day });
+    await expect(collection.insertOne({ ...day, order: 2 })).rejects.toMatchObject({ code: 11000 });
+    await collection.insertOne({ ...day, type: "transit_out", order: 2 });
+    await collection.insertOne({ ...day, destinationId: "other", order: 3 });
+    expect(await collection.countDocuments({})).toBe(3);
+  });
+
+  it("refuses historical duplicate itinerary identities without deleting their references", async () => {
+    await migrateMongoSchema(database);
+    const collection = database.collection("itineraryDays");
+    const indexes = await collection.listIndexes().toArray();
+    for (const index of indexes.filter((index) => index.unique && index.name !== "_id_")) await collection.dropIndex(index.name!);
+    await database.collection("_migrations").deleteOne({ id: "0003-unique-itinerary-identity" });
+    const day = { tripId: "trip", destinationId: "destination", date: new Date("2026-09-25T00:00:00Z"), type: "activity" };
+    const inserted = await collection.insertMany([{ ...day }, { ...day }]);
+    await database.collection("posts").insertOne({ dayId: inserted.insertedIds[0] });
+    await expect(migrateMongoSchema(database)).rejects.toThrow("Duplicate itinerary identities");
+    expect(await collection.countDocuments({})).toBe(2);
+    expect(await database.collection("posts").countDocuments({})).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: "0003-unique-itinerary-identity" })).toBe(0);
   });
 
   it("enforces unique destination positions per Trip and transport directions per destination", async () => {

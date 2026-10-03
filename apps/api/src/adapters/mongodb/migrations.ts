@@ -6,6 +6,7 @@ import {
 
 export const MONGO_MIGRATION_ID = "0001-create-prd-schema";
 export const JOURNEY_MIGRATION_ID = "0002-unique-journey-order-and-direction";
+export const ITINERARY_MIGRATION_ID = "0003-unique-itinerary-identity";
 
 type CollectionSchema = {
   name: string;
@@ -191,5 +192,17 @@ export const migrateMongoSchema = async (database: Db): Promise<void> => {
       { destinationId: 1, direction: 1 }, { name: "destinationId_direction_unique", unique: true },
     );
     await migrations.insertOne({ id: JOURNEY_MIGRATION_ID, appliedAt: new Date() });
+  }
+
+  if (!(await migrations.findOne({ id: ITINERARY_MIGRATION_ID }))) {
+    const days = database.collection("itineraryDays");
+    const duplicates = await days.aggregate([
+      { $group: { _id: { tripId: "$tripId", destinationId: "$destinationId", date: "$date", type: "$type" }, count: { $sum: 1 } } },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 1 },
+    ]).next();
+    if (duplicates !== null) throw new Error("Duplicate itinerary identities must be resolved before migration.");
+    await days.createIndex({ tripId: 1, destinationId: 1, date: 1, type: 1 }, { name: "itinerary_identity_unique", unique: true });
+    await migrations.insertOne({ id: ITINERARY_MIGRATION_ID, appliedAt: new Date() });
   }
 };
