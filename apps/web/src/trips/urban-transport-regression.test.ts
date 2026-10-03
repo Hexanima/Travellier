@@ -46,11 +46,39 @@ describe("urban step conversion", () => {
         .toMatchObject({ ok: true, value: { details: input.details } });
     } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
   });
-  it("rejects a new local clock in a daylight-saving gap", () => {
+  it.each(["03:00", "03:30", "04:00"])("rolls a 02:30 step to the next day after a DST-gap day departure at %s", (departureTime) => {
     const previous = process.env.TZ;
     try {
       process.env.TZ = "America/New_York";
-      const values = { ...formValuesFromTransport(canonical()), departureAt: "2026-03-08T01:30", arrivalAt: "2026-03-08T04:00",
+      const values = { ...formValuesFromTransport(canonical()), departureAt: `2026-03-08T${departureTime}`, arrivalAt: "2026-03-09T04:00",
+        steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "02:30" }] };
+      expect(prepareTransportInput(values, "outbound")).toMatchObject({ ok: true,
+        value: { details: { steps: [{ estimatedAt: "2026-03-09T06:30:00.000Z" }] } } });
+    } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+  });
+  it("resolves the rollover from the previous step on a DST-gap day", () => {
+    const previous = process.env.TZ;
+    try {
+      process.env.TZ = "America/New_York";
+      const values = { ...formValuesFromTransport(canonical()), departureAt: "2026-03-08T01:00", arrivalAt: "2026-03-09T04:00",
+        steps: [
+          { line: "1", fromStop: "A", toStop: "B", estimatedTime: "03:30" },
+          { line: "2", fromStop: "B", toStop: "C", estimatedTime: "02:30" },
+        ] };
+      expect(prepareTransportInput(values, "outbound")).toMatchObject({ ok: true,
+        value: { details: { steps: [
+          { estimatedAt: "2026-03-08T07:30:00.000Z" }, { estimatedAt: "2026-03-09T06:30:00.000Z" },
+        ] } } });
+    } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+  });
+  it.each([
+    ["2026-03-08T01:30", "2026-03-08T04:00"],
+    ["2026-03-07T23:30", "2026-03-08T04:00"],
+  ])("rejects a new local clock in a daylight-saving gap after %s", (departureAt, arrivalAt) => {
+    const previous = process.env.TZ;
+    try {
+      process.env.TZ = "America/New_York";
+      const values = { ...formValuesFromTransport(canonical()), departureAt, arrivalAt,
         steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "02:30" }] };
       expect(prepareTransportInput(values, "outbound")).toMatchObject({ ok: false,
         errors: { "details.steps[0].estimatedTime": expect.any(String) } });

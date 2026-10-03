@@ -65,8 +65,13 @@ const resolveDateTime = (value: string, original?: string) => {
 const localStepInstant = (previousAt: Date, hours: number, minutes: number): Date => {
   let candidate = new Date(previousAt);
   candidate.setHours(hours, minutes, 0, 0);
-  if (candidate.getHours() !== hours || candidate.getMinutes() !== minutes) return new Date(Number.NaN);
-  if (candidate < previousAt) {
+  if (candidate.getHours() !== hours || candidate.getMinutes() !== minutes) {
+    // Resolve an earlier wall clock on the next day before rejecting a DST gap.
+    if (hours * 60 + minutes >= previousAt.getHours() * 60 + previousAt.getMinutes()) return new Date(Number.NaN);
+    candidate = new Date(previousAt);
+    candidate.setDate(candidate.getDate() + 1);
+    candidate.setHours(hours, minutes, 0, 0);
+  } else if (candidate < previousAt) {
     // A backward clock change can repeat this hour before the next calendar day.
     const laterOffset = new Date(candidate.getTime() + 86_400_000).getTimezoneOffset();
     const repeated = new Date(candidate.getTime() + (laterOffset - candidate.getTimezoneOffset()) * 60_000);
