@@ -39,6 +39,24 @@ describe("itinerary screen", () => {
     expect(container.querySelector('[data-itinerary-expenses]')?.textContent).toContain("25,5");
     expect(container.querySelector('[data-itinerary-expenses]')?.textContent).not.toContain("999");
   });
+  it.each([
+    ["register", 0.1, 0.2, "0,3", "0,1"],
+    ["balance", 0.1, 0.2, "0,3", "0,1"],
+    ["register", 10.005, 0, "10,01", "10,01"],
+    ["balance", 10.005, 0, "10,01", "10,01"],
+    ["register", 1234.56, 0.01, "1.234,57", "1.234,56"],
+    ["balance", 1234.56, 0.01, "1.234,57", "1.234,56"],
+  ] as const)("formats daily expenses without floating point artifacts in %s: %s + %s", async (expenseMode, first, second, expectedTotal, expectedPost) => {
+    const value = fixture(); value.expenseMode = expenseMode;
+    value.posts[0].expense!.totalAmount = first;
+    value.posts[1].expense = { ...value.posts[0].expense!, id: itineraryId(30), postId: value.posts[1].id, totalAmount: second };
+    const before = JSON.stringify(value);
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    expect(container.querySelector('[data-itinerary-expenses] .itinerary-expense-total strong')?.textContent).toBe(expectedTotal);
+    expect(container.querySelector('[data-itinerary-expenses] .itinerary-expense-total span')?.textContent).toBe("2 gastos registrados");
+    expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] .itinerary-post-expense strong`)?.textContent).toBe(`Gasto: ${expectedPost}`);
+    expect(JSON.stringify(value)).toBe(before);
+  });
   it("shows activity posts in context once with their own UTC publication instant and expense", async () => {
     const value = fixture(); value.posts[0].activityId = itineraryId(8); value.posts[0].transportId = itineraryId(6);
     value.activities[0].postIds = [itineraryId(10)]; value.transports[0].postIds.push(itineraryId(10));

@@ -11,7 +11,7 @@ type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResp
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta", arrival: "Llegada" };
 const statusLabels = { proposed: "Propuesta", voting: "En votación", confirmed: "Confirmada" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
-const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 20 }).format(value);
+const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 
 export function TripItineraryScreen({ itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
