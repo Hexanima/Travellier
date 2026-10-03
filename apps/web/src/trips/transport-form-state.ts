@@ -42,7 +42,8 @@ const parseLocalDateTime = (value: string): Date | undefined => {
     ? date : undefined;
 };
 
-export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection): FormValidation => {
+export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
+  complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">): FormValidation => {
   const errors: Record<string, string> = {};
   const departurePlace = values.departurePlace.trim();
   const arrivalPlace = values.arrivalPlace.trim();
@@ -56,6 +57,14 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   if (departureAt && arrivalAt && arrivalAt.getTime() < departureAt.getTime()) {
     errors.arrivalAt = "La llegada no puede ser anterior a la salida.";
   }
+  if (complementary?.direction === "return" && direction === "outbound" && arrivalAt &&
+      arrivalAt.getTime() > Date.parse(complementary.departureAt)) {
+    errors.arrivalAt = "La llegada al destino no puede ser posterior a su salida.";
+  }
+  if (complementary?.direction === "outbound" && direction === "return" && departureAt &&
+      departureAt.getTime() < Date.parse(complementary.arrivalAt)) {
+    errors.departureAt = "La salida del destino no puede ser anterior a su llegada.";
+  }
 
   let costPerPerson: number | null = null;
   if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
@@ -66,6 +75,7 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   let steps: UrbanTransportStep[] = [];
   if (values.type === "bus_local") {
     if (values.steps.length === 0) errors["details.steps"] = "Agregá al menos un tramo.";
+    let previousAt = departureAt;
     steps = values.steps.map((step, index) => {
       const next = { line: step.line.trim(), fromStop: step.fromStop.trim(), toStop: step.toStop.trim(),
         estimatedTime: step.estimatedTime.trim() };
@@ -74,6 +84,18 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
       }
       if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(next.estimatedTime)) {
         errors[`details.steps[${index}].estimatedTime`] = "Ingresá una hora válida (HH:mm).";
+      } else if (previousAt && arrivalAt && departureAt && arrivalAt >= departureAt) {
+        const [hours, minutes] = next.estimatedTime.split(":").map(Number);
+        const stepAt = new Date(previousAt);
+        stepAt.setHours(hours, minutes, 0, 0);
+        // HH:mm has no date: a clock rollover belongs to the following calendar day.
+        if (stepAt < previousAt) stepAt.setDate(stepAt.getDate() + 1);
+        if (stepAt > arrivalAt) {
+          errors[`details.steps[${index}].estimatedTime`] =
+            "La hora del tramo debe respetar el orden y estar entre la salida y la llegada.";
+        } else {
+          previousAt = stepAt;
+        }
       }
       return next;
     });
@@ -87,11 +109,11 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
       return { ok: true, value: { ...base, type: "bus_local", costPerPerson: null, details: { steps } } };
     case "bus_long": {
       const company = values.company.trim();
-      return { ok: true, value: { ...base, type: "bus_long", details: company ? { company } : {} } };
+      return { ok: true, value: { ...base, type: "bus_long", details: { company: company || null } } };
     }
     case "flight": {
       const flightNumber = values.flightNumber.trim();
-      return { ok: true, value: { ...base, type: "flight", details: flightNumber ? { flightNumber } : {} } };
+      return { ok: true, value: { ...base, type: "flight", details: { flightNumber: flightNumber || null } } };
     }
     case "car":
     case "other":

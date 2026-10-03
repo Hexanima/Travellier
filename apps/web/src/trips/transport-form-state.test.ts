@@ -75,4 +75,46 @@ describe("prepareTransportInput", () => {
       ok: false, errors: { "details.steps[0].line": expect.any(String), "details.steps[0].estimatedTime": expect.any(String) },
     });
   });
+
+  it("rejects an arrival after the destination's saved departure", () => {
+    expect(prepareTransportInput(values, "outbound", { direction: "return",
+      departureAt: new Date("2026-10-01T10:00").toISOString(), arrivalAt: new Date("2026-10-01T12:00").toISOString() }))
+      .toMatchObject({ ok: false, errors: { arrivalAt: expect.any(String) } });
+  });
+
+  it("rejects a departure before the destination's saved arrival", () => {
+    expect(prepareTransportInput(values, "return", { direction: "outbound",
+      departureAt: new Date("2026-10-01T08:00").toISOString(), arrivalAt: new Date("2026-10-01T10:00").toISOString() }))
+      .toMatchObject({ ok: false, errors: { departureAt: expect.any(String) } });
+  });
+
+  it("allows a destination window whose arrival and departure coincide", () => {
+    expect(prepareTransportInput(values, "outbound", { direction: "return",
+      departureAt: new Date(values.arrivalAt).toISOString(), arrivalAt: new Date("2026-10-01T12:00").toISOString() }).ok).toBe(true);
+    expect(prepareTransportInput(values, "return", { direction: "outbound",
+      departureAt: new Date("2026-10-01T08:00").toISOString(), arrivalAt: new Date(values.departureAt).toISOString() }).ok).toBe(true);
+  });
+
+  it.each([
+    { times: ["09:30", "08:30"], invalidIndex: 1 },
+    { times: ["07:59"], invalidIndex: 0 },
+    { times: ["10:01"], invalidIndex: 0 },
+  ])("rejects urban step times $times outside their interval or sequence", ({ times, invalidIndex }) => {
+    expect(prepareTransportInput({ ...values, type: "bus_local", departureAt: "2026-10-01T08:00", arrivalAt: "2026-10-01T10:00",
+      steps: times.map((estimatedTime) => ({ line: "21", fromStop: "A", toStop: "B", estimatedTime })) }, "outbound"))
+      .toMatchObject({ ok: false, errors: { [`details.steps[${invalidIndex}].estimatedTime`]: expect.any(String) } });
+  });
+
+  it.each([
+    { departureAt: "2026-10-01T08:00", arrivalAt: "2026-10-01T10:00", times: ["08:00", "08:00", "10:00"] },
+    { departureAt: "2026-10-01T23:30", arrivalAt: "2026-10-02T01:00", times: ["23:45", "00:30"] },
+  ])("allows ordered urban steps within $departureAt to $arrivalAt", ({ departureAt, arrivalAt, times }) => {
+    expect(prepareTransportInput({ ...values, type: "bus_local", departureAt, arrivalAt,
+      steps: times.map((estimatedTime) => ({ line: "21", fromStop: "A", toStop: "B", estimatedTime })) }, "outbound").ok).toBe(true);
+  });
+
+  it.each(["flight", "bus_long"] as const)("sends null to clear the optional detail of %s", (type) => {
+    expect(prepareTransportInput({ ...values, type, flightNumber: " ", company: " " }, "outbound"))
+      .toMatchObject({ ok: true, value: { details: type === "flight" ? { flightNumber: null } : { company: null } } });
+  });
 });

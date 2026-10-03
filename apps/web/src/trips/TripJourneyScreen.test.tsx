@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripJourneyScreen } from "./TripJourneyScreen.js";
-import type { TripJourneyApi } from "./trip-journey-api.js";
+import type { JourneyTransport, TransportInput, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripManagementApi } from "./trip-management-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -22,15 +22,18 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-async function render(options: { trip?: unknown; destinations?: unknown; loadFailure?: boolean } = {}) {
+async function render(options: { trip?: unknown; destinations?: unknown; loadFailure?: boolean; transports?: JourneyTransport[] } = {}) {
   const get = vi.fn().mockResolvedValue({ ok: true, value: options.trip ?? trip });
   const listDestinations = vi.fn().mockResolvedValue(options.loadFailure
     ? { ok: false, error: { kind: "network" } }
     : { ok: true, value: options.destinations ?? [first] });
-  const listTransports = vi.fn().mockResolvedValue({ ok: true, value: [] });
+  const listTransports = vi.fn().mockResolvedValue({ ok: true, value: options.transports ?? [] });
   const createDestination = vi.fn().mockResolvedValue({ ok: true, value: second });
+  const updateTransport = vi.fn(async (_tripId: string, destinationId: string, id: string, input: TransportInput) => ({
+    ok: true, value: { ...input, id, tripId, destinationId },
+  }));
   const journey = { listDestinations, listTransports, createDestination,
-    createTransport: vi.fn(), updateTransport: vi.fn() } as unknown as TripJourneyApi;
+    createTransport: vi.fn(), updateTransport } as unknown as TripJourneyApi;
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -39,10 +42,41 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
     <Routes><Route path="/trips/:tripId/journey" element={<TripJourneyScreen trips={{ get } as unknown as TripManagementApi}
       journey={journey} />} /></Routes>
   </MemoryRouter>));
-  return { container, get, listDestinations, listTransports, createDestination };
+  return { container, get, listDestinations, listTransports, createDestination, updateTransport };
 }
 
 describe("TripJourneyScreen", () => {
+  it("uses the latest saved complementary transport when validating either form", async () => {
+    const transports: JourneyTransport[] = (["outbound", "return"] as const).map((direction, index) => ({
+      id: `507f1f77bcf86cd79943901${index + 6}`, tripId, destinationId: first.id, direction, type: "car",
+      departurePlace: "A", arrivalPlace: "B", costPerPerson: null, details: {},
+      departureAt: new Date(direction === "outbound" ? "2026-10-10T08:00" : "2026-10-10T12:00").toISOString(),
+      arrivalAt: new Date(direction === "outbound" ? "2026-10-10T10:00" : "2026-10-10T14:00").toISOString(),
+    }));
+    const { container, updateTransport } = await render({ transports });
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
+      const input = form.querySelector(`[name="${name}"]`) as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const submit = async (form: HTMLFormElement) => act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await change(forms[0], "arrivalAt", "2026-10-10T13:00");
+    await submit(forms[0]);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(forms[0].querySelector('[name="arrivalAt"][aria-invalid="true"]')).not.toBeNull();
+
+    await change(forms[0], "arrivalAt", "2026-10-10T11:00");
+    await submit(forms[0]);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    await change(forms[1], "departureAt", "2026-10-10T10:30");
+    await submit(forms[1]);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    expect(forms[1].querySelector('[name="departureAt"][aria-invalid="true"]')).not.toBeNull();
+  });
+
   it("shows destinations in persisted order and both directions for each", async () => {
     const { container, listTransports } = await render({ destinations: [second, first] });
     const headings = Array.from(container.querySelectorAll("h2")).map((heading) => heading.textContent);

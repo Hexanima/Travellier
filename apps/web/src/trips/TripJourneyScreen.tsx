@@ -112,7 +112,8 @@ export function TripJourneyScreen({ trips, journey }: Props) {
                     {(["outbound", "return"] as const).map((direction) => <section className="journey-direction" key={direction}>
                       <h3>{direction === "outbound" ? "Llegada al destino" : "Salida del destino"}</h3>
                       <TransportForm tripId={tripId!} destinationId={destination.id} direction={direction}
-                        existing={saved.find((item) => item.direction === direction)} journey={journey} onSaved={onSaved} />
+                        existing={saved.find((item) => item.direction === direction)}
+                        complementary={saved.find((item) => item.direction !== direction)} journey={journey} onSaved={onSaved} />
                     </section>)}
                   </div>
                 </section>;

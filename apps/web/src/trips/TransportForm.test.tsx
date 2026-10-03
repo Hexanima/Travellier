@@ -38,7 +38,7 @@ const submit = async (container: HTMLElement) => act(async () => {
   container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 });
 
-async function render(existing?: JourneyTransport) {
+async function render(existing?: JourneyTransport, complementary?: JourneyTransport) {
   const createTransport = vi.fn().mockResolvedValue({ ok: true, value: saved });
   const updateTransport = vi.fn().mockResolvedValue({ ok: true, value: saved });
   const onSaved = vi.fn();
@@ -47,12 +47,47 @@ async function render(existing?: JourneyTransport) {
   const root = createRoot(container);
   roots.push(root);
   await act(async () => root.render(<TransportForm tripId={tripId} destinationId={destinationId}
-    direction="outbound" existing={existing} journey={{ createTransport, updateTransport } as unknown as TripJourneyApi}
+    direction={existing?.direction ?? "outbound"} existing={existing} complementary={complementary}
+    journey={{ createTransport, updateTransport } as unknown as TripJourneyApi}
     onSaved={onSaved} />));
   return { container, createTransport, updateTransport, onSaved };
 }
 
 describe("TransportForm", () => {
+  it.each(["outbound", "return"] as const)("blocks a %s transport that inverts the destination window", async (direction) => {
+    const current: JourneyTransport = { ...saved, direction,
+      departureAt: new Date("2026-10-10T10:00").toISOString(), arrivalAt: new Date("2026-10-10T12:00").toISOString() };
+    const complementary: JourneyTransport = { ...saved, direction: direction === "outbound" ? "return" : "outbound",
+      departureAt: new Date(direction === "outbound" ? "2026-10-09T18:00" : "2026-10-10T11:00").toISOString(),
+      arrivalAt: new Date(direction === "outbound" ? "2026-10-09T20:00" : "2026-10-10T13:00").toISOString() };
+    const { container, updateTransport } = await render(current, complementary);
+    await submit(container);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(container.querySelector(`[name="${direction === "outbound" ? "arrivalAt" : "departureAt"}"][aria-invalid="true"]`)).not.toBeNull();
+  });
+
+  it("shows an urban sequence error without sending a request", async () => {
+    const { container, updateTransport } = await render({ ...saved, type: "bus_local",
+      departureAt: new Date("2026-10-01T08:00").toISOString(), arrivalAt: new Date("2026-10-01T10:00").toISOString(),
+      details: { steps: ["09:30", "08:30"].map((estimatedTime) => ({ line: "21", fromStop: "A", toStop: "B", estimatedTime })) } });
+    await submit(container);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(container.querySelector('[name="step-estimatedTime-1"][aria-invalid="true"]')).not.toBeNull();
+  });
+
+  it.each(["flight", "bus_long"] as const)("clears the saved optional detail for %s", async (type) => {
+    const field = type === "flight" ? "flightNumber" : "company";
+    const current: JourneyTransport = type === "flight" ? saved : { ...saved, type, details: { company: "Empresa" } };
+    const { container, updateTransport } = await render(current);
+    updateTransport.mockImplementation(async (_trip, _destination, _id, input) => ({ ok: true,
+      value: { ...current, ...input, details: { ...current.details, ...input.details } } }));
+    await setField(container, field, "");
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId,
+      expect.objectContaining({ details: { [field]: null } }));
+    expect(container.querySelector(`[name="${field}"]`)).toHaveProperty("value", "");
+  });
+
   it("shows only the fields pertinent to each transport type", async () => {
     const { container } = await render();
     const cases: { type: TransportType; visible: string[]; hidden: string[] }[] = [
