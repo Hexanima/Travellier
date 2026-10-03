@@ -8,6 +8,8 @@ The public API exposes framework-independent ports for persistence, object stora
 
 ## Itinerary generation (T31)
 
+Urban transport writes require `details.steps[].estimatedAt: Date`, ordered nondecreasingly within the inclusive departure/arrival interval. `validateUrbanTransportSteps` is the pure validator shared with the client. `createTransport` enforces canonical writes; `readTransport` additionally accepts historical `estimatedTime: "HH:mm"` without inventing a timezone or instant. Generation validates persisted transports through this read contract so an unrelated mutation does not force conversion of historical clocks.
+
 `generateItineraryDays.execute({}, { tripId, destinations, transports })` returns a `Result` of `ItineraryDayDraft[]`. Dates and interval bounds preserve UTC instants. The drafts contain no IDs and are not persisted by this use case.
 
 For each destination, outbound transport generates `transit_out`, return transport generates `transit_return`, and a known outbound arrival plus return departure generates the bounded `activity` window. Incomplete destinations yield only their known transit intervals. No open-ended activity window is inferred. Zero-duration intervals have no slices.

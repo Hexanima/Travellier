@@ -84,8 +84,8 @@ describe("prepareTransportInput", () => {
     ];
     expect(prepareTransportInput({ ...values, type: "bus_local", steps }, "outbound")).toMatchObject({
       ok: true, value: { type: "bus_local", costPerPerson: null, details: { steps: [
-        { line: "21", fromStop: "Terminal", toStop: "Plaza", estimatedTime: "09:00" },
-        { line: "8", fromStop: "Plaza", toStop: "Hotel", estimatedTime: "09:25" },
+        { line: "21", fromStop: "Terminal", toStop: "Plaza", estimatedAt: new Date("2026-10-01T09:00").toISOString() },
+        { line: "8", fromStop: "Plaza", toStop: "Hotel", estimatedAt: new Date("2026-10-01T09:25").toISOString() },
       ] } },
     });
   });

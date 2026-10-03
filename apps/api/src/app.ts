@@ -292,6 +292,19 @@ const destinationUpdatePayload = (payload: Record<string, unknown>): Pick<Update
   return { ...(hasName ? { name: payload.name as string } : {}), ...(hasOrder ? { order: payload.order as number } : {}) };
 };
 
+// HTTP dates are strings; MongoDB/domain steps use Date. Never infer dates for legacy clocks.
+const transportDetails = (details: Record<string, unknown>): JourneyTransportFields["details"] => ({
+  ...details,
+  ...(Array.isArray(details.steps) ? { steps: details.steps.map((step: unknown) => {
+    if (typeof step !== "object" || step === null || Array.isArray(step) || !("estimatedAt" in step)) return step;
+    const value = step.estimatedAt;
+    const date = typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)
+      ? new Date(value) : new Date(Number.NaN);
+    // Reject normalized dates such as February 30 rather than silently changing the instant.
+    return { ...step, estimatedAt: Number.isFinite(date.getTime()) && date.toISOString() === value ? date : new Date(Number.NaN) };
+  }) } : {}),
+}) as JourneyTransportFields["details"];
+
 const transportPayload = (payload: Record<string, unknown>): JourneyTransportFields | undefined => {
   if (!isString(payload.direction) || !isString(payload.type) || !isString(payload.departurePlace) ||
     !isString(payload.departureAt) || !isString(payload.arrivalPlace) || !isString(payload.arrivalAt) ||
@@ -305,7 +318,7 @@ const transportPayload = (payload: Record<string, unknown>): JourneyTransportFie
     arrivalPlace: payload.arrivalPlace,
     arrivalAt: new Date(payload.arrivalAt),
     costPerPerson: payload.costPerPerson,
-    details: payload.details as JourneyTransportFields["details"],
+    details: transportDetails(payload.details as Record<string, unknown>),
   };
 };
 
@@ -327,7 +340,7 @@ const transportUpdatePayload = (
     ...(has("arrivalPlace") ? { arrivalPlace: payload.arrivalPlace as string } : {}),
     ...(has("arrivalAt") ? { arrivalAt: new Date(payload.arrivalAt as string) } : {}),
     ...(has("costPerPerson") ? { costPerPerson: payload.costPerPerson as number | null } : {}),
-    ...(has("details") ? { details: payload.details as Record<string, unknown> } : {}),
+    ...(has("details") ? { details: transportDetails(payload.details as Record<string, unknown>) } : {}),
   };
 };
 

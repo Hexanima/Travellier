@@ -340,6 +340,7 @@
 
 - Los detalles requeridos cambian según el tipo de transporte.
 - Un transporte inválido no llega a persistencia.
+- Los tramos urbanos usan instantes UTC, respetan el orden cronológico y los límites inclusivos del transporte. Las horas históricas requieren reconfirmación antes de editar.
 
 **Estimación:** M (4hs)
 **Dependencias:** T02, T19

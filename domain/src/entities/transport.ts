@@ -5,13 +5,17 @@ import type { ObjectId } from "../value-objects/object-id.js";
 export type TransportDirection = "outbound" | "return";
 export type TransportType = "bus_local" | "bus_long" | "flight" | "car" | "other";
 
-export interface UrbanTransportStep {
+interface UrbanStepPlaces {
   line: string;
   fromStop: string;
   toStop: string;
-  /** Local 24-hour clock time in HH:mm format. */
-  estimatedTime: string;
 }
+
+/** Canonical UTC instant for new writes; clock-only records remain readable. */
+export type UrbanTransportStep = UrbanStepPlaces & (
+  | { estimatedAt: Date; estimatedTime?: never }
+  | { estimatedTime: string; estimatedAt?: never }
+);
 
 interface TransportBase {
   id: ObjectId;
@@ -34,7 +38,7 @@ export type Transport = TransportBase & (
 
 export type CreateTransportInput = Transport;
 
-const invalid = (field: string, code: string, message: string): Result<Transport, ValidationError> =>
+const invalid = (field: string, code: string, message: string): Result<never, ValidationError> =>
   err(new ValidationError([{ field, code, message }]));
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -48,8 +52,45 @@ const validOptionalText = (value: unknown): boolean =>
 
 const localTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
-export const createTransport = (
+const validateSteps = (steps: readonly UrbanTransportStep[], departureAt: Date, arrivalAt: Date,
+  allowLegacySteps: boolean): Result<void, ValidationError> => {
+  if (!Array.isArray(steps) || steps.length === 0) return invalid("details.steps", "required", "Urban bus requires at least one step.");
+  let previousAt = departureAt.getTime();
+  for (const [index, step] of steps.entries()) {
+    for (const field of ["line", "fromStop", "toStop"] as const) {
+      if (!isRecord(step) || typeof step[field] !== "string" || step[field].trim() === "") {
+        return invalid(`details.steps[${index}].${field}`, "required", `Urban bus step ${field} is required.`);
+      }
+    }
+    const field = `details.steps[${index}].estimatedAt`;
+    if (allowLegacySteps && !Object.hasOwn(step, "estimatedAt") && typeof step.estimatedTime === "string") {
+      if (!hasOnlyKeys(step, ["line", "fromStop", "toStop", "estimatedTime"]) || !localTimePattern.test(step.estimatedTime)) {
+        return invalid(`details.steps[${index}].estimatedTime`, "invalid", "Legacy urban bus time must use HH:mm format.");
+      }
+      continue;
+    }
+    if (!Object.hasOwn(step, "estimatedAt")) return invalid(field, "required", "Confirm the step date and time before saving.");
+    if (!hasOnlyKeys(step, ["line", "fromStop", "toStop", "estimatedAt"]) ||
+        !(step.estimatedAt instanceof Date) || !Number.isFinite(step.estimatedAt.getTime())) {
+      return invalid(field, "invalid", "Urban bus step must have a valid UTC instant.");
+    }
+    const instant = step.estimatedAt.getTime();
+    if (instant < departureAt.getTime() || instant > arrivalAt.getTime()) {
+      return invalid(field, "outside_transport", "Step time must be between departure and arrival.");
+    }
+    if (instant < previousAt) return invalid(field, "before_previous_step", "Step times must be chronological.");
+    previousAt = instant;
+  }
+  return ok(undefined);
+};
+
+/** Shared by the client and write-side entity validation. */
+export const validateUrbanTransportSteps = (steps: readonly UrbanTransportStep[], departureAt: Date,
+  arrivalAt: Date): Result<void, ValidationError> => validateSteps(steps, departureAt, arrivalAt, false);
+
+const validateTransport = (
   input: CreateTransportInput,
+  allowLegacySteps: boolean,
 ): Result<Transport, ValidationError> => {
   if (input.direction !== "outbound" && input.direction !== "return") {
     return invalid("direction", "invalid", "Transport direction is invalid.");
@@ -82,19 +123,8 @@ export const createTransport = (
       if (!hasOnlyKeys(input.details, ["steps"])) {
         return invalid("details", "invalid", "Urban bus details are invalid.");
       }
-      if (!Array.isArray(input.details.steps) || input.details.steps.length === 0) {
-        return invalid("details.steps", "required", "Urban bus requires at least one step.");
-      }
-      for (const [index, step] of input.details.steps.entries()) {
-        for (const field of ["line", "fromStop", "toStop", "estimatedTime"] as const) {
-          if (!isRecord(step) || typeof step[field] !== "string" || step[field].trim() === "") {
-            return invalid(`details.steps[${index}].${field}`, "required", `Urban bus step ${field} is required.`);
-          }
-        }
-        if (!localTimePattern.test(step.estimatedTime)) {
-          return invalid(`details.steps[${index}].estimatedTime`, "invalid", "Urban bus step time must use HH:mm format.");
-        }
-      }
+      const steps = validateSteps(input.details.steps, input.departureAt, input.arrivalAt, allowLegacySteps);
+      if (!steps.ok) return steps;
       break;
     }
     case "bus_long":
@@ -119,3 +149,9 @@ export const createTransport = (
 
   return ok(input);
 };
+
+/** All creation and editing paths enforce canonical instants. */
+export const createTransport = (input: CreateTransportInput): Result<Transport, ValidationError> => validateTransport(input, false);
+
+/** Historical clocks have no recoverable timezone; reading never converts them. */
+export const readTransport = (input: Transport): Result<Transport, ValidationError> => validateTransport(input, true);

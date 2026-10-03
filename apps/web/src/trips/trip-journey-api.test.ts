@@ -15,6 +15,20 @@ const transport = {
 } satisfies JourneyTransport;
 
 describe("createTripJourneyApi", () => {
+  it("reads canonical and legacy urban responses without changing their representation", async () => {
+    const canonical = { ...transport, type: "bus_local", details: { steps: [
+      { line: "1", fromStop: "A", toStop: "B", estimatedAt: "2026-10-01T13:00:00.123Z" },
+    ] } };
+    const legacy = { ...canonical, details: { steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "10:00" }] } };
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, value: { transports: [canonical] } })
+      .mockResolvedValueOnce({ ok: true, value: { transports: [legacy] } })
+      .mockResolvedValueOnce({ ok: true, value: { transports: [{ ...canonical,
+        details: { steps: [{ ...canonical.details.steps[0], estimatedAt: "2026-10-01T15:00:00.000Z" }] } }] } });
+    const api = createTripJourneyApi({ get, post: vi.fn(), patch: vi.fn() } as never);
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [canonical] });
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [legacy] });
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it("distinguishes an itinerary 409 from a duplicate transport through the HTTP client", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "ItineraryConflictError" } }), { status: 409 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "JourneyConflictError" } }), { status: 409 }));

@@ -1,4 +1,5 @@
-import { createTransport, type ObjectId, type Transport, type TripItinerary } from "app-domain";
+import { readTransport, type ObjectId, type TripItinerary } from "app-domain";
+import { journeyTransportForDomain } from "./trip-journey-api.js";
 import type { HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 
@@ -45,7 +46,7 @@ const post = (v: unknown) => entity(v) && id(v.dayId) && id(v.authorId) && nulla
 const transport = (v: unknown) => {
   if (!entity(v) || !id(v.destinationId) || !timestamp(v.departureAt) || !timestamp(v.arrivalAt) || !ids(v.postIds)) return false;
   // Reuse transport validation rather than introducing a different set of valid details in the client.
-  return createTransport({ ...v, departureAt: new Date(v.departureAt), arrivalAt: new Date(v.arrivalAt) } as unknown as Transport).ok;
+  return readTransport(journeyTransportForDomain(v)).ok;
 };
 
 const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse => {
