@@ -107,6 +107,48 @@ describe("local itinerary projection", () => {
     expect(days[0].expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
     expect(JSON.stringify(itinerary)).toBe(before);
   });
+  it.each([
+    ["register", "2026-10-03T12:00:00.789Z"],
+    ["balance", "2026-10-03T12:00:00.789Z"],
+    ["register", "2026-09-24T12:00:00.789Z"],
+    ["balance", "2026-09-24T12:00:00.789Z"],
+  ] as const)("retains an out-of-band post in a split canonical day: %s, %s", (expenseMode, createdAt) => {
+    const itinerary = fixture();
+    itinerary.expenseMode = expenseMode;
+    itinerary.days = [{ ...itinerary.days[1], startsAt: "2026-09-25T00:00:00.123Z", endsAt: "2026-09-25T08:00:00.456Z", items: [] }];
+    itinerary.activities = []; itinerary.transports = []; itinerary.posts = [itinerary.posts[0]];
+    itinerary.posts[0].createdAt = createdAt;
+    const before = JSON.stringify(itinerary);
+    const days = projectTripItinerary(itinerary, "America/Argentina/Buenos_Aires");
+    expect(days.map((day) => day.date)).toEqual(["2026-09-24", "2026-09-25"]);
+    const posts = days.flatMap((day) => day.segments.flatMap((segment) => segment.items.filter((item) => item.kind === "post")));
+    expect(posts).toEqual([{ kind: "post", id: itinerary.posts[0].id, at: createdAt, post: itinerary.posts[0] }]);
+    expect(days[0].segments[0].sourceDayIds).toContain(itinerary.posts[0].dayId);
+    expect(days.map((day) => day.expenseSummary)).toEqual([
+      { totalAmount: 25.5, expenseCount: 1 }, { totalAmount: 0, expenseCount: 0 },
+    ]);
+    expect(JSON.stringify(itinerary)).toBe(before);
+  });
+  it.each(["UTC", "America/Argentina/Buenos_Aires"])("nests a post by activityId across canonical days in %s", (timeZone) => {
+    const itinerary = fixture();
+    itinerary.days = [
+      { ...itinerary.days[1], date: "2026-09-24T00:00:00.000Z", startsAt: "2026-09-24T22:00:00.000Z", endsAt: "2026-09-25T00:00:00.000Z", items: [] },
+      { ...itinerary.days[1], id: itineraryId(30), startsAt: "2026-09-25T00:00:00.000Z", endsAt: "2026-09-25T03:00:00.000Z", items: [] },
+    ];
+    itinerary.transports = []; itinerary.activities = [itinerary.activities[0]]; itinerary.posts = [itinerary.posts[0]];
+    itinerary.activities[0].scheduledAt = "2026-09-24T23:00:00.000Z";
+    itinerary.activities[0].postIds = [itinerary.posts[0].id];
+    itinerary.posts[0].dayId = itineraryId(30); itinerary.posts[0].activityId = itinerary.activities[0].id;
+    itinerary.posts[0].createdAt = "2026-09-25T01:00:00.000Z";
+    const before = JSON.stringify(itinerary), days = projectTripItinerary(itinerary, timeZone);
+    const items = days.flatMap((day) => day.segments.flatMap((segment) => segment.items));
+    const activity = items.find((item) => item.kind === "activity");
+    expect(activity?.kind === "activity" ? activity.posts : []).toEqual([itinerary.posts[0]]);
+    expect(items.filter((item) => item.kind === "post")).toEqual([]);
+    expect(days[0].expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
+    expect(days.slice(1).every((day) => day.expenseSummary.expenseCount === 0)).toBe(true);
+    expect(JSON.stringify(itinerary)).toBe(before);
+  });
   it("keeps distinct destinations even when their intervals coincide", async () => {
     const project = projectTripItinerary, itinerary = fixture();
     itinerary.destinations.push({ ...itinerary.destinations[0], id: itineraryId(30), name: "Carlos Paz", order: 2 });

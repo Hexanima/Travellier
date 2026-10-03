@@ -11,13 +11,13 @@ import { TripItineraryScreen } from "./TripItineraryScreen.js";
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
 const fixture = () => itineraryFixture() as TripItineraryResponse;
-async function render(get = vi.fn().mockResolvedValue({ ok: true, value: fixture() })) {
+async function render(get = vi.fn().mockResolvedValue({ ok: true, value: fixture() }), timeZone = "America/Argentina/Buenos_Aires") {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${itineraryId(1)}/itinerary`]}>
     <Link to={`/trips/${itineraryId(99)}/itinerary`}>Otro viaje</Link>
     <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get } as TripItineraryApi}
-      timeZone="America/Argentina/Buenos_Aires" />} /></Routes>
+      timeZone={timeZone} />} /></Routes>
   </MemoryRouter>));
   return { container, get };
 }
@@ -46,6 +46,35 @@ describe("itinerary screen", () => {
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(10)}"]`)).toHaveLength(1);
     expect(container.querySelector(`[data-itinerary-item="${itineraryId(8)}"]`)?.textContent).toContain("Almuerzo junto al río");
     expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] time`)?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
+  });
+  it("shows a late post and its expense once when its canonical day splits across local dates", async () => {
+    const value = fixture();
+    value.days = [{ ...value.days[1], startsAt: "2026-09-25T00:00:00.123Z", endsAt: "2026-09-25T08:00:00.456Z", items: [] }];
+    value.activities = []; value.transports = []; value.posts = [value.posts[0]];
+    value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    expect(container.querySelectorAll(`[data-itinerary-post="${value.posts[0].id}"]`)).toHaveLength(1);
+    const day = container.querySelector('[data-itinerary-date="2026-09-24"]');
+    expect(day?.textContent).toContain("Almuerzo junto al río");
+    expect(day?.querySelector('[data-itinerary-expenses]')?.textContent).toContain("25,5");
+    expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
+    expect(day?.querySelector(`[data-itinerary-post="${value.posts[0].id}"] time`)?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
+  });
+  it.each(["UTC", "America/Argentina/Buenos_Aires"])("shows a linked post under its activity across canonical days in %s", async (timeZone) => {
+    const value = fixture();
+    value.days = [
+      { ...value.days[1], date: "2026-09-24T00:00:00.000Z", startsAt: "2026-09-24T22:00:00.000Z", endsAt: "2026-09-25T00:00:00.000Z", items: [] },
+      { ...value.days[1], id: itineraryId(30), startsAt: "2026-09-25T00:00:00.000Z", endsAt: "2026-09-25T03:00:00.000Z", items: [] },
+    ];
+    value.transports = []; value.activities = [value.activities[0]]; value.posts = [value.posts[0]];
+    value.activities[0].scheduledAt = "2026-09-24T23:00:00.000Z"; value.activities[0].postIds = [value.posts[0].id];
+    value.posts[0].dayId = itineraryId(30); value.posts[0].activityId = value.activities[0].id;
+    value.posts[0].createdAt = "2026-09-25T01:00:00.000Z";
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }), timeZone);
+    const postSelector = `[data-itinerary-post="${value.posts[0].id}"]`;
+    expect(container.querySelectorAll(postSelector)).toHaveLength(1);
+    expect(container.querySelector(`[data-itinerary-item="${value.activities[0].id}"] ${postSelector}`)).not.toBeNull();
+    expect(container.querySelector('[data-itinerary-date="2026-09-24"] [data-itinerary-expenses]')?.textContent).toContain("25,5");
   });
   it("shows the empty state and a link to configuring transport", async () => {
     const value = { ...fixture(), days: [], activities: [], posts: [], transports: [] };

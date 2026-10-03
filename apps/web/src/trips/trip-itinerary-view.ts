@@ -67,7 +67,7 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
       start = sliceEnd;
     } while (end !== null && start < end);
   }
-  const activityLocations = new Map<string, { segment: ItinerarySegment; item: Extract<ItineraryViewItem, { kind: "activity" }> }>();
+  const activityLocations = new Map<string, Extract<ItineraryViewItem, { kind: "activity" }>>();
   for (const activity of itinerary.activities) {
     const sourceSegments = segmentsBySource.get(activity.dayId) ?? [];
     let segment = sourceSegments.find((s) => includesInstant(s, activity.scheduledAt));
@@ -88,7 +88,7 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
     const item: Extract<ItineraryViewItem, { kind: "activity" }> = {
       kind: "activity", id: activity.id, at: activity.scheduledAt, activity, posts: [],
     };
-    segment.items.push(item); activityLocations.set(activity.id, { segment, item });
+    segment.items.push(item); activityLocations.set(activity.id, item);
   }
   const transports = new Map(itinerary.transports.map((t) => [t.id, t]));
   for (const source of itinerary.days) {
@@ -105,9 +105,10 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
   for (const post of [...itinerary.posts].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))) {
     const segments = segmentsBySource.get(post.dayId) ?? [];
     const parent = post.activityId === null ? undefined : activityLocations.get(post.activityId);
-    if (parent && parent.segment.sourceDayIds.includes(post.dayId)) parent.item.posts.push(post);
+    if (parent) parent.posts.push(post);
     else {
-      const segment = segments.find((s) => includesInstant(s, post.createdAt)) ?? (segments.length === 1 ? segments[0] : undefined);
+      // Publication outside the band still belongs to dayId. Anchor it once in that day's first local slice.
+      const segment = segments.find((s) => includesInstant(s, post.createdAt)) ?? segments[0];
       if (segment) segment.items.push({ kind: "post", id: post.id, at: post.createdAt, post });
     }
   }
