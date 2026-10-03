@@ -59,6 +59,7 @@ describe("Trip screens", () => {
     expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
     expect(container.querySelector(`a[href="/trips/${trip.id}/members"]`)).not.toBeNull();
     expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).not.toBeNull();
+    expect(container.querySelector(`a[href="/trips/${trip.id}/journey"]`)).not.toBeNull();
   });
 
   it("shows an empty state with a creation action", async () => {

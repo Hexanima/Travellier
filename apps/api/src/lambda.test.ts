@@ -22,6 +22,21 @@ const createAccessToken = (userId: string): string => {
 };
 
 describe("Lambda API handler", () => {
+  it("protects and delegates the aggregate itinerary GET", async () => {
+    const tripId = "507f191e810c19729de860ea";
+    const getItinerary = vi.fn().mockResolvedValue({ ok: true, value: { tripId, days: [] } });
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({ environment: "dev", mongo: { uri: "mongodb://example", databaseName: "test" }, jwtSecret, photoBucketName: "test" }),
+      createTripApi: async () => ({ joinByCode: vi.fn(), getItinerary }),
+    });
+    const request = { rawPath: `/trips/${tripId}/itinerary`, requestContext: { http: { method: "GET" } } };
+    expect((await handler(request)).statusCode).toBe(401);
+    expect(getItinerary).not.toHaveBeenCalled();
+    const response = await handler({ ...request, headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` } });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ itinerary: { tripId, days: [] } });
+    expect(getItinerary).toHaveBeenCalledWith({ tripId, authenticatedUserId });
+  });
   it("loads Trip validation for a public invitation without requiring a JWT", async () => {
     const resolveInvitation = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const createTripApi = vi.fn().mockResolvedValue({ resolveInvitation });

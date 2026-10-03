@@ -3,3 +3,4 @@ export * from "./service.js";
 export * from "./result.js";
 export * from "./usecase.js";
 export * from "./error.js";
+export * from "./trip-itinerary.js";
