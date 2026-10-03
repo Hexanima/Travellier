@@ -54,6 +54,53 @@ async function render(existing?: JourneyTransport, complementary?: JourneyTransp
 }
 
 describe("TransportForm", () => {
+  it("allows explicitly re-entering the clock after moving the transport to another date", async () => {
+    const current: JourneyTransport = { ...saved, type: "bus_local", departureAt: new Date("2026-10-01T08:00").toISOString(),
+      arrivalAt: new Date("2026-10-01T10:00").toISOString(), details: { steps: [{ line: "21", fromStop: "A", toStop: "B",
+        estimatedAt: new Date("2026-10-01T09:00:12.345").toISOString() }] } };
+    const { container, updateTransport } = await render(current);
+    updateTransport.mockImplementation(async (_trip, _destination, _id, input) => ({ ok: true, value: { ...current, ...input } }));
+    await setField(container, "departureAt", "2026-10-02T08:00");
+    await setField(container, "arrivalAt", "2026-10-02T10:00");
+    await submit(container);
+    expect(updateTransport).not.toHaveBeenCalled();
+    await setField(container, "step-estimatedTime-0", "");
+    await setField(container, "step-estimatedTime-0", "09:00");
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId, expect.objectContaining({
+      details: { steps: [{ line: "21", fromStop: "A", toStop: "B", estimatedAt: new Date("2026-10-02T09:00").toISOString() }] },
+    }));
+  });
+  it("requires explicit confirmation before converting saved clock-only steps", async () => {
+    const legacy: JourneyTransport = { ...saved, type: "bus_local", departureAt: new Date("2026-10-01T08:00").toISOString(),
+      arrivalAt: new Date("2026-10-01T10:00").toISOString(),
+      details: { steps: [{ line: "21", fromStop: "A", toStop: "B", estimatedTime: "09:00" }] } };
+    const { container, updateTransport } = await render(legacy);
+    updateTransport.mockImplementation(async (_trip, _destination, _id, input) => ({ ok: true, value: { ...legacy, ...input } }));
+    await submit(container);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("zona local");
+    const confirm = container.querySelector('[name="confirmLegacyTimes"]') as HTMLInputElement;
+    expect(confirm).not.toBeNull();
+    await act(async () => confirm.click());
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId, expect.objectContaining({
+      details: { steps: [{ line: "21", fromStop: "A", toStop: "B", estimatedAt: new Date("2026-10-01T09:00").toISOString() }] },
+    }));
+    expect(container.querySelector('[name="confirmLegacyTimes"]')).toBeNull();
+  });
+  it("maps API estimatedAt errors to the visible clock control", async () => {
+    const current: JourneyTransport = { ...saved, type: "bus_local", details: { steps: [{ line: "21", fromStop: "A", toStop: "B",
+      estimatedAt: "2026-10-01T13:00:00.000Z" }] } };
+    const { container, updateTransport } = await render(current);
+    updateTransport.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [
+      { field: "details.steps[0].estimatedAt", message: "Horario fuera del transporte." },
+    ] } });
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    expect(container.querySelector('[name="step-estimatedTime-0"][aria-invalid="true"]')).not.toBeNull();
+    expect(container.textContent).toContain("Horario fuera del transporte.");
+  });
   it("explains an itinerary conflict, retains entered values and allows correction", async () => {
     const { container, updateTransport, onSaved } = await render(saved);
     updateTransport.mockResolvedValueOnce({ ok: false, error: { kind: "itinerary-conflict" } });

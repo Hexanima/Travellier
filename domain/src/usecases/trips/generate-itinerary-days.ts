@@ -1,5 +1,5 @@
 import type { ItineraryDayDraft, ItineraryDayType } from "../../entities/itinerary-day.js";
-import { createTransport, type Transport } from "../../entities/transport.js";
+import { readTransport, type Transport } from "../../entities/transport.js";
 import { createTripDestination, type TripDestination } from "../../entities/trip-destination.js";
 import { ValidationError } from "../../errors/validation-error.js";
 import { err, ok, type Result } from "../../types/result.js";
@@ -41,7 +41,7 @@ const validateJourney = ({ tripId, destinations, transports }: GenerateItinerary
     if (transport.tripId !== tripId) return invalid(`${field}.tripId`, "mismatch", "Transport must belong to the Trip.");
     const journey = journeys.get(transport.destinationId);
     if (!journey) return invalid(`${field}.destinationId`, "not_found", "Transport destination must be included in the Trip.");
-    const validated = createTransport(transport);
+    const validated = readTransport(transport);
     if (!validated.ok) return err(new ValidationError(validated.error.issues.map((issue) => ({ ...issue, field: `${field}.${issue.field}` }))));
     if (journey[transport.direction]) return invalid(`${field}.direction`, "duplicate", "Only one transport per destination and direction is allowed.");
     journey[transport.direction] = validated.value;

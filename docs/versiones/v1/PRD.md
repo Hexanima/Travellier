@@ -129,6 +129,9 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 **Colectivo (urbano, paso a paso)**
 - Se configuran múltiples tramos secuenciales.
 - Cada tramo: línea/número, parada de origen, parada de destino, hora estimada.
+- La hora estimada de cada tramo se guarda como `estimatedAt`, un instante UTC con fecha y precisión de milisegundos. Los tramos deben estar en orden cronológico (se permiten instantes iguales) y dentro de los límites inclusivos de salida y llegada del transporte.
+- La interfaz permite ingresar horas locales: los tramos nuevos toman la primera fecha local cronológicamente posible desde la salida o el tramo anterior, pasando al día siguiente cuando corresponde. Los instantes ya confirmados no cambian al editar otros campos ni al cambiar la zona de visualización.
+- Los registros históricos con `estimatedTime` en formato `HH:mm` siguen siendo legibles, sin inferir una fecha o zona horaria. Antes de editarlos, el usuario debe revisar y confirmar las horas en su zona local; la escritura los reemplaza por `estimatedAt`. Un horario inválido rechaza el cambio completo, sin modificar el transporte ni su itinerario.
 
 **Ómnibus (larga distancia)**
 - Terminal de origen.
@@ -446,7 +449,8 @@ Un transporte por segmento (ida o vuelta) por destino.
   arrivalAt: Date,
   costPerPerson: Number,    // null si no aplica
   details: Object           // estructura flexible según tipo:
-  // bus_local:  { steps: [{ line, fromStop, toStop, estimatedTime }] }
+  // bus_local:  { steps: [{ line, fromStop, toStop, estimatedAt: Date }] }
+  // Lectura histórica: estimatedTime: "HH:mm"; no se acepta en nuevas escrituras.
   // bus_long:   { company, terminal }
   // flight:     { flightNumber, airline }
   // car | other: {}

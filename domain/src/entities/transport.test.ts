@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createObjectId } from "../value-objects/object-id.js";
-import { createTransport, type CreateTransportInput } from "./transport.js";
+import { createTransport, readTransport, type CreateTransportInput } from "./transport.js";
 
 const id = (value: string) => {
   const result = createObjectId(value);
@@ -26,8 +26,8 @@ const local = {
   type: "bus_local" as const,
   details: {
     steps: [
-      { line: "20", fromStop: "Terminal", toStop: "Centro", estimatedTime: "09:00" },
-      { line: "10", fromStop: "Centro", toStop: "Playa", estimatedTime: "09:30" },
+      { line: "20", fromStop: "Terminal", toStop: "Centro", estimatedAt: new Date("2026-09-24T23:00:00Z") },
+      { line: "10", fromStop: "Centro", toStop: "Playa", estimatedAt: new Date("2026-09-25T00:30:00Z") },
     ],
   },
 };
@@ -68,22 +68,22 @@ describe("createTransport", () => {
     issue({ ...local, details: { steps: [] } }, "details.steps", "required");
   });
 
-  it.each(["line", "fromStop", "toStop", "estimatedTime"])("rejects an urban step without %s", (field) => {
+  it.each(["line", "fromStop", "toStop"])("rejects an urban step without %s", (field) => {
     issue({ ...local, details: { steps: [{ ...local.details.steps[0], [field]: " " }] } }, `details.steps[0].${field}`, "required");
   });
 
   it.each(["mañana", "24:00", "09:60", "9:00", "09:00Z", "09:00:00"])(
-    "rejects an invalid urban step time %s",
+    "rejects an invalid legacy clock on reading: %s",
     (estimatedTime) => {
-      issue({
-        ...local,
-        details: { steps: [local.details.steps[0], { ...local.details.steps[1], estimatedTime }] },
-      }, "details.steps[1].estimatedTime", "invalid");
+      const step = local.details.steps[1]!;
+      const places = { line: step.line, fromStop: step.fromStop, toStop: step.toStop };
+      expect(readTransport({ ...local, details: { steps: [local.details.steps[0]!, { ...places, estimatedTime }] } }))
+        .toMatchObject({ ok: false, error: { issues: [{ field: "details.steps[1].estimatedTime", code: "invalid" }] } });
     },
   );
 
-  it.each(["00:00", "23:59"])("accepts boundary urban step time %s", (estimatedTime) => {
-    const input = { ...local, details: { steps: [{ ...local.details.steps[0], estimatedTime }] } };
+  it.each(["2026-09-25T00:00:00Z", "2026-09-24T23:59:00Z"])("accepts boundary urban step instant %s", (instant) => {
+    const input = { ...local, details: { steps: [{ ...local.details.steps[0]!, estimatedAt: new Date(instant) }] } };
     expect(createTransport(input)).toEqual({ ok: true, value: input });
   });
 
@@ -107,7 +107,7 @@ describe("createTransport", () => {
   });
 
   it("allows equal departure and arrival instants", () => {
-    const input = { ...local, arrivalAt: local.departureAt };
+    const input = { ...local, arrivalAt: local.departureAt, details: { steps: [{ ...local.details.steps[0]!, estimatedAt: local.departureAt }] } };
     expect(createTransport(input)).toEqual({ ok: true, value: input });
   });
 

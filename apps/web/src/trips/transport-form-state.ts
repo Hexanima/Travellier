@@ -1,4 +1,7 @@
+import { validateUrbanTransportSteps } from "app-domain";
 import type { JourneyTransport, TransportDirection, TransportInput, TransportType, UrbanTransportStep } from "./trip-journey-api.js";
+
+export type UrbanStepFormValues = { line: string; fromStop: string; toStop: string; estimatedTime: string; estimatedAt?: string };
 
 export type TransportFormValues = {
   type: TransportType;
@@ -9,7 +12,9 @@ export type TransportFormValues = {
   costPerPerson: string;
   flightNumber: string;
   company: string;
-  steps: UrbanTransportStep[];
+  steps: UrbanStepFormValues[];
+  requiresTimeConfirmation?: boolean;
+  legacyTimesConfirmed?: boolean;
 };
 
 export type FormValidation = { ok: true; value: TransportInput } | { ok: false; errors: Record<string, string> };
@@ -34,7 +39,11 @@ export const formValuesFromTransport = (transport: JourneyTransport): TransportF
   costPerPerson: transport.costPerPerson === null ? "" : String(transport.costPerPerson),
   flightNumber: transport.type === "flight" ? transport.details.flightNumber ?? "" : "",
   company: transport.type === "bus_long" ? transport.details.company ?? "" : "",
-  steps: transport.type === "bus_local" ? transport.details.steps.map((step) => ({ ...step })) : [],
+  steps: transport.type === "bus_local" ? transport.details.steps.map((step) => ({ ...step,
+    estimatedTime: step.estimatedAt ? toLocalDateTime(step.estimatedAt).slice(-5) : step.estimatedTime!,
+  })) : [],
+  requiresTimeConfirmation: transport.type === "bus_local" && transport.details.steps.some((step) => !step.estimatedAt),
+  legacyTimesConfirmed: false,
 });
 
 const parseLocalDateTime = (value: string): Date | undefined => {
@@ -51,6 +60,27 @@ const resolveDateTime = (value: string, original?: string) => {
   if (original && value === toLocalDateTime(original)) return { date: new Date(original), iso: original };
   const date = parseLocalDateTime(value);
   return date ? { date, iso: date.toISOString() } : undefined;
+};
+
+const localStepInstant = (previousAt: Date, hours: number, minutes: number): Date => {
+  let candidate = new Date(previousAt);
+  candidate.setHours(hours, minutes, 0, 0);
+  if (candidate.getHours() !== hours || candidate.getMinutes() !== minutes) {
+    // Resolve an earlier wall clock on the next day before rejecting a DST gap.
+    if (hours * 60 + minutes >= previousAt.getHours() * 60 + previousAt.getMinutes()) return new Date(Number.NaN);
+    candidate = new Date(previousAt);
+    candidate.setDate(candidate.getDate() + 1);
+    candidate.setHours(hours, minutes, 0, 0);
+  } else if (candidate < previousAt) {
+    // A backward clock change can repeat this hour before the next calendar day.
+    const laterOffset = new Date(candidate.getTime() + 86_400_000).getTimezoneOffset();
+    const repeated = new Date(candidate.getTime() + (laterOffset - candidate.getTimezoneOffset()) * 60_000);
+    if (repeated >= previousAt && repeated.getFullYear() === candidate.getFullYear() &&
+        repeated.getMonth() === candidate.getMonth() && repeated.getDate() === candidate.getDate() &&
+        repeated.getHours() === hours && repeated.getMinutes() === minutes) candidate = repeated;
+    else candidate.setDate(candidate.getDate() + 1);
+  }
+  return candidate.getHours() === hours && candidate.getMinutes() === minutes ? candidate : new Date(Number.NaN);
 };
 
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
@@ -98,7 +128,7 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
     if (!Number.isFinite(costPerPerson)) errors.costPerPerson = "Ingresá un costo válido.";
   }
 
-  let steps: UrbanTransportStep[] = [];
+  let steps: Extract<UrbanTransportStep, { estimatedAt: string }>[] = [];
   if (values.type === "bus_local") {
     if (values.steps.length === 0) errors["details.steps"] = "Agregá al menos un tramo.";
     let previousAt = departureAt;
@@ -108,23 +138,32 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
       for (const field of ["line", "fromStop", "toStop"] as const) {
         if (!next[field]) errors[`details.steps[${index}].${field}`] = "Completá este campo.";
       }
+      let stepAt = new Date(Number.NaN);
       if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(next.estimatedTime)) {
         errors[`details.steps[${index}].estimatedTime`] = "Ingresá una hora válida (HH:mm).";
       } else if (previousAt && arrivalAt && departureAt && arrivalAt >= departureAt) {
         const [hours, minutes] = next.estimatedTime.split(":").map(Number);
-        const stepAt = new Date(previousAt);
-        stepAt.setHours(hours, minutes, 0, 0);
-        // HH:mm has no date: a clock rollover belongs to the following calendar day.
-        if (stepAt < previousAt) stepAt.setDate(stepAt.getDate() + 1);
-        if (stepAt > arrivalAt) {
-          errors[`details.steps[${index}].estimatedTime`] =
-            "La hora del tramo debe respetar el orden y estar entre la salida y la llegada.";
+        if (step.estimatedAt && toLocalDateTime(step.estimatedAt).slice(-5) === next.estimatedTime) {
+          // Editing another field must not change a previously confirmed instant or its precision.
+          stepAt = new Date(step.estimatedAt);
         } else {
-          previousAt = stepAt;
+          stepAt = localStepInstant(previousAt, hours!, minutes!);
         }
+        if (Number.isFinite(stepAt.getTime())) previousAt = stepAt;
       }
-      return next;
+      return { line: next.line, fromStop: next.fromStop, toStop: next.toStop,
+        estimatedAt: Number.isFinite(stepAt.getTime()) ? stepAt.toISOString() : "" };
     });
+    if (departureAt && arrivalAt) {
+      const checked = validateUrbanTransportSteps(steps.map((step) => ({ ...step, estimatedAt: new Date(step.estimatedAt!) })), departureAt, arrivalAt);
+      if (!checked.ok) for (const issue of checked.error.issues) {
+        const field = issue.field.replace(/\.estimatedAt$/, ".estimatedTime");
+        errors[field] ??= "La hora del tramo debe respetar el orden y estar entre la salida y la llegada.";
+      }
+    }
+    if (values.requiresTimeConfirmation && !values.legacyTimesConfirmed) {
+      errors["details.steps"] = "Confirmá las horas de los tramos en tu zona local antes de guardar.";
+    }
   }
   if (Object.keys(errors).length > 0 || !departure || !arrival) return { ok: false, errors };
 

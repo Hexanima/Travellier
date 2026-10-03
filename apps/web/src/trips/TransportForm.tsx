@@ -1,8 +1,8 @@
 import { useRef, useState, type FormEvent } from "react";
 
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
-import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi, UrbanTransportStep } from "./trip-journey-api.js";
-import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues } from "./transport-form-state.js";
+import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi } from "./trip-journey-api.js";
+import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues, type UrbanStepFormValues } from "./transport-form-state.js";
 
 export type TransportSaveCoordinator = {
   busy: boolean;
@@ -18,7 +18,7 @@ type Props = { tripId: string; destinationId: string; direction: TransportDirect
   journey: Pick<TripJourneyApi, "createTransport" | "updateTransport">;
   onSaved: (transport: JourneyTransport) => void };
 
-const emptyStep = (): UrbanTransportStep => ({ line: "", fromStop: "", toStop: "", estimatedTime: "" });
+const emptyStep = (): UrbanStepFormValues => ({ line: "", fromStop: "", toStop: "", estimatedTime: "" });
 const initialValues = (existing?: JourneyTransport): TransportFormValues => existing ? formValuesFromTransport(existing) : {
   type: "flight", departurePlace: "", departureAt: "", arrivalPlace: "", arrivalAt: "",
   costPerPerson: "", flightNumber: "", company: "", steps: [],
@@ -38,9 +38,9 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
     setErrors((current) => { const next = { ...current }; delete next[field]; return next; });
     setSaved(false);
   };
-  const updateStep = (index: number, field: keyof UrbanTransportStep, value: string) => {
+  const updateStep = (index: number, field: keyof UrbanStepFormValues, value: string) => {
     setValues((current) => ({ ...current, steps: current.steps.map((step, position) =>
-      position === index ? { ...step, [field]: value } : step) }));
+      position === index ? { ...step, estimatedAt: field === "estimatedTime" ? undefined : step.estimatedAt, [field]: value } : step) }));
     setErrors((current) => { const next = { ...current }; delete next[`details.steps[${index}].${field}`]; return next; });
     setSaved(false);
   };
@@ -69,7 +69,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       } else if (result.error.kind === "itinerary-conflict") {
         setSaveError("Este cambio deja actividades fuera de su horario o elimina días con actividades o posts. Revisá los datos vinculados antes de cambiar el transporte.");
       } else if (result.error.kind === "validation" && result.error.fields?.length) {
-        setErrors(Object.fromEntries(result.error.fields.map(({ field, message }) => [field, message])));
+        setErrors(Object.fromEntries(result.error.fields.map(({ field, message }) => [field.replace(/\.estimatedAt$/, ".estimatedTime"), message])));
         setSaveError("Revisá los datos del transporte e intentá nuevamente.");
       } else {
         setSaveError("No pudimos guardar el transporte. Intentá nuevamente.");
@@ -127,6 +127,15 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       {isUrbanBus ? (
         <fieldset className="journey-steps">
           <legend>Tramos del colectivo</legend>
+          <p>Las horas continúan desde la salida o el tramo anterior; cuando corresponde, pasan al día siguiente.</p>
+          {values.requiresTimeConfirmation ? <div>
+            <p>Revisá las horas guardadas y confirmá que corresponden a tu zona local ({Intl.DateTimeFormat().resolvedOptions().timeZone}).</p>
+            <label><input type="checkbox" name="confirmLegacyTimes" checked={values.legacyTimesConfirmed ?? false} disabled={saving}
+              onChange={(event) => {
+                setValues((current) => ({ ...current, legacyTimesConfirmed: event.target.checked }));
+                setErrors((current) => { const next = { ...current }; delete next["details.steps"]; return next; });
+              }} /> Confirmo las horas de estos tramos en mi zona local</label>
+          </div> : null}
           {values.steps.map((step, index) => (
             <div className="journey-step" key={index}>
               <div className="journey-step-heading"><h4>Tramo {index + 1}</h4>
@@ -147,6 +156,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
                 <TextField label="Hora estimada" name={`step-estimatedTime-${index}`} type="time" value={step.estimatedTime}
                   error={errors[`details.steps[${index}].estimatedTime`]} loading={saving}
                   onChange={(event) => updateStep(index, "estimatedTime", event.target.value)} />
+                {step.estimatedAt ? <p>Horario confirmado: {new Date(step.estimatedAt).toLocaleString("es-AR")}</p> : null}
               </div>
             </div>
           ))}

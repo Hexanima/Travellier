@@ -4,6 +4,18 @@ import { itineraryFixture } from "./itinerary-test-fixture.js";
 import { createTripItineraryApi } from "./trip-itinerary-api.js";
 
 describe("itinerary client", () => {
+  it("reads canonical UTC and legacy urban steps without mutating their fields", async () => {
+    const itinerary = itineraryFixture();
+    const canonical = { ...itinerary.transports[0], type: "bus_local", details: { steps: [
+      { line: "1", fromStop: "A", toStop: "B", estimatedAt: "2026-09-25T09:00:00.123Z" },
+    ] } };
+    const legacy = { ...canonical, details: { steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "06:00" }] } };
+    for (const transport of [canonical, legacy]) {
+      const response = { ...itinerary, transports: [transport, itinerary.transports[1]] };
+      const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary: response } });
+      expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: response });
+    }
+  });
   it("reads the aggregate in one authenticated GET and preserves UTC precision", async () => {
     const createApi = createTripItineraryApi, itinerary = itineraryFixture();
     const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ itinerary })));

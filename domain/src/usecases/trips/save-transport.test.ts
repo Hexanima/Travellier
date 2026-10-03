@@ -9,7 +9,7 @@ const id = (value: string) => {
   return result.value;
 };
 
-const transport: CreateTransportInput = {
+const transport = {
   id: id("507f1f77bcf86cd799439014"),
   tripId: id("507f191e810c19729de860ea"),
   destinationId: id("507f1f77bcf86cd799439013"),
@@ -20,8 +20,8 @@ const transport: CreateTransportInput = {
   arrivalPlace: "Centro",
   arrivalAt: new Date("2026-09-24T09:00:00.000Z"),
   costPerPerson: null,
-  details: { steps: [{ line: "20", fromStop: "Terminal", toStop: "Centro", estimatedTime: "08:30" }] },
-};
+  details: { steps: [{ line: "20", fromStop: "Terminal", toStop: "Centro", estimatedAt: new Date("2026-09-24T08:30:00Z") }] },
+} satisfies CreateTransportInput;
 
 describe("saveTransport", () => {
   it("does not call persistence for an invalid urban bus", async () => {
@@ -49,7 +49,7 @@ describe("saveTransport", () => {
     const saved: unknown[] = [];
     const invalid: CreateTransportInput = {
       ...transport,
-      details: { steps: [{ ...transport.details.steps[0], estimatedTime: "mañana" }] },
+      details: { steps: [{ ...transport.details.steps[0]!, estimatedAt: new Date(Number.NaN) }] },
     };
     const result = await saveTransport.execute({
       transports: { save: async (value: unknown) => { saved.push(value); return ok(undefined); } },
@@ -57,7 +57,7 @@ describe("saveTransport", () => {
 
     expect(result).toMatchObject({
       ok: false,
-      error: { tag: "ValidationError", issues: [{ field: "details.steps[0].estimatedTime", code: "invalid" }] },
+      error: { tag: "ValidationError", issues: [{ field: "details.steps[0].estimatedAt", code: "invalid" }] },
     });
     expect(saved).toEqual([]);
   });

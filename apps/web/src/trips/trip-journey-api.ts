@@ -1,9 +1,13 @@
+import { readTransport, type Transport } from "app-domain";
 import type { ApiClientError, HttpClient } from "../api/index.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
 
 export type TransportDirection = "outbound" | "return";
 export type TransportType = "bus_local" | "bus_long" | "flight" | "car" | "other";
-export type UrbanTransportStep = { line: string; fromStop: string; toStop: string; estimatedTime: string };
+export type UrbanTransportStep = { line: string; fromStop: string; toStop: string } & (
+  | { estimatedAt: string; estimatedTime?: never }
+  | { estimatedTime: string; estimatedAt?: never }
+);
 
 type TransportBase = {
   direction: TransportDirection;
@@ -35,13 +39,21 @@ export type TripJourneyApi = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 const isText = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
-const isOptionalText = (value: unknown) => value === undefined || value === null || isText(value);
 const isTimestamp = (value: unknown): value is string => isText(value) && !Number.isNaN(Date.parse(value));
-const hasOnlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
-  Object.keys(value).every((key) => keys.includes(key));
-const isStep = (value: unknown): value is UrbanTransportStep => isRecord(value) &&
-  isText(value.line) && isText(value.fromStop) && isText(value.toStop) &&
-  typeof value.estimatedTime === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value.estimatedTime);
+
+/** Hydrate only explicit UTC step instants. Legacy clocks retain their original representation. */
+export const journeyTransportForDomain = (value: Record<string, unknown>): Transport => {
+  const details = isRecord(value.details) ? value.details : {};
+  return { ...value, departureAt: new Date(value.departureAt as string), arrivalAt: new Date(value.arrivalAt as string),
+    details: !isRecord(value.details) ? value.details : { ...details, ...(Array.isArray(details.steps) ? { steps: details.steps.map((step: unknown) => {
+      if (!isRecord(step) || !Object.hasOwn(step, "estimatedAt")) return step;
+      const instant = step.estimatedAt;
+      const date = typeof instant === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(instant)
+        ? new Date(instant) : new Date(Number.NaN);
+      return { ...step, estimatedAt: Number.isFinite(date.getTime()) && date.toISOString() === instant ? date : new Date(Number.NaN) };
+    }) } : {}) },
+  } as unknown as Transport;
+};
 
 const isDestination = (value: unknown): value is JourneyDestination => isRecord(value) &&
   isText(value.id) && isText(value.tripId) && isText(value.name) &&
@@ -54,22 +66,7 @@ const isTransport = (value: unknown): value is JourneyTransport => {
       !isText(value.arrivalPlace) || !isTimestamp(value.arrivalAt) ||
       !(value.costPerPerson === null || (typeof value.costPerPerson === "number" && Number.isFinite(value.costPerPerson))) ||
       !isRecord(value.details)) return false;
-  switch (value.type) {
-    case "bus_local":
-      return hasOnlyKeys(value.details, ["steps"]) && Array.isArray(value.details.steps) &&
-        value.details.steps.length > 0 && value.details.steps.every(isStep);
-    case "bus_long":
-      return hasOnlyKeys(value.details, ["company", "terminal"]) &&
-        isOptionalText(value.details.company) && isOptionalText(value.details.terminal);
-    case "flight":
-      return hasOnlyKeys(value.details, ["flightNumber", "airline"]) &&
-        isOptionalText(value.details.flightNumber) && isOptionalText(value.details.airline);
-    case "car":
-    case "other":
-      return Object.keys(value.details).length === 0;
-    default:
-      return false;
-  }
+  return readTransport(journeyTransportForDomain(value)).ok;
 };
 
 const toFailure = (error: ApiClientError): TripFailure =>
