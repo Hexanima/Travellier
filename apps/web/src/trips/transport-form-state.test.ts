@@ -116,12 +116,31 @@ describe("prepareTransportInput", () => {
     }).ok).toBe(true);
   });
 
-  it("only compares the destination arrival with its previous neighbor and departure with its next", () => {
+  it("bounds both destination timestamps even when their complementary transport is missing", () => {
     expect(prepareTransportInput(values, "outbound", undefined, {
       nextArrivalAt: new Date("2026-09-30T18:00").toISOString(),
-    }).ok).toBe(true);
+    })).toMatchObject({ ok: false, errors: { arrivalAt: expect.any(String) } });
     expect(prepareTransportInput(values, "return", undefined, {
       previousDepartureAt: new Date("2026-10-02T12:00").toISOString(),
+    })).toMatchObject({ ok: false, errors: { departureAt: expect.any(String) } });
+  });
+
+  it.each(["outbound", "return"] as const)("uses the known arrival of a previous destination for %s", (direction) => {
+    expect(prepareTransportInput(values, direction, undefined, {
+      previousArrivalAt: new Date("2026-10-02T12:00").toISOString(),
+    })).toMatchObject({ ok: false, errors: { [direction === "outbound" ? "arrivalAt" : "departureAt"]: expect.any(String) } });
+  });
+
+  it.each(["outbound", "return"] as const)("uses the known departure of a next destination for %s", (direction) => {
+    expect(prepareTransportInput(values, direction, undefined, {
+      nextDepartureAt: new Date("2026-09-30T18:00").toISOString(),
+    })).toMatchObject({ ok: false, errors: { [direction === "outbound" ? "arrivalAt" : "departureAt"]: expect.any(String) } });
+  });
+
+  it.each(["outbound", "return"] as const)("allows equal known partial boundaries for %s", (direction) => {
+    const boundary = new Date(direction === "outbound" ? values.arrivalAt : values.departureAt).toISOString();
+    expect(prepareTransportInput(values, direction, undefined, {
+      previousArrivalAt: boundary, nextDepartureAt: boundary,
     }).ok).toBe(true);
   });
 

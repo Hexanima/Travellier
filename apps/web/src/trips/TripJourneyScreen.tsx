@@ -2,17 +2,40 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router-dom";
 
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
-import { TransportForm } from "./TransportForm.js";
-import type { JourneyDestination, JourneyTransport, TripJourneyApi } from "./trip-journey-api.js";
+import { TransportForm, type TransportSaveCoordinator } from "./TransportForm.js";
+import type { JourneyDestination, JourneyTransport, TransportDirection, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
 
 type Props = { trips: Pick<TripManagementApi, "get">; journey: TripJourneyApi };
+
+const validationContext = (destinationId: string, direction: TransportDirection,
+  destinations: JourneyDestination[], transports: Record<string, JourneyTransport[]>) => {
+  const index = destinations.findIndex((destination) => destination.id === destinationId);
+  const previous = destinations[index - 1];
+  const next = destinations[index + 1];
+  const previousTransports = previous ? transports[previous.id] ?? [] : [];
+  const nextTransports = next ? transports[next.id] ?? [] : [];
+  return {
+    complementary: transports[destinationId]?.find((item) => item.direction !== direction),
+    neighbors: {
+      previousArrivalAt: previousTransports.find((item) => item.direction === "outbound")?.arrivalAt,
+      previousDepartureAt: previousTransports.find((item) => item.direction === "return")?.departureAt,
+      nextArrivalAt: nextTransports.find((item) => item.direction === "outbound")?.arrivalAt,
+      nextDepartureAt: nextTransports.find((item) => item.direction === "return")?.departureAt,
+    },
+  };
+};
 
 export function TripJourneyScreen({ trips, journey }: Props) {
   const { tripId } = useParams();
   const [trip, setTrip] = useState<TripDetail>();
   const [destinations, setDestinations] = useState<JourneyDestination[]>([]);
   const [transports, setTransports] = useState<Record<string, JourneyTransport[]>>({});
+  const confirmedJourney = useRef<{ destinations: JourneyDestination[]; transports: Record<string, JourneyTransport[]> }>({
+    destinations: [], transports: {},
+  });
+  const [savingTransport, setSavingTransport] = useState(false);
+  const savingTransportRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [destinationName, setDestinationName] = useState("");
@@ -39,9 +62,11 @@ export function TripJourneyScreen({ trips, journey }: Props) {
       if (responses.some((response) => !response.ok)) {
         setLoadError("No pudimos cargar los destinos y transportes."); return;
       }
+      const loadedTransports = Object.fromEntries(ordered.map((destination, index) => [destination.id,
+        responses[index]?.ok ? responses[index].value : []]));
+      confirmedJourney.current = { destinations: ordered, transports: loadedTransports };
       setDestinations(ordered);
-      setTransports(Object.fromEntries(ordered.map((destination, index) => [destination.id,
-        responses[index]?.ok ? responses[index].value : []])));
+      setTransports(loadedTransports);
     } catch {
       setLoadError("No pudimos cargar los destinos y transportes.");
     } finally {
@@ -62,8 +87,12 @@ export function TripJourneyScreen({ trips, journey }: Props) {
     try {
       const result = await journey.createDestination(tripId, name);
       if (result.ok) {
-        setDestinations((current) => [...current, result.value].sort((a, b) => a.order - b.order));
-        setTransports((current) => ({ ...current, [result.value.id]: [] }));
+        const current = confirmedJourney.current;
+        const ordered = [...current.destinations, result.value].sort((a, b) => a.order - b.order);
+        const updatedTransports = { ...current.transports, [result.value.id]: [] };
+        confirmedJourney.current = { destinations: ordered, transports: updatedTransports };
+        setDestinations(ordered);
+        setTransports(updatedTransports);
         setDestinationName("");
       } else {
         setDestinationError(result.error.kind === "validation" ? "Ingresá un nombre válido para el destino."
@@ -78,12 +107,26 @@ export function TripJourneyScreen({ trips, journey }: Props) {
   };
 
   const onSaved = (transport: JourneyTransport) => {
-    setTransports((current) => {
-      const existing = current[transport.destinationId] ?? [];
-      return { ...current, [transport.destinationId]: [
-        ...existing.filter((item) => item.direction !== transport.direction), transport,
-      ] };
-    });
+    const current = confirmedJourney.current.transports;
+    const existing = current[transport.destinationId] ?? [];
+    const updated = { ...current, [transport.destinationId]: [
+      ...existing.filter((item) => item.direction !== transport.direction), transport,
+    ] };
+    // Publish the confirmed response before releasing the save lock, even if React has not rendered yet.
+    confirmedJourney.current = { ...confirmedJourney.current, transports: updated };
+    setTransports(updated);
+  };
+
+  const saveCoordinator: TransportSaveCoordinator = {
+    busy: savingTransport,
+    begin: (destinationId, direction) => {
+      if (savingTransportRef.current) return undefined;
+      savingTransportRef.current = true;
+      setSavingTransport(true);
+      const current = confirmedJourney.current;
+      return validationContext(destinationId, direction, current.destinations, current.transports);
+    },
+    finish: () => { savingTransportRef.current = false; setSavingTransport(false); },
   };
 
   return (
@@ -103,16 +146,8 @@ export function TripJourneyScreen({ trips, journey }: Props) {
           <>
             <p className="journey-intro">Organizá los destinos en el orden del viaje. Configurá la ida y la vuelta de cada uno; las fechas del viaje se derivan de estos transportes.</p>
             <div className="journey-destinations">
-              {destinations.map((destination, index) => {
+              {destinations.map((destination) => {
                 const saved = transports[destination.id] ?? [];
-                const previous = destinations[index - 1];
-                const next = destinations[index + 1];
-                const neighbors = {
-                  previousDepartureAt: previous
-                    ? transports[previous.id]?.find((item) => item.direction === "return")?.departureAt : undefined,
-                  nextArrivalAt: next
-                    ? transports[next.id]?.find((item) => item.direction === "outbound")?.arrivalAt : undefined,
-                };
                 return <section className="journey-destination" key={destination.id} aria-labelledby={`destination-${destination.id}`}>
                   <div className="journey-destination-heading"><span className="journey-order">Destino {destination.order}</span>
                     <h2 id={`destination-${destination.id}`}>{destination.name}</h2></div>
@@ -121,7 +156,7 @@ export function TripJourneyScreen({ trips, journey }: Props) {
                       <h3>{direction === "outbound" ? "Llegada al destino" : "Salida del destino"}</h3>
                       <TransportForm tripId={tripId!} destinationId={destination.id} direction={direction}
                         existing={saved.find((item) => item.direction === direction)}
-                        complementary={saved.find((item) => item.direction !== direction)} neighbors={neighbors}
+                        saveCoordinator={saveCoordinator}
                         journey={journey} onSaved={onSaved} />
                     </section>)}
                   </div>

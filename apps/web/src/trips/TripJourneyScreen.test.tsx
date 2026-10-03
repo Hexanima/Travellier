@@ -6,8 +6,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripJourneyScreen } from "./TripJourneyScreen.js";
-import type { JourneyTransport, TransportInput, TripJourneyApi } from "./trip-journey-api.js";
-import type { TripManagementApi } from "./trip-management-api.js";
+import type { JourneyTransport, TransportDirection, TransportInput, TripJourneyApi } from "./trip-journey-api.js";
+import type { TripManagementApi, TripResult } from "./trip-management-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const tripId = "507f191e810c19729de860ea";
@@ -31,11 +31,14 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
     ok: true, value: (options.transports ?? []).filter((transport) => transport.destinationId === destinationId),
   }));
   const createDestination = vi.fn().mockResolvedValue({ ok: true, value: second });
-  const updateTransport = vi.fn(async (_tripId: string, destinationId: string, id: string, input: TransportInput) => ({
+  const updateTransport = vi.fn(async (_tripId: string, destinationId: string, id: string, input: TransportInput): Promise<TripResult<JourneyTransport>> => ({
     ok: true, value: { ...input, id, tripId, destinationId },
   }));
+  const createTransport = vi.fn(async (_tripId: string, destinationId: string, input: TransportInput) => ({
+    ok: true, value: { ...input, id: "507f1f77bcf86cd799439019", tripId, destinationId },
+  }));
   const journey = { listDestinations, listTransports, createDestination,
-    createTransport: vi.fn(), updateTransport } as unknown as TripJourneyApi;
+    createTransport, updateTransport } as unknown as TripJourneyApi;
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -44,10 +47,108 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
     <Routes><Route path="/trips/:tripId/journey" element={<TripJourneyScreen trips={{ get } as unknown as TripManagementApi}
       journey={journey} />} /></Routes>
   </MemoryRouter>));
-  return { container, get, listDestinations, listTransports, createDestination, updateTransport };
+  return { container, get, listDestinations, listTransports, createDestination, createTransport, updateTransport };
 }
 
+const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
+  const input = form.querySelector(`[name="${name}"]`) as HTMLInputElement;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+const submit = async (form: HTMLFormElement) => act(async () => {
+  form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+});
+const transport = (destinationId: string, direction: TransportDirection, departureAt: string, arrivalAt: string): JourneyTransport => ({
+  id: `${destinationId.slice(0, -1)}${destinationId === first.id
+    ? (direction === "outbound" ? "6" : "7") : (direction === "outbound" ? "8" : "9")}`,
+  tripId, destinationId, direction, type: "car",
+  departurePlace: "A", arrivalPlace: "B", costPerPerson: null, details: {},
+  departureAt: new Date(departureAt).toISOString(), arrivalAt: new Date(arrivalAt).toISOString(),
+});
+const sameDestination = () => [
+  transport(first.id, "outbound", "2026-10-10T08:00", "2026-10-10T10:00"),
+  transport(first.id, "return", "2026-10-10T18:00", "2026-10-10T20:00"),
+];
+
 describe("TripJourneyScreen", () => {
+  it.each(["outbound", "return"] as const)("blocks %s before the known arrival of a previous partial destination", async (direction) => {
+    const { container, createTransport, updateTransport } = await render({ destinations: [second, first], transports: [
+      transport(first.id, "outbound", "2026-10-12T08:00", "2026-10-12T10:00"),
+    ] });
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    const form = forms[direction === "outbound" ? 2 : 3];
+    await change(form, "departurePlace", "A");
+    await change(form, "arrivalPlace", "B");
+    await change(form, "departureAt", "2026-10-11T08:00");
+    await change(form, "arrivalAt", "2026-10-11T10:00");
+    await submit(form);
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(form.querySelector(`[name="${direction === "outbound" ? "arrivalAt" : "departureAt"}"][aria-invalid="true"]`)).not.toBeNull();
+  });
+
+  it.each(["outbound", "return"] as const)("blocks %s after the known departure of a next partial destination", async (direction) => {
+    const { container, updateTransport } = await render({ destinations: [first, second], transports: [
+      transport(first.id, direction, "2026-10-12T08:00", "2026-10-12T10:00"),
+      transport(second.id, "return", "2026-10-11T18:00", "2026-10-11T20:00"),
+    ] });
+    const form = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form")[direction === "outbound" ? 0 : 1];
+    await submit(form);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(form.querySelector(`[name="${direction === "outbound" ? "arrivalAt" : "departureAt"}"][aria-invalid="true"]`)).not.toBeNull();
+  });
+
+  it.each(["outbound", "return"] as const)("coordinates concurrent saves starting with %s and revalidates the other form", async (direction) => {
+    const transports = sameDestination();
+    const { container, updateTransport } = await render({ transports });
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    await change(forms[0], "arrivalAt", "2026-10-10T16:00");
+    await change(forms[1], "departureAt", "2026-10-10T12:00");
+    let resolveSave!: (result: TripResult<JourneyTransport>) => void;
+    updateTransport.mockImplementationOnce(() => new Promise<TripResult<JourneyTransport>>((resolve) => { resolveSave = resolve; }));
+    const firstIndex = direction === "outbound" ? 0 : 1;
+    const otherIndex = 1 - firstIndex;
+    await act(async () => {
+      forms[firstIndex].dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      forms[otherIndex].dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(updateTransport).toHaveBeenCalledOnce();
+    expect(forms[otherIndex].querySelector('button[type="submit"]')).toHaveProperty("disabled", true);
+    await act(async () => {
+      resolveSave({ ok: true, value: { ...transports[firstIndex], ...updateTransport.mock.calls[0][3] } });
+      // Submit before React renders the new props to exercise validation against the confirmed response.
+      await Promise.resolve();
+      forms[otherIndex].dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(forms[otherIndex].querySelector('button[type="submit"]')).toHaveProperty("disabled", false);
+    await submit(forms[otherIndex]);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    const field = direction === "outbound" ? "departureAt" : "arrivalAt";
+    expect(forms[otherIndex].querySelector(`[name="${field}"][aria-invalid="true"]`)).not.toBeNull();
+    await change(forms[otherIndex], field, direction === "outbound" ? "2026-10-10T16:00" : "2026-10-10T12:00");
+    await submit(forms[otherIndex]);
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["rejected", "thrown"] as const)("releases the shared save lock after a %s request", async (failure) => {
+    const { container, updateTransport } = await render({ transports: sameDestination() });
+    let rejectSave!: (error: Error) => void;
+    let resolveSave!: (result: TripResult<JourneyTransport>) => void;
+    updateTransport.mockImplementationOnce(() => new Promise<TripResult<JourneyTransport>>((resolve, reject) => {
+      resolveSave = resolve; rejectSave = reject;
+    }));
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    await submit(forms[0]);
+    expect(forms[1].querySelector('button[type="submit"]')).toHaveProperty("disabled", true);
+    await act(async () => {
+      if (failure === "thrown") rejectSave(new Error("Connection lost"));
+      else resolveSave({ ok: false, error: { kind: "network" } });
+    });
+    expect(forms[1].querySelector('button[type="submit"]')).toHaveProperty("disabled", false);
+    await submit(forms[1]);
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+  });
+
   it("blocks conflicts with ordered neighbors in either direction and uses their latest saved times", async () => {
     const transports: JourneyTransport[] = [first, second].flatMap((destination) =>
       (["outbound", "return"] as const).map((direction, index) => ({
@@ -62,14 +163,6 @@ describe("TripJourneyScreen", () => {
       })));
     const { container, updateTransport } = await render({ destinations: [second, first], transports });
     const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
-    const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
-      const input = form.querySelector(`[name="${name}"]`) as HTMLInputElement;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const submit = async (form: HTMLFormElement) => act(async () => {
-      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    });
 
     await change(forms[2], "departureAt", "2026-10-11T08:00");
     await change(forms[2], "arrivalAt", "2026-10-11T10:00");
@@ -106,14 +199,6 @@ describe("TripJourneyScreen", () => {
     }));
     const { container, updateTransport } = await render({ transports });
     const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
-    const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
-      const input = form.querySelector(`[name="${name}"]`) as HTMLInputElement;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    const submit = async (form: HTMLFormElement) => act(async () => {
-      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-    });
     await change(forms[0], "arrivalAt", "2026-10-10T13:00");
     await submit(forms[0]);
     expect(updateTransport).not.toHaveBeenCalled();

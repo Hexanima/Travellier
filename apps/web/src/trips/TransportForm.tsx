@@ -4,8 +4,17 @@ import { Button, Feedback, SelectField, TextField } from "../components/index.js
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi, UrbanTransportStep } from "./trip-journey-api.js";
 import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues } from "./transport-form-state.js";
 
+export type TransportSaveCoordinator = {
+  busy: boolean;
+  begin: (destinationId: string, direction: TransportDirection) => {
+    complementary?: JourneyTransport; neighbors: DestinationNeighbors;
+  } | undefined;
+  finish: () => void;
+};
+
 type Props = { tripId: string; destinationId: string; direction: TransportDirection;
   existing?: JourneyTransport; complementary?: JourneyTransport; neighbors?: DestinationNeighbors;
+  saveCoordinator?: TransportSaveCoordinator;
   journey: Pick<TripJourneyApi, "createTransport" | "updateTransport">;
   onSaved: (transport: JourneyTransport) => void };
 
@@ -15,7 +24,7 @@ const initialValues = (existing?: JourneyTransport): TransportFormValues => exis
   costPerPerson: "", flightNumber: "", company: "", steps: [],
 };
 
-export function TransportForm({ tripId, destinationId, direction, existing, complementary, neighbors, journey, onSaved }: Props) {
+export function TransportForm({ tripId, destinationId, direction, existing, complementary, neighbors, saveCoordinator, journey, onSaved }: Props) {
   const [values, setValues] = useState(() => initialValues(existing));
   const [savedTransport, setSavedTransport] = useState(existing);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -38,10 +47,13 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current) return;
-    const prepared = prepareTransportInput(values, direction, complementary, neighbors);
+    const context = saveCoordinator?.begin(destinationId, direction);
+    if (saveCoordinator && !context) return;
+    const prepared = prepareTransportInput(values, direction,
+      context ? context.complementary : complementary, context ? context.neighbors : neighbors);
     setSaveError("");
     setSaved(false);
-    if (!prepared.ok) { setErrors(prepared.errors); return; }
+    if (!prepared.ok) { setErrors(prepared.errors); saveCoordinator?.finish(); return; }
     setErrors({});
     savingRef.current = true;
     setSaving(true);
@@ -65,6 +77,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
     } finally {
       savingRef.current = false;
       setSaving(false);
+      saveCoordinator?.finish();
     }
   };
 
@@ -145,7 +158,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       ) : null}
       {saveError ? <Feedback variant="error">{saveError}</Feedback> : null}
       {saved ? <Feedback variant="success">Transporte guardado.</Feedback> : null}
-      <Button type="submit" loading={saving}>{savedTransport ? "Guardar cambios" : "Guardar transporte"}</Button>
+      <Button type="submit" loading={saving} disabled={saveCoordinator?.busy}>{savedTransport ? "Guardar cambios" : "Guardar transporte"}</Button>
     </form>
   );
 }

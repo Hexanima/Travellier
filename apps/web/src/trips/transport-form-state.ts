@@ -14,7 +14,10 @@ export type TransportFormValues = {
 
 export type FormValidation = { ok: true; value: TransportInput } | { ok: false; errors: Record<string, string> };
 
-export type DestinationNeighbors = { previousDepartureAt?: string; nextArrivalAt?: string };
+export type DestinationNeighbors = {
+  previousArrivalAt?: string; previousDepartureAt?: string;
+  nextArrivalAt?: string; nextDepartureAt?: string;
+};
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const toLocalDateTime = (iso: string) => {
@@ -68,13 +71,16 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
       departureAt.getTime() < Date.parse(complementary.arrivalAt)) {
     errors.departureAt = "La salida del destino no puede ser anterior a su llegada.";
   }
-  if (direction === "outbound" && arrivalAt && neighbors?.previousDepartureAt &&
-      arrivalAt.getTime() < Date.parse(neighbors.previousDepartureAt)) {
-    errors.arrivalAt = "La llegada no puede ser anterior a la salida del destino anterior.";
+  const destinationAt = direction === "outbound" ? arrivalAt : departureAt;
+  const destinationField = direction === "outbound" ? "arrivalAt" : "departureAt";
+  const destinationLabel = direction === "outbound" ? "La llegada" : "La salida";
+  const previousAt = neighbors?.previousDepartureAt ?? neighbors?.previousArrivalAt;
+  const nextAt = neighbors?.nextArrivalAt ?? neighbors?.nextDepartureAt;
+  if (destinationAt && previousAt && destinationAt.getTime() < Date.parse(previousAt)) {
+    errors[destinationField] = `${destinationLabel} no puede ser anterior a la ${neighbors?.previousDepartureAt ? "salida" : "llegada"} del destino anterior.`;
   }
-  if (direction === "return" && departureAt && neighbors?.nextArrivalAt &&
-      departureAt.getTime() > Date.parse(neighbors.nextArrivalAt)) {
-    errors.departureAt = "La salida no puede ser posterior a la llegada al destino siguiente.";
+  if (destinationAt && nextAt && destinationAt.getTime() > Date.parse(nextAt)) {
+    errors[destinationField] = `${destinationLabel} no puede ser posterior ${neighbors?.nextArrivalAt ? "a la llegada al" : "a la salida del"} destino siguiente.`;
   }
 
   let costPerPerson: number | null = null;
