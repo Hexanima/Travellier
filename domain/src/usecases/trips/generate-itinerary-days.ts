@@ -1,4 +1,4 @@
-import type { ItineraryDayDraft } from "../../entities/itinerary-day.js";
+import type { ItineraryDayDraft, ItineraryDayType } from "../../entities/itinerary-day.js";
 import { createTransport, type Transport } from "../../entities/transport.js";
 import { createTripDestination, type TripDestination } from "../../entities/trip-destination.js";
 import { ValidationError } from "../../errors/validation-error.js";
@@ -65,10 +65,34 @@ const validateJourney = ({ tripId, destinations, transports }: GenerateItinerary
   return ok(ordered);
 };
 
+type DaySlice = Omit<ItineraryDayDraft, "order">;
+const utcDayDurationMs = 24 * 60 * 60 * 1_000;
+
+const appendSlices = (slices: DaySlice[], tripId: ObjectId, destinationId: ObjectId,
+  type: Exclude<ItineraryDayType, "arrival">, startsAt: Date, endsAt: Date): void => {
+  const end = endsAt.getTime();
+  let start = startsAt.getTime();
+  while (start < end) {
+    const date = Math.floor(start / utcDayDurationMs) * utcDayDurationMs;
+    const sliceEnd = Math.min(end, date + utcDayDurationMs);
+    slices.push({ tripId, destinationId, type, date: new Date(date), startsAt: new Date(start), endsAt: new Date(sliceEnd) });
+    start = sliceEnd;
+  }
+};
+
+/** Derives canonical UTC day slices; callers persist the drafts and the UI projects them into local calendar dates. */
 export const generateItineraryDays: UseCase<Record<string, never>, GenerateItineraryDaysPayload, ItineraryDayDraft[], ValidationError> = {
   execute: async (_dependencies, payload) => {
     const validated = validateJourney(payload);
     if (!validated.ok) return validated;
-    return ok([]);
+    const slices: DaySlice[] = [];
+    for (const { destination, outbound, return: returning } of validated.value) {
+      if (outbound) appendSlices(slices, payload.tripId, destination.id, "transit_out", outbound.departureAt, outbound.arrivalAt);
+      if (outbound && returning) appendSlices(slices, payload.tripId, destination.id, "activity", outbound.arrivalAt, returning.departureAt);
+      if (returning) appendSlices(slices, payload.tripId, destination.id, "transit_return", returning.departureAt, returning.arrivalAt);
+    }
+    // Stable sorting preserves destination order when two destination transports describe the same transfer.
+    slices.sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+    return ok(slices.map((slice, index) => ({ ...slice, order: index + 1 })));
   },
 };

@@ -198,4 +198,87 @@ describe("generateItineraryDays", () => {
     expect(result.value.every((value) => value.date.getTime() === Date.parse("2026-09-25T00:00:00Z"))).toBe(true);
     expect(result.value.every((value) => !("id" in value))).toBe(true);
   });
+
+  it.each(["outbound", "return"] as const)("derives only known transit when the %s transport is configured", async (direction) => {
+    const payload = input();
+    const configured = payload.transports.find((value) => value.direction === direction)!;
+    const result = await generateItineraryDays.execute({}, { ...payload, transports: [configured] });
+    expect(result).toEqual({ ok: true, value: [
+      day(id(2), direction === "outbound" ? "transit_out" : "transit_return", "2026-09-25T00:00:00Z",
+        configured.departureAt.toISOString(), configured.arrivalAt.toISOString(), 1),
+    ] });
+  });
+
+  it("returns an empty projection when no transport is configured", async () => {
+    expect(await generateItineraryDays.execute({}, { ...input(), transports: [] })).toEqual({ ok: true, value: [] });
+  });
+
+  it("returns an empty projection for a Trip without destinations", async () => {
+    expect(await generateItineraryDays.execute({}, { tripId, destinations: [], transports: [] })).toEqual({ ok: true, value: [] });
+  });
+
+  it("does not add a phantom calendar day for an interval ending at midnight", async () => {
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [
+      transport(3, id(2), "outbound", "2026-09-24T20:00:00Z", "2026-09-25T00:00:00Z"),
+      transport(4, id(2), "return", "2026-09-26T00:00:00Z", "2026-09-26T08:00:00Z"),
+    ] });
+    expect(result).toEqual({ ok: true, value: [
+      day(id(2), "transit_out", "2026-09-24T00:00:00Z", "2026-09-24T20:00:00Z", "2026-09-25T00:00:00Z", 1),
+      day(id(2), "activity", "2026-09-25T00:00:00Z", "2026-09-25T00:00:00Z", "2026-09-26T00:00:00Z", 2),
+      day(id(2), "transit_return", "2026-09-26T00:00:00Z", "2026-09-26T00:00:00Z", "2026-09-26T08:00:00Z", 3),
+    ] });
+  });
+
+  it.each([
+    ["2026-12-31", "2027-01-02", ["2026-12-31", "2027-01-01", "2027-01-02"]],
+    ["2028-02-28", "2028-03-01", ["2028-02-28", "2028-02-29", "2028-03-01"]],
+  ])("covers calendar boundaries between %s and %s", async (first, last, dates) => {
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [
+      transport(3, id(2), "outbound", `${first}T08:00:00Z`, `${first}T10:00:00Z`),
+      transport(4, id(2), "return", `${last}T18:00:00Z`, `${last}T20:00:00Z`),
+    ] });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const activity = result.value.filter((value) => value.type === "activity");
+    expect(activity.map((value) => value.date.toISOString().slice(0, 10))).toEqual(dates);
+    expect(activity[0]?.startsAt.toISOString()).toBe(`${first}T10:00:00.000Z`);
+    expect(activity.at(-1)?.endsAt.toISOString()).toBe(`${last}T18:00:00.000Z`);
+    for (let index = 1; index < activity.length; index++) {
+      expect(activity[index]?.startsAt).toEqual(activity[index - 1]?.endsAt);
+    }
+  });
+
+  it("does not create activity when arrival and departure from the destination coincide", async () => {
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [
+      transport(3, id(2), "outbound", "2026-09-25T08:00:00Z", "2026-09-25T10:00:00Z"),
+      transport(4, id(2), "return", "2026-09-25T10:00:00Z", "2026-09-25T12:00:00Z"),
+    ] });
+    expect(result).toEqual({ ok: true, value: [
+      day(id(2), "transit_out", "2026-09-25T00:00:00Z", "2026-09-25T08:00:00Z", "2026-09-25T10:00:00Z", 1),
+      day(id(2), "transit_return", "2026-09-25T00:00:00Z", "2026-09-25T10:00:00Z", "2026-09-25T12:00:00Z", 2),
+    ] });
+  });
+
+  it("preserves an activity window when both transports have zero duration", async () => {
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [
+      transport(3, id(2), "outbound", "2026-09-25T10:00:00Z", "2026-09-25T10:00:00Z"),
+      transport(4, id(2), "return", "2026-09-25T18:00:00Z", "2026-09-25T18:00:00Z"),
+    ] });
+    expect(result).toEqual({ ok: true, value: [
+      day(id(2), "activity", "2026-09-25T00:00:00Z", "2026-09-25T10:00:00Z", "2026-09-25T18:00:00Z", 1),
+    ] });
+  });
+
+  it("preserves UTC instants supplied with a local timezone offset", async () => {
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [
+      transport(3, id(2), "outbound", "2026-09-24T20:00:00-03:00", "2026-09-24T22:00:00-03:00"),
+      transport(4, id(2), "return", "2026-09-25T02:00:00-03:00", "2026-09-25T04:00:00-03:00"),
+    ] });
+    expect(result).toEqual({ ok: true, value: [
+      day(id(2), "transit_out", "2026-09-24T00:00:00Z", "2026-09-24T23:00:00Z", "2026-09-25T00:00:00Z", 1),
+      day(id(2), "transit_out", "2026-09-25T00:00:00Z", "2026-09-25T00:00:00Z", "2026-09-25T01:00:00Z", 2),
+      day(id(2), "activity", "2026-09-25T00:00:00Z", "2026-09-25T01:00:00Z", "2026-09-25T05:00:00Z", 3),
+      day(id(2), "transit_return", "2026-09-25T00:00:00Z", "2026-09-25T05:00:00Z", "2026-09-25T07:00:00Z", 4),
+    ] });
+  });
 });
