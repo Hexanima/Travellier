@@ -61,6 +61,9 @@ describe("local destination and transport API", () => {
       const saved = await post(transportPath, transportBody);
       expect(saved.status).toBe(201);
       const savedTransport = (await saved.json() as { transport: { id: string } }).transport;
+      const firstDays = await database.collection("itineraryDays").find({ tripId: new ObjectId(first.id) }).toArray();
+      expect(firstDays).toHaveLength(1);
+      expect(firstDays[0]).toMatchObject({ type: "transit_out", startsAt: new Date(transportBody.departureAt), endsAt: new Date(transportBody.arrivalAt) });
       expect((await post(transportPath, transportBody)).status).toBe(409);
       const updated = await fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
         body: JSON.stringify({ arrivalPlace: "Nuevo destino" }) });
@@ -77,6 +80,28 @@ describe("local destination and transport API", () => {
       expect((await fetch(`${base}/trips/${second.id}/destinations/${first.primaryDestination.id}/transports/${savedTransport.id}`,
         { method: "PATCH", headers, body: JSON.stringify(transportBody) })).status).toBe(404);
       expect(await database.collection("transports").countDocuments({})).toBe(1);
+      expect((await post(transportPath, { ...transportBody, direction: "return", departureAt: "2026-09-25T18:00:00Z", arrivalAt: "2026-09-25T20:00:00Z" })).status).toBe(201);
+      const readDays = () => database.collection("itineraryDays").find({ tripId: new ObjectId(first.id) }).sort({ order: 1 }).toArray();
+      const complete = await readDays();
+      expect(complete.map((day) => day.type)).toEqual(["transit_out", "activity", "activity", "transit_return"]);
+      expect(complete[0]!._id).toEqual(firstDays[0]!._id);
+      const patch = () => fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
+        body: JSON.stringify({ departureAt: "2026-09-23T20:00:00Z" }) });
+      expect((await patch()).status).toBe(200);
+      const expanded = await readDays();
+      expect(expanded).toHaveLength(5);
+      expect(expanded.slice(1).map((day) => day._id)).toEqual(complete.map((day) => day._id));
+      expect((await patch()).status).toBe(200);
+      expect(await readDays()).toEqual(expanded);
+      await database.collection("posts").insertOne({ tripId: new ObjectId(first.id), dayId: complete[1]!._id, createdAt: new Date() });
+      const rejected = await fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
+        body: JSON.stringify({ arrivalAt: "2026-09-25T10:00:00Z" }) });
+      expect(rejected.status).toBe(409);
+      expect(await rejected.json()).toMatchObject({ error: { code: "ItineraryConflictError" } });
+      expect(await readDays()).toEqual(expanded);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) }))
+        .toMatchObject({ arrivalAt: new Date(transportBody.arrivalAt) });
+      expect(await database.collection("itineraryDays").countDocuments({ tripId: new ObjectId(second.id) })).toBe(0);
     } finally {
       await new Promise<void>((resolve, reject) => local.app.close((error) => error ? reject(error) : resolve()));
       await local.close();

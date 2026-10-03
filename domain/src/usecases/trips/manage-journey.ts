@@ -10,6 +10,7 @@ import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
+import { regenerateItinerary } from "./regenerate-itinerary.js";
 
 interface JourneyDependencies { members: Pick<TripMemberManagementPort, "findByTripAndUser">; journeys: TripJourneyPort }
 interface JourneyContext { authenticatedUserId: ObjectId; tripId: ObjectId }
@@ -66,10 +67,8 @@ export const createJourneyDestination: UseCase<CreateDestinationDependencies, Cr
   },
 };
 
-export const updateJourneyDestination: UseCase<JourneyDependencies, UpdateJourneyDestinationPayload, TripDestination, TaggedError> = {
+const updateDestinationInJourney: UseCase<JourneyDependencies, UpdateJourneyDestinationPayload, TripDestination, TaggedError> = {
   execute: async (dependencies, payload) => {
-    const access = await authorize(dependencies, payload);
-    if (!access.ok) return access;
     if (payload.name === undefined && payload.order === undefined) return invalid("destination", "A name or order is required.");
     if (payload.name !== undefined && (typeof payload.name !== "string" || payload.name.trim() === "")) return invalid("name", "Destination name is required.");
     if (payload.order !== undefined && (!Number.isSafeInteger(payload.order) || payload.order < 1)) return invalid("order", "Destination order must be a positive integer.");
@@ -90,10 +89,8 @@ export const listJourneyTransports: UseCase<JourneyDependencies, DestinationCont
   },
 };
 
-export const createJourneyTransport: UseCase<TransportDependencies, CreateJourneyTransportPayload, Transport, TaggedError> = {
+const createTransportInJourney: UseCase<TransportDependencies, CreateJourneyTransportPayload, Transport, TaggedError> = {
   execute: async (dependencies, payload) => {
-    const access = await authorize(dependencies, payload);
-    if (!access.ok) return access;
     const destination = await dependencies.journeys.findDestination(payload.tripId, payload.destinationId);
     if (!destination.ok) return destination;
     if (destination.value?.tripId !== payload.tripId) return err(new DestinationNotFoundError());
@@ -105,10 +102,8 @@ export const createJourneyTransport: UseCase<TransportDependencies, CreateJourne
   },
 };
 
-export const updateJourneyTransport: UseCase<JourneyDependencies, UpdateJourneyTransportPayload, Transport, TaggedError> = {
+const updateTransportInJourney: UseCase<JourneyDependencies, UpdateJourneyTransportPayload, Transport, TaggedError> = {
   execute: async (dependencies, payload) => {
-    const access = await authorize(dependencies, payload);
-    if (!access.ok) return access;
     const destination = await dependencies.journeys.findDestination(payload.tripId, payload.destinationId);
     if (!destination.ok) return destination;
     if (destination.value?.tripId !== payload.tripId) return err(new DestinationNotFoundError());
@@ -136,3 +131,23 @@ export const updateJourneyTransport: UseCase<JourneyDependencies, UpdateJourneyT
     return saved.value === undefined ? err(new TransportNotFoundError()) : ok(saved.value);
   },
 };
+
+const withItineraryRegeneration = <P extends JourneyContext, V>(
+  mutation: UseCase<TransportDependencies, P, V, TaggedError>,
+  needsRegeneration: (payload: P) => boolean = () => true,
+): UseCase<TransportDependencies, P, V, TaggedError> => ({
+  execute: async (dependencies, payload) => {
+    const access = await authorize(dependencies, payload);
+    if (!access.ok) return access;
+    return dependencies.journeys.withTransaction(payload.tripId, async (journeys) => {
+      const result = await mutation.execute({ ...dependencies, journeys }, payload);
+      if (!result.ok || !needsRegeneration(payload)) return result;
+      const regenerated = await regenerateItinerary(journeys, payload.tripId, dependencies.createId);
+      return regenerated.ok ? result : regenerated;
+    });
+  },
+});
+
+export const createJourneyTransport = withItineraryRegeneration(createTransportInJourney);
+export const updateJourneyTransport = withItineraryRegeneration(updateTransportInJourney);
+export const updateJourneyDestination = withItineraryRegeneration(updateDestinationInJourney, (payload) => payload.order !== undefined);

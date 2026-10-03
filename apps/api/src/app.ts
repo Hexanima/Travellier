@@ -196,6 +196,9 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   if (error.tag === "JourneyConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "Journey resource already exists." } });
   }
+  if (error.tag === "ItineraryConflictError") {
+    return jsonResponse(409, { error: { code: error.tag, message: "Transport changes would invalidate activities or remove days with linked data." } });
+  }
 
   if (error.tag === "UnauthorizedError") {
     return jsonResponse(403, {

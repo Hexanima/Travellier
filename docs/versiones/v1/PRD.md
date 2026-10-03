@@ -198,6 +198,12 @@ Caso 3 — multi-destino:
 
 Las fechas y horas de transportes, actividades y límites del itinerario se almacenan como **instantes UTC**. La interfaz los muestra y agrupa en días calendario según la **zona horaria local del usuario**, conservando los límites exactos, incluidos los milisegundos. Una llegada a las 08:00 habilita actividad desde las 08:00; la fecha calendario del segmento no habilita actividad desde medianoche. Cambiar la zona de visualización no modifica los timestamps ni las referencias compartidas del itinerario.
 
+#### Regeneración y protección de datos
+
+Al crear o modificar transportes, o cambiar el orden de destinos, se recalcula la proyección del Trip dentro de la misma transacción que el cambio. Las franjas que conservan destino, fecha UTC y tipo mantienen su `dayId`, aunque cambien sus límites u orden. Las franjas nuevas reciben un ObjectId y las obsoletas sin dependencias se retiran.
+
+Si el cambio elimina una franja referenciada por actividades o posts, o deja una actividad fuera de su ventana y franja correspondientes, se **rechaza el cambio y se conservan todos los datos anteriores**. No se borran ni reubican automáticamente actividades o posts; sus vínculos y datos asociados permanecen intactos. El `createdAt` de un post no se usa para reubicarlo ni restringir su asociación al día.
+
 #### Tipos de día
 
 | Tipo | Descripción |

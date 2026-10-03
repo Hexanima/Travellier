@@ -66,6 +66,8 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
         setValues(formValuesFromTransport(result.value));
         setSaved(true);
         onSaved(result.value);
+      } else if (result.error.kind === "itinerary-conflict") {
+        setSaveError("Este cambio deja actividades fuera de su horario o elimina días con actividades o posts. Revisá los datos vinculados antes de cambiar el transporte.");
       } else if (result.error.kind === "validation" && result.error.fields?.length) {
         setErrors(Object.fromEntries(result.error.fields.map(({ field, message }) => [field, message])));
         setSaveError("Revisá los datos del transporte e intentá nuevamente.");

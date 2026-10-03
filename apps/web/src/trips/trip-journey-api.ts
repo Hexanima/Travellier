@@ -73,6 +73,7 @@ const isTransport = (value: unknown): value is JourneyTransport => {
 };
 
 const toFailure = (error: ApiClientError): TripFailure =>
+  error.status === 409 && error.code === "ItineraryConflictError" ? { kind: "itinerary-conflict" } :
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
     : { kind: error.kind };

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createObjectId, ok, type TripDestination, type Transport } from "../../index.js";
+import { createObjectId, ok, type TripDestination, type Transport, type TripJourneyPort } from "../../index.js";
 import { createJourneyDestination, createJourneyTransport, listJourneyDestinations, updateJourneyDestination, updateJourneyTransport } from "./manage-journey.js";
 
 const id = (value: string) => {
@@ -16,6 +16,14 @@ const transport: Transport = { id: id("507f1f77bcf86cd799439014"), tripId, desti
   departurePlace: "Origen", departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "Destino", arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: null, details: {} };
 const member = { id: id("507f1f77bcf86cd799439015"), tripId, userId: actorId, role: "participant" as const, joinedAt: new Date() };
 
+const journeyStub = (overrides: Partial<TripJourneyPort>): TripJourneyPort => {
+  const journeys = { listDestinations: async () => ok([destination]), listTransports: async () => ok([transport]),
+    listItineraryDays: async () => ok([]), listItineraryReferences: async () => ok({ activities: [], posts: [] }),
+    replaceItineraryDays: async () => ok(undefined), ...overrides } as TripJourneyPort;
+  journeys.withTransaction = async (_tripId, work) => work(journeys);
+  return journeys;
+};
+
 describe("journey use cases", () => {
   it("does not list or create destinations for a nonmember", async () => {
     const appendDestination = vi.fn();
@@ -30,7 +38,7 @@ describe("journey use cases", () => {
   it("appends a valid destination and rejects invalid updates before persistence", async () => {
     const appendDestination = vi.fn().mockResolvedValue(ok(destination));
     const updateDestination = vi.fn();
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: { appendDestination, updateDestination }, createId: () => destinationId, now: () => destination.createdAt } as never;
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({ appendDestination, updateDestination }), createId: () => destinationId, now: () => destination.createdAt } as never;
     expect(await createJourneyDestination.execute(deps, { authenticatedUserId: actorId, tripId, name: "Córdoba" })).toEqual(ok(destination));
     expect(appendDestination).toHaveBeenCalledWith(expect.objectContaining({ tripId, name: "Córdoba" }));
     expect(await updateJourneyDestination.execute(deps, { authenticatedUserId: actorId, tripId, destinationId, order: 0 })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
@@ -39,9 +47,9 @@ describe("journey use cases", () => {
 
   it("rejects a transport when the destination belongs to another Trip", async () => {
     const insertTransport = vi.fn();
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
       findDestination: async () => ok({ ...destination, tripId: otherTripId }), insertTransport,
-    }, createId: () => transport.id } as never;
+    }), createId: () => transport.id } as never;
     const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId, tripId, destinationId });
     expect(result).toMatchObject({ ok: false, error: { tag: "DestinationNotFoundError" } });
     expect(insertTransport).not.toHaveBeenCalled();
@@ -49,7 +57,7 @@ describe("journey use cases", () => {
 
   it("rejects an invalid transport without inserting it", async () => {
     const insertTransport = vi.fn();
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: { findDestination: async () => ok(destination), insertTransport }, createId: () => transport.id } as never;
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({ findDestination: async () => ok(destination), insertTransport }), createId: () => transport.id } as never;
     const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId, arrivalAt: new Date("2026-09-24T07:00:00Z") });
     expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
     expect(insertTransport).not.toHaveBeenCalled();
@@ -57,7 +65,7 @@ describe("journey use cases", () => {
 
   it("persists only transport fields and does not expose the authenticated actor", async () => {
     const insertTransport = vi.fn(async (value: Transport) => ok(value));
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: { findDestination: async () => ok(destination), insertTransport }, createId: () => transport.id } as never;
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({ findDestination: async () => ok(destination), insertTransport }), createId: () => transport.id } as never;
     const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId });
     expect(result).toEqual(ok(transport));
     expect(insertTransport).toHaveBeenCalledWith(transport);
@@ -66,9 +74,9 @@ describe("journey use cases", () => {
   it("merges a partial transport update with the stored transport", async () => {
     const replaceTransport = vi.fn(async (value: Transport) => ok(value));
     const findTransport = vi.fn(async () => ok(transport));
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
       findDestination: async () => ok(destination), findTransport, replaceTransport,
-    } } as never;
+    }), createId: () => transport.id } as never;
     const result = await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
       transportId: transport.id, arrivalPlace: "Nuevo destino" } as never);
     expect(result).toEqual(ok({ ...transport, arrivalPlace: "Nuevo destino" }));
@@ -79,9 +87,9 @@ describe("journey use cases", () => {
   it("keeps omitted nested transport details for the same type", async () => {
     const flight: Transport = { ...transport, type: "flight", details: { flightNumber: "LA1", airline: "LATAM" } };
     const replaceTransport = vi.fn(async (value: Transport) => ok(value));
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
       findDestination: async () => ok(destination), findTransport: async () => ok(flight), replaceTransport,
-    } } as never;
+    }), createId: () => transport.id } as never;
     expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
       transportId: flight.id, details: { flightNumber: "LA2" } } as never)).toEqual(ok({ ...flight,
       details: { flightNumber: "LA2", airline: "LATAM" },
@@ -90,9 +98,9 @@ describe("journey use cases", () => {
 
   it("does not save a partial update that makes the transport invalid", async () => {
     const replaceTransport = vi.fn();
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
       findDestination: async () => ok(destination), findTransport: async () => ok(transport), replaceTransport,
-    } } as never;
+    }), createId: () => transport.id } as never;
     expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
       transportId: transport.id, arrivalAt: new Date("2026-09-24T07:00:00Z") } as never)).toMatchObject({
       ok: false, error: { tag: "ValidationError" },
@@ -102,9 +110,9 @@ describe("journey use cases", () => {
 
   it("does not update a transport found outside the requested Trip", async () => {
     const replaceTransport = vi.fn();
-    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: {
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
       findDestination: async () => ok(destination), findTransport: async () => ok({ ...transport, tripId: otherTripId }), replaceTransport,
-    } } as never;
+    }), createId: () => transport.id } as never;
     expect(await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
       transportId: transport.id, arrivalPlace: "Nuevo destino" } as never)).toMatchObject({
       ok: false, error: { tag: "TransportNotFoundError" },

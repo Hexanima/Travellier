@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTripJourneyApi, type JourneyTransport } from "./trip-journey-api.js";
+import { createHttpClient } from "../api/http-client.js";
 
 const tripId = "507f191e810c19729de860ea";
 const destinationId = "507f1f77bcf86cd799439013";
@@ -14,6 +15,17 @@ const transport = {
 } satisfies JourneyTransport;
 
 describe("createTripJourneyApi", () => {
+  it("distinguishes an itinerary 409 from a duplicate transport through the HTTP client", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "ItineraryConflictError" } }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "JourneyConflictError" } }), { status: 409 }));
+    const api = createTripJourneyApi(createHttpClient({ baseUrl: "https://example.test", fetch,
+      getAccessToken: async () => "token", onUnauthorized: vi.fn() }));
+    const input = { direction: transport.direction, type: transport.type, departurePlace: transport.departurePlace,
+      departureAt: transport.departureAt, arrivalPlace: transport.arrivalPlace, arrivalAt: transport.arrivalAt,
+      costPerPerson: transport.costPerPerson, details: transport.details };
+    expect(await api.updateTransport(tripId, destinationId, transportId, input)).toEqual({ ok: false, error: { kind: "itinerary-conflict" } });
+    expect(await api.createTransport(tripId, destinationId, input)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it("loads ordered destinations and validates their shape", async () => {
     const get = vi.fn().mockResolvedValueOnce({ ok: true, value: { destinations: [destination] } })
       .mockResolvedValueOnce({ ok: true, value: { destinations: [{ name: "Sin ID" }] } });

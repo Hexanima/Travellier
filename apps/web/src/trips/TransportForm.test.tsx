@@ -54,6 +54,21 @@ async function render(existing?: JourneyTransport, complementary?: JourneyTransp
 }
 
 describe("TransportForm", () => {
+  it("explains an itinerary conflict, retains entered values and allows correction", async () => {
+    const { container, updateTransport, onSaved } = await render(saved);
+    updateTransport.mockResolvedValueOnce({ ok: false, error: { kind: "itinerary-conflict" } });
+    await setField(container, "flightNumber", "AR456");
+    await submit(container);
+    expect(container.textContent).toContain("elimina días con actividades o posts");
+    expect(container.textContent).not.toContain("Transporte guardado.");
+    expect((container.querySelector('[name="flightNumber"]') as HTMLInputElement).value).toBe("AR456");
+    expect(onSaved).not.toHaveBeenCalled();
+    await setField(container, "flightNumber", "AR789");
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Transporte guardado.");
+  });
   it("saves an unchanged departure coinciding with the exact arrival, including seconds", async () => {
     const boundary = "2026-10-10T10:00:30.125-03:00";
     const current: JourneyTransport = { ...saved, direction: "return", departureAt: boundary,
