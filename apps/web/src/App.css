@@ -159,7 +159,8 @@ dd {
 .trips-item p { margin: 0; }
 .trips-destination { color: #286053; font-weight: 700; }
 .trips-item .trips-description { margin-top: 8px; }
-.trips-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.trips-item { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; }
+.trips-item > div { flex: 1 1 220px; }
 .trips-settings-link { flex: none; color: #286053; font-weight: 700; text-underline-offset: 3px; }
 .trips-settings-link:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
 .trip-config-name { margin: 0 0 24px; color: #526270; }
@@ -202,6 +203,30 @@ dd {
 .trip-public-preview .ui-button { margin-top: 8px; }
 .trip-public-preview a:focus-visible { outline: 3px solid #8dbdb0; outline-offset: 3px; }
 
+.journey-header h1 { margin-bottom: 8px; font-size: clamp(2rem, 6vw, 3rem); }
+.journey-header p, .journey-intro { color: #526270; line-height: 1.5; }
+.journey-header p { margin: 0; font-weight: 700; }
+.journey-intro { max-width: 65ch; margin: 16px 0 28px; }
+.journey-destinations { display: grid; gap: 28px; }
+.journey-destination, .journey-add { padding: 24px; border: 1px solid #d6dde3; border-radius: 8px; background: #fff; }
+.journey-destination-heading { margin-bottom: 24px; }
+.journey-order { color: #286053; font-size: .875rem; font-weight: 700; }
+.journey-destination h2, .journey-add h2 { margin: 4px 0 0; font-size: 1.5rem; }
+.journey-directions { display: grid; gap: 32px; }
+.journey-direction + .journey-direction { border-top: 1px solid #d6dde3; padding-top: 28px; }
+.journey-direction h3 { margin: 0 0 16px; font-size: 1.15rem; }
+.journey-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.journey-transport-form > .ui-button, .journey-add-destination > .ui-button { justify-self: start; }
+.journey-steps { min-width: 0; display: grid; gap: 16px; margin: 0; border: 1px solid #d6dde3; border-radius: 8px; padding: 16px; }
+.journey-steps legend { padding: 0 6px; font-weight: 700; }
+.journey-step + .journey-step { border-top: 1px solid #d6dde3; padding-top: 16px; }
+.journey-step-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.journey-step-heading h4 { margin: 0; font-size: 1rem; }
+.journey-step-heading .ui-button { background: #fff; color: #286053; }
+.journey-steps > .ui-button { justify-self: start; }
+.journey-add { margin-top: 28px; }
+.journey-add h2 { margin-bottom: 18px; }
+
 @media (max-width: 540px) {
   .trips-header { align-items: stretch; flex-direction: column; }
   .trips-create-link { align-self: flex-start; }
@@ -209,4 +234,7 @@ dd {
   .trips-item { align-items: flex-start; flex-direction: column; }
   .trip-member-admin-row { align-items: flex-start; flex-direction: column; }
   .trip-public-preview { padding: 20px; }
+  .journey-destination, .journey-add { padding: 20px; }
+  .journey-field-grid { grid-template-columns: 1fr; }
+  .journey-step-heading { align-items: flex-start; flex-direction: column; }
 }

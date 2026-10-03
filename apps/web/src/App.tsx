@@ -12,7 +12,9 @@ import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
+import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
+import { TripJourneyScreen } from './trips/TripJourneyScreen.js'
 import { PublicTripConfirmationScreen, TripExploreScreen } from './trips/TripExploreScreen.js'
 import { TripJoinScreen } from './trips/TripJoinScreen.js'
 import { TripMembersScreen } from './trips/TripMembersScreen.js'
@@ -26,6 +28,7 @@ type AppProps = {
   sessionStorage?: NativeSessionStorage
   nativeApp?: NativeAppUrlApi
   trips?: Partial<TripInvitationApi & TripManagementApi>
+  journey?: Partial<TripJourneyApi>
   members?: Partial<TripMembersApi>
 }
 
@@ -49,7 +52,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, members }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -61,6 +64,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const deepLinkReceived = useRef(false)
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
   const defaultTrips = useRef<(TripInvitationApi & TripManagementApi) | undefined>(undefined)
+  const defaultJourney = useRef<TripJourneyApi | undefined>(undefined)
   const defaultMembers = useRef<TripMembersApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
@@ -87,11 +91,13 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     })
     defaultAuth.current = createAuthApi(client)
     defaultTrips.current = { ...createTripInvitationApi(client), ...createTripManagementApi(client) }
+    defaultJourney.current = createTripJourneyApi(client)
     defaultMembers.current = createTripMembersApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
   const activeTrips = trips ?? defaultTrips.current
+  const activeJourney = journey ?? defaultJourney.current
   const activeMembers = members ?? defaultMembers.current
   const tripManagement = useMemo<TripManagementApi>(() => ({
     list: activeTrips?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -105,6 +111,13 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     list: activeMembers?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     expel: activeMembers?.expel ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeMembers])
+  const tripJourney = useMemo<TripJourneyApi>(() => ({
+    listDestinations: activeJourney?.listDestinations ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    createDestination: activeJourney?.createDestination ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    listTransports: activeJourney?.listTransports ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    createTransport: activeJourney?.createTransport ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    updateTransport: activeJourney?.updateTransport ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeJourney])
 
   useEffect(() => {
     if (!hasApiConfiguration || restoredSession.current) {
@@ -223,6 +236,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/trips/:tripId/config" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <TripConfigurationScreen trips={tripManagement} />
+          </TripRoute>
+        } />
+        <Route path="/trips/:tripId/journey" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <TripJourneyScreen trips={tripManagement} journey={tripJourney} />
           </TripRoute>
         } />
         <Route path="/profile" element={

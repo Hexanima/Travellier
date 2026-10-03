@@ -52,6 +52,13 @@ describe("App Trip routes", () => {
     primaryDestination: { name: "Bariloche" }, visibility: "public",
   };
 
+  it("guards the journey route before login", async () => {
+    const get = vi.fn();
+    const container = await render(`/trips/${tripId}/journey`, false, { get });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("guards public discovery before login", async () => {
     const listPublic = vi.fn();
     const container = await render("/trips/explore", false, { listPublic });
