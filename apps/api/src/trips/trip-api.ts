@@ -6,6 +6,7 @@ import {
   createTrip,
   expelTripParticipant,
   getTrip,
+  getTripItinerary,
   listTripMembers,
   listPublicTrips,
   listUserTrips,
@@ -24,6 +25,7 @@ import { createMongoTripManagementRepository } from "../adapters/mongodb/trip-ma
 import { createMongoTripMemberRepository } from "../adapters/mongodb/trip-member-repository.js";
 import { createMongoTripInvitationRepositories } from "../adapters/mongodb/trip-invitation-repositories.js";
 import { createMongoTripJourneyRepository } from "../adapters/mongodb/trip-journey-repository.js";
+import { createMongoTripItineraryQueryRepository } from "../adapters/mongodb/trip-itinerary-query-repository.js";
 import { createTripInvitationApi } from "./trip-invitation-api.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -45,11 +47,13 @@ export const createTripApi = (database: Db): TripApi => {
   const members = createMongoTripMemberRepository(database);
   const publicJoinMembers = createMongoTripInvitationRepositories(database).members;
   const journeys = createMongoTripJourneyRepository(database);
+  const itinerary = createMongoTripItineraryQueryRepository(database);
   const journeyDependencies = { journeys, members, createId };
   return {
     ...createTripInvitationApi(database),
     create: (payload) => createTrip.execute({ trips, createId, createInviteCode, now: () => new Date() }, payload),
     get: (payload) => getTrip.execute({ trips }, payload),
+    getItinerary: (payload) => getTripItinerary.execute({ members, itinerary }, payload),
     list: (payload) => listUserTrips.execute({ trips }, payload),
     listPublic: (payload) => listPublicTrips.execute({ trips }, payload),
     joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers }, payload),
