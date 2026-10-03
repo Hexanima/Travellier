@@ -305,6 +305,17 @@ const transportDetails = (details: Record<string, unknown>): JourneyTransportFie
   }) } : {}),
 }) as JourneyTransportFields["details"];
 
+const transportInstant = (value: string): Date => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/.exec(value);
+  if (!match) return new Date(Number.NaN);
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0;
+  // Validate the submitted calendar date before Date normalizes it or applies its offset.
+  if (day < 1 || day > daysInMonth) return new Date(Number.NaN);
+  return new Date(value);
+};
+
 const transportPayload = (payload: Record<string, unknown>): JourneyTransportFields | undefined => {
   if (!isString(payload.direction) || !isString(payload.type) || !isString(payload.departurePlace) ||
     !isString(payload.departureAt) || !isString(payload.arrivalPlace) || !isString(payload.arrivalAt) ||
@@ -314,9 +325,9 @@ const transportPayload = (payload: Record<string, unknown>): JourneyTransportFie
     direction: payload.direction as JourneyTransportFields["direction"],
     type: payload.type as JourneyTransportFields["type"],
     departurePlace: payload.departurePlace,
-    departureAt: new Date(payload.departureAt),
+    departureAt: transportInstant(payload.departureAt),
     arrivalPlace: payload.arrivalPlace,
-    arrivalAt: new Date(payload.arrivalAt),
+    arrivalAt: transportInstant(payload.arrivalAt),
     costPerPerson: payload.costPerPerson,
     details: transportDetails(payload.details as Record<string, unknown>),
   };
@@ -336,9 +347,9 @@ const transportUpdatePayload = (
     ...(has("direction") ? { direction: payload.direction as JourneyTransportFields["direction"] } : {}),
     ...(has("type") ? { type: payload.type as JourneyTransportFields["type"] } : {}),
     ...(has("departurePlace") ? { departurePlace: payload.departurePlace as string } : {}),
-    ...(has("departureAt") ? { departureAt: new Date(payload.departureAt as string) } : {}),
+    ...(has("departureAt") ? { departureAt: transportInstant(payload.departureAt as string) } : {}),
     ...(has("arrivalPlace") ? { arrivalPlace: payload.arrivalPlace as string } : {}),
-    ...(has("arrivalAt") ? { arrivalAt: new Date(payload.arrivalAt as string) } : {}),
+    ...(has("arrivalAt") ? { arrivalAt: transportInstant(payload.arrivalAt as string) } : {}),
     ...(has("costPerPerson") ? { costPerPerson: payload.costPerPerson as number | null } : {}),
     ...(has("details") ? { details: transportDetails(payload.details as Record<string, unknown>) } : {}),
   };
