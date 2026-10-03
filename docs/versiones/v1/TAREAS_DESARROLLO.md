@@ -420,11 +420,12 @@
 
 ### T35 — Crear dominio de actividades
 
-**Descripción:** Modelar actividades, estados, horario, ubicación y relación con días válidos del itinerario. Validar que una actividad solo pueda pertenecer a una ventana habilitada.
+**Descripción:** Modelar actividades planificadas o espontáneas, estados, fecha y hora obligatorias, ubicación y relación con días válidos del itinerario. Validar que una actividad solo pueda pertenecer a una ventana habilitada.
 
 **Criterios de aceptación:**
 
 - Una actividad no puede asignarse a un día ajeno al Trip.
+- Toda actividad requiere un `scheduledAt` válido con fecha y hora, dentro de la ventana habilitada del destino; no se acepta ausente ni `null`.
 - Con votación desactivada, se crea confirmada.
 
 **Estimación:** M (4hs)
@@ -437,6 +438,7 @@
 **Criterios de aceptación:**
 
 - Miembros pueden crear y editar actividades.
+- La creación y edición validan la fecha y hora obligatorias; los timestamps se almacenan y devuelven como instantes UTC.
 - Usuarios externos no pueden leer ni modificar actividades del Trip.
 
 **Estimación:** L (8hs)
@@ -444,11 +446,13 @@
 
 ### T37 — Crear interfaz de actividades
 
-**Descripción:** Implementar creación, edición y detalle de actividades desde el día del itinerario. Incluir título, descripción, hora y vínculo de Maps opcionales.
+**Descripción:** Implementar creación, edición y detalle de actividades planificadas o espontáneas desde el día del itinerario. Incluir título, fecha y hora obligatorios, y descripción y vínculo de Maps opcionales. Usar la zona local del usuario para ingresar y mostrar los horarios.
 
 **Criterios de aceptación:**
 
 - Se puede crear una actividad desde un día válido.
+- Una actividad planificada solicita fecha y hora previstas; una espontánea precarga fecha y hora actuales y permite ajustarlas para registrar cuándo ocurrió.
+- No se puede guardar una actividad sin fecha y hora válidas dentro de la ventana habilitada.
 - La actividad aparece en el itinerario al guardar.
 
 **Estimación:** L (8hs)
@@ -714,7 +718,7 @@
 
 ### T59 — Integrar exportación al calendario nativo
 
-**Descripción:** Implementar adaptación de actividades confirmadas y días de actividad a eventos de calendario nativo. Incluir nombre del Trip, horario y ubicación cuando existan.
+**Descripción:** Implementar adaptación de actividades confirmadas y días de actividad a eventos de calendario nativo. Incluir nombre del Trip y horario; agregar ubicación cuando exista.
 
 **Criterios de aceptación:**
 
