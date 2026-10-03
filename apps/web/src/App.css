@@ -232,6 +232,7 @@ dd {
   .trips-create-link { align-self: flex-start; }
   .trips-empty { padding: 20px; }
   .trips-item { align-items: flex-start; flex-direction: column; }
+  .trips-item > div { flex: none; }
   .trip-member-admin-row { align-items: flex-start; flex-direction: column; }
   .trip-public-preview { padding: 20px; }
   .journey-destination, .journey-add { padding: 20px; }

@@ -103,8 +103,16 @@ export function TripJourneyScreen({ trips, journey }: Props) {
           <>
             <p className="journey-intro">Organizá los destinos en el orden del viaje. Configurá la ida y la vuelta de cada uno; las fechas del viaje se derivan de estos transportes.</p>
             <div className="journey-destinations">
-              {destinations.map((destination) => {
+              {destinations.map((destination, index) => {
                 const saved = transports[destination.id] ?? [];
+                const previous = destinations[index - 1];
+                const next = destinations[index + 1];
+                const neighbors = {
+                  previousDepartureAt: previous
+                    ? transports[previous.id]?.find((item) => item.direction === "return")?.departureAt : undefined,
+                  nextArrivalAt: next
+                    ? transports[next.id]?.find((item) => item.direction === "outbound")?.arrivalAt : undefined,
+                };
                 return <section className="journey-destination" key={destination.id} aria-labelledby={`destination-${destination.id}`}>
                   <div className="journey-destination-heading"><span className="journey-order">Destino {destination.order}</span>
                     <h2 id={`destination-${destination.id}`}>{destination.name}</h2></div>
@@ -113,7 +121,8 @@ export function TripJourneyScreen({ trips, journey }: Props) {
                       <h3>{direction === "outbound" ? "Llegada al destino" : "Salida del destino"}</h3>
                       <TransportForm tripId={tripId!} destinationId={destination.id} direction={direction}
                         existing={saved.find((item) => item.direction === direction)}
-                        complementary={saved.find((item) => item.direction !== direction)} journey={journey} onSaved={onSaved} />
+                        complementary={saved.find((item) => item.direction !== direction)} neighbors={neighbors}
+                        journey={journey} onSaved={onSaved} />
                     </section>)}
                   </div>
                 </section>;

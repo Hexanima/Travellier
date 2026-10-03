@@ -14,6 +14,8 @@ export type TransportFormValues = {
 
 export type FormValidation = { ok: true; value: TransportInput } | { ok: false; errors: Record<string, string> };
 
+export type DestinationNeighbors = { previousDepartureAt?: string; nextArrivalAt?: string };
+
 const pad = (value: number) => String(value).padStart(2, "0");
 const toLocalDateTime = (iso: string) => {
   const date = new Date(iso);
@@ -43,7 +45,8 @@ const parseLocalDateTime = (value: string): Date | undefined => {
 };
 
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
-  complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">): FormValidation => {
+  complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">,
+  neighbors?: DestinationNeighbors): FormValidation => {
   const errors: Record<string, string> = {};
   const departurePlace = values.departurePlace.trim();
   const arrivalPlace = values.arrivalPlace.trim();
@@ -64,6 +67,14 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   if (complementary?.direction === "outbound" && direction === "return" && departureAt &&
       departureAt.getTime() < Date.parse(complementary.arrivalAt)) {
     errors.departureAt = "La salida del destino no puede ser anterior a su llegada.";
+  }
+  if (direction === "outbound" && arrivalAt && neighbors?.previousDepartureAt &&
+      arrivalAt.getTime() < Date.parse(neighbors.previousDepartureAt)) {
+    errors.arrivalAt = "La llegada no puede ser anterior a la salida del destino anterior.";
+  }
+  if (direction === "return" && departureAt && neighbors?.nextArrivalAt &&
+      departureAt.getTime() > Date.parse(neighbors.nextArrivalAt)) {
+    errors.departureAt = "La salida no puede ser posterior a la llegada al destino siguiente.";
   }
 
   let costPerPerson: number | null = null;

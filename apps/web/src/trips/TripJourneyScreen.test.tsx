@@ -27,7 +27,9 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
   const listDestinations = vi.fn().mockResolvedValue(options.loadFailure
     ? { ok: false, error: { kind: "network" } }
     : { ok: true, value: options.destinations ?? [first] });
-  const listTransports = vi.fn().mockResolvedValue({ ok: true, value: options.transports ?? [] });
+  const listTransports = vi.fn(async (_tripId: string, destinationId: string) => ({
+    ok: true, value: (options.transports ?? []).filter((transport) => transport.destinationId === destinationId),
+  }));
   const createDestination = vi.fn().mockResolvedValue({ ok: true, value: second });
   const updateTransport = vi.fn(async (_tripId: string, destinationId: string, id: string, input: TransportInput) => ({
     ok: true, value: { ...input, id, tripId, destinationId },
@@ -46,6 +48,55 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
 }
 
 describe("TripJourneyScreen", () => {
+  it("blocks conflicts with ordered neighbors in either direction and uses their latest saved times", async () => {
+    const transports: JourneyTransport[] = [first, second].flatMap((destination) =>
+      (["outbound", "return"] as const).map((direction, index) => ({
+        id: `${destination.id.slice(0, -1)}${destination.order * 2 + index + 4}`, tripId, destinationId: destination.id, direction, type: "car",
+        departurePlace: "A", arrivalPlace: "B", costPerPerson: null, details: {},
+        departureAt: new Date(destination === first
+          ? (direction === "outbound" ? "2026-10-10T08:00" : "2026-10-12T12:00")
+          : (direction === "outbound" ? "2026-10-12T13:00" : "2026-10-14T12:00")).toISOString(),
+        arrivalAt: new Date(destination === first
+          ? (direction === "outbound" ? "2026-10-10T10:00" : "2026-10-12T14:00")
+          : (direction === "outbound" ? "2026-10-12T15:00" : "2026-10-14T14:00")).toISOString(),
+      })));
+    const { container, updateTransport } = await render({ destinations: [second, first], transports });
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
+      const input = form.querySelector(`[name="${name}"]`) as HTMLInputElement;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const submit = async (form: HTMLFormElement) => act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    await change(forms[2], "departureAt", "2026-10-11T08:00");
+    await change(forms[2], "arrivalAt", "2026-10-11T10:00");
+    await submit(forms[2]);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(forms[2].textContent).toContain("La llegada no puede ser anterior a la salida del destino anterior.");
+    expect(forms[2].querySelector('[name="arrivalAt"][aria-invalid="true"]')).not.toBeNull();
+
+    await change(forms[2], "departureAt", "2026-10-12T10:00");
+    await change(forms[2], "arrivalAt", "2026-10-12T12:00");
+    await submit(forms[2]);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    await change(forms[1], "departureAt", "2026-10-12T13:00");
+    await submit(forms[1]);
+    expect(updateTransport).toHaveBeenCalledOnce();
+    expect(forms[1].textContent).toContain("La salida no puede ser posterior a la llegada al destino siguiente.");
+    expect(forms[1].querySelector('[name="departureAt"][aria-invalid="true"]')).not.toBeNull();
+
+    await change(forms[1], "departureAt", "2026-10-12T11:00");
+    await submit(forms[1]);
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+    await change(forms[2], "arrivalAt", "2026-10-12T10:30");
+    await submit(forms[2]);
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+    expect(forms[2].querySelector('[name="arrivalAt"][aria-invalid="true"]')).not.toBeNull();
+  });
+
   it("uses the latest saved complementary transport when validating either form", async () => {
     const transports: JourneyTransport[] = (["outbound", "return"] as const).map((direction, index) => ({
       id: `507f1f77bcf86cd79943901${index + 6}`, tripId, destinationId: first.id, direction, type: "car",

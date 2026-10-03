@@ -95,6 +95,36 @@ describe("prepareTransportInput", () => {
       departureAt: new Date("2026-10-01T08:00").toISOString(), arrivalAt: new Date(values.departureAt).toISOString() }).ok).toBe(true);
   });
 
+  it("rejects an arrival before the previous destination's departure", () => {
+    expect(prepareTransportInput(values, "outbound", undefined, {
+      previousDepartureAt: new Date("2026-10-02T12:00").toISOString(),
+    })).toMatchObject({ ok: false, errors: { arrivalAt: expect.any(String) } });
+  });
+
+  it("rejects a departure after the next destination's arrival", () => {
+    expect(prepareTransportInput(values, "return", undefined, {
+      nextArrivalAt: new Date("2026-09-30T18:00").toISOString(),
+    })).toMatchObject({ ok: false, errors: { departureAt: expect.any(String) } });
+  });
+
+  it.each([0, 60_000])("allows neighboring destination boundaries separated by %s milliseconds", (gap) => {
+    expect(prepareTransportInput(values, "outbound", undefined, {
+      previousDepartureAt: new Date(new Date(values.arrivalAt).getTime() - gap).toISOString(),
+    }).ok).toBe(true);
+    expect(prepareTransportInput(values, "return", undefined, {
+      nextArrivalAt: new Date(new Date(values.departureAt).getTime() + gap).toISOString(),
+    }).ok).toBe(true);
+  });
+
+  it("only compares the destination arrival with its previous neighbor and departure with its next", () => {
+    expect(prepareTransportInput(values, "outbound", undefined, {
+      nextArrivalAt: new Date("2026-09-30T18:00").toISOString(),
+    }).ok).toBe(true);
+    expect(prepareTransportInput(values, "return", undefined, {
+      previousDepartureAt: new Date("2026-10-02T12:00").toISOString(),
+    }).ok).toBe(true);
+  });
+
   it.each([
     { times: ["09:30", "08:30"], invalidIndex: 1 },
     { times: ["07:59"], invalidIndex: 0 },

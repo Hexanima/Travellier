@@ -2,10 +2,10 @@ import { useRef, useState, type FormEvent } from "react";
 
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi, UrbanTransportStep } from "./trip-journey-api.js";
-import { formValuesFromTransport, prepareTransportInput, type TransportFormValues } from "./transport-form-state.js";
+import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues } from "./transport-form-state.js";
 
 type Props = { tripId: string; destinationId: string; direction: TransportDirection;
-  existing?: JourneyTransport; complementary?: JourneyTransport;
+  existing?: JourneyTransport; complementary?: JourneyTransport; neighbors?: DestinationNeighbors;
   journey: Pick<TripJourneyApi, "createTransport" | "updateTransport">;
   onSaved: (transport: JourneyTransport) => void };
 
@@ -15,7 +15,7 @@ const initialValues = (existing?: JourneyTransport): TransportFormValues => exis
   costPerPerson: "", flightNumber: "", company: "", steps: [],
 };
 
-export function TransportForm({ tripId, destinationId, direction, existing, complementary, journey, onSaved }: Props) {
+export function TransportForm({ tripId, destinationId, direction, existing, complementary, neighbors, journey, onSaved }: Props) {
   const [values, setValues] = useState(() => initialValues(existing));
   const [savedTransport, setSavedTransport] = useState(existing);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -38,7 +38,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current) return;
-    const prepared = prepareTransportInput(values, direction, complementary);
+    const prepared = prepareTransportInput(values, direction, complementary, neighbors);
     setSaveError("");
     setSaved(false);
     if (!prepared.ok) { setErrors(prepared.errors); return; }
