@@ -22,6 +22,25 @@ const chronological = (a: ItineraryViewItem, b: ItineraryViewItem) =>
 const includesInstant = (segment: ItinerarySegment, instant: string) => Date.parse(instant) >= Date.parse(segment.startsAt) &&
   (segment.endsAt === null || Date.parse(instant) < Date.parse(segment.endsAt));
 
+/** Keep band context on consecutive agenda entries, even when entries from other bands interleave. */
+const chronologicalSegments = (segments: ItinerarySegment[]): ItinerarySegment[] => {
+  const entries = segments.flatMap<{ segment: ItinerarySegment; item: ItineraryViewItem | null }>((segment) =>
+    segment.items.length > 0 ? segment.items.map((item) => ({ segment, item })) : [{ segment, item: null }]);
+  entries.sort((a, b) => Date.parse(a.item?.at ?? a.segment.startsAt) - Date.parse(b.item?.at ?? b.segment.startsAt) ||
+    (a.item && b.item ? chronological(a.item, b.item) : Number(b.item !== null) - Number(a.item !== null)) ||
+    a.segment.key.localeCompare(b.segment.key));
+  const groups: ItinerarySegment[] = [];
+  let source: ItinerarySegment | undefined;
+  for (const { segment, item } of entries) {
+    if (source !== segment) {
+      source = segment;
+      groups.push({ ...segment, key: `${segment.key}-${item ? `${item.kind}-${item.id}` : "empty"}`, items: [] });
+    }
+    if (item) groups[groups.length - 1].items.push(item);
+  }
+  return groups;
+};
+
 /** Calendar-only projection. Canonical day IDs and instants are never modified. */
 export const projectTripItinerary = (itinerary: TripItineraryResponse,
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): LocalItineraryDay[] => {
@@ -102,27 +121,24 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
       }
     }
   }
+  const result = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const localDayBySegment = new Map(result.flatMap((day) => day.segments.map((segment) => [segment, day] as const)));
+  const expensePostsByDay = new Map(result.map((day) => [day, new Map<string, ItineraryPostResponse>()] as const));
   for (const post of [...itinerary.posts].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))) {
     const segments = segmentsBySource.get(post.dayId) ?? [];
+    // Allocation follows dayId, independently of the activity under which the post is displayed.
+    const segment = segments.find((s) => includesInstant(s, post.createdAt)) ?? segments[0];
+    if (segment && post.expense !== null) expensePostsByDay.get(localDayBySegment.get(segment)!)!.set(post.id, post);
     const parent = post.activityId === null ? undefined : activityLocations.get(post.activityId);
     if (parent) parent.posts.push(post);
     else {
       // Publication outside the band still belongs to dayId. Anchor it once in that day's first local slice.
-      const segment = segments.find((s) => includesInstant(s, post.createdAt)) ?? segments[0];
       if (segment) segment.items.push({ kind: "post", id: post.id, at: post.createdAt, post });
     }
   }
-  const result = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
   for (const day of result) {
-    const expensePosts = new Map<string, ItineraryPostResponse>();
-    day.segments.sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt));
-    for (const segment of day.segments) {
-      segment.items.sort(chronological);
-      for (const item of segment.items) {
-        const posts = item.kind === "post" ? [item.post] : item.kind === "activity" ? item.posts : [];
-        for (const post of posts) if (post.expense !== null) expensePosts.set(post.id, post);
-      }
-    }
+    const expensePosts = expensePostsByDay.get(day)!;
+    day.segments = chronologicalSegments(day.segments);
     day.expenseSummary = { totalAmount: [...expensePosts.values()].reduce((sum, p) => sum + p.expense!.totalAmount, 0), expenseCount: expensePosts.size };
   }
   return result;

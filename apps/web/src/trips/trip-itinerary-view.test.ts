@@ -30,6 +30,25 @@ describe("local itinerary projection", () => {
     expect(days[0].segments[0]).toMatchObject({ startsAt: "2026-09-25T00:00:00.123Z", endsAt: "2026-09-25T03:00:00.000Z", sourceDayIds: [itineraryId(4)] });
     expect(days[1].segments[0]).toMatchObject({ startsAt: "2026-09-25T03:00:00.000Z", endsAt: "2026-09-25T08:00:00.456Z", sourceDayIds: [itineraryId(4)] });
   });
+  it.each(["UTC", "America/Argentina/Buenos_Aires"])("interleaves posts from different bands with activities across the whole day in %s", (timeZone) => {
+    const itinerary = fixture();
+    itinerary.posts[0].dayId = itineraryId(3); itinerary.posts[0].transportId = itineraryId(6);
+    itinerary.posts[0].parentPostId = itineraryId(11);
+    itinerary.posts.push(
+      { ...itinerary.posts[0], id: itineraryId(13), createdAt: itinerary.activities[1].scheduledAt, expense: null },
+      { ...itinerary.posts[0], id: itineraryId(14), dayId: itineraryId(5), transportId: itineraryId(7), createdAt: "2026-09-25T11:00:00.123Z", expense: null },
+    );
+    itinerary.days.reverse(); itinerary.activities.reverse(); itinerary.posts.reverse();
+    const before = JSON.stringify(itinerary), day = projectTripItinerary(itinerary, timeZone)[0];
+    expect(day.segments.flatMap((segment) => segment.items).map((item) => item.id))
+      .toEqual([6, 11, 14, 8, 10, 9, 13, 7].map(itineraryId));
+    const postBand = day.segments.find((segment) => segment.items.some((item) => item.id === itineraryId(10)));
+    expect(postBand).toMatchObject({ type: "transit_out", sourceDayIds: [itineraryId(3)],
+      startsAt: "2026-09-25T08:00:00.123Z", endsAt: "2026-09-25T10:00:00.123Z" });
+    expect(new Set(day.segments.map((segment) => segment.key)).size).toBe(day.segments.length);
+    expect(day.expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
+    expect(JSON.stringify(itinerary)).toBe(before);
+  });
   it("merges contiguous UTC slices of the same band in a local calendar day", async () => {
     const project = projectTripItinerary, itinerary = fixture();
     itinerary.days = [
@@ -103,7 +122,8 @@ describe("local itinerary projection", () => {
     itinerary.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
     const before = JSON.stringify(itinerary), days = project(itinerary, "America/Argentina/Buenos_Aires");
     expect(days.map((d) => d.date)).toEqual(["2026-09-25"]);
-    expect(days[0].segments[1].items.filter((i) => i.kind === "post").map((i) => i.id)).toEqual([itineraryId(10)]);
+    expect(days[0].segments.filter((segment) => segment.type === "activity").flatMap((segment) => segment.items)
+      .filter((item) => item.kind === "post").map((item) => item.id)).toEqual([itineraryId(10)]);
     expect(days[0].expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
     expect(JSON.stringify(itinerary)).toBe(before);
   });
@@ -145,8 +165,32 @@ describe("local itinerary projection", () => {
     const activity = items.find((item) => item.kind === "activity");
     expect(activity?.kind === "activity" ? activity.posts : []).toEqual([itinerary.posts[0]]);
     expect(items.filter((item) => item.kind === "post")).toEqual([]);
-    expect(days[0].expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
-    expect(days.slice(1).every((day) => day.expenseSummary.expenseCount === 0)).toBe(true);
+    expect(days.map((day) => day.expenseSummary)).toEqual(timeZone === "UTC"
+      ? [{ totalAmount: 0, expenseCount: 0 }, { totalAmount: 25.5, expenseCount: 1 }]
+      : [{ totalAmount: 25.5, expenseCount: 1 }]);
+    expect(JSON.stringify(itinerary)).toBe(before);
+  });
+  it.each([
+    ["UTC", "register"], ["UTC", "balance"],
+    ["America/Argentina/Buenos_Aires", "register"], ["America/Argentina/Buenos_Aires", "balance"],
+  ] as const)("keeps expenses on the post's assigned local day before and after linking in %s (%s)", (timeZone, expenseMode) => {
+    const itinerary = fixture(); itinerary.expenseMode = expenseMode;
+    itinerary.days = [
+      { ...itinerary.days[1], date: "2026-09-24T00:00:00.000Z", startsAt: "2026-09-24T22:00:00.000Z", endsAt: "2026-09-25T00:00:00.000Z", items: [] },
+      { ...itinerary.days[1], id: itineraryId(30), startsAt: "2026-09-25T00:00:00.000Z", endsAt: "2026-09-25T08:00:00.000Z", items: [] },
+    ];
+    itinerary.transports = []; itinerary.activities = [itinerary.activities[0]]; itinerary.posts = [itinerary.posts[0]];
+    itinerary.activities[0].scheduledAt = "2026-09-24T23:00:00.000Z";
+    itinerary.posts[0].dayId = itineraryId(30); itinerary.posts[0].createdAt = "2026-09-25T04:00:00.000Z";
+    const unlinked = projectTripItinerary(itinerary, timeZone).map((day) => ({ date: day.date, ...day.expenseSummary }));
+    itinerary.posts[0].activityId = itinerary.activities[0].id; itinerary.activities[0].postIds = [itinerary.posts[0].id];
+    const before = JSON.stringify(itinerary), linked = projectTripItinerary(itinerary, timeZone);
+    expect(linked.map((day) => ({ date: day.date, ...day.expenseSummary }))).toEqual(unlinked);
+    expect(unlinked).toEqual([
+      { date: "2026-09-24", totalAmount: 0, expenseCount: 0 }, { date: "2026-09-25", totalAmount: 25.5, expenseCount: 1 },
+    ]);
+    const activity = linked[0].segments.flatMap((segment) => segment.items).find((item) => item.kind === "activity");
+    expect(activity?.kind === "activity" ? activity.posts : []).toEqual(itinerary.posts);
     expect(JSON.stringify(itinerary)).toBe(before);
   });
   it("keeps distinct destinations even when their intervals coincide", async () => {
@@ -154,7 +198,7 @@ describe("local itinerary projection", () => {
     itinerary.destinations.push({ ...itinerary.destinations[0], id: itineraryId(30), name: "Carlos Paz", order: 2 });
     itinerary.days.push({ ...itinerary.days[1], id: itineraryId(31), destinationId: itineraryId(30), order: 4, items: [] });
     const segments = project(itinerary, "UTC")[0].segments;
-    expect(segments.filter((s) => s.type === "activity").map((s) => s.destinationName)).toEqual(["Córdoba", "Carlos Paz"]);
+    expect(segments.filter((s) => s.type === "activity").map((s) => s.destinationName).sort()).toEqual(["Carlos Paz", "Córdoba"]);
   });
   it("does not invent an end for null bounds or mutate canonical input", async () => {
     const project = projectTripItinerary, itinerary = fixture();
