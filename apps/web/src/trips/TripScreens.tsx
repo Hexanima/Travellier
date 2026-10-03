@@ -66,6 +66,7 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
                   {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                 </div>
                 <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
+                <Link className="trips-settings-link" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
                 <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
               </ListItem>
             ))}
