@@ -8,20 +8,28 @@ import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
 
 type Props = { trips: Pick<TripManagementApi, "get">; journey: TripJourneyApi };
 
+const destinationTimestamp = (transport: JourneyTransport) =>
+  Date.parse(transport.direction === "outbound" ? transport.arrivalAt : transport.departureAt);
+
+const knownBoundary = (transports: JourneyTransport[], side: "previous" | "next") =>
+  transports.reduce<JourneyTransport | undefined>((selected, candidate) => {
+    if (!selected) return candidate;
+    const difference = destinationTimestamp(candidate) - destinationTimestamp(selected);
+    return (side === "previous" ? difference > 0 : difference < 0) ? candidate : selected;
+  }, undefined);
+
 const validationContext = (destinationId: string, direction: TransportDirection,
   destinations: JourneyDestination[], transports: Record<string, JourneyTransport[]>) => {
   const index = destinations.findIndex((destination) => destination.id === destinationId);
-  const previous = destinations[index - 1];
-  const next = destinations[index + 1];
-  const previousTransports = previous ? transports[previous.id] ?? [] : [];
-  const nextTransports = next ? transports[next.id] ?? [] : [];
+  const previous = knownBoundary(destinations.slice(0, index).flatMap((destination) => transports[destination.id] ?? []), "previous");
+  const next = knownBoundary(destinations.slice(index + 1).flatMap((destination) => transports[destination.id] ?? []), "next");
   return {
     complementary: transports[destinationId]?.find((item) => item.direction !== direction),
     neighbors: {
-      previousArrivalAt: previousTransports.find((item) => item.direction === "outbound")?.arrivalAt,
-      previousDepartureAt: previousTransports.find((item) => item.direction === "return")?.departureAt,
-      nextArrivalAt: nextTransports.find((item) => item.direction === "outbound")?.arrivalAt,
-      nextDepartureAt: nextTransports.find((item) => item.direction === "return")?.departureAt,
+      previousArrivalAt: previous?.direction === "outbound" ? previous.arrivalAt : undefined,
+      previousDepartureAt: previous?.direction === "return" ? previous.departureAt : undefined,
+      nextArrivalAt: next?.direction === "outbound" ? next.arrivalAt : undefined,
+      nextDepartureAt: next?.direction === "return" ? next.departureAt : undefined,
     },
   };
 };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { formValuesFromTransport, prepareTransportInput, type TransportFormValues } from "./transport-form-state.js";
+import type { JourneyTransport } from "./trip-journey-api.js";
 
 const values: TransportFormValues = {
   type: "flight", departurePlace: " AEP ", departureAt: "2026-10-01T09:00",
@@ -9,7 +10,43 @@ const values: TransportFormValues = {
   steps: [{ line: "21", fromStop: "A", toStop: "B", estimatedTime: "09:00" }],
 };
 
+const precise: JourneyTransport = {
+  id: "507f1f77bcf86cd799439014", tripId: "507f191e810c19729de860ea", destinationId: "507f1f77bcf86cd799439013",
+  type: "flight", direction: "return", departurePlace: "A", arrivalPlace: "B", costPerPerson: null, details: {},
+  departureAt: "2026-10-10T10:00:30.125-03:00", arrivalAt: "2026-10-10T12:00:45.678-03:00",
+};
+
 describe("prepareTransportInput", () => {
+  it("preserves the original timestamps when editing another field", () => {
+    const loaded = formValuesFromTransport(precise);
+    expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, precise.direction, undefined, undefined, precise))
+      .toMatchObject({ ok: true, value: { departurePlace: "C", departureAt: precise.departureAt, arrivalAt: precise.arrivalAt } });
+  });
+
+  it.each(["departureAt", "arrivalAt"] as const)("updates only the edited %s timestamp", (field) => {
+    const loaded = formValuesFromTransport(precise);
+    const untouched = field === "departureAt" ? "arrivalAt" : "departureAt";
+    const changedInstant = new Date(Date.parse(precise[field]) + (field === "departureAt" ? -1 : 1) * 3_600_000).toISOString();
+    const changed = formValuesFromTransport({ ...precise, [field]: changedInstant })[field];
+    expect(prepareTransportInput({ ...loaded, [field]: changed }, precise.direction, undefined, undefined, precise))
+      .toMatchObject({ ok: true, value: { [field]: new Date(changed).toISOString(), [untouched]: precise[untouched] } });
+  });
+
+  it("validates an unchanged departure against the exact complementary arrival", () => {
+    const loaded = formValuesFromTransport(precise);
+    expect(prepareTransportInput(loaded, "return", {
+      direction: "outbound", departureAt: "2026-10-10T08:00:00.000-03:00", arrivalAt: precise.departureAt,
+    }, undefined, precise)).toMatchObject({ ok: true, value: { departureAt: precise.departureAt } });
+  });
+
+  it("does not hide an actual second-level conflict by truncating an unchanged arrival", () => {
+    const current = { ...precise, direction: "outbound" as const,
+      departureAt: "2026-10-10T08:00:00.000-03:00", arrivalAt: precise.departureAt };
+    expect(prepareTransportInput(formValuesFromTransport(current), "outbound", {
+      direction: "return", departureAt: "2026-10-10T10:00:15.000-03:00", arrivalAt: precise.arrivalAt,
+    }, undefined, current)).toMatchObject({ ok: false, errors: { arrivalAt: expect.any(String) } });
+  });
+
   it("loads saved instants into local date-time controls", () => {
     const instant = new Date("2026-10-01T12:00:00.000Z");
     const loaded = formValuesFromTransport({ ...values, departureAt: instant.toISOString(),

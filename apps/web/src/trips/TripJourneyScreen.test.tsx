@@ -13,6 +13,7 @@ import type { TripManagementApi, TripResult } from "./trip-management-api.js";
 const tripId = "507f191e810c19729de860ea";
 const first = { id: "507f1f77bcf86cd799439013", tripId, name: "Bariloche", order: 1, createdAt: "2026-09-24T12:00:00.000Z" };
 const second = { id: "507f1f77bcf86cd799439015", tripId, name: "Córdoba", order: 2, createdAt: "2026-09-24T12:00:00.000Z" };
+const third = { ...second, id: "507f1f77bcf86cd799439021", name: "Carlos Paz", order: 3 };
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null,
   primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2",
   votingEnabled: false, expenseMode: "register" };
@@ -59,8 +60,7 @@ const submit = async (form: HTMLFormElement) => act(async () => {
   form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 });
 const transport = (destinationId: string, direction: TransportDirection, departureAt: string, arrivalAt: string): JourneyTransport => ({
-  id: `${destinationId.slice(0, -1)}${destinationId === first.id
-    ? (direction === "outbound" ? "6" : "7") : (direction === "outbound" ? "8" : "9")}`,
+  id: `${direction === "outbound" ? "607f" : "707f"}${destinationId.slice(4)}`,
   tripId, destinationId, direction, type: "car",
   departurePlace: "A", arrivalPlace: "B", costPerPerson: null, details: {},
   departureAt: new Date(departureAt).toISOString(), arrivalAt: new Date(arrivalAt).toISOString(),
@@ -71,6 +71,56 @@ const sameDestination = () => [
 ];
 
 describe("TripJourneyScreen", () => {
+  it.each([
+    { side: "previous", direction: "outbound" },
+    { side: "previous", direction: "return" },
+    { side: "next", direction: "outbound" },
+    { side: "next", direction: "return" },
+  ] as const)("bounds $direction against the $side known destination across empty destinations", async ({ side, direction }) => {
+    const later = { ...third, order: 4 };
+    const empty = { ...second, id: "507f1f77bcf86cd799439022", name: "Destino vacío", order: 3 };
+    const previous = side === "previous";
+    const current = previous ? later : first;
+    const known = previous
+      ? transport(first.id, "return", "2026-10-12T18:00", "2026-10-12T20:00")
+      : transport(later.id, "outbound", "2026-10-11T08:00", "2026-10-11T10:00");
+    const edited = transport(current.id, direction,
+      previous ? "2026-10-11T08:00" : "2026-10-12T18:00",
+      previous ? "2026-10-11T10:00" : "2026-10-12T20:00");
+    const { container, updateTransport } = await render({ destinations: [later, empty, second, first], transports: [known, edited] });
+    const forms = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form");
+    const form = forms[(previous ? 6 : 0) + (direction === "outbound" ? 0 : 1)];
+    const field = direction === "outbound" ? "arrivalAt" : "departureAt";
+    await submit(form);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(form.querySelector(`[name="${field}"][aria-invalid="true"]`)).not.toBeNull();
+
+    const valid = previous ? "2026-10-12T18:00" : "2026-10-11T10:00";
+    await change(form, "departureAt", valid);
+    await change(form, "arrivalAt", valid);
+    await submit(form);
+    expect(updateTransport).toHaveBeenCalledOnce();
+  });
+
+  it.each(["previous", "next"] as const)("uses the strongest %s known boundary rather than the nearest partial destination", async (side) => {
+    const previous = side === "previous";
+    const current = previous ? third : first;
+    const direction = previous ? "outbound" : "return";
+    const transports = previous ? [
+      transport(first.id, "return", "2026-10-12T18:00", "2026-10-12T20:00"),
+      transport(second.id, "outbound", "2026-10-11T08:00", "2026-10-11T10:00"),
+    ] : [
+      transport(second.id, "return", "2026-10-12T18:00", "2026-10-12T20:00"),
+      transport(third.id, "outbound", "2026-10-11T08:00", "2026-10-11T10:00"),
+    ];
+    transports.push(transport(current.id, direction, "2026-10-12T08:00", "2026-10-12T10:00"));
+    const { container, updateTransport } = await render({ destinations: [third, first, second], transports });
+    const form = container.querySelectorAll<HTMLFormElement>("form.journey-transport-form")[previous ? 4 : 1];
+    await submit(form);
+    expect(updateTransport).not.toHaveBeenCalled();
+    expect(form.querySelector(`[name="${previous ? "arrivalAt" : "departureAt"}"][aria-invalid="true"]`)).not.toBeNull();
+  });
+
   it.each(["outbound", "return"] as const)("blocks %s before the known arrival of a previous partial destination", async (direction) => {
     const { container, createTransport, updateTransport } = await render({ destinations: [second, first], transports: [
       transport(first.id, "outbound", "2026-10-12T08:00", "2026-10-12T10:00"),

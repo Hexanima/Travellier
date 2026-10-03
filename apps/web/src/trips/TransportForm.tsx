@@ -50,7 +50,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
     const context = saveCoordinator?.begin(destinationId, direction);
     if (saveCoordinator && !context) return;
     const prepared = prepareTransportInput(values, direction,
-      context ? context.complementary : complementary, context ? context.neighbors : neighbors);
+      context ? context.complementary : complementary, context ? context.neighbors : neighbors, savedTransport);
     setSaveError("");
     setSaved(false);
     if (!prepared.ok) { setErrors(prepared.errors); saveCoordinator?.finish(); return; }

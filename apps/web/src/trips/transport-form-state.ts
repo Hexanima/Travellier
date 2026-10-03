@@ -47,17 +47,26 @@ const parseLocalDateTime = (value: string): Date | undefined => {
     ? date : undefined;
 };
 
+const resolveDateTime = (value: string, original?: string) => {
+  if (original && value === toLocalDateTime(original)) return { date: new Date(original), iso: original };
+  const date = parseLocalDateTime(value);
+  return date ? { date, iso: date.toISOString() } : undefined;
+};
+
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
   complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">,
-  neighbors?: DestinationNeighbors): FormValidation => {
+  neighbors?: DestinationNeighbors,
+  original?: Pick<JourneyTransport, "departureAt" | "arrivalAt">): FormValidation => {
   const errors: Record<string, string> = {};
   const departurePlace = values.departurePlace.trim();
   const arrivalPlace = values.arrivalPlace.trim();
   if (!departurePlace) errors.departurePlace = "Ingresá el lugar de salida.";
   if (!arrivalPlace) errors.arrivalPlace = "Ingresá el lugar de llegada.";
 
-  const departureAt = parseLocalDateTime(values.departureAt);
-  const arrivalAt = parseLocalDateTime(values.arrivalAt);
+  const departure = resolveDateTime(values.departureAt, original?.departureAt);
+  const arrival = resolveDateTime(values.arrivalAt, original?.arrivalAt);
+  const departureAt = departure?.date;
+  const arrivalAt = arrival?.date;
   if (!departureAt) errors.departureAt = "Ingresá una fecha y hora de salida válidas.";
   if (!arrivalAt) errors.arrivalAt = "Ingresá una fecha y hora de llegada válidas.";
   if (departureAt && arrivalAt && arrivalAt.getTime() < departureAt.getTime()) {
@@ -117,10 +126,10 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
       return next;
     });
   }
-  if (Object.keys(errors).length > 0 || !departureAt || !arrivalAt) return { ok: false, errors };
+  if (Object.keys(errors).length > 0 || !departure || !arrival) return { ok: false, errors };
 
-  const base = { direction, departurePlace, departureAt: departureAt.toISOString(), arrivalPlace,
-    arrivalAt: arrivalAt.toISOString(), costPerPerson };
+  const base = { direction, departurePlace, departureAt: departure.iso, arrivalPlace,
+    arrivalAt: arrival.iso, costPerPerson };
   switch (values.type) {
     case "bus_local":
       return { ok: true, value: { ...base, type: "bus_local", costPerPerson: null, details: { steps } } };

@@ -54,6 +54,26 @@ async function render(existing?: JourneyTransport, complementary?: JourneyTransp
 }
 
 describe("TransportForm", () => {
+  it("saves an unchanged departure coinciding with the exact arrival, including seconds", async () => {
+    const boundary = "2026-10-10T10:00:30.125-03:00";
+    const current: JourneyTransport = { ...saved, direction: "return", departureAt: boundary,
+      arrivalAt: "2026-10-10T12:00:45.678-03:00" };
+    const { container, updateTransport } = await render(current, { ...saved,
+      departureAt: "2026-10-10T08:00:00.000-03:00", arrivalAt: boundary });
+    updateTransport.mockImplementation(async (_trip, _destination, _id, input) => ({ ok: true, value: { ...current, ...input } }));
+    await setField(container, "flightNumber", "AR456");
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId, expect.objectContaining({
+      departureAt: boundary, arrivalAt: current.arrivalAt, details: { flightNumber: "AR456" },
+    }));
+    expect(container.querySelector('[name="departureAt"][aria-invalid="true"]')).toBeNull();
+    await setField(container, "flightNumber", "AR789");
+    await submit(container);
+    expect(updateTransport).toHaveBeenLastCalledWith(tripId, destinationId, transportId,
+      expect.objectContaining({ departureAt: boundary, arrivalAt: current.arrivalAt }));
+    expect(updateTransport).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["outbound", "return"] as const)("blocks a %s transport that inverts the destination window", async (direction) => {
     const current: JourneyTransport = { ...saved, direction,
       departureAt: new Date("2026-10-10T10:00").toISOString(), arrivalAt: new Date("2026-10-10T12:00").toISOString() };
