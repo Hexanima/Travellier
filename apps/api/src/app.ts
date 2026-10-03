@@ -25,6 +25,8 @@ import {
   type UpdateTripConfigurationPayload,
   type TripView,
   type TripDetail,
+  type TripItinerary,
+  type GetTripItineraryPayload,
   type PublicTripPreview,
   type TripMemberSummary,
   type ListTripMembersPayload,
@@ -93,6 +95,7 @@ export interface TripInvitationApi {
 export interface TripApi extends TripInvitationApi {
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
+  getItinerary?: (payload: GetTripItineraryPayload) => AsyncResult<TripItinerary>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
   listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
   joinPublic?: (payload: JoinPublicTripPayload) => AsyncResult<JoinTripByCodeResult>;
@@ -409,6 +412,16 @@ export const handleApiRequest = async (
     if (dependencies.trips?.joinPublic === undefined) return unavailableResponse();
     const result = await dependencies.trips.joinPublic({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  const itineraryMatch = request.url?.match(/^\/trips\/([^/?]+)\/itinerary$/);
+  if (request.method === "GET" && itineraryMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(itineraryMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.getItinerary === undefined) return unavailableResponse();
+    const result = await dependencies.trips.getItinerary({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+    return result.ok ? jsonResponse(200, { itinerary: result.value }) : errorResponse(result.error);
   }
 
   const destinationListMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations$/);

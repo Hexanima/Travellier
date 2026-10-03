@@ -7,3 +7,4 @@ export * from "./public-trips.js";
 export * from "./save-transport.js";
 export * from "./manage-journey.js";
 export * from "./generate-itinerary-days.js";
+export * from "./get-trip-itinerary.js";
