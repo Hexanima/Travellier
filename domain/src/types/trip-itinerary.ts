@@ -1,22 +1,12 @@
+import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
 import type { Transport } from "../entities/transport.js";
 import type { TripDestination } from "../entities/trip-destination.js";
 import type { Trip } from "../entities/trip.js";
 import type { ObjectId } from "../value-objects/object-id.js";
 
-/** Read models only; activity/post creation rules belong to their own use cases. */
-export interface ItineraryActivity {
-  id: ObjectId;
-  tripId: ObjectId;
-  dayId: ObjectId;
-  title: string;
-  description: string | null;
-  scheduledAt: Date;
-  mapsUrl: string | null;
-  status: "proposed" | "voting" | "confirmed";
-  createdBy: ObjectId;
-  createdAt: Date;
-}
+/** Keep the read contract compatible while sharing the activity entity's fields. */
+export type ItineraryActivity = Activity;
 
 export interface ItineraryPost {
   id: ObjectId;
