@@ -79,16 +79,27 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
       }
     },
     removeParticipant: async (membershipId, tripId, userId) => {
+      const session = database.client.startSession();
       try {
-        const result = await members.deleteOne({
-          _id: new MongoObjectId(membershipId),
-          tripId: new MongoObjectId(tripId),
-          userId: new MongoObjectId(userId),
-          role: "participant",
-        });
-        return ok(result.deletedCount === 1);
+        const removed = await session.withTransaction(async () => {
+          const mongoTripId = new MongoObjectId(tripId);
+          // Share activity/itinerary/Trip-deletion coordination before revoking access.
+          const lock = await database.collection("trips").updateOne({ _id: mongoTripId },
+            { $inc: { destinationOrderRevision: 1 } }, { session });
+          if (lock.matchedCount === 0) return false;
+          const result = await members.deleteOne({
+            _id: new MongoObjectId(membershipId),
+            tripId: mongoTripId,
+            userId: new MongoObjectId(userId),
+            role: "participant",
+          }, { session });
+          return result.deletedCount === 1;
+        }, { readConcern: { level: "snapshot" }, readPreference: "primary" });
+        return removed === undefined ? err(unknownError()) : ok(removed);
       } catch {
         return err(unknownError());
+      } finally {
+        await session.endSession();
       }
     },
   };
