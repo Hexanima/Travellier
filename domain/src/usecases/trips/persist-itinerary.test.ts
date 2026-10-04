@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createObjectId, ok, type ItineraryDay, type ObjectId, type Transport, type TripDestination,
+import { createActivity, createObjectId, ok, type ItineraryDay, type ObjectId, type Transport, type TripDestination,
   type TripJourneyPort } from "../../index.js";
 import { createJourneyTransport, updateJourneyDestination, updateJourneyTransport } from "./manage-journey.js";
 
@@ -54,7 +54,16 @@ function fixture() {
     authenticatedUserId: actorId, tripId, destinationId, transportId: state.transports[0]!.id, ...patch,
   });
   const configure = async () => { expect((await create(outbound)).ok).toBe(true); expect((await create(returning)).ok).toBe(true); };
-  return { state, deps, create, update, configure };
+  const addActivity = (dayId: ObjectId, scheduledAt: Date) => {
+    const activity = createActivity({ id: id(nextId++), tripId, dayId, scheduledAt,
+      title: "Paseo", createdBy: actorId, createdAt: new Date("2026-10-04T12:00:00Z") },
+    { trip: { id: tripId, votingEnabled: false }, days: state.days });
+    expect(activity.ok).toBe(true);
+    if (!activity.ok) throw activity.error;
+    state.activities.push(activity.value);
+    return activity.value;
+  };
+  return { state, deps, create, update, configure, addActivity };
 }
 
 describe("transport itinerary persistence", () => {
@@ -153,4 +162,58 @@ describe("transport itinerary persistence", () => {
       .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
     expect(state).toEqual(previous);
   });
+
+  it("preserves a domain-created activity and its references after compatible narrowing", async () => {
+    const { state, configure, update, addActivity } = fixture();
+    await configure();
+    const activity = addActivity(state.days[1]!.id, new Date("2026-09-25T12:00:00.456Z"));
+    const previousActivity = structuredClone(activity);
+    expect((await update({ arrivalAt: new Date("2026-09-25T11:00:00Z") })).ok).toBe(true);
+    expect(state.activities[0]).toEqual(previousActivity);
+    expect(state.days[1]!.id).toBe(activity.dayId);
+  });
+
+  it.each(["narrow", "remove"] as const)("rolls back changes that %s a domain-created activity's slice", async (change) => {
+    const { state, configure, update, addActivity } = fixture();
+    await configure();
+    addActivity(state.days[1]!.id, outbound.arrivalAt);
+    const previous = structuredClone(state);
+    const arrivalAt = change === "narrow" ? new Date(outbound.arrivalAt.getTime() + 1) : new Date("2026-09-26T10:00:00Z");
+    expect(await update({ arrivalAt })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+    expect(state).toEqual(previous);
+  });
+
+  it("preserves a final departure activity at midnight", async () => {
+    const { state, configure, update, addActivity, deps } = fixture();
+    await configure();
+    const departureAt = new Date("2026-09-26T00:00:00Z");
+    expect((await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
+      transportId: state.transports.find((transport) => transport.direction === "return")!.id, departureAt })).ok).toBe(true);
+    const activity = addActivity(state.days.find((day) => day.type === "activity")!.id, departureAt);
+    expect((await update({ costPerPerson: 42 })).ok).toBe(true);
+    expect(state.activities[0]).toEqual(activity);
+  });
+
+  it("keeps midnight on its following slice when regenerating an itinerary", async () => {
+    const { state, configure, update, addActivity } = fixture();
+    await configure();
+    const activity = addActivity(state.days[2]!.id, state.days[2]!.startsAt);
+    expect((await update({ costPerPerson: 42 })).ok).toBe(true);
+    expect(state.activities[0]).toEqual(activity);
+    state.activities[0]!.dayId = state.days[1]!.id;
+    const previous = structuredClone(state);
+    expect(await update({ costPerPerson: 43 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+    expect(state).toEqual(previous);
+  });
+
+  it.each([undefined, null, new Date(Number.NaN), "2026-09-25T12:00:00Z"])(
+    "rejects malformed stored activity schedules without throwing or changing data: %s", async (scheduledAt) => {
+      const { state, configure, update } = fixture();
+      await configure();
+      state.activities.push({ dayId: state.days[1]!.id, scheduledAt } as never);
+      const previous = structuredClone(state);
+      expect(await update({ costPerPerson: 42 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(state).toEqual(previous);
+    },
+  );
 });
