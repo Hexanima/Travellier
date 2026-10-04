@@ -17,6 +17,7 @@ import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
 import { TripJourneyScreen } from './trips/TripJourneyScreen.js'
 import { TripItineraryScreen } from './trips/TripItineraryScreen.js'
 import { createTripItineraryApi, type TripItineraryApi } from './trips/trip-itinerary-api.js'
+import { createTripActivityApi, type TripActivityApi } from './trips/trip-activity-api.js'
 import { PublicTripConfirmationScreen, TripExploreScreen } from './trips/TripExploreScreen.js'
 import { TripJoinScreen } from './trips/TripJoinScreen.js'
 import { TripMembersScreen } from './trips/TripMembersScreen.js'
@@ -33,6 +34,7 @@ type AppProps = {
   journey?: Partial<TripJourneyApi>
   members?: Partial<TripMembersApi>
   itinerary?: Partial<TripItineraryApi>
+  activities?: Partial<TripActivityApi>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -55,7 +57,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -70,6 +72,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultJourney = useRef<TripJourneyApi | undefined>(undefined)
   const defaultMembers = useRef<TripMembersApi | undefined>(undefined)
   const defaultItinerary = useRef<TripItineraryApi | undefined>(undefined)
+  const defaultActivities = useRef<TripActivityApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -98,6 +101,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultJourney.current = createTripJourneyApi(client)
     defaultMembers.current = createTripMembersApi(client)
     defaultItinerary.current = createTripItineraryApi(client)
+    defaultActivities.current = createTripActivityApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -105,6 +109,12 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeJourney = journey ?? defaultJourney.current
   const activeMembers = members ?? defaultMembers.current
   const activeItinerary = itinerary ?? defaultItinerary.current
+  const activeActivities = activities ?? defaultActivities.current
+  const tripActivities = useMemo<TripActivityApi>(() => ({
+    create: activeActivities?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    get: activeActivities?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    update: activeActivities?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeActivities])
   const tripItinerary = useMemo<TripItineraryApi>(() => ({
     get: activeItinerary?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeItinerary])
@@ -256,7 +266,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="/trips/:tripId/itinerary" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripItineraryScreen itinerary={tripItinerary} />
+            <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} />
           </TripRoute>
         } />
         <Route path="/profile" element={

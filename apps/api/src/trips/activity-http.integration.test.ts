@@ -155,6 +155,15 @@ describe("activity HTTP API", () => {
     for (const method of ["GET", "PATCH", "DELETE"]) expect((await request(method, `${path}/${foreignActivity}`, { title: "No" })).statusCode).toBe(404);
   });
 
+  it("includes a newly created activity in the aggregate itinerary immediately", async () => {
+    const activity = await create();
+    const response = await request("GET", `/trips/${trip}/itinerary`);
+    expect(response.statusCode).toBe(200);
+    const itinerary = JSON.parse(response.body).itinerary;
+    expect(itinerary.activities).toMatchObject([{ ...activity, postIds: [] }]);
+    expect(itinerary.days[0].items).toEqual([{ kind: "activity", id: activity.id, at: activity.scheduledAt }]);
+  });
+
   it("updates itinerary placement and detaches posts on deletion without moving their own day", async () => {
     const activity = await create(), secondDay = new ObjectId(), postId = new ObjectId();
     const baseDay = await db.collection("itineraryDays").findOne({ _id: day });
