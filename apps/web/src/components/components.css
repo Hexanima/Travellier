@@ -50,6 +50,37 @@
   outline-offset: 2px;
 }
 
+.ui-password-control { position: relative; }
+.ui-control--password { padding-inline-end: calc(44px + var(--ui-space-3)); }
+.ui-control--password::-ms-reveal { display: none; }
+
+.ui-password-toggle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ui-radius);
+  background: transparent;
+  color: var(--ui-color-accent);
+  cursor: pointer;
+}
+
+.ui-password-toggle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-color-accent) 10%, transparent);
+}
+
+.ui-password-toggle:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ui-color-accent) 35%, transparent);
+  outline-offset: 2px;
+}
+
+.ui-password-toggle:disabled { cursor: not-allowed; opacity: 0.6; }
+
 .ui-field {
   display: grid;
   gap: var(--ui-space-1);

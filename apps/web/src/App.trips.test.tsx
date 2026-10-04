@@ -29,7 +29,7 @@ const memberTrip = {
   votingEnabled: false, expenseMode: "register",
 };
 
-async function render(path: string, session: boolean, trips: Record<string, unknown>) {
+async function render(path: string, session: boolean, trips: Record<string, unknown>, journey?: Record<string, unknown>, members?: Record<string, unknown>) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -40,6 +40,8 @@ async function render(path: string, session: boolean, trips: Record<string, unkn
         auth={{ refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } }) }}
         sessionStorage={storage(session)}
         trips={trips as never}
+        journey={journey as never}
+        members={members as never}
       />
     </MemoryRouter>,
   ));
@@ -47,6 +49,38 @@ async function render(path: string, session: boolean, trips: Record<string, unkn
 }
 
 describe("App Trip routes", () => {
+  it("connects admin group deletion and reloads My Trips", async () => {
+    const deleteTrip = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [] });
+    const container = await render(`/trips/${tripId}/members`, true, {
+      get: async () => ({ ok: true, value: memberTrip }), deleteTrip, list,
+    }, undefined, {
+      list: async () => ({ ok: true, value: { currentUserId: "admin", members: [
+        { id: "membership", userId: "admin", name: "Admin", role: "admin", joinedAt: new Date().toISOString() },
+      ] } }),
+    });
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Eliminar viaje")?.click());
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Eliminar definitivamente")?.click());
+    expect(deleteTrip).toHaveBeenCalledWith(tripId);
+    expect(list).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Mis viajes");
+  });
+  it("connects destination deletion from the protected journey route", async () => {
+    const first = { id: "507f191e810c19729de860e1", tripId, name: "Bariloche", order: 1, createdAt: new Date().toISOString(), hasRecords: false };
+    const second = { ...first, id: "507f191e810c19729de860e2", name: "Córdoba", order: 2 };
+    const deleteDestination = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const container = await render(`/trips/${tripId}/journey`, true, {
+      get: async () => ({ ok: true, value: memberTrip }),
+    }, {
+      listDestinations: vi.fn().mockResolvedValueOnce({ ok: true, value: [first, second] })
+        .mockResolvedValue({ ok: true, value: [first] }),
+      listTransports: async () => ({ ok: true, value: [] }), deleteDestination,
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Eliminar destino Córdoba"]')?.click());
+    await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar eliminación")?.click());
+    expect(deleteDestination).toHaveBeenCalledWith(tripId, second.id);
+    expect(container.querySelectorAll(".journey-destination")).toHaveLength(1);
+  });
   const publicTrip = {
     kind: "public", id: tripId, name: "Patagonia", description: "Lagos y senderos",
     primaryDestination: { name: "Bariloche" }, visibility: "public",

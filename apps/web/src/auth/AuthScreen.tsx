@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 
-import { Button, Feedback, TextField } from "../components/index.js";
+import { Button, Feedback, PasswordField, TextField } from "../components/index.js";
 import type { AuthApi, AuthenticatedSession, AuthFailure } from "./auth-api.js";
 
 export type AuthScreenMode = "login" | "register";
@@ -101,10 +101,10 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
         <form className="auth-form" noValidate onSubmit={submit}>
           {isRegister ? <TextField label="Nombre" name="name" autoComplete="name" error={errors.name} loading={loading} /> : null}
           <TextField label="Email" name="email" type="email" autoComplete="email" error={errors.email} loading={loading} />
-          <TextField
+          <PasswordField
+            key={mode}
             label="Contraseña"
             name="password"
-            type="password"
             autoComplete={isRegister ? "new-password" : "current-password"}
             error={errors.password}
             loading={loading}

@@ -5,6 +5,8 @@ import {
   err,
   ok,
   UnknownError,
+  TaggedError,
+  TripNotFoundError,
   type TripInvitationRepository,
   type TripMembershipRepository,
 } from "app-domain";
@@ -53,12 +55,21 @@ export const createMongoTripInvitationRepositories = (database: Db): {
     },
     members: {
       addParticipant: async (tripId, userId) => {
+        const session = database.client.startSession();
         try {
-          return ok(await upsertParticipant(new MongoObjectId(tripId), new MongoObjectId(userId)));
+          const joined = await session.withTransaction(async () => {
+            // Serialize invitation joins with group deletion; a stale invitation must not create an orphan.
+            const lock = await trips.findOneAndUpdate({ _id: new MongoObjectId(tripId) },
+              { $set: { publicJoinLockId: new MongoObjectId() } }, { session, projection: { _id: 1 } });
+            if (lock === null) throw new TripNotFoundError();
+            return upsertParticipant(new MongoObjectId(tripId), new MongoObjectId(userId), session);
+          });
+          return ok(joined ?? false);
         } catch (error) {
           if (error instanceof MongoServerError && error.code === 11_000) return ok(false);
+          if (error instanceof TaggedError) return err(error);
           return err(unknownError());
-        }
+        } finally { await session.endSession(); }
       },
       addPublicParticipant: async (tripId, userId) => {
         const session = database.client.startSession();

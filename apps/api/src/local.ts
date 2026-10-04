@@ -10,6 +10,7 @@ import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
 import { createTripApi } from "./trips/trip-api.js";
+import { loadApiEnvironment } from "./load-env.js";
 
 type LocalEnvironment = Record<string, string | undefined>;
 
@@ -35,7 +36,10 @@ export const createLocalApi = async (
       ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
     }),
     trips: createTripApi(connection.database),
-  }, createJwtMiddleware({ jwtSecret }));
+  }, createJwtMiddleware({ jwtSecret }), environment.API_VERBOSE === "false"
+    ? undefined
+    : (entry) => console.log(JSON.stringify(entry)),
+  environment.CORS_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean));
 
   return {
     app,
@@ -48,6 +52,7 @@ const isEntrypoint =
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isEntrypoint) {
+  loadApiEnvironment();
   const port = Number(process.env.PORT ?? 3000);
 
   void createLocalApi()

@@ -18,6 +18,8 @@ import {
   createJourneyTransport,
   listJourneyTransports,
   updateJourneyTransport,
+  deleteJourneyDestination,
+  deleteTrip,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -26,6 +28,7 @@ import { createMongoTripMemberRepository } from "../adapters/mongodb/trip-member
 import { createMongoTripInvitationRepositories } from "../adapters/mongodb/trip-invitation-repositories.js";
 import { createMongoTripJourneyRepository } from "../adapters/mongodb/trip-journey-repository.js";
 import { createMongoTripItineraryQueryRepository } from "../adapters/mongodb/trip-itinerary-query-repository.js";
+import { createMongoTripDeletionRepository } from "../adapters/mongodb/trip-deletion-repository.js";
 import { createTripInvitationApi } from "./trip-invitation-api.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -49,10 +52,12 @@ export const createTripApi = (database: Db): TripApi => {
   const journeys = createMongoTripJourneyRepository(database);
   const itinerary = createMongoTripItineraryQueryRepository(database);
   const journeyDependencies = { journeys, members, createId };
+  const deletion = createMongoTripDeletionRepository(database);
   return {
     ...createTripInvitationApi(database),
     create: (payload) => createTrip.execute({ trips, createId, createInviteCode, now: () => new Date() }, payload),
     get: (payload) => getTrip.execute({ trips }, payload),
+    delete: (payload) => deleteTrip.execute({ deletion }, payload),
     getItinerary: (payload) => getTripItinerary.execute({ members, itinerary }, payload),
     list: (payload) => listUserTrips.execute({ trips }, payload),
     listPublic: (payload) => listPublicTrips.execute({ trips }, payload),
@@ -61,8 +66,9 @@ export const createTripApi = (database: Db): TripApi => {
     listMembers: (payload) => listTripMembers.execute({ members }, payload),
     expelMember: (payload) => expelTripParticipant.execute({ members }, payload),
     createDestination: (payload) => createJourneyDestination.execute({ ...journeyDependencies, createId, now: () => new Date() }, payload),
-    listDestinations: (payload) => listJourneyDestinations.execute(journeyDependencies, payload),
+    listDestinations: (payload) => listJourneyDestinations.execute({ ...journeyDependencies, deletion }, payload),
     updateDestination: (payload) => updateJourneyDestination.execute(journeyDependencies, payload),
+    deleteDestination: (payload) => deleteJourneyDestination.execute({ deletion }, payload),
     createTransport: (payload) => createJourneyTransport.execute({ ...journeyDependencies, createId }, payload),
     listTransports: (payload) => listJourneyTransports.execute(journeyDependencies, payload),
     updateTransport: (payload) => updateJourneyTransport.execute(journeyDependencies, payload),

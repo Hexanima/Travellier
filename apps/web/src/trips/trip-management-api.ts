@@ -25,7 +25,7 @@ export type MemberTripDetail = TripSummary & {
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
 export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type PublicTripJoinResult = { tripId: string; joined: boolean };
-export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict"; fields?: readonly { field: string; message: string }[] };
+export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination"; fields?: readonly { field: string; message: string }[] };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;
@@ -33,6 +33,7 @@ export type TripManagementApi = {
   joinPublic: (tripId: string) => Promise<TripResult<PublicTripJoinResult>>;
   create: (input: CreateTripInput) => Promise<TripResult<TripSummary>>;
   get: (tripId: string) => Promise<TripResult<TripDetail>>;
+  deleteTrip: (tripId: string) => Promise<TripResult<void>>;
   updateConfiguration: (tripId: string, input: TripConfigurationUpdate) => Promise<TripResult<MemberTripDetail>>;
 };
 
@@ -79,7 +80,11 @@ const toFailure = (error: ApiClientError): TripFailure =>
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
     : { kind: error.kind };
 
-export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripManagementApi => ({
+export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripManagementApi => ({
+  deleteTrip: async (tripId) => {
+    const result = await client.delete<void>(`/trips/${encodeURIComponent(tripId)}`);
+    return result.ok ? { ok: true, value: undefined } : { ok: false, error: toFailure(result.error) };
+  },
   list: async () => {
     const result = await client.get<unknown>("/trips");
     if (!result.ok) return { ok: false, error: toFailure(result.error) };

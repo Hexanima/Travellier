@@ -7,6 +7,7 @@ import {
   type MongoDatabaseConfig,
 } from "./connection.js";
 import { migrateMongoSchema } from "./migrations.js";
+import { loadApiEnvironment } from "../../load-env.js";
 
 export const runMongoMigrations = async (
   config: MongoDatabaseConfig,
@@ -25,6 +26,7 @@ const isEntrypoint =
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isEntrypoint) {
+  loadApiEnvironment();
   runMongoMigrations(readMongoDatabaseConfig()).catch((error: unknown) => {
     console.error(error);
     process.exitCode = 1;

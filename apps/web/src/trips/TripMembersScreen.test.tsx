@@ -34,10 +34,12 @@ async function render(options: {
   expel?: ReturnType<typeof vi.fn>;
   copyText?: ReturnType<typeof vi.fn>;
   share?: ReturnType<typeof vi.fn>;
+  deleteTrip?: ReturnType<typeof vi.fn>;
 } = {}) {
   const get = options.get ?? vi.fn().mockResolvedValue({ ok: true, value: trip });
   const list = options.list ?? vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, participant], currentUserId: options.viewerId ?? adminId } });
   const expel = options.expel ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
+  const deleteTrip = options.deleteTrip ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
   const copyText = options.copyText ?? vi.fn().mockResolvedValue(undefined);
   const container = document.createElement("div");
   document.body.append(container);
@@ -46,15 +48,84 @@ async function render(options: {
   await act(async () => root.render(
     <MemoryRouter initialEntries={[`/trips/${tripId}/members`]}>
       <Routes>
-        <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={{ get } as never}
+        <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={{ get, deleteTrip } as never}
           members={{ list, expel }} apiBaseUrl="https://api.example.test" sharing={{ copyText, share: options.share }} />} />
+        <Route path="/trips" element={<h1>Mis viajes</h1>} />
       </Routes>
     </MemoryRouter>,
   ));
-  return { container, get, list, expel, copyText };
+  return { container, get, list, expel, copyText, deleteTrip };
 }
 
 describe("TripMembersScreen", () => {
+  it("hides group deletion from participants", async () => {
+    const { container } = await render({ viewerId: participantId });
+    expect(findButton(container, "Eliminar viaje")).toBeUndefined();
+  });
+
+  it("lets an admin confirm group deletion with other members and returns to My Trips", async () => {
+    const { container, deleteTrip } = await render();
+    const remove = findButton(container, "Eliminar viaje");
+    expect(remove).toBeDefined();
+    await act(async () => remove?.click());
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Patagonia");
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("registros asociados");
+    expect(deleteTrip).not.toHaveBeenCalled();
+    await act(async () => findButton(container, "Cancelar")?.click());
+    expect(deleteTrip).not.toHaveBeenCalled();
+    await act(async () => findButton(container, "Eliminar viaje")?.click());
+    await act(async () => findButton(container, "Eliminar definitivamente")?.click());
+    expect(deleteTrip).toHaveBeenCalledWith(tripId);
+    expect(container.textContent).toBe("Mis viajes");
+  });
+
+  it("preserves the group and offers retry when deletion fails", async () => {
+    const deleteTrip = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const { container } = await render({ deleteTrip });
+    await act(async () => findButton(container, "Eliminar viaje")?.click());
+    await act(async () => findButton(container, "Eliminar definitivamente")?.click());
+    expect(deleteTrip).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Intentá nuevamente");
+    expect(container.querySelector('[aria-label="Integrantes del viaje"]')?.textContent).toContain("Ana");
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it("refreshes admin permissions after a forbidden deletion", async () => {
+    const list = vi.fn().mockResolvedValueOnce({ ok: true, value: { members: [admin, participant], currentUserId: adminId } })
+      .mockResolvedValueOnce({ ok: true, value: { members: [{ ...admin, role: "participant" }, participant], currentUserId: adminId } });
+    const { container, deleteTrip } = await render({ list, deleteTrip: vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } }) });
+    await act(async () => findButton(container, "Eliminar viaje")?.click());
+    await act(async () => findButton(container, "Eliminar definitivamente")?.click());
+    expect(deleteTrip).toHaveBeenCalledTimes(1);
+    expect(findButton(container, "Eliminar viaje")).toBeUndefined();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("permiso");
+  });
+
+  it.each(["rejected", "network"])("offers reload if permissions refresh fails with %s after forbidden deletion", async (failure) => {
+    const list = vi.fn().mockResolvedValueOnce({ ok: true, value: { members: [admin, participant], currentUserId: adminId } });
+    if (failure === "rejected") list.mockRejectedValueOnce(new Error("Network unavailable"));
+    else list.mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+    const { container } = await render({ list, deleteTrip: vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } }) });
+    await act(async () => findButton(container, "Eliminar viaje")?.click());
+    await act(async () => findButton(container, "Eliminar definitivamente")?.click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar los miembros");
+    expect(findButton(container, "Reintentar")).toBeDefined();
+  });
+
+  it("prevents double deletion and expulsion while deletion is pending", async () => {
+    let complete!: (result: unknown) => void;
+    const deleteTrip = vi.fn().mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
+    const { container } = await render({ deleteTrip });
+    await act(async () => findButton(container, "Eliminar viaje")?.click());
+    const confirm = findButton(container, "Eliminar definitivamente");
+    await act(async () => { confirm?.click(); confirm?.click(); });
+    expect(deleteTrip).toHaveBeenCalledTimes(1);
+    expect(findButton(container, "Expulsar")?.disabled).toBe(true);
+    expect(findButton(container, "Cancelar")?.closest("fieldset")?.disabled).toBe(true);
+    await act(async () => complete({ ok: true, value: undefined }));
+    expect(container.textContent).toBe("Mis viajes");
+  });
   it("shows the invitation and member list to a participant without expulsion controls", async () => {
     const { container, list } = await render({ viewerId: participantId });
     expect(list).toHaveBeenCalledWith(tripId);

@@ -272,24 +272,29 @@
 
 ### T23 — Crear API de miembros e invitaciones
 
-**Descripción:** Implementar consulta de miembros, unión por código, prevención de duplicados y expulsión. Validar pertenencia al Trip en cada operación.
+**Descripción:** Implementar consulta de miembros, unión por código, prevención de duplicados, expulsión y eliminación del Trip/grupo por un admin. Validar pertenencia al Trip en cada operación.
 
 **Criterios de aceptación:**
 
 - Un usuario no puede unirse dos veces al mismo Trip.
 - Solo admins pueden expulsar y no se exponen miembros de Trips ajenos.
+- Solo un admin puede eliminar el Trip, sin bloqueo por integrantes o registros. La cascada MongoDB es atómica y no afecta otros Trips ni usuarios.
+- Una unión concurrente con la baja no deja una membresía huérfana y las invitaciones del Trip eliminado dejan de funcionar.
+- Las claves de fotos eliminadas se conservan en trabajos durables para la futura limpieza física de S3 (fase 6).
 
 **Estimación:** M (4hs)
 **Dependencias:** T10, T19, T20
 
 ### T24 — Crear interfaz de miembros e invitación
 
-**Descripción:** Implementar pantalla para copiar código, compartir link, ver miembros, confirmar unión y expulsar participantes. Separar claramente las acciones administrativas.
+**Descripción:** Implementar pantalla para copiar código, compartir link, ver miembros, confirmar unión, expulsar participantes y eliminar el Trip/grupo. Separar claramente las acciones administrativas.
 
 **Criterios de aceptación:**
 
 - Un usuario puede unirse ingresando un código válido.
 - La acción de expulsión no está disponible para participantes.
+- La eliminación del Trip solo aparece para admins, advierte que borra datos para todos y requiere confirmación.
+- Evita solicitudes duplicadas, informa errores sin abandonar el grupo y vuelve al listado actualizado después de eliminarlo.
 
 **Estimación:** M (4hs)
 **Dependencias:** T08, T09, T23
@@ -347,24 +352,28 @@
 
 ### T29 — Crear API de destinos y transportes
 
-**Descripción:** Implementar altas, modificaciones y consultas de destinos ordenados y sus transportes. Validar que pertenecen al Trip y destino indicados.
+**Descripción:** Implementar altas, modificaciones y consultas de destinos ordenados y sus transportes, y la baja de destinos vacíos. Validar que pertenecen al Trip y destino indicados.
 
 **Criterios de aceptación:**
 
 - El orden de destinos se persiste sin duplicados.
 - No se puede crear un transporte para otro Trip.
+- La baja exige ser integrante, conserva al menos un destino y se bloquea con registros asociados (HTTP 409).
+- La validación, baja y renumeración son atómicas; las bajas concurrentes no dejan un Trip sin destinos.
 
 **Estimación:** M (4hs)
 **Dependencias:** T04, T10, T28
 
 ### T30 — Crear formularios de destinos y transportes
 
-**Descripción:** Implementar formularios para avión, ómnibus, colectivo urbano, auto y otro. Permitir agregar destinos y tramos de colectivo secuenciales.
+**Descripción:** Implementar formularios para avión, ómnibus, colectivo urbano, auto y otro. Permitir agregar y eliminar destinos vacíos, y agregar tramos de colectivo secuenciales.
 
 **Criterios de aceptación:**
 
 - Cada tipo muestra solo sus campos pertinentes.
 - Los errores temporales se muestran antes de guardar.
+- Eliminar un destino requiere confirmación; la opción se oculta para el único destino, uno con registros o mientras se desconoce si está vacío. Los conflictos concurrentes también ocultan la acción, sin perder datos ante errores.
+- Durante la baja se evitan solicitudes duplicadas y cambios simultáneos; al finalizar se recarga el orden confirmado por la API.
 
 **Estimación:** L (8hs)
 **Dependencias:** T08, T09, T29
@@ -601,6 +610,7 @@
 
 - El archivo no atraviesa la Lambda.
 - Un fallo de upload no crea una referencia de foto inválida.
+- Implementar el procesador de `storageDeletionJobs`: eliminar objetos S3 con reintentos e idempotencia sin bloquear la baja del Trip. Esta limpieza física sigue pendiente mientras no esté implementada la integración de fotos.
 
 **Estimación:** M (4hs)
 **Dependencias:** T44, T48

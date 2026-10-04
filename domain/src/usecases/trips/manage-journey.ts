@@ -6,6 +6,7 @@ import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
 import type { TripMemberManagementPort } from "../../ports/trip-member-management-port.js";
 import type { TripJourneyPort } from "../../ports/trip-journey-port.js";
+import type { TripDeletionPort } from "../../ports/trip-deletion-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
@@ -48,10 +49,20 @@ const transportFromPayload = (payload: CreateJourneyTransportPayload, id: Object
   arrivalAt: payload.arrivalAt, costPerPerson: payload.costPerPerson, details: payload.details,
 } as Transport);
 
-export const listJourneyDestinations: UseCase<JourneyDependencies, JourneyContext, TripDestination[], TaggedError> = {
+export type JourneyDestinationSummary = TripDestination & { hasRecords: boolean };
+
+export const listJourneyDestinations: UseCase<JourneyDependencies & {
+  deletion: Pick<TripDeletionPort, "findDestinationIdsWithRecords">;
+}, JourneyContext, JourneyDestinationSummary[], TaggedError> = {
   execute: async (dependencies, payload) => {
     const access = await authorize(dependencies, payload);
-    return access.ok ? dependencies.journeys.listDestinations(payload.tripId) : access;
+    if (!access.ok) return access;
+    const destinations = await dependencies.journeys.listDestinations(payload.tripId);
+    if (!destinations.ok) return destinations;
+    const records = await dependencies.deletion.findDestinationIdsWithRecords(payload.tripId);
+    if (!records.ok) return records;
+    const occupied = new Set(records.value);
+    return ok(destinations.value.map((destination) => ({ ...destination, hasRecords: occupied.has(destination.id) })));
   },
 };
 

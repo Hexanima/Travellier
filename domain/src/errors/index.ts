@@ -16,3 +16,4 @@ export * from "./destination-not-found-error.js";
 export * from "./transport-not-found-error.js";
 export * from "./journey-conflict-error.js";
 export * from "./itinerary-conflict-error.js";
+export * from "./deletion-conflict-error.js";

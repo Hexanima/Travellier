@@ -22,6 +22,15 @@ describe("Mongo trip invitation repositories", () => {
     await server?.stop();
   });
 
+  it("does not recreate a membership when a group was deleted after invitation lookup", async () => {
+    const tripId = new ObjectId();
+    const userId = new ObjectId();
+    const { members } = createMongoTripInvitationRepositories(database);
+    expect(await members.addParticipant(tripId.toHexString() as never, userId.toHexString() as never))
+      .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    expect(await database.collection("tripMembers").countDocuments({ tripId })).toBe(0);
+  });
+
   it("finds an invitation and inserts a participant only once", async () => {
     const tripId = new ObjectId();
     const userId = new ObjectId();
@@ -39,6 +48,7 @@ describe("Mongo trip invitation repositories", () => {
   it("preserves an admin membership when the same user follows an invitation", async () => {
     const tripId = new ObjectId();
     const userId = new ObjectId();
+    await database.collection("trips").insertOne({ _id: tripId, inviteCode: "ADMIN-TEST" });
     await database.collection("tripMembers").insertOne({ tripId, userId, role: "admin", joinedAt: new Date() });
     const { members } = createMongoTripInvitationRepositories(database);
 
@@ -49,6 +59,7 @@ describe("Mongo trip invitation repositories", () => {
   it("keeps one membership when two joins arrive at the same time", async () => {
     const tripId = new ObjectId();
     const userId = new ObjectId();
+    await database.collection("trips").insertOne({ _id: tripId, inviteCode: "CONCURRENT-TEST" });
     const { members } = createMongoTripInvitationRepositories(database);
 
     const results = await Promise.all([

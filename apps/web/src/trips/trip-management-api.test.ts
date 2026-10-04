@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTripManagementApi } from "./trip-management-api.js";
+import { createHttpClient } from "../api/http-client.js";
 
 const trip = {
   id: "507f191e810c19729de860ea",
@@ -18,6 +19,16 @@ const configuredTrip = {
 };
 
 describe("createTripManagementApi", () => {
+  it("deletes a Trip through authenticated HTTP and preserves permission failures", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "Forbidden" } }), { status: 403 }));
+    const api = createTripManagementApi(createHttpClient({ baseUrl: "https://api.example.test", fetch,
+      getAccessToken: async () => "access", onUnauthorized: vi.fn() }));
+    expect(await api.deleteTrip(trip.id)).toEqual({ ok: true, value: undefined });
+    expect(fetch).toHaveBeenCalledWith(`https://api.example.test/trips/${trip.id}`,
+      expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ Authorization: "Bearer access" }) }));
+    expect(await api.deleteTrip(trip.id)).toEqual({ ok: false, error: { kind: "forbidden" } });
+  });
   it("loads the authenticated user's Trips", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [trip] } });
     const api = createTripManagementApi({ get, post: vi.fn() } as never);

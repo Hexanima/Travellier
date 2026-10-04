@@ -114,6 +114,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     joinPublic: activeTrips?.joinPublic ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeTrips?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     get: activeTrips?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    deleteTrip: activeTrips?.deleteTrip ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     updateConfiguration: activeTrips?.updateConfiguration ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeTrips])
   const tripMembers = useMemo<TripMembersApi>(() => ({
@@ -123,6 +124,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const tripJourney = useMemo<TripJourneyApi>(() => ({
     listDestinations: activeJourney?.listDestinations ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     createDestination: activeJourney?.createDestination ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    deleteDestination: activeJourney?.deleteDestination ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     listTransports: activeJourney?.listTransports ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     createTransport: activeJourney?.createTransport ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     updateTransport: activeJourney?.updateTransport ?? (async () => ({ ok: false, error: { kind: 'server' } })),

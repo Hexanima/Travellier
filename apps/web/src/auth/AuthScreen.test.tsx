@@ -52,6 +52,45 @@ const submit = async (container: HTMLElement) => {
 };
 
 describe("AuthScreen", () => {
+  it.each(["login", "register"] as const)("toggles password visibility in %s without changing its value or submitting", async (mode) => {
+    const login = vi.fn();
+    const register = vi.fn();
+    const container = await renderAuthScreen({ mode, auth: { login, register } });
+    const password = container.querySelector<HTMLInputElement>('[name="password"]')!;
+    await setValue(password, "secret-pass");
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Mostrar contraseña"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.type).toBe("button");
+    expect(toggle?.getAttribute("aria-controls")).toBe(password.id);
+    expect(password.type).toBe("password");
+    expect(password.autocomplete).toBe(mode === "register" ? "new-password" : "current-password");
+    await act(async () => toggle?.click());
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("secret-pass");
+    expect(toggle?.getAttribute("aria-label")).toBe("Ocultar contraseña");
+    await act(async () => toggle?.click());
+    expect(password.type).toBe("password");
+    expect(password.value).toBe("secret-pass");
+    expect(toggle?.getAttribute("aria-label")).toBe("Mostrar contraseña");
+    expect(login).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it.each(["login", "register"] as const)("disables password visibility during %s submission", async (mode) => {
+    let complete!: (value: unknown) => void;
+    const request = vi.fn(() => new Promise((resolve) => { complete = resolve; }));
+    const container = await renderAuthScreen({ mode, auth: { login: request, register: request } as never });
+    if (mode === "register") await setValue(container.querySelector('[name="name"]') as HTMLInputElement, "Nico");
+    await setValue(container.querySelector('[name="email"]') as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector('[name="password"]') as HTMLInputElement, "secret-pass");
+    await submit(container);
+    const toggle = container.querySelector<HTMLButtonElement>('[aria-label="Mostrar contraseña"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.disabled).toBe(true);
+    await act(async () => complete({ ok: false, error: { kind: "network" } }));
+    expect(toggle?.disabled).toBe(false);
+  });
+
   it("shows field validation before registering", async () => {
     const register = vi.fn();
     const container = await renderAuthScreen({
