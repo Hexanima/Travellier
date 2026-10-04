@@ -11,9 +11,9 @@ import { itineraryFixture } from "./itinerary-test-fixture.js";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks(); });
-async function render(existing?: ActivityResponse) {
+async function render(existing?: ActivityResponse, providedContext?: ActivityFormContext) {
   const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
-  const context: ActivityFormContext = { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
+  const context: ActivityFormContext = providedContext ?? { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
     selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
   const create = vi.fn().mockResolvedValue({ ok: true, value: itinerary.activities[0] });
   const update = vi.fn().mockResolvedValue({ ok: true, value: itinerary.activities[0] });
@@ -47,6 +47,22 @@ describe("ActivityForm", () => {
     expect(create).not.toHaveBeenCalled();
     await field(container, "title", "Museo"); await field(container, "time", "06:00"); await submit(container);
     expect(container.textContent).toContain("dentro de la franja"); expect(create).not.toHaveBeenCalled();
+  });
+  it("lets the user explicitly choose and see the exact start without rounding entered clocks", async () => {
+    const { context } = await render();
+    context.days[1].startsAt = context.selection.startsAt = "2026-09-25T13:00:00.123Z";
+    context.days[1].endsAt = context.selection.endsAt = "2026-09-25T13:00:59.789Z";
+    const { container, create } = await render(undefined, context);
+    await field(container, "title", "Llegada"); await field(container, "time", "10:00"); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    const chooseStart = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Usar inicio de franja");
+    expect(chooseStart).toBeDefined();
+    await act(async () => chooseStart!.click());
+    const exact = container.querySelector<HTMLTimeElement>(`time[datetime="${context.selection.startsAt}"]`);
+    expect(exact?.textContent).toContain("10:00:00,123");
+    expect(container.querySelector('[name="time"]')).toHaveProperty("value", "10:00");
+    await submit(container);
+    expect(create).toHaveBeenCalledWith(context.tripId, expect.objectContaining({ scheduledAt: context.selection.startsAt }));
   });
   it("prefills spontaneous occurrence time and allows correcting it", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-25T13:34:56.789Z"));

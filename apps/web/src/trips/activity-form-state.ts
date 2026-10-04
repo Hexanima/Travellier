@@ -36,10 +36,13 @@ export const prepareActivityInput = (values: ActivityFormValues, context: Activi
   const { selection } = context;
   const days = canonicalDays(context.days);
   for (const scheduledAt of candidates) {
-    if (operation === "create" && (values.date !== selection.date || scheduledAt.getTime() < Date.parse(selection.startsAt) ||
+    if (operation === "create" && (scheduledAt.getTime() < Date.parse(selection.startsAt) ||
         selection.endsAt === null || scheduledAt.getTime() > Date.parse(selection.endsAt))) continue;
     const selected = days.find((day) => (operation === "edit" || selection.sourceDayIds.includes(day.id)) && day.destinationId === selection.destinationId &&
       validateActivitySchedule({ tripId: context.tripId as ObjectId, dayId: day.id, scheduledAt }, days).ok);
+    // A final inclusive departure can belong to the next local date. Calendar splits cannot.
+    if (operation === "create" && values.date !== selection.date &&
+        (scheduledAt.getTime() !== Date.parse(selection.endsAt!) || scheduledAt.getTime() !== selected?.endsAt?.getTime())) continue;
     if (selected) return { ok: true, value: { dayId: selected.id, title: values.title.trim(), scheduledAt: scheduledAt.toISOString(),
       description: values.description.trim() || null, mapsUrl: values.mapsUrl.trim() || null } };
   }

@@ -74,6 +74,29 @@ describe("activity form state", () => {
     expect(prepareActivityInput(value, ctx).ok).toBe(true);
     expect(prepareActivityInput({ ...value, originalScheduledAt: "2026-09-25T18:00:00.790Z" }, ctx).ok).toBe(false);
   });
+  it.each([
+    ["UTC", "2026-09-25T10:00:00.000Z", "2026-09-26T00:00:00.000Z"],
+    ["America/Argentina/Buenos_Aires", "2026-09-26T00:00:00.000Z", "2026-09-26T03:00:00.000Z"],
+  ])("accepts final departure at next-day midnight in %s from the previous local band", (timeZone, startsAt, endsAt) => {
+    const ctx = context(timeZone);
+    Object.assign(ctx.days[1], { date: `${startsAt.slice(0, 10)}T00:00:00.000Z`, startsAt, endsAt });
+    Object.assign(ctx.selection, { startsAt, endsAt });
+    const value = { ...values(), date: "2026-09-26", time: "00:00" };
+    expect(prepareActivityInput(value, ctx)).toMatchObject({ ok: true, value: { dayId: ctx.days[1].id, scheduledAt: endsAt } });
+    expect(prepareActivityInput({ ...value, originalScheduledAt: new Date(Date.parse(endsAt) + 1).toISOString() }, ctx).ok).toBe(false);
+  });
+  it("does not allow next-day creation at an artificial local calendar split", () => {
+    const ctx = context();
+    Object.assign(ctx.days[1], { date: "2026-09-26T00:00:00.000Z", startsAt: "2026-09-26T00:00:00.000Z", endsAt: "2026-09-26T10:00:00.000Z" });
+    Object.assign(ctx.selection, { startsAt: ctx.days[1].startsAt, endsAt: "2026-09-26T03:00:00.000Z" });
+    expect(prepareActivityInput({ ...values(), date: "2026-09-26", time: "00:00" }, ctx).ok).toBe(false);
+  });
+  it("does not claim midnight owned by a following canonical activity slice", () => {
+    const ctx = context("UTC"), endsAt = "2026-09-26T00:00:00.000Z";
+    ctx.days[1].endsAt = ctx.selection.endsAt = endsAt;
+    ctx.days.push({ ...ctx.days[1], id: "000000000000000000000099", date: endsAt, startsAt: endsAt, endsAt: "2026-09-26T10:00:00.000Z" });
+    expect(prepareActivityInput({ ...values(), date: "2026-09-26", time: "00:00" }, ctx).ok).toBe(false);
+  });
   it.each(["transit_out", "transit_return", "arrival"] as const)("rejects %s as a creation day", (type) => {
     const ctx = context(); ctx.days[1].type = type;
     expect(prepareActivityInput(values(), ctx).ok).toBe(false);

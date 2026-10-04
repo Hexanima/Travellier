@@ -3,6 +3,7 @@ import { Button, Feedback, SelectField, TextAreaField, TextField } from "../comp
 import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues, type ActivityMode } from "./activity-form-state.js";
 import type { ActivityInput, ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripFailure } from "./trip-management-api.js";
+import { toLocalDateTime } from "./transport-local-time.js";
 
 type Props = { context: ActivityFormContext; activities: Pick<TripActivityApi, "create" | "update">; existing?: ActivityResponse;
   onSaved: (activity: ActivityResponse) => void; onBusyChange: (busy: boolean) => void };
@@ -24,6 +25,11 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
     const initial = initialActivityValues(localContext, mode, new Date(Date.now()));
     setValues((current) => ({ ...current, mode, date: initial.date, time: initial.time, originalScheduledAt: initial.originalScheduledAt }));
     setErrors({}); setFailure(undefined); setMessage("");
+  };
+  const chooseWindowStart = () => {
+    const local = toLocalDateTime(context.selection.startsAt, timeZone);
+    update("date", local.slice(0, 10)); update("time", local.slice(11));
+    setValues((current) => ({ ...current, originalScheduledAt: context.selection.startsAt }));
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -53,7 +59,10 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
     } catch { setFailure({ kind: "network" }); }
     finally { savingRef.current = false; setSaving(false); onBusyChange(false); }
   };
-  const clock = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const clock = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+    second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" });
+  const exactScheduledAt = values.originalScheduledAt && toLocalDateTime(values.originalScheduledAt, timeZone) === `${values.date}T${values.time}`
+    ? values.originalScheduledAt : undefined;
   return <form className="activity-form" onSubmit={(event) => void submit(event)} noValidate>
     <p className="activity-context">{existing ? <>Horarios en {timeZone}<br />
       Podés reprogramar dentro de las franjas de actividad de este destino.</> : <>
@@ -69,6 +78,8 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
       <TextField label={values.mode === "spontaneous" ? "Hora en que ocurrió" : "Hora prevista"} name="time" type="time" value={values.time} required loading={saving}
         error={errors.time ?? errors.scheduledAt ?? errors.dayId} onChange={(event) => update("time", event.target.value)} />
     </div>
+    {!existing ? <Button type="button" disabled={saving} onClick={chooseWindowStart}>Usar inicio de franja</Button> : null}
+    {exactScheduledAt ? <p className="activity-context">Hora exacta: <time dateTime={exactScheduledAt}>{clock.format(new Date(exactScheduledAt))}</time>.</p> : null}
     {values.mode === "spontaneous" ? <p className="activity-context">Podés ajustar la fecha y hora si la registrás después de realizada.</p> : null}
     <TextAreaField label="Descripción (opcional)" name="description" value={values.description} loading={saving} error={errors.description}
       onChange={(event) => update("description", event.target.value)} />

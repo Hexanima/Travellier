@@ -79,6 +79,35 @@ describe("itinerary activity flows", () => {
     expect(create).toHaveBeenCalledWith(fixture.tripId, expect.objectContaining({ dayId: next.id, scheduledAt: "2026-09-26T01:00:00.000Z" }));
     expect(container.querySelector('[data-itinerary-date="2026-09-25"]')?.textContent).toContain("Después de cenar");
   });
+  it("creates at final midnight from the preceding activity band and displays it on the departure date", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse;
+    const first = { ...fixture.days[1], endsAt: "2026-09-26T00:00:00.000Z", items: [] };
+    const last = { ...first, id: itineraryId(40), date: first.endsAt, startsAt: first.endsAt, endsAt: "2026-09-26T03:00:00.000Z", order: 3 };
+    const returning = { ...fixture.days[2], date: first.endsAt, startsAt: last.endsAt, endsAt: "2026-09-26T06:00:00.000Z", items: [], order: 4 };
+    fixture.days = [first, last, returning]; fixture.activities = []; fixture.posts = []; fixture.transports = [];
+    const { container, create } = await render(fixture);
+    expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).not.toContain("Crear actividad");
+    await click(container, "Crear actividad"); await field(container, "title", "Despedida");
+    await field(container, "date", "2026-09-26"); await field(container, "time", "00:00"); await save(container);
+    expect(create).toHaveBeenCalledWith(fixture.tripId, expect.objectContaining({ dayId: last.id, scheduledAt: last.endsAt }));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).toContain("Despedida");
+  });
+  it.each([
+    ["UTC", "2026-09-25T10:00:00.123Z", "2026-09-25T10:00:59.789Z"],
+    ["UTC", "2026-09-25T10:00:00.123Z", "2026-09-25T10:00:00.124Z"],
+    ["America/New_York", "2026-11-01T06:00:00.123Z", "2026-11-01T06:00:00.789Z"],
+  ])("creates by selecting the exact start of a band without a complete minute in %s: %s–%s", async (timeZone, startsAt, endsAt) => {
+    const fixture = itineraryFixture() as TripItineraryResponse;
+    fixture.days = [{ ...fixture.days[1], date: `${startsAt.slice(0, 10)}T00:00:00.000Z`, startsAt, endsAt, items: [] }];
+    fixture.activities = []; fixture.posts = []; fixture.transports = [];
+    const { container, create } = await render(fixture, timeZone);
+    await click(container, "Crear actividad"); await field(container, "title", "Apenas llegamos");
+    await click(container, "Usar inicio de franja"); await save(container);
+    expect(create).toHaveBeenCalledWith(fixture.tripId, expect.objectContaining({ dayId: fixture.days[0].id, scheduledAt: startsAt }));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Apenas llegamos");
+  });
   it("cancels without writing and restores focus to the trigger", async () => {
     const { container, create } = await render(); const trigger = button(container, "Crear actividad"); trigger.focus();
     await click(container, "Crear actividad"); await click(container, "Cerrar");
