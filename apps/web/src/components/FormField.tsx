@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 interface BaseFieldProps {
@@ -66,6 +66,34 @@ export function TextField({ className, type = "text", ...props }: TextFieldProps
           className={["ui-control", className].filter(Boolean).join(" ")}
           type={type}
         />
+      )}
+    </FieldLayout>
+  );
+}
+
+export type PasswordFieldProps = Omit<TextFieldProps, "type">;
+
+export function PasswordField({ className, disabled, error, helpText, id, label, loading, ...inputProps }: PasswordFieldProps) {
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <FieldLayout disabled={disabled} error={error} helpText={helpText} id={id} label={label} loading={loading}>
+      {(controlProps) => (
+        <div className="ui-password-control">
+          <input {...inputProps} {...controlProps}
+            className={["ui-control", "ui-control--password", className].filter(Boolean).join(" ")}
+            type={visible ? "text" : "password"} />
+          <button className="ui-password-toggle" type="button" disabled={controlProps.disabled}
+            aria-label={visible ? "Ocultar contraseña" : "Mostrar contraseña"} aria-controls={controlProps.id}
+            onClick={() => setVisible((current) => !current)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+              {visible ? <path d="m3 3 18 18" /> : null}
+            </svg>
+          </button>
+        </div>
       )}
     </FieldLayout>
   );

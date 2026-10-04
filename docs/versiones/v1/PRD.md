@@ -107,11 +107,19 @@ El mismo patrón aplica para el link de confirmación de email (`/auth/verify/:t
 
 | Rol | Permisos |
 |---|---|
-| Admin | Todo + puede expulsar participantes |
-| Participante | Crear/editar actividades, posts, comentarios, votar — igual que admin salvo expulsión |
+| Admin | Todo + puede expulsar participantes y eliminar el Trip/grupo |
+| Participante | Crear/editar actividades, posts, comentarios, votar — igual que admin salvo expulsión y eliminación del Trip |
 
 - El creador del Trip es admin por defecto.
 - Puede haber múltiples admins.
+
+#### Baja del Trip/grupo
+
+- Cualquier admin actual puede eliminar el Trip, previa confirmación explícita. Los integrantes y los registros existentes no bloquean esta operación.
+- La baja elimina en cascada los datos del Trip en MongoDB: membresías, destinos, transportes, itinerario, actividades, participaciones, votos, posts, referencias de fotos, gastos, likes y comentarios. No elimina cuentas de usuarios ni afecta otros Trips.
+- Los permisos, la baja y la cascada se ejecutan en una sola transacción, serializada con las mutaciones del viaje y las nuevas membresías. Las invitaciones dejan de ser válidas y no pueden crear membresías huérfanas.
+- Si hay referencias de fotos, sus claves S3 se conservan en trabajos durables `storageDeletionJobs` dentro de esa transacción. La limpieza física de S3 se completará con la integración de fotos (fase 6); todavía no hay un procesador de estos trabajos. Esto no bloquea la baja del grupo.
+- El mínimo de un destino se aplica a Trips existentes, no a la eliminación del Trip completo.
 
 #### Configuración del Trip
 
@@ -155,6 +163,14 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 #### Multi-destino
 
 Un Trip puede tener múltiples destinos secuenciales. Cada destino tiene su propio par transporte de llegada / transporte de salida. El sistema detecta automáticamente los días de actividad entre la llegada a un destino y la salida hacia el siguiente.
+
+#### Baja de destinos
+
+- Cualquier integrante puede eliminar un destino vacío, previa confirmación.
+- Un Trip debe conservar al menos un destino: no se permite eliminar el único existente.
+- Se bloquea la baja si el destino tiene transportes, días de itinerario o contenido asociado. No se elimina contenido en cascada.
+- La opción de eliminar se oculta si es el único destino, tiene registros asociados o todavía no se pudo comprobar que está vacío.
+- La validación y la baja se ejecutan en una misma transacción, serializada con los cambios de destinos y transportes. Los destinos restantes mantienen su orden relativo y se renumeran desde 1 sin duplicados.
 
 **Ejemplo con un destino:**
 ```

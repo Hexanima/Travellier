@@ -15,6 +15,18 @@ const transport = {
 } satisfies JourneyTransport;
 
 describe("createTripJourneyApi", () => {
+  it("deletes destinations and distinguishes both deletion conflicts", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "LastDestinationError" } }), { status: 409 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "DeletionConflictError" } }), { status: 409 }));
+    const api = createTripJourneyApi(createHttpClient({ baseUrl: "https://example.test", fetch,
+      getAccessToken: async () => "token", onUnauthorized: vi.fn() }));
+    expect(await api.deleteDestination(tripId, destinationId)).toEqual({ ok: true, value: undefined });
+    expect(fetch).toHaveBeenCalledWith(`https://example.test/trips/${tripId}/destinations/${destinationId}`,
+      expect.objectContaining({ method: "DELETE", headers: expect.objectContaining({ Authorization: "Bearer token" }) }));
+    expect(await api.deleteDestination(tripId, destinationId)).toEqual({ ok: false, error: { kind: "last-destination" } });
+    expect(await api.deleteDestination(tripId, destinationId)).toEqual({ ok: false, error: { kind: "deletion-conflict" } });
+  });
   it("reads canonical and legacy urban responses without changing their representation", async () => {
     const canonical = { ...transport, type: "bus_local", details: { steps: [
       { line: "1", fromStop: "A", toStop: "B", estimatedAt: "2026-10-01T13:00:00.123Z" },

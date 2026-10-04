@@ -26,11 +26,12 @@ export type TransportInput = TransportBase & (
 );
 
 export type JourneyTransport = TransportInput & { id: string; tripId: string; destinationId: string };
-export type JourneyDestination = { id: string; tripId: string; name: string; order: number; createdAt: string };
+export type JourneyDestination = { id: string; tripId: string; name: string; order: number; createdAt: string; hasRecords?: boolean };
 
 export type TripJourneyApi = {
   listDestinations: (tripId: string) => Promise<TripResult<JourneyDestination[]>>;
   createDestination: (tripId: string, name: string) => Promise<TripResult<JourneyDestination>>;
+  deleteDestination: (tripId: string, destinationId: string) => Promise<TripResult<void>>;
   listTransports: (tripId: string, destinationId: string) => Promise<TripResult<JourneyTransport[]>>;
   createTransport: (tripId: string, destinationId: string, input: TransportInput) => Promise<TripResult<JourneyTransport>>;
   updateTransport: (tripId: string, destinationId: string, transportId: string, input: TransportInput) => Promise<TripResult<JourneyTransport>>;
@@ -57,7 +58,8 @@ export const journeyTransportForDomain = (value: Record<string, unknown>): Trans
 
 const isDestination = (value: unknown): value is JourneyDestination => isRecord(value) &&
   isText(value.id) && isText(value.tripId) && isText(value.name) &&
-  Number.isSafeInteger(value.order) && (value.order as number) > 0 && isTimestamp(value.createdAt);
+  Number.isSafeInteger(value.order) && (value.order as number) > 0 && isTimestamp(value.createdAt) &&
+  (value.hasRecords === undefined || typeof value.hasRecords === "boolean");
 
 const isTransport = (value: unknown): value is JourneyTransport => {
   if (!isRecord(value) || !isText(value.id) || !isText(value.tripId) || !isText(value.destinationId) ||
@@ -70,6 +72,8 @@ const isTransport = (value: unknown): value is JourneyTransport => {
 };
 
 const toFailure = (error: ApiClientError): TripFailure =>
+  error.status === 409 && error.code === "LastDestinationError" ? { kind: "last-destination" } :
+  error.status === 409 && error.code === "DeletionConflictError" ? { kind: "deletion-conflict" } :
   error.status === 409 && error.code === "ItineraryConflictError" ? { kind: "itinerary-conflict" } :
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
@@ -79,7 +83,11 @@ const destinationsPath = (tripId: string) => `/trips/${encodeURIComponent(tripId
 const transportsPath = (tripId: string, destinationId: string) =>
   `${destinationsPath(tripId)}/${encodeURIComponent(destinationId)}/transports`;
 
-export const createTripJourneyApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripJourneyApi => ({
+export const createTripJourneyApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripJourneyApi => ({
+  deleteDestination: async (tripId, destinationId) => {
+    const result = await client.delete<void>(`${destinationsPath(tripId)}/${encodeURIComponent(destinationId)}`);
+    return result.ok ? { ok: true, value: undefined } : { ok: false, error: toFailure(result.error) };
+  },
   listDestinations: async (tripId) => {
     const result = await client.get<unknown>(destinationsPath(tripId));
     if (!result.ok) return { ok: false, error: toFailure(result.error) };

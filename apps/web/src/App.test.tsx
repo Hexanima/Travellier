@@ -10,7 +10,7 @@ describe("App", () => {
   it("does not expose auth entry points when the API URL is not configured", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/"]}>
-        <App />
+        <App apiBaseUrl="" />
       </MemoryRouter>,
     );
 

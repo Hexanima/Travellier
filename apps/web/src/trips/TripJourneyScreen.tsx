@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
+import { Button, Feedback, LoadingState, Modal, TextField } from "../components/index.js";
 import { TransportForm, type TransportSaveCoordinator } from "./TransportForm.js";
 import type { JourneyDestination, JourneyTransport, TransportDirection, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
@@ -50,6 +50,11 @@ export function TripJourneyScreen({ trips, journey }: Props) {
   const [destinationError, setDestinationError] = useState("");
   const [adding, setAdding] = useState(false);
   const addingRef = useRef(false);
+  const [deleteTarget, setDeleteTarget] = useState<JourneyDestination>();
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
+  const [deleteError, setDeleteError] = useState<string>();
+  const [deleteMessage, setDeleteMessage] = useState("");
 
   const load = useCallback(async () => {
     if (!tripId) { setLoadError("No encontramos este viaje."); setLoading(false); return; }
@@ -86,7 +91,7 @@ export function TripJourneyScreen({ trips, journey }: Props) {
 
   const addDestination = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!tripId || addingRef.current) return;
+    if (!tripId || addingRef.current || deletingRef.current) return;
     const name = destinationName.trim();
     if (!name) { setDestinationError("Ingresá un nombre para el destino."); return; }
     addingRef.current = true;
@@ -96,7 +101,7 @@ export function TripJourneyScreen({ trips, journey }: Props) {
       const result = await journey.createDestination(tripId, name);
       if (result.ok) {
         const current = confirmedJourney.current;
-        const ordered = [...current.destinations, result.value].sort((a, b) => a.order - b.order);
+        const ordered = [...current.destinations, { ...result.value, hasRecords: false }].sort((a, b) => a.order - b.order);
         const updatedTransports = { ...current.transports, [result.value.id]: [] };
         confirmedJourney.current = { destinations: ordered, transports: updatedTransports };
         setDestinations(ordered);
@@ -114,6 +119,42 @@ export function TripJourneyScreen({ trips, journey }: Props) {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!tripId || !deleteTarget || deletingRef.current || savingTransportRef.current || addingRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
+    setDeleteError(undefined);
+    setDeleteMessage("");
+    try {
+      const result = await journey.deleteDestination(tripId, deleteTarget.id);
+      if (result.ok) {
+        setDeleteTarget(undefined);
+        setDeleteMessage(`Destino ${deleteTarget.name} eliminado.`);
+        await load();
+      } else {
+        setDeleteError(result.error.kind === "last-destination" ? "El viaje debe conservar al menos un destino."
+          : result.error.kind === "deletion-conflict" ? "Este destino tiene registros asociados y no se puede eliminar."
+          : result.error.kind === "not-found" || result.error.kind === "forbidden" ? "El destino ya no existe o no tenés permiso para eliminarlo."
+          : "No pudimos eliminar el destino. Intentá nuevamente.");
+        if (result.error.kind === "deletion-conflict") {
+          const updated = confirmedJourney.current.destinations.map((destination) => destination.id === deleteTarget.id
+            ? { ...destination, hasRecords: true } : destination);
+          confirmedJourney.current = { ...confirmedJourney.current, destinations: updated };
+          setDestinations(updated);
+          setDeleteTarget(undefined);
+        } else if (result.error.kind === "last-destination") {
+          setDeleteTarget(undefined);
+          await load();
+        }
+      }
+    } catch {
+      setDeleteError("No pudimos eliminar el destino. Intentá nuevamente.");
+    } finally {
+      deletingRef.current = false;
+      setDeleting(false);
+    }
+  };
+
   const onSaved = (transport: JourneyTransport) => {
     const current = confirmedJourney.current.transports;
     const existing = current[transport.destinationId] ?? [];
@@ -126,9 +167,9 @@ export function TripJourneyScreen({ trips, journey }: Props) {
   };
 
   const saveCoordinator: TransportSaveCoordinator = {
-    busy: savingTransport,
+    busy: savingTransport || deleting,
     begin: (destinationId, direction) => {
-      if (savingTransportRef.current) return undefined;
+      if (savingTransportRef.current || deletingRef.current) return undefined;
       savingTransportRef.current = true;
       setSavingTransport(true);
       const current = confirmedJourney.current;
@@ -145,6 +186,8 @@ export function TripJourneyScreen({ trips, journey }: Props) {
           <h1>Destinos y transportes</h1>
           {trip ? <p>{trip.name}</p> : null}
         </header>
+        {deleteMessage ? <Feedback variant="success">{deleteMessage}</Feedback> : null}
+        {deleteError && !deleteTarget ? <Feedback variant="error">{deleteError}</Feedback> : null}
         {loading ? <LoadingState label="Cargando destinos y transportes…" /> : null}
         {!loading && loadError ? <div className="trips-state"><Feedback variant="error">{loadError}</Feedback>
           <Button onClick={() => void load()}>Reintentar</Button></div> : null}
@@ -159,6 +202,12 @@ export function TripJourneyScreen({ trips, journey }: Props) {
                 return <section className="journey-destination" key={destination.id} aria-labelledby={`destination-${destination.id}`}>
                   <div className="journey-destination-heading"><span className="journey-order">Destino {destination.order}</span>
                     <h2 id={`destination-${destination.id}`}>{destination.name}</h2></div>
+                  {destinations.length > 1 && destination.hasRecords === false && saved.length === 0 ? <div className="journey-delete-destination">
+                    <Button error aria-label={`Eliminar destino ${destination.name}`} aria-describedby={`delete-help-${destination.id}`}
+                      disabled={savingTransport || adding || deleting}
+                      onClick={() => { setDeleteTarget(destination); setDeleteError(undefined); }}>Eliminar destino</Button>
+                    <p id={`delete-help-${destination.id}`}>Solo se puede eliminar si no tiene registros asociados.</p>
+                  </div> : null}
                   <div className="journey-directions">
                     {(["outbound", "return"] as const).map((direction) => <section className="journey-direction" key={direction}>
                       <h3>{direction === "outbound" ? "Llegada al destino" : "Salida del destino"}</h3>
@@ -175,14 +224,23 @@ export function TripJourneyScreen({ trips, journey }: Props) {
               <h2 id="add-destination-title">Agregar destino</h2>
               <form className="auth-form journey-add-destination" onSubmit={(event) => void addDestination(event)} noValidate>
                 <TextField label="Nombre del destino" name="destinationName" value={destinationName}
-                  error={destinationError} loading={adding} onChange={(event) => {
+                  error={destinationError} loading={adding || deleting} onChange={(event) => {
                     setDestinationName(event.target.value); setDestinationError("");
                   }} />
-                <Button type="submit" loading={adding}>Agregar destino</Button>
+                <Button type="submit" loading={adding} disabled={deleting}>Agregar destino</Button>
               </form>
             </section>
           </>
         ) : null}
+        <Modal isOpen={deleteTarget !== undefined} title="Eliminar destino" loading={deleting} error={deleteError}
+          onClose={() => setDeleteTarget(undefined)}>
+          <p>¿Querés eliminar {deleteTarget?.name} del viaje? Esta acción no se puede deshacer.</p>
+          <p>Si tiene registros asociados, no se eliminará.</p>
+          <div className="trip-members-actions">
+            <Button onClick={() => setDeleteTarget(undefined)}>Cancelar</Button>
+            <Button error loading={deleting} loadingLabel="Eliminando…" onClick={() => void confirmDelete()}>Confirmar eliminación</Button>
+          </div>
+        </Modal>
       </div>
     </main>
   );

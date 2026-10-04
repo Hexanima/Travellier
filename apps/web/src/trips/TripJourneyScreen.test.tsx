@@ -11,8 +11,8 @@ import type { TripManagementApi, TripResult } from "./trip-management-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const tripId = "507f191e810c19729de860ea";
-const first = { id: "507f1f77bcf86cd799439013", tripId, name: "Bariloche", order: 1, createdAt: "2026-09-24T12:00:00.000Z" };
-const second = { id: "507f1f77bcf86cd799439015", tripId, name: "Córdoba", order: 2, createdAt: "2026-09-24T12:00:00.000Z" };
+const first = { id: "507f1f77bcf86cd799439013", tripId, name: "Bariloche", order: 1, createdAt: "2026-09-24T12:00:00.000Z", hasRecords: false };
+const second = { id: "507f1f77bcf86cd799439015", tripId, name: "Córdoba", order: 2, createdAt: "2026-09-24T12:00:00.000Z", hasRecords: false };
 const third = { ...second, id: "507f1f77bcf86cd799439021", name: "Carlos Paz", order: 3 };
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null,
   primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2",
@@ -32,13 +32,14 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
     ok: true, value: (options.transports ?? []).filter((transport) => transport.destinationId === destinationId),
   }));
   const createDestination = vi.fn().mockResolvedValue({ ok: true, value: second });
+  const deleteDestination = vi.fn().mockResolvedValue({ ok: true, value: undefined });
   const updateTransport = vi.fn(async (_tripId: string, destinationId: string, id: string, input: TransportInput): Promise<TripResult<JourneyTransport>> => ({
     ok: true, value: { ...input, id, tripId, destinationId },
   }));
   const createTransport = vi.fn(async (_tripId: string, destinationId: string, input: TransportInput) => ({
     ok: true, value: { ...input, id: "507f1f77bcf86cd799439019", tripId, destinationId },
   }));
-  const journey = { listDestinations, listTransports, createDestination,
+  const journey = { listDestinations, listTransports, createDestination, deleteDestination,
     createTransport, updateTransport } as unknown as TripJourneyApi;
   const container = document.createElement("div");
   document.body.append(container);
@@ -48,7 +49,7 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
     <Routes><Route path="/trips/:tripId/journey" element={<TripJourneyScreen trips={{ get } as unknown as TripManagementApi}
       journey={journey} />} /></Routes>
   </MemoryRouter>));
-  return { container, get, listDestinations, listTransports, createDestination, createTransport, updateTransport };
+  return { container, get, listDestinations, listTransports, createDestination, deleteDestination, createTransport, updateTransport };
 }
 
 const change = async (form: HTMLFormElement, name: string, value: string) => act(async () => {
@@ -71,6 +72,88 @@ const sameDestination = () => [
 ];
 
 describe("TripJourneyScreen", () => {
+  const button = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+    .find((element) => (element.getAttribute("aria-label") ?? element.textContent) === label)!;
+
+  it("hides deletion of the last destination", async () => {
+    const { container, deleteDestination } = await render();
+    expect(button(container, "Eliminar destino Bariloche")).toBeUndefined();
+    expect(container.querySelector(".journey-delete-destination")).toBeNull();
+    expect(deleteDestination).not.toHaveBeenCalled();
+  });
+
+  it("hides deletion of destinations with transports", async () => {
+    const { container } = await render({ destinations: [first, second], transports: sameDestination() });
+    expect(button(container, "Eliminar destino Bariloche")).toBeUndefined();
+    expect(button(container, "Eliminar destino Córdoba").disabled).toBe(false);
+    expect(container.textContent).not.toContain("Este destino tiene registros asociados y no se puede eliminar.");
+  });
+
+  it("hides deletion for records reported by the API even without transports", async () => {
+    const { container } = await render({ destinations: [{ ...first, hasRecords: true }, second] });
+    expect(button(container, "Eliminar destino Bariloche")).toBeUndefined();
+    expect(button(container, "Eliminar destino Córdoba")).toBeDefined();
+  });
+
+  it("hides deletion while record availability is unknown", async () => {
+    const { container } = await render({ destinations: [{ ...first, hasRecords: undefined }, second] });
+    expect(button(container, "Eliminar destino Bariloche")).toBeUndefined();
+  });
+
+  it("requires confirmation, allows cancellation and reloads the remaining destinations after deletion", async () => {
+    const { container, deleteDestination, listDestinations } = await render({ destinations: [first, second] });
+    await act(async () => button(container, "Eliminar destino Bariloche").click());
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Bariloche");
+    expect(deleteDestination).not.toHaveBeenCalled();
+    await act(async () => button(container, "Cancelar").click());
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(deleteDestination).not.toHaveBeenCalled();
+    listDestinations.mockResolvedValueOnce({ ok: true, value: [{ ...second, order: 1 }] });
+    await act(async () => button(container, "Eliminar destino Bariloche").click());
+    await act(async () => button(container, "Confirmar eliminación").click());
+    expect(deleteDestination).toHaveBeenCalledWith(tripId, first.id);
+    expect(container.querySelectorAll(".journey-destination")).toHaveLength(1);
+    expect(container.querySelector(".journey-order")?.textContent).toBe("Destino 1");
+    expect(container.querySelector(".journey-destination")?.textContent).toContain("Córdoba");
+  });
+
+  it("preserves destinations and hides deletion after the server reports new records", async () => {
+    const { container, deleteDestination } = await render({ destinations: [first, second] });
+    deleteDestination.mockResolvedValueOnce({ ok: false, error: { kind: "deletion-conflict" } });
+    await act(async () => button(container, "Eliminar destino Córdoba").click());
+    await act(async () => button(container, "Confirmar eliminación").click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("registros asociados");
+    expect(container.querySelectorAll(".journey-destination")).toHaveLength(2);
+    expect(button(container, "Eliminar destino Córdoba")).toBeUndefined();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("reloads and hides deletion after another member removes all other destinations", async () => {
+    const { container, deleteDestination, listDestinations } = await render({ destinations: [first, second] });
+    deleteDestination.mockResolvedValueOnce({ ok: false, error: { kind: "last-destination" } });
+    listDestinations.mockResolvedValueOnce({ ok: true, value: [{ ...second, order: 1 }] });
+    await act(async () => button(container, "Eliminar destino Córdoba").click());
+    await act(async () => button(container, "Confirmar eliminación").click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("al menos un destino");
+    expect(button(container, "Eliminar destino Córdoba")).toBeUndefined();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("prevents duplicate requests and transport/add mutations during deletion", async () => {
+    const { container, deleteDestination } = await render({ destinations: [first, second] });
+    let complete!: (value: unknown) => void;
+    deleteDestination.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }));
+    await act(async () => button(container, "Eliminar destino Córdoba").click());
+    const confirm = button(container, "Confirmar eliminación");
+    await act(async () => { confirm.click(); confirm.click(); });
+    expect(deleteDestination).toHaveBeenCalledTimes(1);
+    expect(container.querySelector<HTMLButtonElement>('.journey-add button')?.disabled).toBe(true);
+    const transportButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('.journey-transport-form button[type="submit"]'));
+    expect(transportButtons).toHaveLength(4);
+    expect(transportButtons.every((element) => element.disabled)).toBe(true);
+    await act(async () => complete({ ok: false, error: { kind: "network" } }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Intentá nuevamente");
+  });
   it.each([
     { side: "previous", direction: "outbound" },
     { side: "previous", direction: "return" },

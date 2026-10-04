@@ -210,6 +210,8 @@ dd {
 .journey-destinations { display: grid; gap: 28px; }
 .journey-destination, .journey-add { padding: 24px; border: 1px solid #d6dde3; border-radius: 8px; background: #fff; }
 .journey-destination-heading { margin-bottom: 24px; }
+.journey-delete-destination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 24px; }
+.journey-delete-destination p { margin: 0; flex: 1 1 240px; }
 .journey-order { color: #286053; font-size: .875rem; font-weight: 700; }
 .journey-destination h2, .journey-add h2 { margin: 4px 0 0; font-size: 1.5rem; }
 .journey-directions { display: grid; gap: 32px; }

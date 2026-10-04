@@ -1,7 +1,7 @@
 import type { AddressInfo } from "node:net";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { MongoClient, ObjectId } from "mongodb";
 import { createObjectId } from "app-domain";
 
@@ -9,10 +9,10 @@ import { createLocalApi } from "./local.js";
 import { createAuthenticationTokenAdapter } from "./auth/authentication-token-adapter.js";
 
 describe("local API entrypoint", () => {
-  let mongo: MongoMemoryServer;
+  let mongo: MongoMemoryReplSet;
 
   beforeAll(async () => {
-    mongo = await MongoMemoryServer.create();
+    mongo = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: "wiredTiger" } });
   });
 
   afterAll(async () => {

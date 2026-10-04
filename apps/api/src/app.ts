@@ -1,7 +1,9 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import cors from "cors";
 
 import {
   type AsyncResult,
@@ -33,6 +35,8 @@ import {
   type ExpelTripParticipantPayload,
   type CreateJourneyDestinationPayload,
   type UpdateJourneyDestinationPayload,
+  type DeleteJourneyDestinationPayload,
+  type DeleteTripPayload,
   type CreateJourneyTransportPayload,
   type UpdateJourneyTransportPayload,
   type JourneyTransportFields,
@@ -95,6 +99,7 @@ export interface TripInvitationApi {
 export interface TripApi extends TripInvitationApi {
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
+  delete?: (payload: DeleteTripPayload) => AsyncResult<void>;
   getItinerary?: (payload: GetTripItineraryPayload) => AsyncResult<TripItinerary>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
   listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
@@ -105,6 +110,7 @@ export interface TripApi extends TripInvitationApi {
   createDestination?: (payload: CreateJourneyDestinationPayload) => AsyncResult<TripDestination>;
   listDestinations?: (payload: { authenticatedUserId: ObjectId; tripId: ObjectId }) => AsyncResult<TripDestination[]>;
   updateDestination?: (payload: UpdateJourneyDestinationPayload) => AsyncResult<TripDestination>;
+  deleteDestination?: (payload: DeleteJourneyDestinationPayload) => AsyncResult<void>;
   createTransport?: (payload: CreateJourneyTransportPayload) => AsyncResult<Transport>;
   listTransports?: (payload: { authenticatedUserId: ObjectId; tripId: ObjectId; destinationId: ObjectId }) => AsyncResult<Transport[]>;
   updateTransport?: (payload: UpdateJourneyTransportPayload) => AsyncResult<Transport>;
@@ -113,6 +119,20 @@ export interface TripApi extends TripInvitationApi {
 export type RequestAuthenticator = (
   authorization: string | undefined,
 ) => Promise<{ authenticatedUserId: ObjectId } | undefined>;
+
+export type ApiLogEntry = {
+  event: "request" | "response" | "error";
+  requestId: string;
+  method: string;
+  path: string;
+  status?: number;
+  durationMs?: number;
+  errorCode?: string;
+  errorName?: string;
+  stack?: string[];
+};
+
+export type ApiLogger = (entry: ApiLogEntry) => void;
 
 export const createHealthResponse = async (): Promise<HealthResponse> => ({
   app: "travellier",
@@ -198,6 +218,10 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "JourneyConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "Journey resource already exists." } });
+  }
+  if (error.tag === "LastDestinationError" || error.tag === "DeletionConflictError") {
+    return jsonResponse(409, { error: { code: error.tag, message: error.tag === "LastDestinationError"
+      ? "A Trip must have at least one destination." : "Resources with associated records cannot be deleted." } });
   }
   if (error.tag === "ItineraryConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "Transport changes would invalidate activities or remove days with linked data." } });
@@ -478,6 +502,11 @@ export const handleApiRequest = async (
       const result = await dependencies.trips.updateDestination({ authenticatedUserId: actor, tripId: tripId.value, destinationId: destinationId.value, ...update });
       return result.ok ? jsonResponse(200, { destination: result.value }) : errorResponse(result.error);
     }
+    if (destinationDetailMatch && request.method === "DELETE" && destinationId?.ok) {
+      if (dependencies.trips?.deleteDestination === undefined) return unavailableResponse();
+      const result = await dependencies.trips.deleteDestination({ authenticatedUserId: actor, tripId: tripId.value, destinationId: destinationId.value });
+      return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+    }
     if (transportListMatch && destinationId?.ok) {
       if (request.method === "GET") {
         if (dependencies.trips?.listTransports === undefined) return unavailableResponse();
@@ -533,7 +562,7 @@ export const handleApiRequest = async (
 
   const detailMatch = request.url?.match(/^\/trips\/([^/?]+)$/);
   const configMatch = request.url?.match(/^\/trips\/([^/?]+)\/config$/);
-  if ((request.method === "GET" && detailMatch !== null && detailMatch !== undefined) ||
+  if (((request.method === "GET" || request.method === "DELETE") && detailMatch !== null && detailMatch !== undefined) ||
     (request.method === "PATCH" && configMatch !== null && configMatch !== undefined)) {
     if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
     const tripId = createObjectId((detailMatch ?? configMatch)?.[1] ?? "");
@@ -542,6 +571,11 @@ export const handleApiRequest = async (
       if (dependencies.trips?.get === undefined) return unavailableResponse();
       const result = await dependencies.trips.get({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
       return result.ok ? jsonResponse(200, { trip: result.value }) : errorResponse(result.error);
+    }
+    if (request.method === "DELETE") {
+      if (dependencies.trips?.delete === undefined) return unavailableResponse();
+      const result = await dependencies.trips.delete({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+      return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
     }
     const input = payload === undefined ? undefined : configurationPayload(payload);
     if (input === undefined) return invalidRequestResponse();
@@ -728,31 +762,108 @@ const readRequestBody = async (request: IncomingMessage): Promise<string> => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
+export const defaultCorsOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "capacitor://localhost",
+  "http://localhost",
+  "https://localhost",
+] as const;
+
 export const createRequestHandler = (
   dependencies: ApiDependencies = {},
   authenticate?: RequestAuthenticator,
-) =>
-  async (request: IncomingMessage, response: ServerResponse) => {
-    const authenticated = await authenticate?.(request.headers.authorization);
-    const apiResponse = await handleApiRequest(
-      {
-        method: request.method,
-        url: request.url,
-        body: await readRequestBody(request),
-        authenticatedUserId: authenticated?.authenticatedUserId,
-      },
-      dependencies,
-    );
-    response.writeHead(apiResponse.statusCode, apiResponse.headers);
-    response.end(apiResponse.body);
+  logger?: ApiLogger,
+  allowedOrigins: readonly string[] = defaultCorsOrigins,
+) => {
+  const applyCors = cors<IncomingMessage>({
+    origin: [...allowedOrigins],
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+    preflightContinue: true,
+  });
+
+  return async (request: IncomingMessage, response: ServerResponse) => {
+    const startedAt = performance.now();
+    const metadata = {
+      requestId: randomUUID(),
+      method: request.method ?? "UNKNOWN",
+      path: (request.url ?? "/").split("?")[0]
+        .replace(/(\/auth\/verify\/)[^/]+/g, "$1[REDACTED]")
+        .replace(/(\/invite\/)[^/]+/g, "$1[REDACTED]"),
+    };
+    let errorCode: string | undefined;
+
+    logger?.({ event: "request", ...metadata });
+    response.once("finish", () => {
+      logger?.({
+        event: "response",
+        ...metadata,
+        status: response.statusCode,
+        durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        ...(errorCode === undefined ? {} : { errorCode }),
+      });
+    });
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        applyCors(request, response, (error: unknown) => error ? reject(error) : resolve());
+      });
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      const authenticated = await authenticate?.(request.headers.authorization);
+      const apiResponse = await handleApiRequest(
+        {
+          method: request.method,
+          url: request.url,
+          body: await readRequestBody(request),
+          authenticatedUserId: authenticated?.authenticatedUserId,
+        },
+        dependencies,
+      );
+      if (apiResponse.statusCode >= 400) {
+        try {
+          const payload = JSON.parse(apiResponse.body) as { error?: string | { code?: string } };
+          errorCode = typeof payload.error === "string" ? payload.error : payload.error?.code;
+        } catch {
+          // HTML error pages have no JSON error code; their HTTP status is still logged.
+        }
+      }
+      response.writeHead(apiResponse.statusCode, apiResponse.headers);
+      response.end(apiResponse.body);
+    } catch (error: unknown) {
+      errorCode = "InternalServerError";
+      logger?.({
+        event: "error",
+        ...metadata,
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        ...(error instanceof Error ? { stack: error.stack?.split("\n").filter((line) => /^\s+at /.test(line)) } : {}),
+      });
+      const apiResponse = jsonResponse(500, {
+        error: { code: errorCode, message: "Unable to complete the request." },
+      });
+      if (response.headersSent) {
+        response.destroy();
+      } else {
+        response.writeHead(apiResponse.statusCode, apiResponse.headers);
+        response.end(apiResponse.body);
+      }
+    }
   };
+};
 
 export const requestHandler = createRequestHandler();
 
 export const createApp = (
   dependencies: ApiDependencies = {},
   authenticate?: RequestAuthenticator,
-) => createServer(createRequestHandler(dependencies, authenticate));
+  logger?: ApiLogger,
+  allowedOrigins: readonly string[] = defaultCorsOrigins,
+) => createServer(createRequestHandler(dependencies, authenticate, logger, allowedOrigins));
 
 const isEntrypoint =
   process.argv[1] !== undefined &&

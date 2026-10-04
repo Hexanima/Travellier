@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
@@ -29,12 +29,13 @@ const invitationUrl = (baseUrl: string | undefined, code: string): string | unde
 };
 
 export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
-  trips: Pick<TripManagementApi, "get">;
+  trips: Pick<TripManagementApi, "get" | "deleteTrip">;
   members: TripMembersApi;
   apiBaseUrl?: string;
   sharing?: TripSharing;
 }) {
   const { tripId } = useParams();
+  const navigate = useNavigate();
   const [trip, setTrip] = useState<MemberTripDetail>();
   const [memberList, setMemberList] = useState<MemberList>();
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,10 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const [expelling, setExpelling] = useState(false);
   const [expelError, setExpelError] = useState<string>();
   const expellingRef = useRef(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string>();
+  const deletingRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!tripId) {
@@ -111,7 +116,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   };
 
   const confirmExpel = async () => {
-    if (!tripId || !target || !canExpel || target.role !== "participant" || expellingRef.current) return;
+    if (!tripId || !target || !canExpel || target.role !== "participant" || expellingRef.current || deletingRef.current) return;
     expellingRef.current = true;
     setExpelling(true);
     setExpelError(undefined);
@@ -139,6 +144,41 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
     } finally {
       expellingRef.current = false;
       setExpelling(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!tripId || !deleteOpen || !canExpel || deletingRef.current || expellingRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
+    setDeleteError(undefined);
+    try {
+      const result = await trips.deleteTrip(tripId);
+      if (result.ok) {
+        navigate("/trips", { replace: true });
+      } else if (result.error.kind === "forbidden") {
+        setDeleteOpen(false);
+        setMemberList(undefined);
+        setMessage({ text: "Tu permiso para eliminar el viaje cambió. Actualizamos los integrantes.", error: true });
+        try {
+          const refreshed = await members.list(tripId);
+          if (!refreshed.ok) {
+            setLoadError(refreshed.error.kind === "not-found" ? "not-found" : "other");
+          } else if (refreshed.value.members.some((member) => member.userId === refreshed.value.currentUserId)) {
+            setMemberList(refreshed.value);
+          } else { setLoadError("not-found"); }
+        } catch { setLoadError("other"); }
+      } else if (result.error.kind === "not-found") {
+        setDeleteOpen(false);
+        setLoadError("not-found");
+      } else {
+        setDeleteError("No pudimos eliminar el viaje. Intentá nuevamente.");
+      }
+    } catch {
+      setDeleteError("No pudimos eliminar el viaje. Intentá nuevamente.");
+    } finally {
+      deletingRef.current = false;
+      setDeleting(false);
     }
   };
 
@@ -186,9 +226,12 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
                 {memberList.members.filter((member) => member.role === "participant").map((member) => (
                   <div className="trip-member-admin-row" key={member.id}>
                     <span>{member.name}</span>
-                    <Button error data-member-action="expel" aria-label={`Expulsar a ${member.name}`} onClick={() => { setTarget(member); setExpelError(undefined); }}>Expulsar</Button>
+                    <Button error disabled={deleting} data-member-action="expel" aria-label={`Expulsar a ${member.name}`} onClick={() => { setTarget(member); setExpelError(undefined); }}>Expulsar</Button>
                   </div>
                 ))}
+                <h3>Eliminar viaje</h3>
+                <p>Elimina el grupo para todos sus integrantes y borra sus registros asociados. Esta acción no se puede deshacer.</p>
+                <Button error disabled={expelling || deleting} onClick={() => { setDeleteOpen(true); setDeleteError(undefined); }}>Eliminar viaje</Button>
               </section>
             ) : null}
           </>
@@ -198,6 +241,14 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
           <div className="trip-members-actions">
             <Button onClick={() => setTarget(undefined)}>Cancelar</Button>
             <Button error onClick={() => void confirmExpel()} loading={expelling} loadingLabel="Expulsando…">Confirmar expulsión</Button>
+          </div>
+        </Modal>
+        <Modal isOpen={deleteOpen} title="Eliminar viaje" loading={deleting} error={deleteError} onClose={() => setDeleteOpen(false)}>
+          <p>¿Querés eliminar {trip?.name} para todos sus integrantes?</p>
+          <p>Se borrarán los destinos, transportes y todos los registros asociados. Esta acción no se puede deshacer.</p>
+          <div className="trip-members-actions">
+            <Button onClick={() => setDeleteOpen(false)}>Cancelar</Button>
+            <Button error loading={deleting} loadingLabel="Eliminando…" onClick={() => void confirmDelete()}>Eliminar definitivamente</Button>
           </div>
         </Modal>
       </section>

@@ -134,7 +134,7 @@ describe("App authentication", () => {
     await act(async () => {
       root.render(
         <MemoryRouter initialEntries={["/"]}>
-          <App sessionStorage={sessionStorage} />
+          <App apiBaseUrl="" sessionStorage={sessionStorage} />
         </MemoryRouter>,
       );
     });
