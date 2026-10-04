@@ -4,38 +4,68 @@ import { Button, Feedback, List, ListItem, LoadingState } from "../components/in
 import type { TripFailure } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectTripItinerary, type ItineraryViewItem } from "./trip-itinerary-view.js";
+import { ActivityDialog, type ActivityDialogRequest } from "./ActivityDialog.js";
+import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import "./itinerary.css";
 
-type Props = { itinerary: TripItineraryApi; timeZone?: string };
+type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; timeZone?: string };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta", arrival: "Llegada" };
 const statusLabels = { proposed: "Propuesta", voting: "En votación", confirmed: "Confirmada" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
 const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 
-export function TripItineraryScreen({ itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
+export function TripItineraryScreen({ itinerary, activities, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
-  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} timeZone={timeZone} />;
+  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} timeZone={timeZone} />;
 }
 
-function ItineraryContent({ tripId, itinerary, timeZone }: Props & { tripId?: string; timeZone: string }) {
+function ItineraryContent({ tripId, itinerary, activities, timeZone }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [dialog, setDialog] = useState<ActivityDialogRequest>();
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const [saved, setSaved] = useState(false);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
-      setState({ kind: "loading" });
+      setState((current) => current.kind === "ready" ? current : { kind: "loading" });
+      setRefreshing(attempt > 0); setRefreshError(false);
       try {
         const result = await itinerary.get(tripId);
-        if (!cancelled) setState(result.ok ? { kind: "ready", value: result.value } : { kind: "error", error: result.error });
+        if (!cancelled) {
+          if (result.ok) setState({ kind: "ready", value: result.value });
+          else if (["network", "server"].includes(result.error.kind)) {
+            setRefreshError(attempt > 0);
+            setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
+          } else { setState({ kind: "error", error: result.error }); setDialog(undefined); }
+        }
       } catch {
-        if (!cancelled) setState({ kind: "error", error: { kind: "network" } });
+        if (!cancelled) {
+          setRefreshError(attempt > 0);
+          setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
+        }
+      } finally {
+        if (!cancelled) setRefreshing(false);
       }
     };
     void load();
     return () => { cancelled = true; };
   }, [tripId, itinerary, attempt]);
+  const onSaved = (activity: ActivityResponse) => {
+    // Reflect only a successful server write; retain posts and expenses until the aggregate refreshes.
+    setState((current) => current.kind !== "ready" ? current : { kind: "ready", value: { ...current.value,
+      activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity,
+        postIds: current.value.posts.filter((post) => post.activityId === activity.id).map((post) => post.id) }],
+      days: current.value.days.map((day) => ({ ...day, items: [
+        ...day.items.filter((item) => !(item.kind === "activity" && item.id === activity.id)),
+        ...(day.id === activity.dayId ? [{ kind: "activity" as const, id: activity.id, at: activity.scheduledAt }] : []),
+      ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id)) })),
+    } });
+    setSaved(true); setDialog(undefined); setAttempt((value) => value + 1);
+  };
   const days = state.kind === "ready" ? projectTripItinerary(state.value, timeZone) : [];
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const clock = new Intl.DateTimeFormat("es-AR", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -49,6 +79,12 @@ function ItineraryContent({ tripId, itinerary, timeZone }: Props & { tripId?: st
         <p>El viaje, día a día. Horarios en tu zona local.</p>
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
       </header>
+      {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
+      {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando itinerario…" /> : null}
+      {state.kind === "ready" && refreshError ? <div className="activity-detail">
+        <Feedback variant="error">No pudimos actualizar el itinerario. Los cambios guardados se conservan.</Feedback>
+        <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar itinerario</Button>
+      </div> : null}
       {state.kind === "loading" ? <LoadingState label="Cargando itinerario…" /> : null}
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Este itinerario no está disponible para tu cuenta."
@@ -66,7 +102,7 @@ function ItineraryContent({ tripId, itinerary, timeZone }: Props & { tripId?: st
         {days.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
           <h2 id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></h2>
           <div className="itinerary-bands">
-            {day.segments.map((segment) => <section key={segment.key} className={`itinerary-band itinerary-band--${segment.type}`}
+            {day.segments.map((segment, index) => <section key={segment.key} className={`itinerary-band itinerary-band--${segment.type}`}
               data-itinerary-kind={segment.type} aria-labelledby={`band-${segment.key}`}>
               <header className="itinerary-band-header">
                 <div><h3 id={`band-${segment.key}`}>{bandLabels[segment.type]}</h3><p>{segment.destinationName}</p></div>
@@ -75,8 +111,12 @@ function ItineraryContent({ tripId, itinerary, timeZone }: Props & { tripId?: st
                   {segment.endsAt !== null && segment.endsAt !== segment.startsAt ? <> – <time dateTime={segment.endsAt}>{clock.format(new Date(segment.endsAt))}</time></> : null}
                 </p>
               </header>
+              {activities && segment.type === "activity" && segment.endsAt !== null && Date.parse(segment.endsAt) > Date.parse(segment.startsAt) &&
+                day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
+                ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} clock={clock} publication={publication} />)}
+                {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} clock={clock} publication={publication}
+                  disabled={refreshing} onActivity={activities ? (activityId) => setDialog({ kind: "detail", activityId }) : undefined} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
             </section>)}
           </div>
@@ -88,11 +128,14 @@ function ItineraryContent({ tripId, itinerary, timeZone }: Props & { tripId?: st
           </div>
         </section>)}
       </div> : null}
+      {state.kind === "ready" && activities && dialog ? <ActivityDialog key={dialog.kind === "detail" ? dialog.activityId : "new"}
+        request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved} /> : null}
     </div>
   </main>;
 }
 
-function AgendaItem({ item, clock, publication }: { item: ItineraryViewItem; clock: Intl.DateTimeFormat; publication: Intl.DateTimeFormat }) {
+function AgendaItem({ item, clock, publication, onActivity, disabled }: { item: ItineraryViewItem; clock: Intl.DateTimeFormat; publication: Intl.DateTimeFormat;
+  onActivity?: (id: string) => void; disabled: boolean }) {
   return <ListItem className="itinerary-item" data-itinerary-item={item.id}>
     <time className="itinerary-item-time" dateTime={item.at}>{clock.format(new Date(item.at))}</time>
     <div className="itinerary-item-content">
@@ -102,7 +145,7 @@ function AgendaItem({ item, clock, publication }: { item: ItineraryViewItem; clo
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
       </> : item.kind === "activity" ? <>
-        <h4>{item.activity.title}</h4><p className="itinerary-secondary">{statusLabels[item.activity.status]}</p>
+        <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4><p className="itinerary-secondary">{statusLabels[item.activity.status]}</p>
         {item.activity.description ? <p>{item.activity.description}</p> : null}
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Posts de ${item.activity.title}`}>
           {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}

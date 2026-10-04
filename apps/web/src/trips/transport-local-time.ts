@@ -28,13 +28,17 @@ const possibleInstants = (wall: Date, format: Intl.DateTimeFormat): Date[] => {
     .sort((a, b) => a.getTime() - b.getTime());
 };
 
-export const parseLocalDateTime = (value: string, timeZone: string): Date | undefined => {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return undefined;
+export const parseLocalDateTimeCandidates = (value: string, timeZone: string): Date[] => {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) return [];
   const wall = new Date(`${value}:00.000Z`);
-  if (!Number.isFinite(wall.getTime()) || wall.toISOString().slice(0, 16) !== value) return undefined;
-  // No candidate means the local clock is in a DST gap. Ambiguous new bounds use the first occurrence.
-  return possibleInstants(wall, formatter(timeZone))[0];
+  if (!Number.isFinite(wall.getTime()) || wall.toISOString().slice(0, 16) !== value) return [];
+  // No candidate means the local clock is in a DST gap; repeated clocks retain both occurrences.
+  return possibleInstants(wall, formatter(timeZone));
 };
+
+// Transport bounds retain their existing first-occurrence policy.
+export const parseLocalDateTime = (value: string, timeZone: string): Date | undefined =>
+  parseLocalDateTimeCandidates(value, timeZone)[0];
 
 export const localStepInstant = (previousAt: Date, hours: number, minutes: number, timeZone: string): Date => {
   const format = formatter(timeZone);
