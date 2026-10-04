@@ -283,6 +283,13 @@ Si el modo votación está deshabilitado, las actividades se crean directamente 
 - Múltiples posts pueden asociarse a la misma actividad de forma independiente — no hay orden forzado ni cadena.
 - La vinculación también puede hacerse o modificarse **después de crear el post**.
 
+#### Eliminación de actividades
+
+- Admins y participantes pueden eliminar cualquier actividad del Trip, con los mismos permisos.
+- La eliminación conserva los posts asociados y establece su `activityId` en `null`. No modifica su día, autoría, vínculos con transporte u otros posts, fotos, gastos, comentarios ni likes.
+- Los votos y participaciones de esa actividad se eliminan junto con ella, en una misma transacción MongoDB. La operación se serializa con los cambios del itinerario y la eliminación del Trip.
+- Solo los miembros actuales pueden crear, consultar, editar o eliminar actividades, incluso en Trips públicos.
+
 ---
 
 ### 3.6 Posts

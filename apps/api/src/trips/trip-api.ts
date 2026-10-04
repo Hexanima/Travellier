@@ -20,6 +20,11 @@ import {
   updateJourneyTransport,
   deleteJourneyDestination,
   deleteTrip,
+  createTripActivity,
+  listTripActivities,
+  getTripActivity,
+  updateTripActivity,
+  deleteTripActivity,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -30,6 +35,7 @@ import { createMongoTripJourneyRepository } from "../adapters/mongodb/trip-journ
 import { createMongoTripItineraryQueryRepository } from "../adapters/mongodb/trip-itinerary-query-repository.js";
 import { createMongoTripDeletionRepository } from "../adapters/mongodb/trip-deletion-repository.js";
 import { createTripInvitationApi } from "./trip-invitation-api.js";
+import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-activity-repository.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -53,8 +59,14 @@ export const createTripApi = (database: Db): TripApi => {
   const itinerary = createMongoTripItineraryQueryRepository(database);
   const journeyDependencies = { journeys, members, createId };
   const deletion = createMongoTripDeletionRepository(database);
+  const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
   return {
     ...createTripInvitationApi(database),
+    createActivity: (payload) => createTripActivity.execute(activityDependencies, payload),
+    listActivities: (payload) => listTripActivities.execute(activityDependencies, payload),
+    getActivity: (payload) => getTripActivity.execute(activityDependencies, payload),
+    updateActivity: (payload) => updateTripActivity.execute(activityDependencies, payload),
+    deleteActivity: (payload) => deleteTripActivity.execute(activityDependencies, payload),
     create: (payload) => createTrip.execute({ trips, createId, createInviteCode, now: () => new Date() }, payload),
     get: (payload) => getTrip.execute({ trips }, payload),
     delete: (payload) => deleteTrip.execute({ deletion }, payload),
