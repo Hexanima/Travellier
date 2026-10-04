@@ -4,6 +4,8 @@ import { MongoMemoryServer } from "mongodb-memory-server";
 
 import {
   MONGO_MIGRATION_ID,
+  JOURNEY_MIGRATION_ID,
+  ITINERARY_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
 
@@ -132,9 +134,9 @@ describe("MongoDB schema migration", () => {
     expect(collections.map(({ name }) => name).sort()).toEqual(
       [...prdCollections, "_migrations"].sort(),
     );
-    expect(await database.collection("_migrations").find().toArray()).toEqual([
-      expect.objectContaining({ id: MONGO_MIGRATION_ID }),
-    ]);
+    expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
+      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID].sort(),
+    );
   });
 
   it("applies every PRD index, including refresh-token TTL", async () => {
@@ -176,5 +178,55 @@ describe("MongoDB schema migration", () => {
         id: MONGO_MIGRATION_ID,
       }),
     ).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: JOURNEY_MIGRATION_ID })).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: ITINERARY_MIGRATION_ID })).toBe(1);
+  });
+
+  it("enforces itinerary identity while allowing different types and destinations on one date", async () => {
+    await migrateMongoSchema(database);
+    const collection = database.collection("itineraryDays");
+    const day = { tripId: "trip", destinationId: "destination", date: new Date("2026-09-25T00:00:00Z"), type: "activity", order: 1 };
+    await collection.insertOne({ ...day });
+    await expect(collection.insertOne({ ...day, order: 2 })).rejects.toMatchObject({ code: 11000 });
+    await collection.insertOne({ ...day, type: "transit_out", order: 2 });
+    await collection.insertOne({ ...day, destinationId: "other", order: 3 });
+    expect(await collection.countDocuments({})).toBe(3);
+  });
+
+  it("refuses historical duplicate itinerary identities without deleting their references", async () => {
+    await migrateMongoSchema(database);
+    const collection = database.collection("itineraryDays");
+    const indexes = await collection.listIndexes().toArray();
+    for (const index of indexes.filter((index) => index.unique && index.name !== "_id_")) await collection.dropIndex(index.name!);
+    await database.collection("_migrations").deleteOne({ id: "0003-unique-itinerary-identity" });
+    const day = { tripId: "trip", destinationId: "destination", date: new Date("2026-09-25T00:00:00Z"), type: "activity" };
+    const inserted = await collection.insertMany([{ ...day }, { ...day }]);
+    await database.collection("posts").insertOne({ dayId: inserted.insertedIds[0] });
+    await expect(migrateMongoSchema(database)).rejects.toThrow("Duplicate itinerary identities");
+    expect(await collection.countDocuments({})).toBe(2);
+    expect(await database.collection("posts").countDocuments({})).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: "0003-unique-itinerary-identity" })).toBe(0);
+  });
+
+  it("enforces unique destination positions per Trip and transport directions per destination", async () => {
+    await migrateMongoSchema(database);
+    const destinations = database.collection("destinations");
+    await destinations.insertOne({ tripId: "trip-a", order: 1 });
+    await expect(destinations.insertOne({ tripId: "trip-a", order: 1 })).rejects.toMatchObject({ code: 11000 });
+    await destinations.insertOne({ tripId: "trip-b", order: 1 });
+    const transports = database.collection("transports");
+    await transports.insertOne({ destinationId: "destination-a", direction: "outbound" });
+    await expect(transports.insertOne({ destinationId: "destination-a", direction: "outbound" })).rejects.toMatchObject({ code: 11000 });
+    await transports.insertOne({ destinationId: "destination-a", direction: "return" });
+  });
+
+  it("does not replace the old destination index when existing positions collide", async () => {
+    await migrateMongoSchema(database);
+    await database.collection("_migrations").deleteOne({ id: JOURNEY_MIGRATION_ID });
+    await database.collection("destinations").dropIndex("tripId_order");
+    await database.collection("destinations").createIndex({ tripId: 1, order: 1 }, { name: "tripId_order" });
+    await database.collection("destinations").insertMany([{ tripId: "trip-a", order: 1 }, { tripId: "trip-a", order: 1 }]);
+    await expect(migrateMongoSchema(database)).rejects.toThrow("Duplicate destination positions");
+    expect((await database.collection("destinations").listIndexes().toArray()).find((index) => index.name === "tripId_order")?.unique).not.toBe(true);
   });
 });

@@ -129,6 +129,9 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 **Colectivo (urbano, paso a paso)**
 - Se configuran múltiples tramos secuenciales.
 - Cada tramo: línea/número, parada de origen, parada de destino, hora estimada.
+- La hora estimada de cada tramo se guarda como `estimatedAt`, un instante UTC con fecha y precisión de milisegundos. Los tramos deben estar en orden cronológico (se permiten instantes iguales) y dentro de los límites inclusivos de salida y llegada del transporte.
+- La interfaz permite ingresar horas locales: los tramos nuevos toman la primera fecha local cronológicamente posible desde la salida o el tramo anterior, pasando al día siguiente cuando corresponde. Los instantes ya confirmados no cambian al editar otros campos ni al cambiar la zona de visualización.
+- Los registros históricos con `estimatedTime` en formato `HH:mm` siguen siendo legibles, sin inferir una fecha o zona horaria. Antes de editarlos, el usuario debe revisar y confirmar las horas en su zona local; la escritura los reemplaza por `estimatedAt`. Un horario inválido rechaza el cambio completo, sin modificar el transporte ni su itinerario.
 
 **Ómnibus (larga distancia)**
 - Terminal de origen.
@@ -196,6 +199,14 @@ Caso 3 — multi-destino:
   Segmento 2 → Carlos Paz: llegada sábado 17hs   / salida lunes 9hs
 ```
 
+Las fechas y horas de transportes, actividades y límites del itinerario se almacenan como **instantes UTC**. La interfaz los muestra y agrupa en días calendario según la **zona horaria local del usuario**, conservando los límites exactos, incluidos los milisegundos. Una llegada a las 08:00 habilita actividad desde las 08:00; la fecha calendario del segmento no habilita actividad desde medianoche. Cambiar la zona de visualización no modifica los timestamps ni las referencias compartidas del itinerario.
+
+#### Regeneración y protección de datos
+
+Al crear o modificar transportes, o cambiar el orden de destinos, se recalcula la proyección del Trip dentro de la misma transacción que el cambio. Las franjas que conservan destino, fecha UTC y tipo mantienen su `dayId`, aunque cambien sus límites u orden. Las franjas nuevas reciben un ObjectId y las obsoletas sin dependencias se retiran.
+
+Si el cambio elimina una franja referenciada por actividades o posts, o deja una actividad fuera de su ventana y franja correspondientes, se **rechaza el cambio y se conservan todos los datos anteriores**. No se borran ni reubican automáticamente actividades o posts; sus vínculos y datos asociados permanecen intactos. El `createdAt` de un post no se usa para reubicarlo ni restringir su asociación al día.
+
 #### Tipos de día
 
 | Tipo | Descripción |
@@ -208,7 +219,7 @@ Caso 3 — multi-destino:
 
 Cada día muestra:
 - Tipo de día (tránsito / actividad).
-- Actividades planificadas para ese día con sus posts asociados.
+- Actividades planificadas o espontáneas correspondientes a ese día, con sus posts asociados.
 - Posts espontáneos sin actividad padre, incluyendo posts vinculados al transporte.
 - Resumen de gastos del día (si el modo gastos está activo).
 
@@ -216,16 +227,25 @@ Cada día muestra:
 
 ### 3.5 Actividades
 
-Una **Actividad** es algo planificado para un día específico del itinerario.
+Una **Actividad** es algo que el grupo planifica o realiza espontáneamente dentro de una ventana habilitada del itinerario. **Toda actividad tiene fecha y hora**, independientemente de si fue planificada previamente.
 
 #### Campos
 
 - Título.
 - Descripción (opcional).
 - Día del itinerario al que pertenece.
-- Hora estimada (opcional).
+- Fecha y hora (`scheduledAt`, obligatorias): momento previsto para una actividad planificada o momento en que ocurrió una actividad espontánea.
 - Ubicación con link de Google Maps (opcional).
 - Estado por participante: confirmado / no va / sin responder.
+
+#### Actividades planificadas y espontáneas
+
+- **Planificada:** se ingresa la fecha y hora previstas al crearla.
+- **Espontánea:** se puede registrar sin planificación previa. El formulario precarga la fecha y hora actuales, que se pueden editar si la actividad se carga después de realizada.
+- En ambos casos, `scheduledAt` es obligatorio, representa un instante válido dentro de la ventana de actividad del destino y se almacena en UTC. La interfaz permite ingresar y consultar la fecha y hora en la zona local del usuario.
+- La hora en que ocurrió o se prevé realizar la actividad (`scheduledAt`) es distinta de la hora en que se creó el registro (`createdAt`).
+
+Por ejemplo, si el grupo decide ir a un restaurante el 25/09 a las 21:00 y lo registra a las 22:30, la actividad conserva el 25/09 a las 21:00 como fecha y hora de realización. Puede tener sus posts asociados como cualquier otra actividad.
 
 #### Participación individual
 
@@ -289,7 +309,7 @@ Cuando un post o actividad tiene un link de Google Maps, la app muestra:
 #### Vista en el itinerario
 
 Dentro de cada día del itinerario se muestran:
-1. Actividades planificadas, cada una con sus posts asociados anidados.
+1. Actividades planificadas o espontáneas, cada una con sus posts asociados anidados.
 2. Posts espontáneos sin actividad padre, ordenados cronológicamente.
 3. En días de tránsito: posts vinculados al transporte correspondiente.
 
@@ -429,7 +449,8 @@ Un transporte por segmento (ida o vuelta) por destino.
   arrivalAt: Date,
   costPerPerson: Number,    // null si no aplica
   details: Object           // estructura flexible según tipo:
-  // bus_local:  { steps: [{ line, fromStop, toStop, estimatedTime }] }
+  // bus_local:  { steps: [{ line, fromStop, toStop, estimatedAt: Date }] }
+  // Lectura histórica: estimatedTime: "HH:mm"; no se acepta en nuevas escrituras.
   // bus_long:   { company, terminal }
   // flight:     { flightNumber, airline }
   // car | other: {}
@@ -466,7 +487,7 @@ Generados automáticamente al configurar los transportes. No se crean manualment
   dayId: ObjectId,          // ref: itineraryDays, index
   title: String,
   description: String,      // null si no tiene
-  scheduledAt: Date,        // null si no tiene hora definida
+  scheduledAt: Date,        // obligatorio, no null; fecha y hora previstas o de realización, en UTC
   mapsUrl: String,          // null si no tiene
   status: String,           // "proposed" | "voting" | "confirmed"
   createdBy: ObjectId,      // ref: users
