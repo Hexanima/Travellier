@@ -1,5 +1,6 @@
 import { validateUrbanTransportSteps } from "app-domain";
 import type { JourneyTransport, TransportDirection, TransportInput, TransportType, UrbanTransportStep } from "./trip-journey-api.js";
+import { currentTimeZone, localStepInstant, parseLocalDateTime, toLocalDateTime } from "./transport-local-time.js";
 
 export type UrbanStepFormValues = { line: string; fromStop: string; toStop: string; estimatedTime: string; estimatedAt?: string };
 
@@ -15,6 +16,8 @@ export type TransportFormValues = {
   steps: UrbanStepFormValues[];
   requiresTimeConfirmation?: boolean;
   legacyTimesConfirmed?: boolean;
+  timeZone?: string;
+  editedDates?: Partial<Record<"departureAt" | "arrivalAt", boolean>>;
 };
 
 export type FormValidation = { ok: true; value: TransportInput } | { ok: false; errors: Record<string, string> };
@@ -24,63 +27,27 @@ export type DestinationNeighbors = {
   nextArrivalAt?: string; nextDepartureAt?: string;
 };
 
-const pad = (value: number) => String(value).padStart(2, "0");
-const toLocalDateTime = (iso: string) => {
-  const date = new Date(iso);
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-export const formValuesFromTransport = (transport: JourneyTransport): TransportFormValues => ({
+export const formValuesFromTransport = (transport: JourneyTransport, timeZone = currentTimeZone()): TransportFormValues => ({
+  timeZone,
   type: transport.type,
   departurePlace: transport.departurePlace,
-  departureAt: toLocalDateTime(transport.departureAt),
+  departureAt: toLocalDateTime(transport.departureAt, timeZone),
   arrivalPlace: transport.arrivalPlace,
-  arrivalAt: toLocalDateTime(transport.arrivalAt),
+  arrivalAt: toLocalDateTime(transport.arrivalAt, timeZone),
   costPerPerson: transport.costPerPerson === null ? "" : String(transport.costPerPerson),
   flightNumber: transport.type === "flight" ? transport.details.flightNumber ?? "" : "",
   company: transport.type === "bus_long" ? transport.details.company ?? "" : "",
   steps: transport.type === "bus_local" ? transport.details.steps.map((step) => ({ ...step,
-    estimatedTime: step.estimatedAt ? toLocalDateTime(step.estimatedAt).slice(-5) : step.estimatedTime!,
+    estimatedTime: step.estimatedAt ? toLocalDateTime(step.estimatedAt, timeZone).slice(-5) : step.estimatedTime!,
   })) : [],
   requiresTimeConfirmation: transport.type === "bus_local" && transport.details.steps.some((step) => !step.estimatedAt),
   legacyTimesConfirmed: false,
 });
 
-const parseLocalDateTime = (value: string): Date | undefined => {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value);
-  if (!match) return undefined;
-  const [, year, month, day, hour, minute] = match;
-  const date = new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
-  return date.getFullYear() === Number(year) && date.getMonth() + 1 === Number(month) &&
-    date.getDate() === Number(day) && date.getHours() === Number(hour) && date.getMinutes() === Number(minute)
-    ? date : undefined;
-};
-
-const resolveDateTime = (value: string, original?: string) => {
-  if (original && value === toLocalDateTime(original)) return { date: new Date(original), iso: original };
-  const date = parseLocalDateTime(value);
+const resolveDateTime = (value: string, timeZone: string, original?: string, edited = false) => {
+  if (original && !edited && value === toLocalDateTime(original, timeZone)) return { date: new Date(original), iso: original };
+  const date = parseLocalDateTime(value, timeZone);
   return date ? { date, iso: date.toISOString() } : undefined;
-};
-
-const localStepInstant = (previousAt: Date, hours: number, minutes: number): Date => {
-  let candidate = new Date(previousAt);
-  candidate.setHours(hours, minutes, 0, 0);
-  if (candidate.getHours() !== hours || candidate.getMinutes() !== minutes) {
-    // Resolve an earlier wall clock on the next day before rejecting a DST gap.
-    if (hours * 60 + minutes >= previousAt.getHours() * 60 + previousAt.getMinutes()) return new Date(Number.NaN);
-    candidate = new Date(previousAt);
-    candidate.setDate(candidate.getDate() + 1);
-    candidate.setHours(hours, minutes, 0, 0);
-  } else if (candidate < previousAt) {
-    // A backward clock change can repeat this hour before the next calendar day.
-    const laterOffset = new Date(candidate.getTime() + 86_400_000).getTimezoneOffset();
-    const repeated = new Date(candidate.getTime() + (laterOffset - candidate.getTimezoneOffset()) * 60_000);
-    if (repeated >= previousAt && repeated.getFullYear() === candidate.getFullYear() &&
-        repeated.getMonth() === candidate.getMonth() && repeated.getDate() === candidate.getDate() &&
-        repeated.getHours() === hours && repeated.getMinutes() === minutes) candidate = repeated;
-    else candidate.setDate(candidate.getDate() + 1);
-  }
-  return candidate.getHours() === hours && candidate.getMinutes() === minutes ? candidate : new Date(Number.NaN);
 };
 
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
@@ -93,8 +60,9 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   if (!departurePlace) errors.departurePlace = "Ingresá el lugar de salida.";
   if (!arrivalPlace) errors.arrivalPlace = "Ingresá el lugar de llegada.";
 
-  const departure = resolveDateTime(values.departureAt, original?.departureAt);
-  const arrival = resolveDateTime(values.arrivalAt, original?.arrivalAt);
+  const timeZone = values.timeZone ?? currentTimeZone();
+  const departure = resolveDateTime(values.departureAt, timeZone, original?.departureAt, values.editedDates?.departureAt);
+  const arrival = resolveDateTime(values.arrivalAt, timeZone, original?.arrivalAt, values.editedDates?.arrivalAt);
   const departureAt = departure?.date;
   const arrivalAt = arrival?.date;
   if (!departureAt) errors.departureAt = "Ingresá una fecha y hora de salida válidas.";
@@ -143,11 +111,11 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
         errors[`details.steps[${index}].estimatedTime`] = "Ingresá una hora válida (HH:mm).";
       } else if (previousAt && arrivalAt && departureAt && arrivalAt >= departureAt) {
         const [hours, minutes] = next.estimatedTime.split(":").map(Number);
-        if (step.estimatedAt && toLocalDateTime(step.estimatedAt).slice(-5) === next.estimatedTime) {
+        if (step.estimatedAt && toLocalDateTime(step.estimatedAt, timeZone).slice(-5) === next.estimatedTime) {
           // Editing another field must not change a previously confirmed instant or its precision.
           stepAt = new Date(step.estimatedAt);
         } else {
-          stepAt = localStepInstant(previousAt, hours!, minutes!);
+          stepAt = localStepInstant(previousAt, hours!, minutes!, timeZone);
         }
         if (Number.isFinite(stepAt.getTime())) previousAt = stepAt;
       }

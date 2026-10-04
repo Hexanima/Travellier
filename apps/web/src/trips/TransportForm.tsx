@@ -3,6 +3,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi } from "./trip-journey-api.js";
 import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues, type UrbanStepFormValues } from "./transport-form-state.js";
+import { currentTimeZone } from "./transport-local-time.js";
 
 export type TransportSaveCoordinator = {
   busy: boolean;
@@ -20,6 +21,7 @@ type Props = { tripId: string; destinationId: string; direction: TransportDirect
 
 const emptyStep = (): UrbanStepFormValues => ({ line: "", fromStop: "", toStop: "", estimatedTime: "" });
 const initialValues = (existing?: JourneyTransport): TransportFormValues => existing ? formValuesFromTransport(existing) : {
+  timeZone: currentTimeZone(),
   type: "flight", departurePlace: "", departureAt: "", arrivalPlace: "", arrivalAt: "",
   costPerPerson: "", flightNumber: "", company: "", steps: [],
 };
@@ -34,7 +36,9 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
   const savingRef = useRef(false);
 
   const update = (field: keyof Omit<TransportFormValues, "steps">, value: string) => {
-    setValues((current) => ({ ...current, [field]: value }));
+    setValues((current) => ({ ...current, [field]: value,
+      ...((field === "departureAt" || field === "arrivalAt") ? { editedDates: { ...current.editedDates, [field]: true } } : {}),
+    }));
     setErrors((current) => { const next = { ...current }; delete next[field]; return next; });
     setSaved(false);
   };
@@ -63,7 +67,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
         : await journey.createTransport(tripId, destinationId, prepared.value);
       if (result.ok) {
         setSavedTransport(result.value);
-        setValues(formValuesFromTransport(result.value));
+        setValues(formValuesFromTransport(result.value, values.timeZone));
         setSaved(true);
         onSaved(result.value);
       } else if (result.error.kind === "itinerary-conflict") {
@@ -95,6 +99,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
 
   return (
     <form className="auth-form journey-transport-form" onSubmit={(event) => void submit(event)} noValidate>
+      <p>Horarios en {values.timeZone}. Esta zona se mantiene mientras editás el formulario.</p>
       <SelectField label="Tipo de transporte" name="type" value={values.type} loading={saving}
         onChange={(event) => {
           const type = event.target.value as TransportType;
@@ -129,7 +134,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
           <legend>Tramos del colectivo</legend>
           <p>Las horas continúan desde la salida o el tramo anterior; cuando corresponde, pasan al día siguiente.</p>
           {values.requiresTimeConfirmation ? <div>
-            <p>Revisá las horas guardadas y confirmá que corresponden a tu zona local ({Intl.DateTimeFormat().resolvedOptions().timeZone}).</p>
+            <p>Revisá las horas guardadas y confirmá que corresponden a tu zona local ({values.timeZone}).</p>
             <label><input type="checkbox" name="confirmLegacyTimes" checked={values.legacyTimesConfirmed ?? false} disabled={saving}
               onChange={(event) => {
                 setValues((current) => ({ ...current, legacyTimesConfirmed: event.target.checked }));
@@ -156,7 +161,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
                 <TextField label="Hora estimada" name={`step-estimatedTime-${index}`} type="time" value={step.estimatedTime}
                   error={errors[`details.steps[${index}].estimatedTime`]} loading={saving}
                   onChange={(event) => updateStep(index, "estimatedTime", event.target.value)} />
-                {step.estimatedAt ? <p>Horario confirmado: {new Date(step.estimatedAt).toLocaleString("es-AR")}</p> : null}
+                {step.estimatedAt ? <p>Horario confirmado: {new Date(step.estimatedAt).toLocaleString("es-AR", { timeZone: values.timeZone })}</p> : null}
               </div>
             </div>
           ))}

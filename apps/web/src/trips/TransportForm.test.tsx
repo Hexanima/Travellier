@@ -54,6 +54,58 @@ async function render(existing?: JourneyTransport, complementary?: JourneyTransp
 }
 
 describe("TransportForm", () => {
+  it.each(["America/New_York", "Asia/Tokyo"])("keeps confirmed clocks and the editing zone across saves after switching to %s", async (zone) => {
+    const previous = process.env.TZ;
+    try {
+      process.env.TZ = "America/Argentina/Buenos_Aires";
+      const openingZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const current: JourneyTransport = { ...saved, type: "bus_local", departureAt: "2026-10-04T06:00:00.123Z",
+        arrivalAt: "2026-10-04T08:00:00.456Z", details: { steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedAt: "2026-10-04T07:30:12.345Z" }] } };
+      const { container, updateTransport } = await render(current);
+      updateTransport.mockImplementation(async (_trip, _destination, _id, input) => ({ ok: true, value: { ...current, ...input } }));
+      process.env.TZ = zone;
+      await setField(container, "arrivalPlace", "C");
+      await submit(container);
+      expect(updateTransport).toHaveBeenLastCalledWith(tripId, destinationId, transportId,
+        expect.objectContaining({ departureAt: current.departureAt, arrivalAt: current.arrivalAt, details: current.details }));
+      expect(container.textContent).toContain(openingZone);
+      expect(container.querySelector('[name="departureAt"]')).toHaveProperty("value", "2026-10-04T03:00");
+      process.env.TZ = "Asia/Tokyo";
+      await setField(container, "step-line-0", "2");
+      await submit(container);
+      expect(updateTransport).toHaveBeenLastCalledWith(tripId, destinationId, transportId,
+        expect.objectContaining({ departureAt: current.departureAt, arrivalAt: current.arrivalAt,
+          details: { steps: [{ ...current.details.steps[0], line: "2" }] } }));
+      expect(updateTransport).toHaveBeenCalledTimes(2);
+    } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+  });
+
+  it("uses the opening zone for a new transport even if the system zone changes before saving", async () => {
+    const previous = process.env.TZ;
+    try {
+      process.env.TZ = "America/Argentina/Buenos_Aires";
+      const { container, createTransport } = await render();
+      await setField(container, "departurePlace", "A");
+      await setField(container, "arrivalPlace", "B");
+      await setField(container, "departureAt", "2026-10-04T03:00");
+      await setField(container, "arrivalAt", "2026-10-04T05:00");
+      process.env.TZ = "Asia/Tokyo";
+      await submit(container);
+      expect(createTransport).toHaveBeenCalledWith(tripId, destinationId,
+        expect.objectContaining({ departureAt: "2026-10-04T06:00:00.000Z", arrivalAt: "2026-10-04T08:00:00.000Z" }));
+    } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+  });
+
+  it("treats explicitly re-entering a saved date-time as a clock edit, not an unrelated field change", async () => {
+    const current = { ...saved, departureAt: new Date("2026-10-01T08:00:12.345").toISOString() };
+    const { container, updateTransport } = await render(current);
+    await setField(container, "departureAt", "");
+    await setField(container, "departureAt", "2026-10-01T08:00");
+    await submit(container);
+    expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId,
+      expect.objectContaining({ departureAt: new Date("2026-10-01T08:00").toISOString(), arrivalAt: current.arrivalAt }));
+  });
+
   it("allows explicitly re-entering the clock after moving the transport to another date", async () => {
     const current: JourneyTransport = { ...saved, type: "bus_local", departureAt: new Date("2026-10-01T08:00").toISOString(),
       arrivalAt: new Date("2026-10-01T10:00").toISOString(), details: { steps: [{ line: "21", fromStop: "A", toStop: "B",
