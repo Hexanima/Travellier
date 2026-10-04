@@ -28,7 +28,7 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current) return;
-    const prepared = prepareActivityInput(values, localContext);
+    const prepared = prepareActivityInput(values, localContext, existing ? "edit" : "create");
     setMessage(""); setFailure(undefined);
     if (!prepared.ok) { setErrors(prepared.errors); return; }
     const changes: Partial<ActivityInput> = existing ? Object.fromEntries(
@@ -55,8 +55,10 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
   };
   const clock = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   return <form className="activity-form" onSubmit={(event) => void submit(event)} noValidate>
-    <p className="activity-context">{context.selection.date.split("-").reverse().join("/")} · Horarios en {timeZone}<br />
-      Franja disponible: {clock.format(new Date(context.selection.startsAt))}{context.selection.endsAt ? ` – ${clock.format(new Date(context.selection.endsAt))}` : ""}.</p>
+    <p className="activity-context">{existing ? <>Horarios en {timeZone}<br />
+      Podés reprogramar dentro de las franjas de actividad de este destino.</> : <>
+      {context.selection.date.split("-").reverse().join("/")} · Horarios en {timeZone}<br />
+      Franja disponible: {clock.format(new Date(context.selection.startsAt))}{context.selection.endsAt ? ` – ${clock.format(new Date(context.selection.endsAt))}` : ""}.</>}</p>
     {!existing ? <SelectField label="Tipo de actividad" name="mode" value={values.mode} loading={saving} onChange={(event) => changeMode(event.target.value as ActivityMode)}>
       <option value="planned">Planificada</option><option value="spontaneous">Espontánea</option>
     </SelectField> : null}

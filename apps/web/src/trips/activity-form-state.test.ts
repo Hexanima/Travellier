@@ -10,6 +10,14 @@ const context = (timeZone = "America/Argentina/Buenos_Aires"): ActivityFormConte
     selection: { date: "2026-09-25", destinationId: day.destinationId, sourceDayIds: [day.id], startsAt: day.startsAt, endsAt: day.endsAt } };
 };
 const values = () => ({ mode: "planned" as const, title: "  Paseo  ", description: "", mapsUrl: "", date: "2026-09-25", time: "09:00" });
+const reschedulingContext = (timeZone?: string): ActivityFormContext => {
+  const ctx = context(timeZone);
+  ctx.days[1].endsAt = "2026-09-26T00:00:00.000Z";
+  ctx.selection.endsAt = ctx.days[1].endsAt;
+  ctx.days.push({ ...ctx.days[1], id: "000000000000000000000099", date: "2026-09-26T00:00:00.000Z",
+    startsAt: ctx.days[1].endsAt, endsAt: "2026-09-26T18:00:00.000Z", items: [] });
+  return ctx;
+};
 const invalid = (change: Partial<ReturnType<typeof values>>, field: string) => {
   expect(prepareActivityInput({ ...values(), ...change }, context())).toMatchObject({ ok: false, errors: { [field]: expect.any(String) } });
 };
@@ -80,5 +88,58 @@ describe("activity form state", () => {
     const ctx = context("America/New_York"); ctx.selection.date = "2026-03-08";
     expect(prepareActivityInput({ ...values(), date: "2026-03-08", time: "02:30" }, ctx))
       .toMatchObject({ ok: false, errors: { scheduledAt: expect.any(String) } });
+  });
+  it.each([
+    ["05:00", "06:00", "05:30"],
+    ["06:00", "07:00", "06:30"],
+    ["05:45", "06:45", "06:30"],
+    ["05:00", "07:00", "05:30"],
+  ])("resolves a repeated 01:30 within the selected %s–%s UTC window", (start, end, expected) => {
+    const ctx = context("America/New_York");
+    const iso = (time: string) => `2026-11-01T${time}:00.000Z`;
+    Object.assign(ctx.days[1], { date: iso("00:00"), startsAt: iso(start), endsAt: iso(end) });
+    Object.assign(ctx.selection, { date: "2026-11-01", startsAt: iso(start), endsAt: iso(end) });
+    expect(prepareActivityInput({ ...values(), date: ctx.selection.date, time: "01:30" }, ctx))
+      .toMatchObject({ ok: true, value: { dayId: ctx.days[1].id, scheduledAt: iso(expected) } });
+  });
+  it("rejects a repeated clock when neither occurrence is in the selected window", () => {
+    const ctx = context("America/New_York");
+    Object.assign(ctx.days[1], { startsAt: "2026-11-01T06:30:00.001Z", endsAt: "2026-11-01T07:00:00.000Z" });
+    Object.assign(ctx.selection, { date: "2026-11-01", startsAt: ctx.days[1].startsAt, endsAt: ctx.days[1].endsAt });
+    expect(prepareActivityInput({ ...values(), date: ctx.selection.date, time: "01:30" }, ctx).ok).toBe(false);
+  });
+  it("preserves the second occurrence exactly and never substitutes an unchanged timestamp", () => {
+    const ctx = context("America/New_York");
+    Object.assign(ctx.days[1], { startsAt: "2026-11-01T05:00:00.000Z", endsAt: "2026-11-01T07:00:00.000Z" });
+    Object.assign(ctx.selection, { date: "2026-11-01", startsAt: ctx.days[1].startsAt, endsAt: ctx.days[1].endsAt });
+    const value = { ...values(), date: ctx.selection.date, time: "01:30", originalScheduledAt: "2026-11-01T06:30:12.345Z" };
+    expect(prepareActivityInput(value, ctx)).toMatchObject({ ok: true, value: { scheduledAt: value.originalScheduledAt } });
+    ctx.days[1].endsAt = ctx.selection.endsAt = "2026-11-01T06:00:00.000Z";
+    expect(prepareActivityInput(value, ctx).ok).toBe(false);
+  });
+  it.each([
+    ["America/Argentina/Buenos_Aires", "2026-09-26", "09:00", "2026-09-26T12:00:00.000Z"],
+    ["America/New_York", "2026-09-25", "22:00", "2026-09-26T02:00:00.000Z"],
+    ["Asia/Tokyo", "2026-09-26", "09:00", "2026-09-26T00:00:00.000Z"],
+  ])("resolves the new canonical day when editing in %s", (timeZone, date, time, scheduledAt) => {
+    const ctx = reschedulingContext(timeZone);
+    expect(prepareActivityInput({ ...values(), date, time }, ctx, "edit"))
+      .toMatchObject({ ok: true, value: { dayId: ctx.days[3].id, scheduledAt } });
+  });
+  it("keeps creation scoped to the selected local day and band", () => {
+    const ctx = reschedulingContext();
+    expect(prepareActivityInput({ ...values(), date: "2026-09-26" }, ctx).ok).toBe(false);
+    expect(prepareActivityInput({ ...values(), time: "22:00" }, ctx).ok).toBe(false);
+  });
+  it.each(["transit", "destination", "trip", "before", "after", "missing"])("rejects a reschedule with %s outside the enabled destination window", (invalid) => {
+    const ctx = reschedulingContext(), next = ctx.days[3];
+    let date = "2026-09-26", time = "09:00";
+    if (invalid === "transit") next.type = "transit_out";
+    if (invalid === "destination") next.destinationId = "000000000000000000000088";
+    if (invalid === "trip") next.tripId = "000000000000000000000088";
+    if (invalid === "before") { next.startsAt = "2026-09-26T12:00:00.001Z"; }
+    if (invalid === "after") time = "15:01";
+    if (invalid === "missing") date = "2026-09-27";
+    expect(prepareActivityInput({ ...values(), date, time }, ctx, "edit").ok).toBe(false);
   });
 });

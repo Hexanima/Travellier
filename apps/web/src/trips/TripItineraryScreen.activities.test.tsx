@@ -57,6 +57,17 @@ describe("itinerary activity flows", () => {
     await click(container, "Crear actividad"); await field(container, "title", "Primera actividad"); await field(container, "time", "09:00"); await save(container);
     expect(create).toHaveBeenCalledOnce(); expect(container.textContent).toContain("Primera actividad");
   });
+  it("creates at the second occurrence of a repeated local hour within the enabled band", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse;
+    fixture.days = [{ ...fixture.days[1], date: "2026-11-01T00:00:00.000Z",
+      startsAt: "2026-11-01T06:00:00.000Z", endsAt: "2026-11-01T07:00:00.000Z", items: [] }];
+    fixture.activities = []; fixture.posts = []; fixture.transports = [];
+    const { container, create } = await render(fixture, "America/New_York");
+    await click(container, "Crear actividad"); await field(container, "title", "Paseo al amanecer");
+    await field(container, "time", "01:30"); await save(container);
+    expect(create).toHaveBeenCalledWith(fixture.tripId, expect.objectContaining({ dayId: fixture.days[0].id, scheduledAt: "2026-11-01T06:30:00.000Z" }));
+    expect(container.querySelector('[data-itinerary-date="2026-11-01"]')?.textContent).toContain("Paseo al amanecer");
+  });
   it("uses the canonical UTC day when one local creation band merges two dates", async () => {
     const fixture = itineraryFixture() as TripItineraryResponse;
     const first = { ...fixture.days[1], startsAt: "2026-09-25T20:00:00.000Z", endsAt: "2026-09-26T00:00:00.000Z", items: [] };
@@ -85,6 +96,26 @@ describe("itinerary activity flows", () => {
     expect(update).toHaveBeenCalledWith(fixture.tripId, itineraryId(8), { title: "Paseo nocturno", scheduledAt: "2026-09-25T17:00:00.000Z" });
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(10)}"]`)).toHaveLength(1);
     expect(Array.from(container.querySelectorAll('[data-itinerary-kind="activity"] [data-itinerary-item]')).map((i) => i.getAttribute("data-itinerary-item"))).toEqual([itineraryId(9), itineraryId(8)]);
+  });
+  it("reschedules to another local date of the same destination and moves the activity with its linked posts", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse;
+    const next = { ...fixture.days[1], id: itineraryId(40), date: "2026-09-26T00:00:00.000Z",
+      startsAt: "2026-09-26T00:00:00.000Z", endsAt: "2026-09-26T18:00:00.000Z", items: [] };
+    fixture.days.push(next);
+    fixture.posts[0].activityId = fixture.activities[0].id;
+    fixture.activities[0].postIds = [fixture.posts[0].id];
+    const originalPostDayId = fixture.posts[0].dayId;
+    const { container, update, getItinerary } = await render(fixture);
+    await click(container, "Paseo por el centro"); await click(container, "Editar actividad");
+    await field(container, "date", "2026-09-26"); await save(container);
+    expect(update).toHaveBeenCalledWith(fixture.tripId, itineraryId(8), { dayId: next.id, scheduledAt: "2026-09-26T12:00:00.000Z" });
+    expect(getItinerary).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-itinerary-date="2026-09-25"]')?.textContent).not.toContain("Paseo por el centro");
+    expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).toContain("Paseo por el centro");
+    expect(container.querySelector('[data-itinerary-date="2026-09-26"] [data-itinerary-post]')?.getAttribute("data-itinerary-post")).toBe(fixture.posts[0].id);
+    expect(container.querySelectorAll(`[data-itinerary-post="${fixture.posts[0].id}"]`)).toHaveLength(1);
+    expect(fixture.posts[0].dayId).toBe(originalPostDayId);
   });
   it("shows saved content even if reloading fails and retries only the GET", async () => {
     const { container, create, getItinerary } = await render();

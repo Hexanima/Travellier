@@ -67,6 +67,11 @@ describe("ActivityForm", () => {
     const { container, update } = await render(itineraryFixture().activities[0] as ActivityResponse); await submit(container);
     expect(update).not.toHaveBeenCalled(); expect(container.textContent).toContain("No hay cambios para guardar");
   });
+  it("describes rescheduling within the destination instead of restricting edits to the original band", async () => {
+    const { container } = await render(itineraryFixture().activities[0] as ActivityResponse);
+    expect(container.textContent).toContain("Podés reprogramar dentro de las franjas de actividad de este destino.");
+    expect(container.textContent).not.toContain("Franja disponible:");
+  });
   it("preserves unchanged text exactly while editing another field", async () => {
     const existing = { ...itineraryFixture().activities[0], title: " Paseo ", description: "  Primera línea\nSegunda línea  " } as ActivityResponse;
     const { container, update } = await render(existing);
