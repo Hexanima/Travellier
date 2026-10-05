@@ -33,16 +33,20 @@ describe("App itinerary integration", () => {
     await act(async () => link?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
     expect(container.textContent).toContain("Paseo por el centro"); expect(get).toHaveBeenCalledExactlyOnceWith(itineraryId(1));
   });
-  it("wires the aggregate adapter to the restored session without extra content requests", async () => {
+  it("loads the aggregate and each own participation with the restored session", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "renewed-refresh" })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ itinerary: itineraryFixture() })));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ itinerary: itineraryFixture() })))
+      .mockImplementation(async () => new Response(JSON.stringify({ participation: null })));
     vi.stubGlobal("fetch", fetch);
     const container = await render(`/trips/${itineraryId(1)}/itinerary`, { apiBaseUrl: "https://api.example.test", sessionStorage: storage(true) });
     expect(container.textContent).toContain("Paseo por el centro");
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(fetch).toHaveBeenLastCalledWith(`https://api.example.test/trips/${itineraryId(1)}/itinerary`, expect.objectContaining({
+    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenNthCalledWith(2, `https://api.example.test/trips/${itineraryId(1)}/itinerary`, expect.objectContaining({
       method: "GET", headers: { Authorization: "Bearer renewed" },
     }));
+    const participationCalls = fetch.mock.calls.filter(([url]) => (url as string).endsWith("/participation"));
+    expect(participationCalls).toHaveLength(2);
+    participationCalls.forEach(([, request]) => expect(request.headers.Authorization).toBe("Bearer renewed"));
   });
   it("returns to login when the itinerary request expires the shared session", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "renewed-refresh" })))
