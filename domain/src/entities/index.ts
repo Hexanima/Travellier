@@ -8,3 +8,4 @@ export * from "./itinerary-day.js";
 export * from "./activity-schedule.js";
 export * from "./activity.js";
 export * from "./activity-participation.js";
+export * from "./activity-vote.js";

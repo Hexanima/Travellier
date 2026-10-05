@@ -277,6 +277,10 @@ Propuesta → En votación → Confirmada
 
 Si el modo votación está deshabilitado, las actividades se crean directamente como confirmadas.
 
+Cada integrante actual puede emitir un voto `up` (a favor) o `down` (en contra), con los mismos permisos para admins y participantes. Conserva un único voto por actividad y puede reemplazar su valor. El primer voto, a favor o en contra, pasa una actividad de `proposed` a `voting`; los votos posteriores conservan `voting`. Las actividades `confirmed` no admiten nuevos votos ni reemplazos.
+
+La regla exacta de consenso sigue pendiente de definición. Hasta definirla, los votos no confirman automáticamente una actividad. Desactivar la votación impide registrar o reemplazar votos; conserva los anteriores, que siguen siendo consultables por sus autores mientras mantengan la membresía. Las contrapropuestas y el tratamiento de votos al editar una propuesta requieren una definición posterior.
+
 #### Posts asociados
 
 - Cualquier miembro puede crear posts vinculados a una actividad en cualquier momento (antes, durante o después).
@@ -540,7 +544,7 @@ Generados automáticamente al configurar los transportes. No se crean manualment
 
 ### Colección: `activityVotes`
 
-Solo aplica cuando `trip.votingEnabled = true`.
+Registrar o reemplazar votos requiere `trip.votingEnabled = true`. Desactivar la votación conserva los votos existentes.
 
 ```js
 {
@@ -549,7 +553,7 @@ Solo aplica cuando `trip.votingEnabled = true`.
   userId: ObjectId,         // ref: users
   tripId: ObjectId,         // ref: trips (desnormalizado para queries)
   value: String,            // "up" | "down"
-  createdAt: Date
+  createdAt: Date           // fecha original del voto; se conserva al reemplazar su valor
 }
 // Index compuesto único: { activityId, userId }
 ```

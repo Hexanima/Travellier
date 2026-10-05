@@ -772,6 +772,7 @@
 ## Preguntas abiertas
 
 - ¿Cuál es la regla exacta de consenso para confirmar una actividad: unanimidad, mayoría simple, porcentaje configurable o decisión manual de un admin?
+- ¿Qué debe pasar con los votos existentes si se modifica el horario o contenido de una propuesta? ¿Cómo se vinculan y resuelven sus contrapropuestas?
 - ¿Cómo se distribuye un gasto en modo balance: partes iguales entre todos los miembros, participantes seleccionados o proporciones personalizadas?
 - ¿Qué moneda, precisión decimal y reglas de redondeo deben aplicarse a los gastos?
 - El modelo `direction: outbound | return` no representa claramente traslados entre destinos intermedios. ¿Cada destino requiere transporte de llegada y salida, o solo el primero y último?

@@ -18,3 +18,5 @@ export * from "./journey-conflict-error.js";
 export * from "./itinerary-conflict-error.js";
 export * from "./deletion-conflict-error.js";
 export * from "./activity-not-found-error.js";
+export * from "./activity-voting-disabled-error.js";
+export * from "./activity-voting-closed-error.js";
