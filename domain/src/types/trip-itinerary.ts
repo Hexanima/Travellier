@@ -1,5 +1,6 @@
 import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
+import type { Post } from "../entities/post.js";
 import type { Transport } from "../entities/transport.js";
 import type { TripDestination } from "../entities/trip-destination.js";
 import type { Trip } from "../entities/trip.js";
@@ -8,18 +9,8 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** Keep the read contract compatible while sharing the activity entity's fields. */
 export type ItineraryActivity = Activity;
 
-export interface ItineraryPost {
-  id: ObjectId;
-  tripId: ObjectId;
-  dayId: ObjectId;
-  authorId: ObjectId;
-  description: string | null;
-  mapsUrl: string | null;
-  activityId: ObjectId | null;
-  transportId: ObjectId | null;
-  parentPostId: ObjectId | null;
-  createdAt: Date;
-}
+/** Keep the read contract compatible while sharing the post entity's fields. */
+export type ItineraryPost = Post;
 
 export interface ItineraryExpense {
   id: ObjectId;
