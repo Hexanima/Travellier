@@ -43,6 +43,8 @@ import {
   type TripDestination,
   type Transport,
   type Activity,
+  type ActivityParticipation,
+  type SetTripActivityParticipationPayload,
   type CreateTripActivityPayload,
   type UpdateTripActivityPayload,
   type TripActivityPayload,
@@ -106,6 +108,8 @@ export interface TripInvitationApi {
 }
 
 export interface TripApi extends TripInvitationApi {
+  getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
+  setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<ActivityParticipation>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<Activity>;
   listActivities?: (payload: TripActivityPayload) => AsyncResult<Activity[]>;
   getActivity?: (payload: ActivityDetailPayload) => AsyncResult<Activity>;
@@ -524,6 +528,24 @@ export const handleApiRequest = async (
     if (dependencies.trips?.getItinerary === undefined) return unavailableResponse();
     const result = await dependencies.trips.getItinerary({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, { itinerary: result.value }) : errorResponse(result.error);
+  }
+
+  const participationMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/participation$/);
+  if (participationMatch && (request.method === "GET" || request.method === "PUT")) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(participationMatch[1] ?? "");
+    const activityId = createObjectId(participationMatch[2] ?? "");
+    if (!tripId.ok || !activityId.ok) return invalidRequestResponse();
+    const context = { tripId: tripId.value, activityId: activityId.value, authenticatedUserId: request.authenticatedUserId };
+    if (request.method === "GET") {
+      if (!dependencies.trips?.getActivityParticipation) return unavailableResponse();
+      const result = await dependencies.trips.getActivityParticipation(context);
+      return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
+    }
+    if (!payload) return invalidRequestResponse();
+    if (!dependencies.trips?.setActivityParticipation) return unavailableResponse();
+    const result = await dependencies.trips.setActivityParticipation({ ...context, status: payload.status });
+    return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
   }
 
   const activityListMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities$/);
