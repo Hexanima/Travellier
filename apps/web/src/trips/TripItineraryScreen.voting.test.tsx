@@ -143,6 +143,50 @@ describe("activity voting in itinerary and detail", () => {
     if (activityStatus === "confirmed") expect(voting(dialog).querySelectorAll('[aria-pressed]')).toHaveLength(0);
     else expect(selected(dialog)).toBe("A favor");
   });
+  it.each(["voting", "confirmed"] as const)("preserves the %s status when a delayed edit arrives after the vote and the itinerary refresh fails", async (activityStatus) => {
+    const pendingVote = deferred<TripResult<ActivityVoteResponse & { vote: VoteResponse }>>();
+    const pendingEdit = deferred<TripResult<ActivityResponse>>();
+    const write = vi.fn<TripVoteApi["set"]>(() => pendingVote.promise);
+    const { container, value, getItinerary, getActivity, get, update } = await render({
+      votes: { set: write }, update: () => pendingEdit.promise,
+    });
+    const edited = { ...value.activities[0], title: "Paseo editado" };
+    const beforePosts = Array.from(container.querySelectorAll("[data-itinerary-post]")).map((el) => el.outerHTML);
+    const beforeExpenses = Array.from(container.querySelectorAll("[data-itinerary-expenses]")).map((el) => el.outerHTML);
+    await click(voting(card(container)), "A favor");
+    await click(card(container), "Paseo por el centro");
+    await click(container.querySelector<HTMLElement>('[role="dialog"]')!, "Editar actividad");
+    const title = container.querySelector<HTMLInputElement>('[name="title"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, edited.title);
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledOnce();
+    expect(getItinerary).toHaveBeenCalledOnce();
+    await act(async () => pendingVote.resolve(activityStatus === "confirmed"
+      ? { ok: false, error: { kind: "voting-closed" } }
+      : { ok: true, value: { vote: vote(), activityStatus } }));
+    const statusLabel = activityStatus === "voting" ? "En votación" : "Confirmada";
+    expect(card(container).textContent).toContain(statusLabel);
+    getItinerary.mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+    await act(async () => pendingEdit.resolve({ ok: true, value: edited }));
+    expect(container.textContent).toContain("No pudimos actualizar el itinerario");
+    expect(card(container).textContent).toContain(edited.title);
+    expect(card(container).textContent).toContain(statusLabel);
+    expect(card(container).textContent).not.toContain("Propuesta");
+    if (activityStatus === "confirmed") expect(voting(card(container)).querySelectorAll('[aria-pressed]')).toHaveLength(0);
+    else expect(selected(card(container))).toBe("A favor");
+    expect(Array.from(container.querySelectorAll("[data-itinerary-post]")).map((el) => el.outerHTML)).toEqual(beforePosts);
+    expect(Array.from(container.querySelectorAll("[data-itinerary-expenses]")).map((el) => el.outerHTML)).toEqual(beforeExpenses);
+    expect(get).toHaveBeenCalledTimes(2); expect(write).toHaveBeenCalledOnce(); expect(getItinerary).toHaveBeenCalledTimes(2);
+    getActivity.mockResolvedValue({ ok: true, value: edited });
+    await click(card(container), edited.title);
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.textContent).toContain(statusLabel);
+    if (activityStatus === "confirmed") expect(voting(dialog).querySelectorAll('[aria-pressed]')).toHaveLength(0);
+    else expect(selected(dialog)).toBe("A favor");
+  });
   it("hides voting and performs no vote requests when the Trip disables it", async () => {
     const value = fixture(); value.votingEnabled = false;
     const { container, get, set } = await render({ value });

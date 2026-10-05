@@ -92,14 +92,19 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
   }, [tripId, itinerary, attempt]);
   const onSaved = (activity: ActivityResponse) => {
     // Reflect only a successful server write; retain posts and expenses until the aggregate refreshes.
-    setState((current) => current.kind !== "ready" ? current : { kind: "ready", value: { ...current.value,
-      activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity,
-        postIds: current.value.posts.filter((post) => post.activityId === activity.id).map((post) => post.id) }],
-      days: current.value.days.map((day) => ({ ...day, items: [
-        ...day.items.filter((item) => !(item.kind === "activity" && item.id === activity.id)),
-        ...(day.id === activity.dayId ? [{ kind: "activity" as const, id: activity.id, at: activity.scheduledAt }] : []),
-      ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id)) })),
-    } });
+    setState((current) => {
+      if (current.kind !== "ready") return current;
+      const previous = current.value.activities.find((a) => a.id === activity.id)?.status;
+      const status = previous && statusRank[previous] > statusRank[activity.status] ? previous : activity.status;
+      return { kind: "ready", value: { ...current.value,
+        activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity, status,
+          postIds: current.value.posts.filter((post) => post.activityId === activity.id).map((post) => post.id) }],
+        days: current.value.days.map((day) => ({ ...day, items: [
+          ...day.items.filter((item) => !(item.kind === "activity" && item.id === activity.id)),
+          ...(day.id === activity.dayId ? [{ kind: "activity" as const, id: activity.id, at: activity.scheduledAt }] : []),
+        ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id)) })),
+      } };
+    });
     setSaved(true); setDialog(undefined); setAttempt((value) => value + 1);
   };
   const days = state.kind === "ready" ? projectTripItinerary(state.value, timeZone) : [];
