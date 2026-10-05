@@ -80,6 +80,44 @@ Sin JWT válido responde 401; usuarios externos y Trips inaccesibles responden 4
 
 Las mutaciones leen membresía, configuración y días dentro de la misma transacción, coordinada por Trip con transportes y bajas. La expulsión de participantes revoca la membresía dentro de una transacción con la misma coordinación: una mutación de actividad confirma antes de la expulsión o, si la expulsión se confirma primero, se rechaza por falta de membresía. Un fallo revierte todas las escrituras. DELETE elimina actividad, votos y participaciones y desvincula sus posts con `activityId: null`; conserva sus demás datos y relaciones, fotos, gastos, likes y comentarios. GET usa un snapshot sin modificar datos. La consulta agregada del itinerario refleja los cambios en su siguiente lectura.
 
+## API de Posts (T43)
+
+Todas las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden crear, consultar y editar posts de cualquier integrante. La edición y las vinculaciones conservan la autoría y la fecha original de publicación.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| POST | `/trips/:tripId/posts` | 201 `{ post }`, o `{ post, activity }` en creación conjunta |
+| GET | `/trips/:tripId/posts` | 200 `{ posts }`, ordenados por `createdAt` e ID |
+| GET | `/trips/:tripId/posts/:postId` | 200 `{ post }` |
+| PATCH | `/trips/:tripId/posts/:postId` | 200 `{ post }` |
+
+POST requiere `dayId` y acepta `description`, `mapsUrl`, `activityId`, `parentPostId` y `transportId` opcionales. Un post puede combinar las tres vinculaciones o no tener ninguna. El día y todas las referencias deben existir en el mismo Trip; los vínculos pueden apuntar a contenido de otros días del viaje. Se rechaza la autorreferencia. Los posts pueden pertenecer a franjas de actividad, llegada o tránsito; su `createdAt` no restringe ni cambia la asociación al día.
+
+PATCH permite únicamente esos seis campos: omitidos conservan su valor; `null` limpia texto/Maps o desvincula cada relación independientemente. `dayId` no admite `null`. El servidor controla ID, Trip, autor y `createdAt`; los campos protegidos o desconocidos del body se ignoran y un PATCH sin campos editables responde 400. La entidad resultante se valida completa, incluidas las referencias conservadas. Un vínculo inválido rechaza toda la edición, incluidos los cambios de texto o día.
+
+Para crear una actividad espontánea y su primer post, enviar `newActivity` en el mismo POST:
+
+```json
+{
+  "dayId": "507f1f77bcf86cd799439011",
+  "description": "Fuimos a cenar",
+  "newActivity": {
+    "title": "Cena",
+    "scheduledAt": "2026-09-25T09:00:00.456-03:00",
+    "description": "Restaurante del centro",
+    "mapsUrl": null
+  }
+}
+```
+
+`newActivity` requiere título y `scheduledAt`; acepta descripción y Maps opcionales. Usa el día del post, que debe ser una franja de actividad, y valida el horario dentro de la ventana exacta del destino. La fecha requiere zona explícita y admite hasta tres decimales, como en T36; la respuesta normaliza UTC y conserva milisegundos. Su estado inicial es `confirmed` con votación desactivada o `proposed` con votación habilitada. No se admite combinar `newActivity` con un `activityId` no nulo. La creación conjunta solo está disponible en POST; PATCH no crea actividades.
+
+Membresía, configuración, día y relaciones se leen dentro de la misma transacción que las escrituras, coordinada por Trip con regeneración del itinerario, expulsiones y bajas de actividades/Trip. Cualquier error aborta todos los cambios; la creación conjunta nunca deja uno de los dos registros persistido parcialmente. GET usa snapshots sin escrituras. El itinerario refleja los cambios en su siguiente consulta, y eliminar una actividad sigue desvinculando sus posts sin alterar sus demás datos.
+
+Sin JWT válido devuelve 401; externos, expulsados o Trips inaccesibles reciben 404 `TripNotFoundError`. Un post ausente o de otro Trip recibe 404 `PostNotFoundError`. JSON/body o IDs de ruta malformados reciben 400; campos, día, horario o vínculos inválidos reciben 422 `ValidationError`, con detalles en `error.fields`. Dependencias sin configurar reciben 503 y fallos inesperados, 500 genérico.
+
+IDs y referencias se almacenan como BSON `ObjectId`, y fechas como BSON `Date`. Se reutilizan la colección `posts` y los índices de T04; T43 no agrega migraciones. Fotos, gastos e interacciones permanecen en sus colecciones separadas; esta API no los crea ni modifica. Compositor y feed corresponden a T44/T45.
+
 ## API de participación (T38)
 
 Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden consultar y actualizar únicamente su propia participación; `userId` se obtiene del JWT.

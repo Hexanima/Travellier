@@ -53,6 +53,13 @@ import {
   type TripActivityPayload,
   type ActivityDetailPayload,
   type ActivityEditableFields,
+  type Post,
+  type CreateTripPostPayload,
+  type CreateTripPostResult,
+  type UpdateTripPostPayload,
+  type TripPostPayload,
+  type PostDetailPayload,
+  type PostEditableFields,
   type Result,
   createObjectId,
   ValidationError,
@@ -111,6 +118,10 @@ export interface TripInvitationApi {
 }
 
 export interface TripApi extends TripInvitationApi {
+  createPost?: (payload: CreateTripPostPayload) => AsyncResult<CreateTripPostResult>;
+  listPosts?: (payload: TripPostPayload) => AsyncResult<Post[]>;
+  getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
+  updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   getActivityVote?: (payload: ActivityDetailPayload) => AsyncResult<TripActivityVoteView>;
   setActivityVote?: (payload: SetTripActivityVotePayload) => AsyncResult<SetTripActivityVoteResult>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
@@ -238,6 +249,9 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
 
   if (error.tag === "ActivityNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Activity not found." } });
+  }
+  if (error.tag === "PostNotFoundError") {
+    return jsonResponse(404, { error: { code: error.tag, message: "Post not found." } });
   }
   if (error.tag === "ActivityVotingDisabledError" || error.tag === "ActivityVotingClosedError") {
     return jsonResponse(409, { error: { code: error.tag, message: error.tag === "ActivityVotingDisabledError"
@@ -466,6 +480,36 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
   return ok(fields);
 };
 
+const postPayload = (payload: Record<string, unknown>, creating: boolean):
+  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity">, ValidationError> => {
+  const invalid = (field: string, code = "invalid") => err(new ValidationError([
+    { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
+  ]));
+  if (creating && (!Object.hasOwn(payload, "dayId") || payload.dayId == null)) return invalid("dayId", "required");
+  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity"> = {};
+  for (const field of ["dayId", "activityId", "parentPostId", "transportId"] as const) {
+    if (!Object.hasOwn(payload, field)) continue;
+    if (field !== "dayId" && payload[field] === null) { fields[field] = null; continue; }
+    const id = createObjectId(isString(payload[field]) ? payload[field] : "");
+    if (!id.ok) return invalid(field);
+    fields[field] = id.value;
+  }
+  for (const field of ["description", "mapsUrl"] as const) {
+    if (!Object.hasOwn(payload, field)) continue;
+    if (!isString(payload[field]) && payload[field] !== null) return invalid(field);
+    fields[field] = payload[field] as string | null;
+  }
+  if (creating && Object.hasOwn(payload, "newActivity")) {
+    const value = payload.newActivity;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid("newActivity");
+    const parsed = activityPayload({ ...value, dayId: fields.dayId }, true);
+    if (!parsed.ok) return parsed;
+    fields.newActivity = { title: parsed.value.title!, scheduledAt: parsed.value.scheduledAt!,
+      description: parsed.value.description, mapsUrl: parsed.value.mapsUrl };
+  }
+  return ok(fields);
+};
+
 const unavailableResponse = (): ApiResponse =>
   jsonResponse(503, {
     error: {
@@ -573,6 +617,46 @@ export const handleApiRequest = async (
     if (!dependencies.trips?.setActivityParticipation) return unavailableResponse();
     const result = await dependencies.trips.setActivityParticipation({ ...context, status: payload.status });
     return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
+  }
+
+  const postListMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts$/);
+  const postDetailMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)$/);
+  if (postListMatch || postDetailMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((postListMatch ?? postDetailMatch)?.[1] ?? "");
+    const postId = postDetailMatch ? createObjectId(postDetailMatch[2] ?? "") : undefined;
+    if (!tripId.ok || (postId !== undefined && !postId.ok)) return invalidRequestResponse();
+    const context = { tripId: tripId.value, authenticatedUserId: request.authenticatedUserId }, trips = dependencies.trips;
+    if (postListMatch && request.method === "GET") {
+      if (!trips?.listPosts) return unavailableResponse();
+      const result = await trips.listPosts(context);
+      return result.ok ? jsonResponse(200, { posts: result.value }) : errorResponse(result.error);
+    }
+    if (postListMatch && request.method === "POST") {
+      if (!payload) return invalidRequestResponse();
+      const parsed = postPayload(payload, true);
+      if (!parsed.ok) return errorResponse(parsed.error);
+      if (!trips?.createPost) return unavailableResponse();
+      const result = await trips.createPost({ ...context, ...parsed.value } as CreateTripPostPayload);
+      return result.ok ? jsonResponse(201, result.value) : errorResponse(result.error);
+    }
+    if (postId?.ok) {
+      const detail = { ...context, postId: postId.value };
+      if (request.method === "GET") {
+        if (!trips?.getPost) return unavailableResponse();
+        const result = await trips.getPost(detail);
+        return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);
+      }
+      if (request.method === "PATCH") {
+        if (!payload) return invalidRequestResponse();
+        const parsed = postPayload(payload, false);
+        if (!parsed.ok) return errorResponse(parsed.error);
+        if (Object.keys(parsed.value).length === 0) return invalidRequestResponse();
+        if (!trips?.updatePost) return unavailableResponse();
+        const result = await trips.updatePost({ ...detail, ...parsed.value });
+        return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);
+      }
+    }
   }
 
   const activityListMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities$/);

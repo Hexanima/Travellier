@@ -12,3 +12,4 @@ export * from "./delete-trip-resources.js";
 export * from "./manage-activities.js";
 export * from "./manage-activity-participations.js";
 export * from "./manage-activity-votes.js";
+export * from "./manage-posts.js";
