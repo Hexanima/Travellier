@@ -69,3 +69,13 @@
   .itinerary-items > .itinerary-item { gap: 12px; }
 }
 @media (max-width: 360px) { .activity-date-time { grid-template-columns: minmax(0, 1fr); } }
+.activity-vote { min-width: 0; margin: var(--ui-space-4) 0 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-3); }
+.activity-vote legend { padding: 0; margin-bottom: var(--ui-space-2); font-weight: 600; }
+.activity-vote .activity-vote-status { margin: 0; color: var(--ui-color-text); }
+.activity-vote-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.activity-vote-actions .ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.activity-vote-actions .ui-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
+.activity-vote-actions .ui-button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-color-accent) 10%, var(--ui-color-surface)); }
+.activity-vote-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-vote a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.activity-vote a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
