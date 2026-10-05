@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Button, Feedback, SelectField, TextAreaField, TextField } from "../components/index.js";
-import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues, type ActivityMode } from "./activity-form-state.js";
+import { Button, Feedback, TextAreaField, TextField } from "../components/index.js";
+import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues } from "./activity-form-state.js";
 import type { ActivityInput, ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripFailure } from "./trip-management-api.js";
 import { toLocalDateTime } from "./transport-local-time.js";
@@ -10,7 +10,7 @@ type Props = { context: ActivityFormContext; activities: Pick<TripActivityApi, "
 export function ActivityForm({ context, activities, existing, onSaved, onBusyChange }: Props) {
   const [timeZone] = useState(context.timeZone);
   const localContext = { ...context, timeZone };
-  const [values, setValues] = useState(() => initialActivityValues(localContext, "planned", new Date(Date.now()), existing));
+  const [values, setValues] = useState(() => initialActivityValues(localContext, existing));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<TripFailure>();
   const [message, setMessage] = useState("");
@@ -20,11 +20,6 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => { const next = { ...current }; delete next[field]; delete next.scheduledAt; delete next.dayId; return next; });
     setFailure(undefined); setMessage("");
-  };
-  const changeMode = (mode: ActivityMode) => {
-    const initial = initialActivityValues(localContext, mode, new Date(Date.now()));
-    setValues((current) => ({ ...current, mode, date: initial.date, time: initial.time, originalScheduledAt: initial.originalScheduledAt }));
-    setErrors({}); setFailure(undefined); setMessage("");
   };
   const chooseWindowStart = () => {
     const local = toLocalDateTime(context.selection.startsAt, timeZone);
@@ -68,19 +63,15 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
       Podés reprogramar dentro de las franjas de actividad de este destino.</> : <>
       {context.selection.date.split("-").reverse().join("/")} · Horarios en {timeZone}<br />
       Franja disponible: {clock.format(new Date(context.selection.startsAt))}{context.selection.endsAt ? ` – ${clock.format(new Date(context.selection.endsAt))}` : ""}.</>}</p>
-    {!existing ? <SelectField label="Tipo de actividad" name="mode" value={values.mode} loading={saving} onChange={(event) => changeMode(event.target.value as ActivityMode)}>
-      <option value="planned">Planificada</option><option value="spontaneous">Espontánea</option>
-    </SelectField> : null}
     <TextField label="Título" name="title" value={values.title} required loading={saving} error={errors.title} onChange={(event) => update("title", event.target.value)} />
     <div className="activity-date-time">
       <TextField label="Fecha" name="date" type="date" value={values.date} required loading={saving} error={errors.date}
         onChange={(event) => update("date", event.target.value)} />
-      <TextField label={values.mode === "spontaneous" ? "Hora en que ocurrió" : "Hora prevista"} name="time" type="time" value={values.time} required loading={saving}
+      <TextField label="Hora prevista" name="time" type="time" value={values.time} required loading={saving}
         error={errors.time ?? errors.scheduledAt ?? errors.dayId} onChange={(event) => update("time", event.target.value)} />
     </div>
     {!existing ? <Button type="button" disabled={saving} onClick={chooseWindowStart}>Usar inicio de franja</Button> : null}
     {exactScheduledAt ? <p className="activity-context">Hora exacta: <time dateTime={exactScheduledAt}>{clock.format(new Date(exactScheduledAt))}</time>.</p> : null}
-    {values.mode === "spontaneous" ? <p className="activity-context">Podés ajustar la fecha y hora si la registrás después de realizada.</p> : null}
     <TextAreaField label="Descripción (opcional)" name="description" value={values.description} loading={saving} error={errors.description}
       onChange={(event) => update("description", event.target.value)} />
     <TextField label="Vínculo de Maps (opcional)" name="mapsUrl" type="text" inputMode="url" value={values.mapsUrl} loading={saving} error={errors.mapsUrl}

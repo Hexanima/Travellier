@@ -256,8 +256,8 @@ Una **Actividad** es algo que el grupo planifica o realiza espontáneamente dent
 
 #### Actividades planificadas y espontáneas
 
-- **Planificada:** se ingresa la fecha y hora previstas al crearla.
-- **Espontánea:** se puede registrar sin planificación previa. El formulario precarga la fecha y hora actuales, que se pueden editar si la actividad se carga después de realizada.
+- **Planificada:** se crea desde un día del itinerario, ingresando la fecha y hora previstas. Este formulario sirve para planificar y no incluye un selector de actividad planificada o espontánea.
+- **Espontánea:** surge al registrar un post sobre una actividad que no estaba cargada. Desde el compositor del post se puede crear la actividad y vincularle ese primer post en un mismo guardado, sin crearla previamente en otra pantalla. En ese flujo se precargan la fecha y hora actuales y se permite ajustarlas para registrar cuándo ocurrió.
 - En ambos casos, `scheduledAt` es obligatorio, representa un instante válido dentro de la ventana de actividad del destino y se almacena en UTC. La interfaz permite ingresar y consultar la fecha y hora en la zona local del usuario.
 - La hora en que ocurrió o se prevé realizar la actividad (`scheduledAt`) es distinta de la hora en que se creó el registro (`createdAt`).
 
@@ -316,6 +316,8 @@ Un post puede vincularse a:
 - Cualquier combinación de las anteriores, o ninguna (post espontáneo independiente).
 
 La vinculación puede configurarse **al crear el post o en cualquier momento posterior**, permitiendo que dos personas que publicaron por separado sobre el mismo momento puedan vincular sus posts después.
+
+Si la actividad todavía no existe, el compositor permite crear una **actividad espontánea junto con el post**. La actividad y su vinculación se guardan conjuntamente; un error no debe dejar una actividad ni un post creados parcialmente. También se conserva la opción de publicar un post independiente sin actividad.
 
 #### Mapa in-app
 
@@ -724,7 +726,7 @@ Cliente ──► POST /auth/refresh  ──► Lambda (valida refresh token) �
 4. Usuario confirma unirse → queda como participante.
 
 ### Crear una actividad
-1. Desde un día del itinerario, el usuario crea una actividad.
+1. Desde un día del itinerario, el usuario planifica una actividad indicando título, fecha y hora previstas, sin seleccionar un tipo de actividad.
 2. Si votación está habilitada: queda en estado "propuesta", el grupo vota, al alcanzar consenso pasa a "confirmada".
 3. Si votación está deshabilitada: queda directamente "confirmada".
 4. Cada miembro puede indicar si va o no va.
@@ -732,7 +734,7 @@ Cliente ──► POST /auth/refresh  ──► Lambda (valida refresh token) �
 ### Crear un post
 1. Desde el itinerario (día o actividad) o desde un botón global.
 2. El usuario agrega descripción, fotos, ubicación y/o gasto.
-3. Puede vincularlo a una actividad o a otro post al crearlo, o hacerlo después.
+3. Puede vincularlo a una actividad o a otro post al crearlo, o hacerlo después. Si registra una actividad que no estaba cargada, puede crearla como espontánea dentro del compositor y guardar juntos la actividad y el post vinculado.
 4. El post aparece en el día correspondiente del itinerario.
 
 ### Vincular posts después de creados

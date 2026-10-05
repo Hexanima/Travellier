@@ -4,16 +4,15 @@ import type { ItineraryDayResponse } from "./trip-itinerary-api.js";
 import type { ItinerarySegment } from "./trip-itinerary-view.js";
 import { parseLocalDateTimeCandidates, toLocalDateTime } from "./transport-local-time.js";
 
-export type ActivityMode = "planned" | "spontaneous";
-export type ActivityFormValues = { mode: ActivityMode; title: string; description: string; mapsUrl: string; date: string; time: string; originalScheduledAt?: string };
+export type ActivityFormValues = { title: string; description: string; mapsUrl: string; date: string; time: string; originalScheduledAt?: string };
 export type ActivityFormContext = { tripId: string; days: ItineraryDayResponse[]; timeZone: string;
   selection: Pick<ItinerarySegment, "destinationId" | "sourceDayIds" | "startsAt" | "endsAt"> & { date: string } };
 export type ActivityFormResult = { ok: true; value: ActivityInput } | { ok: false; errors: Record<string, string> };
 
-export const initialActivityValues = (context: ActivityFormContext, mode: ActivityMode, now: Date, existing?: ActivityResponse): ActivityFormValues => {
-  const originalScheduledAt = existing?.scheduledAt ?? (mode === "spontaneous" ? now.toISOString() : undefined);
+export const initialActivityValues = (context: ActivityFormContext, existing?: ActivityResponse): ActivityFormValues => {
+  const originalScheduledAt = existing?.scheduledAt;
   const local = originalScheduledAt ? toLocalDateTime(originalScheduledAt, context.timeZone) : undefined;
-  return { mode, title: existing?.title ?? "", description: existing?.description ?? "", mapsUrl: existing?.mapsUrl ?? "",
+  return { title: existing?.title ?? "", description: existing?.description ?? "", mapsUrl: existing?.mapsUrl ?? "",
     date: local?.slice(0, 10) ?? context.selection.date, time: local?.slice(11) ?? "", originalScheduledAt };
 };
 

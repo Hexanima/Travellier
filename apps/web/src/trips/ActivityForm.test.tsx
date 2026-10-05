@@ -64,11 +64,18 @@ describe("ActivityForm", () => {
     await submit(container);
     expect(create).toHaveBeenCalledWith(context.tripId, expect.objectContaining({ scheduledAt: context.selection.startsAt }));
   });
-  it("prefills spontaneous occurrence time and allows correcting it", async () => {
+  it("plans directly without a type selector or automatically prefilling the occurrence time", async () => {
     vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-25T13:34:56.789Z"));
-    const { container, create } = await render(); await field(container, "mode", "spontaneous");
-    expect(container.querySelector('[name="time"]')).toHaveProperty("value", "10:34");
-    await field(container, "title", "Almuerzo"); await field(container, "time", "10:00"); await submit(container);
+    const { container, create } = await render();
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.textContent).not.toContain("Tipo de actividad");
+    expect(container.textContent).not.toContain("Espontánea");
+    expect(container.querySelector('[name="date"]')).toHaveProperty("value", "2026-09-25");
+    expect(container.querySelector('[name="time"]')).toHaveProperty("value", "");
+    expect(container.textContent).toContain("Hora prevista");
+    await field(container, "title", "Almuerzo"); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    await field(container, "time", "10:00"); await submit(container);
     expect(create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ scheduledAt: "2026-09-25T13:00:00.000Z" }));
   });
   it("edits only changed fields and clears optional content without rewriting the timestamp", async () => {
