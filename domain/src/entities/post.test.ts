@@ -37,6 +37,13 @@ describe("createPost", () => {
       .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null, ...selected } });
   });
 
+  it.each([0, 1, 2, 3])("rejects self-reference when creating link combination %i", (mask) => {
+    const payload = { ...input(), parentPostId: input().id,
+      activityId: mask & 1 ? links.activityId : null, transportId: mask & 2 ? links.transportId : null };
+    expect(domain.createPost(payload, { ...linkedContext(), parentPost: payload }))
+      .toMatchObject(issue("parentPostId", "self_reference"));
+  });
+
   it("preserves description and Maps location without requiring photos or expenses", () => {
     const payload = { ...input(), description: "Recuerdo del viaje", mapsUrl: "https://maps.app.goo.gl/example" };
     expect(domain.createPost(payload, context())).toEqual({ ok: true, value: {
@@ -145,6 +152,14 @@ describe("relinkPost", () => {
   it("adds all three links to an existing spontaneous post through the public domain export", () => {
     expect(domain).toHaveProperty("relinkPost", expect.any(Function));
     expect(domain.relinkPost(post(), links, linkedContext())).toEqual({ ok: true, value: post(true) });
+  });
+
+  it.each([0, 1, 2, 3])("rejects self-reference when relinking combination %i without changing the original post", (mask) => {
+    const original = Object.freeze(post(true)), before = structuredClone(original);
+    expect(domain.relinkPost(original, { parentPostId: original.id,
+      activityId: mask & 1 ? links.activityId : null, transportId: mask & 2 ? links.transportId : null },
+    { ...linkedContext(), parentPost: original })).toMatchObject(issue("parentPostId", "self_reference"));
+    expect(original).toEqual(before);
   });
 
   it.each(references)("adds %s independently", (field) => {

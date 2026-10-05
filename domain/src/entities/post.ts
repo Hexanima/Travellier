@@ -43,6 +43,9 @@ export const createPost = (input: CreatePostInput, context: CreatePostContext): 
   if (input.tripId !== context.trip.id) {
     return invalid("tripId", "mismatch", "Post must belong to the supplied Trip.");
   }
+  if (input.parentPostId === input.id) {
+    return invalid("parentPostId", "self_reference", "Post must link to another post, not itself.");
+  }
   const references = [
     ["dayId", input.dayId, context.day],
     ["activityId", input.activityId, context.activity],
