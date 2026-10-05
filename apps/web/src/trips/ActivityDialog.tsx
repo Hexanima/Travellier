@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, Feedback, LoadingState, Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
@@ -9,7 +9,7 @@ import { projectTripItinerary } from "./trip-itinerary-view.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
 type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse; timeZone: string; activities: TripActivityApi;
-  onClose: () => void; onSaved: (activity: ActivityResponse) => void };
+  onClose: () => void; onSaved: (activity: ActivityResponse) => void; participation?: ReactNode };
 type DetailState = { kind: "loading" } | { kind: "error"; error: TripFailure } | { kind: "detail" | "edit"; value: ActivityResponse };
 const statusLabels = { proposed: "Propuesta", voting: "En votación", confirmed: "Confirmada" };
 
@@ -19,7 +19,7 @@ const safeMapsUrl = (value: string | null) => {
   catch { return undefined; }
 };
 
-export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved }: Props) {
+export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, participation }: Props) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -62,6 +62,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       {state.kind === "detail" ? <div className="activity-detail">
         <h3>{state.value.title}</h3>
         <p className="activity-context">{statusLabels[state.value.status]}</p>
+        {participation}
         <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br /><span className="activity-context">Horarios en {timeZone}</span></p>
         {state.value.description ? <p className="activity-description">{state.value.description}</p> : null}
         {maps ? <a className="activity-maps-link" href={maps} target="_blank" rel="noopener noreferrer">Ver vínculo de Maps</a>

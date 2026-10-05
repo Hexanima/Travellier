@@ -40,6 +40,7 @@ describe("App activity integration", () => {
     const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
       if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "renewed-refresh" }));
       if (url.endsWith("/itinerary")) return new Response(JSON.stringify({ itinerary: fixture }));
+      if (url.endsWith("/participation")) return new Response(JSON.stringify({ participation: null }));
       if (request.method === "POST") {
         const activity = { ...fixture.activities[0], ...JSON.parse(request.body as string), id: itineraryId(30), postIds: [] };
         fixture.activities.push(activity); fixture.days[1].items.push({ kind: "activity", id: activity.id, at: activity.scheduledAt });
@@ -57,16 +58,20 @@ describe("App activity integration", () => {
     await click(container, "Actividad nueva"); expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Confirmada");
     await click(container, "Editar actividad"); await field(container, "title", "Actividad editada"); await save(container);
     expect(container.querySelector('[role="dialog"]')).toBeNull(); expect(container.textContent).toContain("Actividad editada");
-    const activityCalls = fetch.mock.calls.filter(([url]) => (url as string).includes("/activities"));
+    const activityCalls = fetch.mock.calls.filter(([url]) => (url as string).includes("/activities") && !(url as string).endsWith("/participation"));
     expect(activityCalls.map(([, request]) => request.method)).toEqual(["POST", "GET", "PATCH"]);
     activityCalls.forEach(([, request]) => expect(request.headers.Authorization).toBe("Bearer renewed"));
     expect(JSON.parse(activityCalls[2][1].body)).toEqual({ title: "Actividad editada" });
     expect(fetch.mock.calls.filter(([url]) => (url as string).endsWith("/itinerary"))).toHaveLength(3);
+    expect(fetch.mock.calls.filter(([url]) => (url as string).endsWith("/participation"))).toHaveLength(3);
   });
   it("redirects to login when the shared session expires during creation", async () => {
-    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "refresh" })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ itinerary: itineraryFixture() })))
-      .mockResolvedValueOnce(new Response("{}", { status: 401 }));
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "refresh" }));
+      if (url.endsWith("/itinerary")) return new Response(JSON.stringify({ itinerary: itineraryFixture() }));
+      if (url.endsWith("/participation")) return new Response(JSON.stringify({ participation: null }));
+      expect(request.method).toBe("POST"); return new Response("{}", { status: 401 });
+    });
     const container = await render(fetch);
     await click(container, "Crear actividad"); await field(container, "title", "Museo");
     await field(container, "time", toLocalDateTime("2026-09-25T13:30:00.000Z", Intl.DateTimeFormat().resolvedOptions().timeZone).slice(11)); await save(container);

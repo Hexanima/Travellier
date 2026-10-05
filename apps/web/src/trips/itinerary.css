@@ -53,6 +53,16 @@
 .activity-dialog a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
 .activity-dialog .ui-modal__title { overflow-wrap: anywhere; }
 .activity-dialog .ui-modal__content { margin-inline: 0; }
+.activity-participation { min-width: 0; margin: var(--ui-space-4) 0 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-3); }
+.activity-participation legend { padding: 0; margin-bottom: var(--ui-space-2); font-weight: 600; }
+.activity-participation .activity-participation-status { margin: 0; color: var(--ui-color-text); }
+.activity-participation-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.activity-participation-actions .ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.activity-participation-actions .ui-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
+.activity-participation-actions .ui-button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-color-accent) 10%, var(--ui-color-surface)); }
+.activity-participation-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-participation a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.activity-participation a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
 @media (max-width: 540px) {
   .itinerary-band { padding: 16px; }
   .itinerary-band-header { flex-wrap: wrap; }
