@@ -5,7 +5,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
-import type { ActivityResponse } from "./trip-activity-api.js";
+import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { ActivityVoteResponse, TripVoteApi, VoteResponse } from "./trip-vote-api.js";
 import type { TripResult } from "./trip-management-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
@@ -22,7 +22,8 @@ const fixture = (): TripItineraryResponse => {
 };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 type Options = { votes?: Partial<TripVoteApi>; value?: TripItineraryResponse; strict?: boolean;
-  getItinerary?: TripItineraryApi["get"]; detail?: (activity: ActivityResponse) => ActivityResponse };
+  getItinerary?: TripItineraryApi["get"]; detail?: (activity: ActivityResponse) => ActivityResponse;
+  update?: TripActivityApi["update"] };
 async function render(options: Options = {}) {
   const value = options.value ?? fixture();
   const getItinerary = vi.fn(options.getItinerary ?? (async (tripId: string) => ({ ok: true as const, value: { ...structuredClone(value), tripId } })));
@@ -31,20 +32,21 @@ async function render(options: Options = {}) {
   const votes = { get, set, ...options.votes };
   const getActivity = vi.fn(async (_tripId: string, id: string) => ({ ok: true as const,
     value: options.detail ? options.detail(value.activities.find((a) => a.id === id)!) : value.activities.find((a) => a.id === id)! }));
+  const update = vi.fn<TripActivityApi["update"]>(options.update ?? (async () => ({ ok: false, error: { kind: "server" } })));
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const tree = (itinerary: TripItineraryApi) => <MemoryRouter initialEntries={[`/trips/${value.tripId}/itinerary`]}>
     <Link to={`/trips/${itineraryId(99)}/itinerary`}>Otro viaje</Link>
     <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={itinerary} votes={votes}
       activities={{ get: getActivity, create: async () => ({ ok: false, error: { kind: "server" } }),
-        update: async () => ({ ok: false, error: { kind: "server" } }) }}
+        update }}
       participations={{ get: async () => ({ ok: true, value: null }), set: async (tripId, activityId, status) => ({ ok: true,
         value: { id: itineraryId(70), tripId, activityId, userId: itineraryId(20), status, updatedAt: "2026-09-25T12:00:00.000Z" } }) }}
       timeZone="UTC" />} /></Routes>
   </MemoryRouter>;
   await act(async () => root.render(options.strict ? <StrictMode>{tree({ get: getItinerary })}</StrictMode> : tree({ get: getItinerary })));
   const refresh = async (next: TripItineraryResponse) => act(async () => root.render(tree({ get: async () => ({ ok: true, value: next }) })));
-  return { container, root, value, get, set, getItinerary, getActivity, refresh };
+  return { container, root, value, get, set, getItinerary, getActivity, update, refresh };
 }
 const card = (container: HTMLElement, id = itineraryId(8)) => container.querySelector<HTMLElement>(`[data-itinerary-item="${id}"]`)!;
 const voting = (scope: HTMLElement) => {
@@ -97,6 +99,49 @@ describe("activity voting in itinerary and detail", () => {
     dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
     expect(dialog.textContent).toContain("En votación"); expect(selected(dialog)).toBe("A favor");
     expect(get).toHaveBeenCalledTimes(2);
+  });
+  it.each(["voting", "confirmed"] as const)("preserves the %s status resolved by a vote request when the earlier post-edit itinerary refresh finishes later", async (activityStatus) => {
+    const value = fixture();
+    const pending = deferred<TripResult<TripItineraryResponse>>();
+    const write = vi.fn<TripVoteApi["set"]>(async (tripId, id, next) => activityStatus === "confirmed"
+      ? { ok: false, error: { kind: "voting-closed" } }
+      : { ok: true, value: { vote: vote(id, next, tripId), activityStatus } });
+    const { container, getItinerary, get, set, update } = await render({ value,
+      votes: { set: write },
+      update: async (_tripId, id, changes) => {
+        const activity = value.activities.find((a) => a.id === id)!;
+        Object.assign(activity, changes); return { ok: true, value: { ...activity } };
+      },
+    });
+    getItinerary.mockReturnValueOnce(pending.promise);
+    await click(card(container), "Paseo por el centro");
+    await click(container.querySelector<HTMLElement>('[role="dialog"]')!, "Editar actividad");
+    const title = container.querySelector<HTMLInputElement>('[name="title"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "Paseo editado");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(update).toHaveBeenCalledOnce(); expect(getItinerary).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Actualizando itinerario");
+    const earlierSnapshot = structuredClone(value);
+    earlierSnapshot.activities[1].description = "Descripción actualizada desde el itinerario";
+    await click(voting(card(container)), "A favor");
+    const statusLabel = activityStatus === "voting" ? "En votación" : "Confirmada";
+    expect(card(container).textContent).toContain(statusLabel);
+    await act(async () => pending.resolve({ ok: true, value: earlierSnapshot }));
+    expect(card(container).textContent).toContain(statusLabel);
+    expect(card(container).textContent).not.toContain("Propuesta");
+    if (activityStatus === "confirmed") expect(voting(card(container)).querySelectorAll('[aria-pressed]')).toHaveLength(0);
+    else expect(selected(card(container))).toBe("A favor");
+    expect(card(container).textContent).toContain("Paseo editado");
+    expect(card(container, itineraryId(9)).textContent).toContain("Descripción actualizada desde el itinerario");
+    expect(get).toHaveBeenCalledTimes(2); expect(set).not.toHaveBeenCalled(); expect(write).toHaveBeenCalledOnce(); expect(getItinerary).toHaveBeenCalledTimes(2);
+    await click(card(container), "Paseo editado");
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog.textContent).toContain(statusLabel);
+    if (activityStatus === "confirmed") expect(voting(dialog).querySelectorAll('[aria-pressed]')).toHaveLength(0);
+    else expect(selected(dialog)).toBe("A favor");
   });
   it("hides voting and performs no vote requests when the Trip disables it", async () => {
     const value = fixture(); value.votingEnabled = false;

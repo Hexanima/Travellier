@@ -19,6 +19,7 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta", arrival: "Llegada" };
 const statusLabels = { proposed: "Propuesta", voting: "En votación", confirmed: "Confirmada" };
+const statusRank: Record<ActivityStatus, number> = { proposed: 0, voting: 1, confirmed: 2 };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
 const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 
@@ -41,8 +42,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
     onRetry={() => participation.retry(activityId)} /> : null;
   const voteActivities = useMemo(() => state.kind === "ready" ? state.value.activities : [], [state]);
   const onActivityStatus = useCallback((activityId: string, status: ActivityStatus) => {
-    const rank = { proposed: 0, voting: 1, confirmed: 2 };
-    setState((current) => current.kind !== "ready" || !current.value.activities.some((a) => a.id === activityId && rank[status] > rank[a.status])
+    setState((current) => current.kind !== "ready" || !current.value.activities.some((a) => a.id === activityId && statusRank[status] > statusRank[a.status])
       ? current : { kind: "ready", value: { ...current.value,
         activities: current.value.activities.map((a) => a.id === activityId ? { ...a, status } : a) } });
   }, []);
@@ -65,7 +65,14 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
       try {
         const result = await itinerary.get(tripId);
         if (!cancelled) {
-          if (result.ok) setState({ kind: "ready", value: result.value });
+          if (result.ok) setState((current) => {
+            // An older aggregate snapshot must not undo a status already resolved by a vote or detail request.
+            const statuses = new Map(current.kind === "ready" ? current.value.activities.map(({ id, status }) => [id, status]) : []);
+            return { kind: "ready", value: { ...result.value, activities: result.value.activities.map((activity) => {
+              const previous = statuses.get(activity.id);
+              return previous && statusRank[previous] > statusRank[activity.status] ? { ...activity, status: previous } : activity;
+            }) } };
+          });
           else if (["network", "server"].includes(result.error.kind)) {
             setRefreshError(attempt > 0);
             setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
