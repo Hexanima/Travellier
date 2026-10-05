@@ -42,8 +42,22 @@ import {
   type JourneyTransportFields,
   type TripDestination,
   type Transport,
+  type Activity,
+  type ActivityParticipation,
+  type SetTripActivityParticipationPayload,
+  type SetTripActivityVotePayload,
+  type TripActivityVoteView,
+  type SetTripActivityVoteResult,
+  type CreateTripActivityPayload,
+  type UpdateTripActivityPayload,
+  type TripActivityPayload,
+  type ActivityDetailPayload,
+  type ActivityEditableFields,
+  type Result,
   createObjectId,
   ValidationError,
+  err,
+  ok,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
 import { tripInvitationBridgePage, tripInvitationErrorPage } from "./trips/trip-invitation-page.js";
@@ -97,6 +111,15 @@ export interface TripInvitationApi {
 }
 
 export interface TripApi extends TripInvitationApi {
+  getActivityVote?: (payload: ActivityDetailPayload) => AsyncResult<TripActivityVoteView>;
+  setActivityVote?: (payload: SetTripActivityVotePayload) => AsyncResult<SetTripActivityVoteResult>;
+  getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
+  setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<ActivityParticipation>;
+  createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<Activity>;
+  listActivities?: (payload: TripActivityPayload) => AsyncResult<Activity[]>;
+  getActivity?: (payload: ActivityDetailPayload) => AsyncResult<Activity>;
+  updateActivity?: (payload: UpdateTripActivityPayload) => AsyncResult<Activity>;
+  deleteActivity?: (payload: ActivityDetailPayload) => AsyncResult<void>;
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
   delete?: (payload: DeleteTripPayload) => AsyncResult<void>;
@@ -213,6 +236,13 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     });
   }
 
+  if (error.tag === "ActivityNotFoundError") {
+    return jsonResponse(404, { error: { code: error.tag, message: "Activity not found." } });
+  }
+  if (error.tag === "ActivityVotingDisabledError" || error.tag === "ActivityVotingClosedError") {
+    return jsonResponse(409, { error: { code: error.tag, message: error.tag === "ActivityVotingDisabledError"
+      ? "Activity voting is disabled for this Trip." : "Confirmed activities do not accept votes." } });
+  }
   if (error.tag === "DestinationNotFoundError" || error.tag === "TransportNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Journey resource not found." } });
   }
@@ -399,6 +429,43 @@ const profileUpdatePayload = (
   };
 };
 
+const activityPayload = (payload: Record<string, unknown>, creating: boolean): Result<Partial<ActivityEditableFields>, ValidationError> => {
+  const invalid = (field: string, code = "invalid") => err(new ValidationError([
+    { field, code, message: `Activity ${field} is ${code === "required" ? "required" : "invalid"}.` },
+  ]));
+  if (creating) {
+    for (const field of ["title", "dayId", "scheduledAt"] as const) {
+      if (!Object.hasOwn(payload, field) || payload[field] == null) return invalid(field, "required");
+    }
+  }
+  const fields: Partial<ActivityEditableFields> = {};
+  if (Object.hasOwn(payload, "title")) {
+    if (!isString(payload.title)) return invalid("title");
+    fields.title = payload.title;
+  }
+  if (Object.hasOwn(payload, "dayId")) {
+    const dayId = createObjectId(isString(payload.dayId) ? payload.dayId : "");
+    if (!dayId.ok) return invalid("dayId");
+    fields.dayId = dayId.value;
+  }
+  if (Object.hasOwn(payload, "scheduledAt")) {
+    const value = payload.scheduledAt;
+    if (value == null) return invalid("scheduledAt", "required");
+    const match = isString(value) ? /^\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.exec(value) : null;
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || Number(match[3] ?? 0) > 59) return invalid("scheduledAt");
+    const date = transportInstant(value as string);
+    if (!Number.isFinite(date.getTime())) return invalid("scheduledAt");
+    fields.scheduledAt = date;
+  }
+  for (const field of ["description", "mapsUrl"] as const) {
+    if (Object.hasOwn(payload, field)) {
+      if (!isString(payload[field]) && payload[field] !== null) return invalid(field);
+      fields[field] = payload[field] as string | null;
+    }
+  }
+  return ok(fields);
+};
+
 const unavailableResponse = (): ApiResponse =>
   jsonResponse(503, {
     error: {
@@ -470,6 +537,89 @@ export const handleApiRequest = async (
     if (dependencies.trips?.getItinerary === undefined) return unavailableResponse();
     const result = await dependencies.trips.getItinerary({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, { itinerary: result.value }) : errorResponse(result.error);
+  }
+
+  const voteMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/vote$/);
+  if (voteMatch && (request.method === "GET" || request.method === "PUT")) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(voteMatch[1] ?? "");
+    const activityId = createObjectId(voteMatch[2] ?? "");
+    if (!tripId.ok || !activityId.ok) return invalidRequestResponse();
+    const context = { tripId: tripId.value, activityId: activityId.value, authenticatedUserId: request.authenticatedUserId };
+    if (request.method === "GET") {
+      if (!dependencies.trips?.getActivityVote) return unavailableResponse();
+      const result = await dependencies.trips.getActivityVote(context);
+      return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+    }
+    if (!payload) return invalidRequestResponse();
+    if (!dependencies.trips?.setActivityVote) return unavailableResponse();
+    const result = await dependencies.trips.setActivityVote({ ...context, value: payload.value });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+  }
+
+  const participationMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/participation$/);
+  if (participationMatch && (request.method === "GET" || request.method === "PUT")) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(participationMatch[1] ?? "");
+    const activityId = createObjectId(participationMatch[2] ?? "");
+    if (!tripId.ok || !activityId.ok) return invalidRequestResponse();
+    const context = { tripId: tripId.value, activityId: activityId.value, authenticatedUserId: request.authenticatedUserId };
+    if (request.method === "GET") {
+      if (!dependencies.trips?.getActivityParticipation) return unavailableResponse();
+      const result = await dependencies.trips.getActivityParticipation(context);
+      return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
+    }
+    if (!payload) return invalidRequestResponse();
+    if (!dependencies.trips?.setActivityParticipation) return unavailableResponse();
+    const result = await dependencies.trips.setActivityParticipation({ ...context, status: payload.status });
+    return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
+  }
+
+  const activityListMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities$/);
+  const activityDetailMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)$/);
+  if (activityListMatch || activityDetailMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((activityListMatch ?? activityDetailMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    const activityId = activityDetailMatch ? createObjectId(activityDetailMatch[2] ?? "") : undefined;
+    if (activityId !== undefined && !activityId.ok) return invalidRequestResponse();
+    const context = { tripId: tripId.value, authenticatedUserId: request.authenticatedUserId };
+    const trips = dependencies.trips;
+    if (activityListMatch && request.method === "GET") {
+      if (!trips?.listActivities) return unavailableResponse();
+      const result = await trips.listActivities(context);
+      return result.ok ? jsonResponse(200, { activities: result.value }) : errorResponse(result.error);
+    }
+    if (activityListMatch && request.method === "POST") {
+      if (!payload) return invalidRequestResponse();
+      const parsed = activityPayload(payload, true);
+      if (!parsed.ok) return errorResponse(parsed.error);
+      if (!trips?.createActivity) return unavailableResponse();
+      const result = await trips.createActivity({ ...context, ...parsed.value } as CreateTripActivityPayload);
+      return result.ok ? jsonResponse(201, { activity: result.value }) : errorResponse(result.error);
+    }
+    if (activityId?.ok) {
+      const detail = { ...context, activityId: activityId.value };
+      if (request.method === "GET") {
+        if (!trips?.getActivity) return unavailableResponse();
+        const result = await trips.getActivity(detail);
+        return result.ok ? jsonResponse(200, { activity: result.value }) : errorResponse(result.error);
+      }
+      if (request.method === "PATCH") {
+        if (!payload) return invalidRequestResponse();
+        const parsed = activityPayload(payload, false);
+        if (!parsed.ok) return errorResponse(parsed.error);
+        if (Object.keys(parsed.value).length === 0) return invalidRequestResponse();
+        if (!trips?.updateActivity) return unavailableResponse();
+        const result = await trips.updateActivity({ ...detail, ...parsed.value });
+        return result.ok ? jsonResponse(200, { activity: result.value }) : errorResponse(result.error);
+      }
+      if (request.method === "DELETE") {
+        if (!trips?.deleteActivity) return unavailableResponse();
+        const result = await trips.deleteActivity(detail);
+        return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+      }
+    }
   }
 
   const destinationListMatch = request.url?.match(/^\/trips\/([^/?]+)\/destinations$/);

@@ -456,12 +456,12 @@
 
 ### T37 — Crear interfaz de actividades
 
-**Descripción:** Implementar creación, edición y detalle de actividades planificadas o espontáneas desde el día del itinerario. Incluir título, fecha y hora obligatorios, y descripción y vínculo de Maps opcionales. Usar la zona local del usuario para ingresar y mostrar los horarios.
+**Descripción:** Implementar creación de actividades planificadas, edición y detalle desde el día del itinerario. Incluir título, fecha y hora obligatorios, y descripción y vínculo de Maps opcionales. Usar la zona local del usuario para ingresar y mostrar los horarios. La creación de actividades espontáneas junto a un post corresponde a T43/T44.
 
 **Criterios de aceptación:**
 
 - Se puede crear una actividad desde un día válido.
-- Una actividad planificada solicita fecha y hora previstas; una espontánea precarga fecha y hora actuales y permite ajustarlas para registrar cuándo ocurrió.
+- La creación desde el itinerario solicita fecha y hora previstas, sin selector de actividad planificada o espontánea.
 - No se puede guardar una actividad sin fecha y hora válidas dentro de la ventana habilitada.
 - La actividad aparece en el itinerario al guardar.
 
@@ -532,24 +532,28 @@
 
 ### T43 — Crear API de Posts y vinculaciones
 
-**Descripción:** Implementar creación, edición, consulta y relink posterior de posts. Preservar autoría y validar acceso al Trip.
+**Descripción:** Implementar creación, edición, consulta y relink posterior de posts. Preservar autoría y validar acceso al Trip. Permitir crear una actividad espontánea junto con su primer post vinculado en una misma operación.
 
 **Criterios de aceptación:**
 
 - Un post se puede vincular o desvincular después de creado.
 - Los links inválidos no modifican el post existente.
+- Al crear un post sobre una actividad no cargada, se pueden guardar conjuntamente la actividad espontánea y el post con su `activityId`.
+- La creación conjunta valida membresía, Trip y horario de la actividad; ante un error no persiste ninguno de los dos registros.
 
 **Estimación:** L (8hs)
 **Dependencias:** T10, T32, T42
 
 ### T44 — Crear compositor y edición de Posts
 
-**Descripción:** Implementar pantalla para crear y editar posts desde un día, actividad o acción global. Permitir seleccionar ubicación, gasto y vinculaciones opcionales.
+**Descripción:** Implementar pantalla para crear y editar posts desde un día, actividad o acción global. Permitir seleccionar ubicación, gasto y vinculaciones opcionales. Incluir la creación de una actividad espontánea dentro del compositor cuando todavía no existe, sin exigir una pantalla de alta separada.
 
 **Criterios de aceptación:**
 
 - Se puede crear un post espontáneo sin relaciones.
 - Se puede elegir una actividad, post o transporte del mismo Trip.
+- Se puede crear una actividad espontánea y su primer post vinculado desde el mismo formulario y guardarlos juntos.
+- Ese flujo solicita título y fecha/hora de realización de la actividad; precarga la fecha/hora actuales y permite corregirlas si se registra después de realizada.
 
 **Estimación:** L (8hs)
 **Dependencias:** T08, T09, T43
@@ -768,6 +772,7 @@
 ## Preguntas abiertas
 
 - ¿Cuál es la regla exacta de consenso para confirmar una actividad: unanimidad, mayoría simple, porcentaje configurable o decisión manual de un admin?
+- ¿Qué debe pasar con los votos existentes si se modifica el horario o contenido de una propuesta? ¿Cómo se vinculan y resuelven sus contrapropuestas?
 - ¿Cómo se distribuye un gasto en modo balance: partes iguales entre todos los miembros, participantes seleccionados o proporciones personalizadas?
 - ¿Qué moneda, precisión decimal y reglas de redondeo deben aplicarse a los gastos?
 - El modelo `direction: outbound | return` no representa claramente traslados entre destinos intermedios. ¿Cada destino requiere transporte de llegada y salida, o solo el primero y último?

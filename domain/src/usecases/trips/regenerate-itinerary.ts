@@ -1,3 +1,4 @@
+import { validateActivitySchedule } from "../../entities/activity-schedule.js";
 import type { ItineraryDay, ItineraryDayDraft } from "../../entities/itinerary-day.js";
 import { ItineraryConflictError } from "../../errors/itinerary-conflict-error.js";
 import type { TripJourneyPort } from "../../ports/trip-journey-port.js";
@@ -28,14 +29,8 @@ export const regenerateItinerary = async (journeys: TripJourneyPort, tripId: Obj
     if (!byId.has(post.dayId)) return err(new ItineraryConflictError());
   }
   for (const activity of references.value.activities) {
-    const day = byId.get(activity.dayId);
-    const timestamp = activity.scheduledAt?.getTime();
-    // Slices own their start; UTC midnight belongs to the following slice.
-    // The final departure instant remains a valid activity-window boundary.
-    const nextActivity = day && days.some((next) => next.destinationId === day.destinationId &&
-      next.type === "activity" && next.startsAt.getTime() === day.endsAt.getTime());
-    if (!day || day.type !== "activity" || !Number.isFinite(timestamp) || timestamp < day.startsAt.getTime() ||
-      timestamp > day.endsAt.getTime() || (timestamp === day.endsAt.getTime() && nextActivity)) {
+    const schedule = validateActivitySchedule({ ...activity, tripId }, days);
+    if (!schedule.ok) {
       return err(new ItineraryConflictError());
     }
   }

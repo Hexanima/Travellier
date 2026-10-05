@@ -20,3 +20,9 @@ Before generating a Capacitor build, copy `.env.example` to `.env.production.loc
 - `yarn workspace web cap:build:ios`
 
 Android builds require Android Studio and its SDK. From the command line, point `JAVA_HOME` to Android Studio's bundled JBR and `ANDROID_HOME` to the installed SDK. iOS builds require macOS with Xcode.
+
+## Activity participation (T39)
+
+The itinerary and activity detail share the current user's participation controls: “Voy” (`going`), “No voy” (`not_going`) and “Sin responder” (`pending`). The authenticated GET/PUT `/trips/:tripId/activities/:activityId/participation` endpoints from T38 must be available in the deployed API.
+
+An absent record appears as unanswered only after a successful GET; loading and read failures have separate states. Responses are loaded once per activity during the screen's lifetime. A successful PUT updates only the own participation shared by agenda and detail, without fetching the itinerary again or changing the activity's voting status, other members' responses, posts or expenses. Failed writes preserve the previous selection and allow retry; unavailable resources and expired sessions disable the participation controls. Leaving the itinerary or changing Trip clears the screen's participation state.

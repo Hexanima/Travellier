@@ -37,8 +37,45 @@
 .itinerary-expense-total { text-align: right; }
 .itinerary-expense-total strong { font-size: 1.25rem; }
 .itinerary-shell ::selection { color: #fff; background: var(--ui-color-accent); }
+.activity-create { margin-bottom: var(--ui-space-4); }
+.activity-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
+.activity-title.ui-button:hover:not(:disabled) { color: var(--ui-color-text); }
+.activity-form, .activity-detail { display: grid; gap: var(--ui-space-4); }
+.activity-detail h3, .activity-detail p, .activity-context { margin: 0; line-height: 1.5; }
+.activity-context { color: #526270; font-size: .875rem; }
+.activity-date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--ui-space-3); }
+.activity-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.activity-maps-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.activity-dialog .ui-modal-backdrop { z-index: 10; }
+.activity-dialog .ui-modal { max-block-size: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--ui-color-accent) var(--ui-color-surface); }
+.activity-dialog .ui-modal__close { min-width: 44px; min-height: 44px; }
+.activity-dialog .ui-control { min-width: 0; caret-color: var(--ui-color-accent); }
+.activity-dialog a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-dialog .ui-modal__title { overflow-wrap: anywhere; }
+.activity-dialog .ui-modal__content { margin-inline: 0; }
+.activity-participation { min-width: 0; margin: var(--ui-space-4) 0 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-3); }
+.activity-participation legend { padding: 0; margin-bottom: var(--ui-space-2); font-weight: 600; }
+.activity-participation .activity-participation-status { margin: 0; color: var(--ui-color-text); }
+.activity-participation-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.activity-participation-actions .ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.activity-participation-actions .ui-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
+.activity-participation-actions .ui-button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-color-accent) 10%, var(--ui-color-surface)); }
+.activity-participation-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-participation a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.activity-participation a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
 @media (max-width: 540px) {
   .itinerary-band { padding: 16px; }
   .itinerary-band-header { flex-wrap: wrap; }
   .itinerary-items > .itinerary-item { gap: 12px; }
 }
+@media (max-width: 360px) { .activity-date-time { grid-template-columns: minmax(0, 1fr); } }
+.activity-vote { min-width: 0; margin: var(--ui-space-4) 0 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-3); }
+.activity-vote legend { padding: 0; margin-bottom: var(--ui-space-2); font-weight: 600; }
+.activity-vote .activity-vote-status { margin: 0; color: var(--ui-color-text); }
+.activity-vote-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.activity-vote-actions .ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.activity-vote-actions .ui-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
+.activity-vote-actions .ui-button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-color-accent) 10%, var(--ui-color-surface)); }
+.activity-vote-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-vote a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.activity-vote a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }

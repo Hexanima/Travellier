@@ -9,3 +9,6 @@ export * from "./transport-write-port.js";
 export * from "./trip-journey-port.js";
 export * from "./trip-itinerary-query-port.js";
 export * from "./trip-deletion-port.js";
+export * from "./trip-activity-port.js";
+export * from "./trip-participation-port.js";
+export * from "./trip-vote-port.js";
