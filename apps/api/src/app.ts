@@ -45,6 +45,9 @@ import {
   type Activity,
   type ActivityParticipation,
   type SetTripActivityParticipationPayload,
+  type SetTripActivityVotePayload,
+  type TripActivityVoteView,
+  type SetTripActivityVoteResult,
   type CreateTripActivityPayload,
   type UpdateTripActivityPayload,
   type TripActivityPayload,
@@ -108,6 +111,8 @@ export interface TripInvitationApi {
 }
 
 export interface TripApi extends TripInvitationApi {
+  getActivityVote?: (payload: ActivityDetailPayload) => AsyncResult<TripActivityVoteView>;
+  setActivityVote?: (payload: SetTripActivityVotePayload) => AsyncResult<SetTripActivityVoteResult>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<ActivityParticipation>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<Activity>;
@@ -233,6 +238,10 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
 
   if (error.tag === "ActivityNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Activity not found." } });
+  }
+  if (error.tag === "ActivityVotingDisabledError" || error.tag === "ActivityVotingClosedError") {
+    return jsonResponse(409, { error: { code: error.tag, message: error.tag === "ActivityVotingDisabledError"
+      ? "Activity voting is disabled for this Trip." : "Confirmed activities do not accept votes." } });
   }
   if (error.tag === "DestinationNotFoundError" || error.tag === "TransportNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Journey resource not found." } });
@@ -528,6 +537,24 @@ export const handleApiRequest = async (
     if (dependencies.trips?.getItinerary === undefined) return unavailableResponse();
     const result = await dependencies.trips.getItinerary({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, { itinerary: result.value }) : errorResponse(result.error);
+  }
+
+  const voteMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/vote$/);
+  if (voteMatch && (request.method === "GET" || request.method === "PUT")) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(voteMatch[1] ?? "");
+    const activityId = createObjectId(voteMatch[2] ?? "");
+    if (!tripId.ok || !activityId.ok) return invalidRequestResponse();
+    const context = { tripId: tripId.value, activityId: activityId.value, authenticatedUserId: request.authenticatedUserId };
+    if (request.method === "GET") {
+      if (!dependencies.trips?.getActivityVote) return unavailableResponse();
+      const result = await dependencies.trips.getActivityVote(context);
+      return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+    }
+    if (!payload) return invalidRequestResponse();
+    if (!dependencies.trips?.setActivityVote) return unavailableResponse();
+    const result = await dependencies.trips.setActivityVote({ ...context, value: payload.value });
+    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
   }
 
   const participationMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/participation$/);

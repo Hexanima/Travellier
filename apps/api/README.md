@@ -11,6 +11,8 @@ The `/health` endpoint composes a response from the domain use case exported by 
 - `yarn workspace api build`
 - `yarn workspace api start`
 
+Los tests preparan el binario de MongoDB una sola vez mediante el global setup de Vitest, antes de iniciar las suites paralelas. En un entorno sin caché, la descarga termina antes de ejecutar los hooks de cada suite; si falla, aborta el setup. Cada suite conserva su propia instancia y base de datos.
+
 ## Configuración local
 
 Copiar [`.env.example`](.env.example) a `apps/api/.env`. Completar la URI de Atlas y un secreto JWT propio; usar una base de desarrollo separada de producción. El archivo `.env` está ignorado por Git. No copiar sus valores al frontend.
@@ -94,6 +96,27 @@ No se crean participaciones automáticamente: GET sin registro devuelve `null` y
 Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o de otro Trip responde 404 `ActivityNotFoundError`. Identificadores malformados, JSON inválido o un body que no sea objeto responden 400. Un estado ausente, `null` o distinto de los tres admitidos responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503; los fallos inesperados responden 500 genérico.
 
 La colección `activityParticipations` conserva el índice único `{ activityId: 1, userId: 1 }` de T04. Los identificadores y referencias se almacenan como BSON `ObjectId`, y `updatedAt` como BSON `Date`; `tripId` coincide con el de la actividad. PUT autoriza y realiza el upsert en una misma transacción coordinada por Trip con eliminación de actividades, baja del Trip y expulsión de miembros. Los conflictos de escritura se reintentan mediante el driver y cualquier fallo aborta los cambios. Una eliminación no deja participaciones huérfanas; si la expulsión se confirma primero, la escritura se rechaza por falta de membresía. GET usa un snapshot sin modificar datos. T38 no requiere una nueva migración.
+
+## API de votos de actividades (T40)
+
+Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden consultar y reemplazar exclusivamente su propio voto; `userId` se obtiene del JWT.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/trips/:tripId/activities/:activityId/vote` | 200 `{ vote, activityStatus }`; `vote` es `null` si no existe |
+| PUT | `/trips/:tripId/activities/:activityId/vote` | 200 `{ vote, activityStatus }`, tanto al registrar como al reemplazar |
+
+PUT requiere `{ "value": "up" }` o `{ "value": "down" }`. El voto contiene `id`, `tripId`, `activityId`, `userId`, `value` y `createdAt` en ISO UTC con milisegundos. ID, referencias y fecha son controlados por la API; los campos protegidos enviados en el body se ignoran. Reemplazar o repetir el voto conserva su ID y fecha original de creación, sin duplicar registros ni alterar votos de otros miembros o participaciones.
+
+El primer voto, a favor o en contra, pasa `proposed` a `voting`. Los votos posteriores conservan `voting`; no hay confirmación automática por mayoría o unanimidad. La transición está encapsulada en la política de dominio `transitionAfterActivityVote`, para incorporar la futura regla de consenso. Las actividades `confirmed` rechazan nuevos votos y reemplazos. La API de edición de actividades sigue conservando estado y votos: el tratamiento de votos al editar una propuesta y las contrapropuestas requieren una definición posterior.
+
+Con votación desactivada, PUT responde 409 `ActivityVotingDisabledError` sin escrituras. Una actividad confirmada responde 409 `ActivityVotingClosedError`. GET permite consultar el voto propio existente aun con votación desactivada o actividad confirmada; no crea votos ni modifica estado o revisión del Trip.
+
+Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o ajena responde 404 `ActivityNotFoundError`. IDs malformados, JSON inválido o body que no sea objeto responden 400. Un valor ausente, `null` o distinto de `up`/`down` responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503 y los fallos inesperados responden 500 genérico.
+
+`activityVotes` reutiliza el índice único `{ activityId: 1, userId: 1 }` de T04. IDs y referencias se guardan como BSON `ObjectId`, y `createdAt` como BSON `Date`; `tripId` coincide con el de la actividad. No requiere una nueva migración.
+
+PUT autoriza, lee la configuración, realiza el upsert y aplica la transición en una misma transacción, coordinada por Trip con bajas de actividades/Trip, cambios de configuración e itinerario y expulsiones. Los conflictos de escritura se reintentan mediante el driver y cualquier error aborta todos los cambios. Una baja no deja votos huérfanos; si una expulsión o desactivación se confirma primero, el voto se rechaza. GET usa un snapshot consistente. El estado actualizado aparece en la siguiente lectura de la actividad o del itinerario. La interfaz de votación corresponde a T41 y las notificaciones a T57.
 
 ## Consulta de itinerario (T33)
 
