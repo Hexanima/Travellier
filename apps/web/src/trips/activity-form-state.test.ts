@@ -9,7 +9,7 @@ const context = (timeZone = "America/Argentina/Buenos_Aires"): ActivityFormConte
   return { tripId: itinerary.tripId, days: itinerary.days, timeZone,
     selection: { date: "2026-09-25", destinationId: day.destinationId, sourceDayIds: [day.id], startsAt: day.startsAt, endsAt: day.endsAt } };
 };
-const values = () => ({ mode: "planned" as const, title: "  Paseo  ", description: "", mapsUrl: "", date: "2026-09-25", time: "09:00" });
+const values = () => ({ title: "  Paseo  ", description: "", mapsUrl: "", date: "2026-09-25", time: "09:00" });
 const reschedulingContext = (timeZone?: string): ActivityFormContext => {
   const ctx = context(timeZone);
   ctx.days[1].endsAt = "2026-09-26T00:00:00.000Z";
@@ -24,18 +24,9 @@ const invalid = (change: Partial<ReturnType<typeof values>>, field: string) => {
 
 describe("activity form state", () => {
   it("starts a planned activity on the selected local date without inventing a time", () => {
-    expect(initialActivityValues(context(), "planned", new Date("2026-10-04T12:00:00Z")))
-      .toMatchObject({ mode: "planned", date: "2026-09-25", time: "", title: "", description: "", mapsUrl: "" });
-  });
-  it("prefills a spontaneous activity with the actual local occurrence time", () => {
-    const value = initialActivityValues(context(), "spontaneous", new Date("2026-09-25T12:34:56.789Z"));
-    expect(value).toMatchObject({ mode: "spontaneous", date: "2026-09-25", time: "09:34" });
-    expect(prepareActivityInput({ ...value, title: "Ahora" }, context())).toMatchObject({ ok: true, value: { scheduledAt: "2026-09-25T12:34:56.789Z" } });
-  });
-  it("does not silently move a spontaneous timestamp into the selected day", () => {
-    const value = initialActivityValues(context(), "spontaneous", new Date("2026-10-04T12:00:00Z"));
-    expect(value.date).toBe("2026-10-04");
-    expect(prepareActivityInput({ ...value, title: "Ahora" }, context()).ok).toBe(false);
+    const initial = initialActivityValues(context());
+    expect(initial).toMatchObject({ date: "2026-09-25", time: "", title: "", description: "", mapsUrl: "" });
+    expect(initial).not.toHaveProperty("mode");
   });
   it("prepares a canonical day ID and UTC instant while clearing empty optional fields", () => {
     expect(prepareActivityInput(values(), context())).toEqual({ ok: true, value: {
@@ -54,7 +45,7 @@ describe("activity form state", () => {
   });
   it("preserves UTC seconds and milliseconds when editing another field", () => {
     const existing = (itineraryFixture() as TripItineraryResponse).activities[0];
-    const value = initialActivityValues(context(), "planned", new Date(), existing);
+    const value = initialActivityValues(context(), existing);
     expect(value.time).toBe("09:00");
     expect(prepareActivityInput({ ...value, title: "Nuevo" }, context()))
       .toMatchObject({ ok: true, value: { scheduledAt: existing.scheduledAt, dayId: existing.dayId } });
