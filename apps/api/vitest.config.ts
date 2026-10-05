@@ -11,6 +11,7 @@ export default defineConfig({
         },
     },
     test: {
+        globalSetup: ["./test/mongodb-global-setup.ts"],
         coverage: {
             exclude: ["**/index.ts", "src/errors/generic-errors/**/*"],
         },
