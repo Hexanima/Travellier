@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {readFile,mkdir} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire(import.meta.url)('C:/Users/nicol/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const root=new URL('./public/',import.meta.url),captures=new URL('./review/activity-photos/',import.meta.url);
+const types={html:'text/html',css:'text/css',mjs:'text/javascript',svg:'image/svg+xml',jpg:'image/jpeg',woff2:'font/woff2'};
+const server=http.createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname,file=new URL(path==='/'?'index.html':'.'+path,root);if(!file.href.startsWith(root.href))throw Error();res.setHeader('Content-Type',types[file.pathname.split('.').at(-1)]||'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404);res.end();}});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));await mkdir(captures,{recursive:true});
+const browser=await chromium.launch({channel:'msedge',headless:true}),errors=[];
+try{
+ for(const [name,width,height] of [['mobile',390,844],['desktop',1280,844],['narrow',320,700]]){
+  const page=await browser.newPage({viewport:{width,height},hasTouch:true});page.setDefaultTimeout(4000);page.on('pageerror',e=>errors.push(e.message));
+  const phone=page.locator('.phone'),body=phone.locator('.phone-body');
+  const click=label=>phone.getByRole(['Diario','Fotos','Posts','Grupo','Itinerario'].includes(label)?'tab':'button',{name:label,exact:true}).click();
+  const check=async()=>{await page.waitForFunction(()=>Array.from(document.querySelectorAll('.phone img')).every(img=>img.complete&&img.naturalWidth));assert.ok(await phone.evaluate(el=>el.scrollWidth<=el.clientWidth),'no horizontal overflow');};
+  const shot=async label=>{await page.evaluate(()=>document.fonts.ready);await check();if(name!=='narrow')await page.screenshot({path:fileURLToPath(new URL(name+'-'+label+'.png',captures))});};
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?mode=app&screen=participation');
+  assert.equal(await phone.getByRole('tab',{name:'Recuerdos · 4'}).getAttribute('aria-selected'),'true');
+  assert.equal(await phone.locator('.activity-memory-thumb').count(),3);
+  assert.equal(await phone.locator('[data-record=gelato-text-post] img').count(),0);
+  await phone.locator('.activity-memories').scrollIntoViewIfNeeded();await shot('memories');
+  await phone.getByRole('tab',{name:'Fotos · 5'}).click();assert.equal(await phone.locator('.activity-photo').count(),5);
+  assert.equal(await phone.locator('[data-photo-post=museum-post]').count(),0);
+  await shot('photos');const scroll=await body.evaluate(el=>el.scrollTop);
+  await phone.locator('.activity-photo').nth(1).click();
+  assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'2 / 5');
+  assert.ok((await phone.locator('.viewer-photo img').getAttribute('src')).endsWith('street.jpg'));await shot('viewer');
+  await click('Ver recuerdo');assert.equal(await phone.locator('.photo-count').textContent(),'2 / 3');
+  await click('Volver');assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'2 / 5');
+  await phone.locator('.viewer-photo').focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'3 / 5');
+  await phone.locator('.viewer-photo').evaluate(el=>{
+   el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,touches:[new Touch({identifier:0,target:el,clientX:250,clientY:200})]}));
+   el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,changedTouches:[new Touch({identifier:0,target:el,clientX:100,clientY:210})]}));
+  });
+  assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'4 / 5');
+  await click('Siguiente foto');assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'5 / 5');
+  assert.ok(await phone.getByRole('button',{name:'Siguiente foto',exact:true}).isDisabled());
+  await click('Ver recuerdo');assert.ok(await phone.getByRole('heading',{name:'Una última vuelta por el barrio',exact:true}).isVisible());
+  await click('Volver');await click('Volver');
+  assert.equal(await phone.getByRole('tab',{name:'Fotos · 5'}).getAttribute('aria-selected'),'true');
+  assert.ok(Math.abs(await body.evaluate(el=>el.scrollTop)-scroll)<2,'back restores activity gallery position');
+  await phone.getByRole('tab',{name:'Fotos · 5'}).focus();await page.keyboard.press('Home');
+  assert.equal(await phone.getByRole('tab',{name:'Recuerdos · 4'}).getAttribute('aria-selected'),'true');
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?mode=app&screen=vote');
+  await phone.getByRole('tab',{name:'Fotos · 1'}).click();await phone.locator('.activity-photo').click();
+  assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'1 / 1');
+  assert.ok(await phone.getByRole('button',{name:'Foto anterior',exact:true}).isDisabled());
+  assert.ok(await phone.getByRole('button',{name:'Siguiente foto',exact:true}).isDisabled());
+  await click('Ver recuerdo');await click('Editar post');
+  await phone.getByRole('button',{name:'Agregar fotos',exact:true}).click();
+  await phone.getByRole('button',{name:'Elegir foto castle',exact:true}).click();await click('Agregar al recuerdo');await click('Guardar cambios');
+  await phone.getByRole('button',{name:'Museos Vaticanos',exact:false}).click();
+  await phone.getByRole('tab',{name:'Fotos · 0'}).click();
+  assert.ok(await phone.getByText('Todavía no hay fotos de esta actividad.',{exact:true}).isVisible());
+  await shot('empty');await click('Compartir un recuerdo');
+  assert.ok(await phone.getByText('Actividad · Museos Vaticanos',{exact:true}).isVisible());
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?mode=app&screen=participation');
+  await phone.getByRole('tab',{name:'Fotos · 5'}).click();await phone.locator('.activity-photo').first().click();await click('Volver');await click('Volver');
+  assert.equal(await phone.getAttribute('data-screen'),'itinerary');await click('Volver a Mis viajes');
+  await phone.locator('[data-action=trip][data-value=italia]').click();await click('Diario');await click('Fotos');
+  assert.equal(await phone.locator('.gallery-item').count(),8);await phone.locator('.gallery-item').first().click();
+  assert.equal(await phone.locator('.viewer-navigation [role=status]').textContent(),'1 / 8');await check();await page.close();
+ }
+ assert.deepEqual(errors,[]);console.log('PASS: activity thumbnails/counts, chain photos, scoped viewer, source photo, swipe/keyboard, back/tab/scroll, empty state, prelinked composer and trip gallery; 320/390/1280px');
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

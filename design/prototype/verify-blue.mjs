@@ -1,0 +1,53 @@
+import {createRequire} from 'node:module';
+import {mkdir} from 'node:fs/promises';
+import assert from 'node:assert/strict';
+const require=createRequire(import.meta.url);
+const {chromium}=require('C:/Users/nicol/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const page=await browser.newPage({viewport:{width:1280,height:1200}});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('response',r=>{if(r.status()>=400)errors.push(r.status()+' '+r.url());});
+const review=new URL('./review/blue-import/',import.meta.url);await mkdir(review,{recursive:true});
+await page.goto('http://127.0.0.1:4173/');await page.evaluate(()=>document.fonts.ready);
+const nav=view=>page.locator('#screen-select').selectOption(view);
+const views=['trips','empty','join','itinerary','vote','add','participation','post','gallery'];
+assert.equal(await page.locator('.phone').count(),1);
+assert.equal(await page.locator('.leather-proposal').count(),0);
+assert.deepEqual(await page.locator('.trip-card').evaluate(el=>({width:el.offsetWidth,height:el.offsetHeight})),{width:342,height:260});
+for(const width of [1280,320]){
+ await page.setViewportSize({width,height:1200});
+ for(const view of views){
+  await nav(view);await page.evaluate(()=>document.fonts.ready);
+  assert.equal(await page.locator('.phone').getAttribute('data-screen'),view);
+  const metrics=await page.locator('.phone').evaluate(el=>({width:el.clientWidth,height:el.clientHeight,overflow:el.scrollWidth>el.clientWidth,bodyOverflow:el.querySelector('.phone-body').scrollWidth>el.querySelector('.phone-body').clientWidth}));
+  assert.equal(metrics.height,844);assert.equal(metrics.overflow,false,view+' phone overflow '+width);assert.equal(metrics.bodyOverflow,false,view+' body overflow '+width);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,view+' page overflow '+width);
+  await page.evaluate(()=>{scrollTo(0,0);document.querySelector('.phone-body').scrollTop=0;});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const clip=await page.locator('.phone').evaluate(el=>{const r=el.getBoundingClientRect();return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height};});
+  await page.screenshot({path:new URL(view+'-'+width+'.png',review).pathname.replace(/^\/([A-Z]:)/,'$1'),clip,fullPage:true,animations:'disabled'});
+ }
+ await nav('foundations');assert.equal(await page.locator('.foundations h2').first().innerText(),'Travellier');
+ assert.equal(await page.locator('.control-specimen').count(),8);
+ assert.equal(await page.locator('.control-specimen [aria-busy="true"]').count(),2);
+ assert.equal(await page.locator('.foundations input[aria-invalid="true"]').count(),1);
+ assert.equal(await page.locator('.foundations input:disabled').count(),1);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'foundations overflow '+width);
+ await page.screenshot({path:new URL('foundations-'+width+'.png',review).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+}
+await page.setViewportSize({width:1280,height:1200});
+await nav('trips');await page.locator('.invitation').click();assert.equal(await page.locator('#join-form').count(),1);
+await page.locator('[name="code"]').fill('OTRO');assert.equal(await page.locator('#invite-preview').isVisible(),false);
+await page.locator('[form="join-form"]').click();assert.match(await page.locator('#invite-error').innerText(),/ITALIA26/);
+await page.locator('[name="code"]').fill('ITALIA26');await page.locator('[form="join-form"]').click();assert.equal(await page.locator('.phone').getAttribute('data-screen'),'trips');assert.match(await page.locator('#notice-text').innerText(),/ningún integrante real/);
+await nav('vote');await page.locator('[data-action="vote"][data-value="down"]').click();assert.match(await page.locator('[data-action="vote"][data-value="up"]').innerText(),/2/);assert.match(await page.locator('[data-action="vote"][data-value="down"]').innerText(),/2/);
+await page.locator('[data-action="vote"][data-value="down"]').click();assert.match(await page.locator('[data-action="vote"][data-value="down"]').innerText(),/2/);
+await nav('participation');await page.locator('[data-action="participation"][data-value="not_going"]').click();assert.equal(await page.locator('.detail-badge').innerText(),'Confirmada');assert.match(await page.locator('.group-response').innerText(),/2 van/);
+await nav('itinerary');await page.locator('.participation button').click();assert.equal(await page.locator('.phone').getAttribute('data-screen'),'participation');
+await nav('itinerary');await page.locator('.day-action button').click();assert.equal(await page.locator('#activity-form').count(),1);await page.locator('[form="activity-form"]').click();assert.match(await page.locator('#notice-text').innerText(),/No se guardó/);
+await nav('post');await page.locator('[name="comment"]').fill('<b>Buen viaje</b>');await page.locator('.comment-form button').click();assert.match(await page.locator('.comment').last().innerText(),/<b>Buen viaje<\/b>/);assert.equal(await page.locator('.comment b').count(),0);
+await nav('gallery');for(const id of [0,1,2,3,4])await page.locator('[data-action="select"][data-value="'+id+'"]').click();assert.equal(await page.locator('.gallery-item[aria-pressed="true"]').count(),4);
+await page.locator('[data-action="collage"]').click();assert.equal(await page.locator('.collage-preview img').count(),4);
+await nav('trips');await page.screenshot({path:new URL('desktop.png',review).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+await page.setViewportSize({width:390,height:1200});await page.screenshot({path:new URL('mobile.png',review).pathname.replace(/^\/([A-Z]:)/,'$1'),fullPage:true});
+assert.deepEqual(errors,[]);console.log('Blue prototype: 10 views, 320/390/1280 widths, navigation, invitation, voting, participation, forms and prior memory interactions passed.');
+await browser.close();

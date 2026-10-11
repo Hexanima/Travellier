@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import {readFile,mkdir} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+const {chromium}=createRequire(import.meta.url)('C:/Users/nicol/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const root=new URL('./public/',import.meta.url),captures=new URL('./review/post-thread/',import.meta.url);
+const types={html:'text/html',css:'text/css',mjs:'text/javascript',svg:'image/svg+xml',jpg:'image/jpeg',woff2:'font/woff2'};
+const server=http.createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname,file=new URL(path==='/'?'index.html':'.'+path,root);if(!file.href.startsWith(root.href))throw Error();res.setHeader('Content-Type',types[file.pathname.split('.').at(-1)]||'application/octet-stream');res.end(await readFile(file));}catch{res.writeHead(404);res.end();}});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));await mkdir(captures,{recursive:true});
+const browser=await chromium.launch({channel:'msedge',headless:true}),errors=[];
+try{
+ for(const [name,width,height] of [['mobile',390,844],['desktop',1280,844],['narrow',320,700]]){
+  const page=await browser.newPage({viewport:{width,height}});page.setDefaultTimeout(3000);page.on('pageerror',e=>errors.push(e.message));
+  const phone=page.locator('.phone'),body=phone.locator('.phone-body');
+  const click=label=>phone.getByRole('button',{name:label,exact:true}).click();
+  const check=async()=>{assert.ok(await phone.evaluate(el=>el.scrollWidth<=el.clientWidth),'no horizontal overflow');assert.equal(await phone.locator('img').evaluateAll(imgs=>imgs.filter(img=>!img.complete||!img.naturalWidth).length),0);};
+  const shot=async(label)=>{await page.evaluate(()=>document.fonts.ready);await check();if(name!=='narrow')await page.screenshot({path:fileURLToPath(new URL(name+'-'+label+'.png',captures))});};
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?mode=app&screen=post');
+  await shot('root');
+  assert.equal(await phone.getByRole('tab',{name:'Recuerdos · 1'}).getAttribute('aria-selected'),'true');
+  assert.equal(await phone.locator('[data-child-post]').count(),1);
+  await phone.locator('[data-child-post=gelato-post]').scrollIntoViewIfNeeded();await shot('root-children');
+  const rootScroll=await body.evaluate(el=>el.scrollTop);
+  await phone.locator('[data-child-post=gelato-post]').click();
+  assert.equal(await phone.locator('[data-child-post]').count(),2);
+  assert.equal(await phone.locator('.post-parent').getAttribute('data-record'),'cafe-post');
+  await phone.locator('.post-response-tabs').scrollIntoViewIfNeeded();await shot('branch');
+  await phone.locator('[data-child-post=gelato-text-post]').click();
+  assert.ok(await phone.getByText('Todavía no hay continuaciones.',{exact:true}).isVisible());
+  await shot('text-leaf');await click('Volver');
+  assert.equal(await phone.locator('[data-child-post]').count(),2);
+  await click('Volver');assert.equal(await phone.locator('[data-child-post]').count(),1);
+  assert.ok(Math.abs(await body.evaluate(el=>el.scrollTop)-rootScroll)<2,'back restores position in the parent list');
+  await phone.getByRole('tab',{name:'Comentarios · 2'}).click();
+  assert.equal(await phone.locator('.comment-thread article').count(),2);
+  assert.equal(await phone.locator('[data-child-post]').count(),0);
+  await phone.locator('[name=comment]').fill('Nos quedamos un rato más.');
+  await phone.getByRole('tab',{name:'Recuerdos · 1'}).click();
+  await phone.getByRole('tab',{name:'Comentarios · 2'}).click();
+  assert.equal(await phone.locator('[name=comment]').inputValue(),'Nos quedamos un rato más.');
+  await phone.locator('[data-action=post-like]').click();
+  assert.equal(await phone.locator('[name=comment]').inputValue(),'Nos quedamos un rato más.');
+  await shot('comments');await click('Publicar comentario');
+  assert.equal(await phone.locator('.comment-thread article').count(),3);
+  assert.equal(await phone.locator('[name=comment]').inputValue(),'');
+  await phone.getByRole('tab',{name:'Recuerdos · 1'}).click();
+  // Keyboard tabs switch the panel and focus correctly.
+  await phone.getByRole('tab',{name:'Recuerdos · 1'}).focus();await page.keyboard.press('ArrowRight');
+  assert.equal(await phone.getByRole('tab',{name:'Comentarios · 3'}).getAttribute('aria-selected'),'true');
+  await page.keyboard.press('ArrowLeft');
+  await click('Continuar recuerdo');
+  assert.ok(await phone.getByText('Post · El primer paseo',{exact:true}).isVisible());
+  assert.equal(await phone.locator('[name=day],[name=date],[name=time]').count(),0);
+  await phone.locator('[name=description]').fill('La foto que faltaba del café.');
+  await click('Publicar recuerdo');
+  assert.equal(await phone.locator('.post-parent').getAttribute('data-record'),'cafe-post');
+  await phone.locator('.post-parent').click();
+  assert.equal(await phone.locator('[data-child-post]').count(),2);
+  assert.ok(await phone.getByText('La foto que faltaba del café.',{exact:true}).isVisible());
+  await check();await page.close();
+ }
+ assert.deepEqual(errors,[]);
+ console.log('PASS: direct children, branching navigation/back + scroll, parent preview, tabs/keyboard, comment drafts/likes, continuation publication; 320/390/1280px');
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));}

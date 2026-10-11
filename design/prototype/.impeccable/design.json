@@ -1,0 +1,396 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-09T00:00:00Z",
+  "title": "Design System: Travellier · diseño azul",
+  "extensions": {
+    "colorMeta": {
+      "navy-brand": {
+        "role": "primary",
+        "displayName": "navy brand",
+        "tonalRamp": [
+          "oklch(15% 0.0625 251.22)",
+          "oklch(27% 0.0625 251.22)",
+          "oklch(39% 0.0625 251.22)",
+          "oklch(51% 0.0625 251.22)",
+          "oklch(63% 0.0625 251.22)",
+          "oklch(75% 0.0625 251.22)",
+          "oklch(87% 0.0625 251.22)",
+          "oklch(95% 0.0625 251.22)"
+        ]
+      },
+      "navy-ink": {
+        "role": "neutral",
+        "displayName": "navy ink",
+        "tonalRamp": [
+          "oklch(15% 0.0365 249.20)",
+          "oklch(27% 0.0365 249.20)",
+          "oklch(39% 0.0365 249.20)",
+          "oklch(51% 0.0365 249.20)",
+          "oklch(63% 0.0365 249.20)",
+          "oklch(75% 0.0365 249.20)",
+          "oklch(87% 0.0365 249.20)",
+          "oklch(95% 0.0365 249.20)"
+        ]
+      },
+      "navy-muted": {
+        "role": "neutral",
+        "displayName": "navy muted",
+        "tonalRamp": [
+          "oklch(15% 0.0267 246.34)",
+          "oklch(27% 0.0267 246.34)",
+          "oklch(39% 0.0267 246.34)",
+          "oklch(51% 0.0267 246.34)",
+          "oklch(63% 0.0267 246.34)",
+          "oklch(75% 0.0267 246.34)",
+          "oklch(87% 0.0267 246.34)",
+          "oklch(95% 0.0267 246.34)"
+        ]
+      },
+      "navy-paper": {
+        "role": "neutral",
+        "displayName": "navy paper",
+        "tonalRamp": [
+          "oklch(15% 0.0057 84.57)",
+          "oklch(27% 0.0057 84.57)",
+          "oklch(39% 0.0057 84.57)",
+          "oklch(51% 0.0057 84.57)",
+          "oklch(63% 0.0057 84.57)",
+          "oklch(75% 0.0057 84.57)",
+          "oklch(87% 0.0057 84.57)",
+          "oklch(95% 0.0057 84.57)"
+        ]
+      },
+      "navy-surface": {
+        "role": "neutral",
+        "displayName": "navy surface",
+        "tonalRamp": [
+          "oklch(15% 0.0000 89.88)",
+          "oklch(27% 0.0000 89.88)",
+          "oklch(39% 0.0000 89.88)",
+          "oklch(51% 0.0000 89.88)",
+          "oklch(63% 0.0000 89.88)",
+          "oklch(75% 0.0000 89.88)",
+          "oklch(87% 0.0000 89.88)",
+          "oklch(95% 0.0000 89.88)"
+        ]
+      },
+      "navy-on-brand-muted": {
+        "role": "neutral",
+        "displayName": "navy on brand muted",
+        "tonalRamp": [
+          "oklch(15% 0.0282 248.15)",
+          "oklch(27% 0.0282 248.15)",
+          "oklch(39% 0.0282 248.15)",
+          "oklch(51% 0.0282 248.15)",
+          "oklch(63% 0.0282 248.15)",
+          "oklch(75% 0.0282 248.15)",
+          "oklch(87% 0.0282 248.15)",
+          "oklch(95% 0.0282 248.15)"
+        ]
+      },
+      "navy-soft": {
+        "role": "neutral",
+        "displayName": "navy soft",
+        "tonalRamp": [
+          "oklch(15% 0.0103 247.93)",
+          "oklch(27% 0.0103 247.93)",
+          "oklch(39% 0.0103 247.93)",
+          "oklch(51% 0.0103 247.93)",
+          "oklch(63% 0.0103 247.93)",
+          "oklch(75% 0.0103 247.93)",
+          "oklch(87% 0.0103 247.93)",
+          "oklch(95% 0.0103 247.93)"
+        ]
+      },
+      "navy-line": {
+        "role": "neutral",
+        "displayName": "navy line",
+        "tonalRamp": [
+          "oklch(15% 0.0094 242.85)",
+          "oklch(27% 0.0094 242.85)",
+          "oklch(39% 0.0094 242.85)",
+          "oklch(51% 0.0094 242.85)",
+          "oklch(63% 0.0094 242.85)",
+          "oklch(75% 0.0094 242.85)",
+          "oklch(87% 0.0094 242.85)",
+          "oklch(95% 0.0094 242.85)"
+        ]
+      },
+      "navy-focus": {
+        "role": "neutral",
+        "displayName": "navy focus",
+        "tonalRamp": [
+          "oklch(15% 0.0758 250.22)",
+          "oklch(27% 0.0758 250.22)",
+          "oklch(39% 0.0758 250.22)",
+          "oklch(51% 0.0758 250.22)",
+          "oklch(63% 0.0758 250.22)",
+          "oklch(75% 0.0758 250.22)",
+          "oklch(87% 0.0758 250.22)",
+          "oklch(95% 0.0758 250.22)"
+        ]
+      },
+      "success-bg": {
+        "role": "neutral",
+        "displayName": "success bg",
+        "tonalRamp": [
+          "oklch(15% 0.0157 160.62)",
+          "oklch(27% 0.0157 160.62)",
+          "oklch(39% 0.0157 160.62)",
+          "oklch(51% 0.0157 160.62)",
+          "oklch(63% 0.0157 160.62)",
+          "oklch(75% 0.0157 160.62)",
+          "oklch(87% 0.0157 160.62)",
+          "oklch(95% 0.0157 160.62)"
+        ]
+      },
+      "success-ink": {
+        "role": "neutral",
+        "displayName": "success ink",
+        "tonalRamp": [
+          "oklch(15% 0.0755 164.68)",
+          "oklch(27% 0.0755 164.68)",
+          "oklch(39% 0.0755 164.68)",
+          "oklch(51% 0.0755 164.68)",
+          "oklch(63% 0.0755 164.68)",
+          "oklch(75% 0.0755 164.68)",
+          "oklch(87% 0.0755 164.68)",
+          "oklch(95% 0.0755 164.68)"
+        ]
+      },
+      "studio-bg": {
+        "role": "neutral",
+        "displayName": "studio bg",
+        "tonalRamp": [
+          "oklch(15% 0.0011 197.14)",
+          "oklch(27% 0.0011 197.14)",
+          "oklch(39% 0.0011 197.14)",
+          "oklch(51% 0.0011 197.14)",
+          "oklch(63% 0.0011 197.14)",
+          "oklch(75% 0.0011 197.14)",
+          "oklch(87% 0.0011 197.14)",
+          "oklch(95% 0.0011 197.14)"
+        ]
+      },
+      "navy-pressed": {
+        "role": "primary",
+        "displayName": "Navy pressed"
+      },
+      "disabled-surface": {
+        "role": "neutral",
+        "displayName": "Disabled surface"
+      },
+      "error-ink": {
+        "role": "neutral",
+        "displayName": "Field error"
+      },
+      "form-error-ink": {
+        "role": "neutral",
+        "displayName": "Form error"
+      },
+      "voting-bg": {
+        "role": "neutral",
+        "displayName": "Voting surface"
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Pantallas, destino y tarjeta de viaje."
+      },
+      "heading": {
+        "displayName": "Heading",
+        "purpose": "Nombre del viaje, día y actividad."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Descripciones y relato del post."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Horarios, estados y metadatos."
+      },
+      "display": {
+        "displayName": "Display",
+        "purpose": "Título de actividad en votación y presentación de fundamentos."
+      },
+      "body-small": {
+        "displayName": "Body small",
+        "purpose": "Transporte, ubicación, comentarios y ayuda de formularios."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Acciones, pestañas y autoría."
+      }
+    },
+    "shadows": [
+      {
+        "name": "phone-shell",
+        "value": "0 12px 32px #0000000b",
+        "purpose": "Marco externo del teléfono en el prototipo."
+      }
+    ],
+    "motion": [
+      {
+        "name": "button-color",
+        "value": "background-color 150ms ease, color 150ms ease",
+        "purpose": "Solo con prefers-reduced-motion: no-preference."
+      },
+      {
+        "name": "button-active",
+        "value": "translateY(1px)",
+        "purpose": "Pulsación solo con prefers-reduced-motion: no-preference."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "stacked-studio",
+        "value": "849px"
+      },
+      {
+        "name": "stacked-foundations",
+        "value": "599px"
+      },
+      {
+        "name": "compact-phone",
+        "value": "359px"
+      }
+    ],
+    "focus": {
+      "width": "3px",
+      "offset": "3px",
+      "navy": "#264b70",
+      "fieldWidth": "2px",
+      "fieldOffset": "3px"
+    },
+    "rampNote": "Rampas OKLCH azules y semánticas previamente documentadas, conservadas sin regeneración; sirven al panel y no son colores normativos. Los primitives pertenecen al frontmatter de DESIGN.md. Nuevos estados observados se registran sin rampas inventadas. Snippets con fallback azul para funcionar aislados.",
+    "sources": [
+      "public/styles.css",
+      "public/blue-export.css",
+      "public/foundation-states.css",
+      "public/app.mjs",
+      "public/exported-screens.mjs",
+      "public/state.mjs",
+      "public/index.html",
+      "PRODUCT.md",
+      "blue-import.md",
+      "ASSETS.md",
+      "review/blue-import/exports/",
+      "review/figma-base/trips-context.json",
+      "review/figma-base/itinerary-context.json"
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button · blue",
+      "kind": "button",
+      "refersTo": "button-navy",
+      "description": "Normal, presionado, deshabilitado y carga de muestra; altura mínima de 52px.",
+      "html": "<div class=\"ds-button-stack\"><button class=\"ds-primary\">Crear viaje</button><button class=\"ds-primary ds-pressed\">Crear viaje</button><button class=\"ds-primary\" disabled>Crear viaje</button><button class=\"ds-primary ds-loading\" disabled aria-busy=\"true\">Cargando…</button><small>Estados de muestra; no hay una carga en curso.</small></div>",
+      "css": ".ds-primary{font:600 14px/20px Manrope,system-ui,sans-serif;border:0;border-radius:12px;background:var(--brand,#16324f);color:var(--on-brand,#fff);width:100%;min-height:52px;padding:16px;cursor:pointer}.ds-primary:disabled{background:var(--soft,#eaf0f6);color:var(--muted,#5e6c79);cursor:default}.ds-primary:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}.ds-primary:not(:disabled):hover,.ds-primary.ds-pressed{background:var(--navy-pressed,#11263a)}.ds-primary.ds-loading:disabled{background:var(--brand,#16324f);color:var(--on-brand,#fff)}.ds-button-stack{display:grid;gap:12px}.ds-button-stack small{font:400 14px/20px Manrope,system-ui,sans-serif;color:var(--muted,#5e6c79)}@media(prefers-reduced-motion:no-preference){.ds-primary{transition:background-color 150ms ease,color 150ms ease}.ds-primary:active{transform:translateY(1px)}}"
+    },
+    {
+      "name": "Secondary button · blue",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Secundario plano; normal, presionado, deshabilitado y carga de muestra.",
+      "html": "<div class=\"ds-secondary-stack\"><button class=\"ds-secondary\">Crear viaje</button><button class=\"ds-secondary ds-secondary-pressed\">Crear viaje</button><button class=\"ds-secondary\" disabled>Crear viaje</button><button class=\"ds-secondary ds-secondary-loading\" disabled aria-busy=\"true\">Cargando…</button><small>Estados de muestra; no hay una carga en curso.</small></div>",
+      "css": ".ds-secondary-stack{display:grid;gap:12px}.ds-secondary-stack small{font:400 14px/20px Manrope,system-ui,sans-serif;color:var(--muted,#5e6c79)}.ds-secondary{font:600 14px/20px Manrope,system-ui,sans-serif;width:100%;min-height:52px;padding:15px;border:1px solid var(--line,#d9dfe4);border-radius:12px;background:var(--surface,#fff);color:var(--brand,#16324f);cursor:pointer}.ds-secondary:disabled{background:#f0ebe3;color:var(--muted,#5e6c79);cursor:not-allowed}.ds-secondary.ds-secondary-loading:disabled{background:var(--surface,#fff);color:var(--brand,#16324f)}.ds-secondary:not(:disabled):hover,.ds-secondary.ds-secondary-pressed{background:var(--surface,#fff);border-color:var(--line,#d9dfe4)}.ds-secondary:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-secondary{transition:background-color 150ms ease,color 150ms ease}.ds-secondary:active{transform:translateY(1px)}}"
+    },
+    {
+      "name": "Text field · exported states",
+      "kind": "input",
+      "refersTo": "text-field",
+      "description": "Campos normal, enfocado, error y deshabilitado; 56px.",
+      "html": "<div class=\"ds-fields\"><label class=\"ds-field\">Nombre<input placeholder=\"Cena en Trastevere\"></label><label class=\"ds-field\">Código · enfocado<input class=\"ds-source-focused\" value=\"ITALIA26\" readonly></label><label class=\"ds-field\">Código · error<input aria-invalid=\"true\" aria-describedby=\"ds-field-error\" placeholder=\"Ingresá el código\" readonly></label><p class=\"ds-field-error\" id=\"ds-field-error\">Código de ejemplo no válido.</p><label class=\"ds-field\">Código · deshabilitado<input placeholder=\"Ingresá el código\" disabled></label></div>",
+      "css": ".ds-fields{display:grid;gap:16px}.ds-field{display:flex;flex-direction:column;gap:8px;font:600 14px/20px Manrope,system-ui,sans-serif;color:var(--ink,#1c2c3c)}.ds-field input{font:400 16px/24px Manrope,system-ui,sans-serif;width:100%;min-width:0;height:56px;border:1px solid var(--line,#d9dfe4);background:var(--surface,#fff);color:var(--ink,#1c2c3c);border-radius:12px;padding:15px 16px;caret-color:var(--brand,#16324f)}.ds-field input::placeholder{color:var(--muted,#5e6c79)}.ds-field .ds-source-focused{border:2px solid var(--focus,#264b70);padding:14px 15px}.ds-field input:hover{cursor:text}.ds-field input:focus-visible{outline:2px solid var(--focus,#264b70);outline-offset:3px}.ds-field input[aria-invalid=true],.ds-field input[aria-invalid=true]::placeholder{color:#bc3030}.ds-field input[aria-invalid=true]{border-color:#bc3030}.ds-field input:disabled{background:#f0ebe3;color:var(--muted,#5e6c79)}.ds-field-error{margin:0;font:400 14px/20px Manrope,system-ui,sans-serif;color:#bc3030}"
+    },
+    {
+      "name": "Comment field",
+      "kind": "input",
+      "refersTo": "comment-field",
+      "description": "Campo del post, altura mínima 48px y límite 280.",
+      "html": "<label class=\"ds-label\" for=\"ds-comment\">Escribí un comentario</label><input id=\"ds-comment\" class=\"ds-comment\" maxlength=\"280\" placeholder=\"Dejá un comentario…\" required>",
+      "css": ".ds-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}.ds-comment{font:14px/20px Manrope,system-ui,sans-serif;width:100%;min-height:48px;padding:12px;border:1px solid var(--line,#d9dfe4);border-radius:12px;background:var(--surface,#fff);color:var(--ink,#1c2c3c);caret-color:var(--brand,#16324f)}.ds-comment::placeholder{color:var(--muted,#5e6c79)}.ds-comment:hover{cursor:text}.ds-comment:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}"
+    },
+    {
+      "name": "Trip navigation",
+      "kind": "nav",
+      "description": "Slots originales Itinerario/Diario/Grupo.",
+      "html": "<nav class=\"ds-tabs\" aria-label=\"Secciones del viaje\"><button aria-pressed=\"true\">Itinerario</button><button aria-pressed=\"false\">Diario</button><button aria-pressed=\"false\">Grupo</button></nav>",
+      "css": ".ds-tabs{display:flex;gap:8px;padding:12px 24px}.ds-tabs button{flex:0 1 92px;min-width:0;min-height:44px;background:var(--paper,#faf8f4);color:var(--muted,#5e6c79);font:600 14px/20px Manrope,system-ui,sans-serif;border:0;border-radius:12px;padding:12px}.ds-tabs button:first-child{flex:0 1 108px}.ds-tabs button[aria-pressed=true]{background:var(--brand,#16324f);color:var(--on-brand,#fff)}.ds-tabs button:hover{cursor:pointer}.ds-tabs button:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-tabs button{transition:background-color 150ms ease,color 150ms ease}.ds-tabs button:active{transform:translateY(1px)}}"
+    },
+    {
+      "name": "Confirmation badge",
+      "kind": "chip",
+      "refersTo": "confirmation",
+      "description": "Estado grupal informativo, independiente de la respuesta personal.",
+      "html": "<span class=\"ds-confirmed\">Confirmada</span>",
+      "css": ".ds-confirmed{display:inline-block;width:100px;text-align:center;white-space:nowrap;font:600 12px/18px Manrope,system-ui,sans-serif;padding:8px;border-radius:999px;background:var(--success-bg,#e6f2eb);color:var(--success-ink,#25634b)}"
+    },
+    {
+      "name": "Transport information card",
+      "kind": "card",
+      "refersTo": "transport-card",
+      "description": "Tarjeta plana de transporte; la columna horaria queda fuera de ella.",
+      "html": "<section class=\"ds-transport\"><span>09:45 · Llegada</span><h4>Llegamos a Roma</h4><p>Fiumicino · Vuelo AZ 681</p></section>",
+      "css": ".ds-transport{display:flex;flex-direction:column;gap:8px;padding:16px;background:var(--soft,#eaf0f6);border-radius:16px;font-family:Manrope,system-ui,sans-serif;color:var(--ink,#1c2c3c)}.ds-transport span{font-size:12px;line-height:18px;font-weight:600;color:var(--brand,#16324f)}.ds-transport h4{margin:0;font-size:18px;line-height:26px;font-weight:700}.ds-transport p{margin:0;font-size:14px;line-height:20px;color:var(--muted,#5e6c79)}"
+    },
+    {
+      "name": "Calendar day",
+      "kind": "button",
+      "refersTo": "day-selected",
+      "description": "Fecha seleccionada con cifras tabulares.",
+      "html": "<button class=\"ds-day\" aria-pressed=\"true\"><span>LUN</span><strong>12</strong></button>",
+      "css": ".ds-day{width:50px;min-height:64px;display:flex;flex-direction:column;align-items:center;gap:4px;border:0;border-radius:12px;padding:8px 0;font:600 12px/18px Manrope,system-ui,sans-serif;background:none;color:var(--ink,#1c2c3c)}.ds-day span{color:var(--muted,#5e6c79)}.ds-day strong{font-size:18px;line-height:26px;font-weight:700;font-variant-numeric:tabular-nums}.ds-day[aria-pressed=true]{background:var(--brand,#16324f);color:var(--on-brand,#fff)}.ds-day[aria-pressed=true] span{color:var(--on-brand-muted,#c5d5e5)}.ds-day:hover{cursor:pointer}.ds-day:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-day{transition:background-color 150ms ease,color 150ms ease}.ds-day:active{transform:translateY(1px)}}"
+    },
+    {
+      "name": "Trip card · source geometry",
+      "kind": "card",
+      "refersTo": "trip-card",
+      "description": "Ruta y divisor originales, fechas e iniciales; relleno azul plano.",
+      "html": "<button class=\"ds-trip\"><span class=\"ds-trip-top\"><span>Sale en 7 días</span><span>Privado</span></span><strong class=\"ds-trip-title\">Italia, sin apuro</strong><span class=\"ds-route\"><span>BUE</span><svg class=\"ds-stitch\" viewBox=\"0 0 136 1.5\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><line y1=\".75\" x2=\"136\" y2=\".75\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-dasharray=\"4 5\"/></svg><svg class=\"ds-trip-plane\" viewBox=\"0 0 20 20\" aria-hidden=\"true\"><path d=\"M18.3333 1.66667L7.5 12.5M18.3333 1.66667L12.5 18.3333L9.16667 10.8333L1.66667 7.5L18.3333 1.66667Z\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg><span>ROM</span></span><span class=\"ds-trip-destinations\">Roma → Florencia → Venecia</span><svg class=\"ds-divider\" viewBox=\"0 0 294 1.5\" preserveAspectRatio=\"none\" aria-hidden=\"true\"><line y1=\".75\" x2=\"294\" y2=\".75\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-dasharray=\"4 5\"/></svg><span class=\"ds-trip-bottom\"><span>12–22 oct 2026</span><small>NC · AL · +2</small></span></button>",
+      "css": ".ds-trip{width:100%;height:260px;border:0;border-radius:16px;background:var(--brand,#16324f);color:var(--on-brand,#fff);padding:24px;display:flex;flex-direction:column;gap:12px;align-items:stretch;text-align:left;font-family:Manrope,system-ui,sans-serif;cursor:pointer}.ds-trip-top{display:flex;justify-content:space-between;font:600 12px/18px Manrope,system-ui,sans-serif;color:var(--on-brand-muted,#c5d5e5)}.ds-trip-title,.ds-route{font:700 24px/32px Manrope,system-ui,sans-serif}.ds-route{display:flex;align-items:center;gap:12px}.ds-stitch{flex:1;min-width:0;height:1.5px;color:var(--on-brand-muted,#c5d5e5)}.ds-trip-plane{width:20px;height:20px;flex-shrink:0}.ds-divider{height:1.5px;width:100%;color:var(--on-brand-muted,#c5d5e5)}.ds-trip-destinations{font:400 14px/20px Manrope,system-ui,sans-serif;color:var(--on-brand-muted,#c5d5e5)}.ds-trip-bottom{display:flex;justify-content:space-between;align-items:center;font:600 14px/20px Manrope,system-ui,sans-serif}.ds-trip-bottom small{font-size:12px;line-height:18px}.ds-trip:hover{cursor:pointer}.ds-trip:focus-visible{outline:3px solid var(--focus,#264b70);outline-offset:3px}@media(prefers-reduced-motion:no-preference){.ds-trip{transition:background-color 150ms ease,color 150ms ease}.ds-trip:active{transform:translateY(1px)}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "El Travellier original, en azul",
+    "overview": "La autoridad visual son los exports entregados por el usuario de Fundamentos, Viajes e Itinerario, junto con los frames originales 7:5 y 9:5. La elección aprobada conserva Manrope, composición, jerarquía y geometría en una sola paleta azul. El estudio chocolate queda archivado en `versions/chocolate-study/`.\n\nEste sistema describe el prototipo local de `public/`: siete pantallas originales y fundamentos/componentes. Post y Galería son extensiones identificadas como extra. La aplicación objetivo sigue siendo React + Capacitor para iOS y Android; el prototipo no acredita implementación funcional del producto.",
+    "keyCharacteristics": [
+      "Una paleta azul aprobada y superficies planas.",
+      "Manrope, jerarquía compacta y fechas con cifras tabulares.",
+      "Ruta y divisores originales, iconos SVG y fotografías acreditadas solo en los extras."
+    ],
+    "rules": [
+      {
+        "name": "The Blue Identity Rule",
+        "body": "La identidad usa la paleta azul aprobada; los colores de estado conservan su función semántica.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Font Rule",
+        "body": "Las pantallas y los componentes conservan Manrope y la jerarquía del original.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat Content Rule",
+        "body": "El contenido gana jerarquía con tono y espacio; la sombra actual pertenece al marco del prototipo.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do conservar la composición original, Manrope y la identidad azul elegida.",
+      "Do aplicar la cascada de `public/styles.css`, `public/blue-export.css` y `public/foundation-states.css` en ese orden.",
+      "Do conservar SVG originales y procedencia de las seis fotos en `ASSETS.md`.",
+      "Do mantener foco visible, objetivos de al menos 44px y movimiento reducido.",
+      "Do identificar simulaciones, especímenes de carga y conceptos futuros de forma explícita."
+    ],
+    "donts": [
+      "Don't reintroducir la paleta marrón o material de equipaje en el sistema activo.",
+      "Don't reintroducir Literata, polaroids, fotos inclinadas o encabezados poéticos sobredimensionados.",
+      "Don't presentar Post/Galería como copias del Figma original o el prototipo como plataforma web pública.",
+      "Don't presentar estado local como persistencia, publicación o funcionalidad nativa real.",
+      "Don't convertir Finalizado en estado de actividad sin definición en el PRD."
+    ]
+  }
+}

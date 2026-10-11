@@ -1,0 +1,73 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {mkdir} from 'node:fs/promises';
+const require=createRequire(import.meta.url);
+const {chromium}=require('C:/Users/nicol/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const browser=await chromium.launch({channel:'msedge',headless:true});
+const folder=new URL('./review/app-mode/',import.meta.url);
+await mkdir(folder,{recursive:true});
+const file=name=>new URL(name,folder).pathname.replace(/^\/([A-Z]:)/,'$1');
+const chrome='.studio-header,.status-bar,.wordmark,.studio-note,.studio-intro,.screen-switch,.design-controls,.study-disclosure,#screen-index,.proposal-label,.prototype-note,#credits,#notice';
+const errors=[];
+try {
+ for(const [width,height] of [[1280,844],[390,844],[320,568],[844,390],[768,1024]]) {
+  const page=await browser.newPage({viewport:{width,height}});
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('http://127.0.0.1:4173/?v=playable');
+  await page.locator('.phone').waitFor();
+  assert.equal(await page.getByRole('button',{name:'Solo app',exact:true}).count(),1,'The study needs a Solo app button');
+  await page.locator('#credits-button').click();
+  await page.locator('#studio-toggle').click();
+  assert.equal(await page.locator('#studio-toggle').getAttribute('aria-pressed'),'true');
+  assert.equal(new URL(page.url()).searchParams.get('mode'),'app');
+  assert.equal(await page.locator(chrome).evaluateAll(els=>els.some(el=>el.checkVisibility())),false,'All study chrome is hidden');
+  assert.equal(await page.locator('.phone').isVisible(),true);
+  const bounds=await page.locator('.phone').boundingBox();
+  assert.equal(await page.locator('#studio-toggle').isVisible(),false,'No study return button in the app');
+  assert.deepEqual(bounds,{x:0,y:0,width,height},'App fills the entire available viewport');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollHeight>innerHeight),false,'Only app content scrolls');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.evaluate(()=>document.fonts.ready);
+  await page.screenshot({path:file('app-'+width+'.png'),fullPage:true});
+  await page.locator('.phone').getByRole('button',{name:'Crear viaje',exact:true}).click();
+  const name=page.locator('.phone [name=name]');
+  await name.fill('Escapada con amigos');
+  const phoneHandle=await page.locator('.phone').elementHandle();
+  await page.setViewportSize({width,height:height-100});
+  assert.equal(await name.inputValue(),'Escapada con amigos','Viewport changes keep unsubmitted form data');
+  assert.equal(await phoneHandle.evaluate(el=>el.isConnected),true,'Resizing must not redraw the app');
+  assert.deepEqual(await page.locator('.phone').boundingBox(),{x:0,y:0,width,height:height-100});
+  await page.setViewportSize({width,height});
+  await page.goto('http://127.0.0.1:4173/?v=playable&mode=app&screen=itinerary');
+  await page.locator('.phone[data-screen=itinerary]').waitFor();
+  assert.equal(await page.locator('.phone').getAttribute('data-screen'),'itinerary');
+  await page.locator('.phone').getByRole('button',{name:'Agregar actividad',exact:true}).click();
+  assert.equal(await page.locator('.phone').getAttribute('data-screen'),'add','App navigation keeps working');
+  assert.equal(await page.locator('.studio-header').isVisible(),false);
+  await page.goto('http://127.0.0.1:4173/?v=playable&screen=itinerary');
+  await page.locator('.phone[data-screen=itinerary]').waitFor();
+  assert.equal(await page.locator('.study-disclosure').isVisible(),true,'Study remains available at its original URL');
+  assert.equal(new URL(page.url()).searchParams.get('screen'),'itinerary');
+  assert.equal(new URL(page.url()).searchParams.has('mode'),false);
+  await page.locator('#screen-select').selectOption('create-trip');
+  await name.fill('Escapada sin marco');
+  const draftHandle=await page.locator('.phone').elementHandle();
+  await page.getByRole('button',{name:'Solo app',exact:true}).click();
+  assert.equal(await name.inputValue(),'Escapada sin marco');
+  assert.equal(await draftHandle.evaluate(el=>el.isConnected),true,'Entering app-only mode keeps the existing app');
+  for(const screen of ['post','gallery','compose','profile','login','transports']) {
+   await page.goto('http://127.0.0.1:4173/?v=playable&mode=app&screen='+screen);
+   await page.locator('.phone[data-screen="'+screen+'"]').waitFor();
+   assert.deepEqual(await page.locator('.phone').boundingBox(),{x:0,y:0,width,height},screen+' full viewport');
+   assert.equal(await page.locator('.phone-body').evaluate(el=>el.scrollWidth>el.clientWidth),false,screen+' no horizontal overflow');
+  }
+  await page.goto('http://127.0.0.1:4173/?screen=foundations');
+  await page.locator('.foundations').waitFor();
+  await page.getByRole('button',{name:'Solo app',exact:true}).click();
+  assert.equal(await page.locator('.phone').getAttribute('data-screen'),'trips','Foundations enters the navigable app');
+  assert.equal(await page.locator('.foundations').count(),0);
+  await page.close();
+ }
+ assert.deepEqual(errors,[]);
+ console.log('PASS: edge-to-edge app, no studio controls, portrait/landscape/tablet/desktop, viewport resize, drafts and navigation');
+} finally {await browser.close();}

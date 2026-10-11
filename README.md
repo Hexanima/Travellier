@@ -2,7 +2,7 @@
 
 Aplicación mobile para organizar viajes grupales. Centraliza el transporte, el itinerario, las actividades, los posts con fotos y gastos, y la participación de cada integrante.
 
-El producto está en etapa de planificación. El modelo funcional completo está en [docs/versiones/v1/PRD.md](docs/versiones/v1/PRD.md).
+El [PRD v1](docs/versiones/v1/PRD.md) y el [diseño azul navegable](design/prototype/README.md) quedaron aprobados y fijados como referencia de implementación el 2026-10-11. Los cambios requieren solicitud o aprobación explícita del usuario; el [PRD original](docs/versiones/v1/PRD-original.md) se conserva sin cambios para comparar. La aprobación no actualiza automáticamente las tareas ni acredita implementación.
 
 ## Alcance inicial
 
@@ -10,7 +10,7 @@ El producto está en etapa de planificación. El modelo funcional completo está
 - Trips privados por invitación o públicos a los que se puede unir cualquier usuario.
 - Transporte de ida/vuelta y viajes con múltiples destinos.
 - Itinerario generado a partir de los horarios exactos de transporte.
-- Actividades con participación individual y votación opcional por Trip.
+- Actividades con participación individual, planes simultáneos y agenda personal sin superposiciones.
 - Posts espontáneos o vinculados a actividades, otros posts o transportes.
 - Fotos en S3, comentarios y likes.
 - Gastos dentro de posts, con modos de registro y balance.
@@ -34,7 +34,8 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `domain`: entidades, casos de uso, contratos de resultado y puertos sin dependencias de frameworks.
 - `apps/api`: adaptador HTTP; evolucionará hacia las funciones Lambda de la API.
 - `apps/web`: cliente React mobile empaquetable con Capacitor para iOS y Android.
-- `docs/versiones/v1/PRD.md`: especificación funcional y modelo de datos.
+- `design/prototype`: [prototipo visual navegable](design/prototype/README.md), independiente de la aplicación; sus archivos para Live Server están en `design/prototype/public`.
+- `docs/versiones/v1/PRD.md`: especificación funcional y modelo de datos aprobados; `PRD-original.md` conserva el documento inicial.
 - `AGENTS.md`: contexto e instrucciones para agentes que trabajen en el repositorio.
 
 ## Comandos
