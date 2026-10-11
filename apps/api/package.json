@@ -7,6 +7,7 @@
     "build": "yarn clean && tsc -p tsconfig.build.json",
     "dev": "tsx watch src/local.ts",
     "migrate:mongodb": "tsx src/adapters/mongodb/run-migrations.ts",
+    "audit:mongodb": "tsx src/adapters/mongodb/run-contract-audit.ts",
     "start": "node dist/local.js",
     "test": "vitest",
     "lint": "eslint .",
