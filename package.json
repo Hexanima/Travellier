@@ -10,14 +10,17 @@
   "packageManager": "yarn@4.9.1",
   "devDependencies": {
     "@aws-sdk/client-cloudformation": "3.1132.0",
+    "@aws-sdk/client-lambda": "3.1132.0",
     "@aws-sdk/client-secrets-manager": "3.1132.0",
+    "@aws-sdk/client-sns": "3.1132.0",
+    "js-yaml": "4.1.0",
     "serverless": "4.42.0",
     "typescript": "^5.8.3"
   },
   "scripts": {
     "lint": "yarn workspaces foreach -A --parallel run lint",
     "typecheck": "yarn workspaces foreach -A --parallel run typecheck",
-    "test": "node --test scripts/android-build-environment.test.mjs scripts/quality-contract.test.mjs scripts/infrastructure-contract.test.mjs scripts/infrastructure-deploy.test.mjs && yarn workspaces foreach -A --parallel run test --run --clearScreen false",
+    "test": "node --test scripts/android-build-environment.test.mjs scripts/quality-contract.test.mjs scripts/infrastructure-contract.test.mjs scripts/infrastructure-deploy.test.mjs scripts/pending-services.test.mjs scripts/push-provisioning.test.mjs && yarn workspaces foreach -A --parallel run test --run --clearScreen false",
     "build": "yarn workspaces foreach -A --topological run build",
     "infrastructure:print:dev": "serverless print --stage dev",
     "infrastructure:print:prod": "serverless print --stage prod",
