@@ -47,6 +47,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@aws-sdk/client-lambda@npm:3.1132.0":
+  version: 3.1132.0
+  resolution: "@aws-sdk/client-lambda@npm:3.1132.0"
+  dependencies:
+    "@aws-sdk/core": "npm:^3.978.0"
+    "@aws-sdk/credential-provider-node": "npm:^3.972.83"
+    "@aws-sdk/types": "npm:^3.974.5"
+    "@smithy/core": "npm:^3.33.3"
+    "@smithy/fetch-http-handler": "npm:^5.7.2"
+    "@smithy/node-http-handler": "npm:^4.11.3"
+    "@smithy/types": "npm:^4.17.2"
+    tslib: "npm:^2.6.2"
+  checksum: 10c0/3b761a7668f240ac36bec1aa2922b1344afb416dbb62a7d03a7e8e6186f522ab5ec76a9ce81dfea967394dcf5b3b0633a6402277e08c2f7ffa1392d1813307bc
+  languageName: node
+  linkType: hard
+
 "@aws-sdk/client-s3@npm:3.1132.0":
   version: 3.1132.0
   resolution: "@aws-sdk/client-s3@npm:3.1132.0"
@@ -79,6 +95,22 @@ __metadata:
     "@smithy/types": "npm:^4.17.2"
     tslib: "npm:^2.6.2"
   checksum: 10c0/266eaae3bbb027dfe8320c8a28c5b0c385f7eae6ee36bbf715b7cccd204b44e9248392e944421cea74039b6833f0102adbf60f9c7976c4de85a0d6c7c5af9b5c
+  languageName: node
+  linkType: hard
+
+"@aws-sdk/client-sns@npm:3.1132.0":
+  version: 3.1132.0
+  resolution: "@aws-sdk/client-sns@npm:3.1132.0"
+  dependencies:
+    "@aws-sdk/core": "npm:^3.978.0"
+    "@aws-sdk/credential-provider-node": "npm:^3.972.83"
+    "@aws-sdk/types": "npm:^3.974.5"
+    "@smithy/core": "npm:^3.33.3"
+    "@smithy/fetch-http-handler": "npm:^5.7.2"
+    "@smithy/node-http-handler": "npm:^4.11.3"
+    "@smithy/types": "npm:^4.17.2"
+    tslib: "npm:^2.6.2"
+  checksum: 10c0/22983ca605bb727ecfac304525a186cb60e1f1d5eb382cd2a71595ed7193bdda4d359f075f6e81c599c1256b11f6da6bdbbf3a86f49550c8d6356e10106fdb01
   languageName: node
   linkType: hard
 
@@ -3317,7 +3349,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"js-yaml@npm:^4.1.0":
+"js-yaml@npm:4.1.0, js-yaml@npm:^4.1.0":
   version: 4.1.0
   resolution: "js-yaml@npm:4.1.0"
   dependencies:
@@ -4823,7 +4855,10 @@ __metadata:
   resolution: "travellier@workspace:."
   dependencies:
     "@aws-sdk/client-cloudformation": "npm:3.1132.0"
+    "@aws-sdk/client-lambda": "npm:3.1132.0"
     "@aws-sdk/client-secrets-manager": "npm:3.1132.0"
+    "@aws-sdk/client-sns": "npm:3.1132.0"
+    js-yaml: "npm:4.1.0"
     serverless: "npm:4.42.0"
     typescript: "npm:^5.8.3"
   languageName: unknown

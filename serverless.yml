@@ -1,6 +1,23 @@
 service: travellier-api
 frameworkVersion: '4'
 
+package:
+  patterns:
+    - '!**/.env'
+    - '!**/.env.*'
+    - '!**/*.p8'
+    - '!**/*.p12'
+    - '!**/service-account*.json'
+    - '!**/service_account*.json'
+    - '!**/service.json'
+    - '!**/*-firebase-adminsdk-*.json'
+    - '!apps/web/**'
+    - '!design/**'
+    - '!docs/**'
+    - '!.temp/**'
+    - '!scripts/**'
+    - '!infrastructure/**'
+
 provider:
   name: aws
   runtime: nodejs22.x
@@ -39,12 +56,8 @@ provider:
           Action:
             - secretsmanager:GetSecretValue
           Resource:
-            - Fn::GetAtt:
-                - MongoConfigurationSecret
-                - Arn
-            - Fn::GetAtt:
-                - JwtSigningSecret
-                - Arn
+            - Ref: MongoConfigurationSecret
+            - Ref: JwtSigningSecret
         - Effect: Allow
           Action:
             - s3:PutObject
@@ -69,6 +82,8 @@ stages:
   default:
     params:
       logRetentionInDays: 14
+      eventsConsumerArn: ''
+      storageDeletionConsumerArn: ''
   dev:
     params:
       logRetentionInDays: 14
@@ -77,59 +92,60 @@ stages:
       logRetentionInDays: 90
 
 resources:
-  Resources:
-    PhotoBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketEncryption:
-          ServerSideEncryptionConfiguration:
-            - ServerSideEncryptionByDefault:
-                SSEAlgorithm: AES256
-        CorsConfiguration:
-          CorsRules:
-            - AllowedHeaders:
-                - Content-Type
-              AllowedMethods:
-                - PUT
-              AllowedOrigins:
-                - capacitor://localhost
-                - http://localhost
-              MaxAge: 3000
-        OwnershipControls:
-          Rules:
-            - ObjectOwnership: BucketOwnerEnforced
-        PublicAccessBlockConfiguration:
-          BlockPublicAcls: true
-          BlockPublicPolicy: true
-          IgnorePublicAcls: true
-          RestrictPublicBuckets: true
-    MongoConfigurationSecret:
-      Type: AWS::SecretsManager::Secret
-      DeletionPolicy: Delete
-      UpdateReplacePolicy: Delete
-      Properties:
-        Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
-    JwtSigningSecret:
-      Type: AWS::SecretsManager::Secret
-      DeletionPolicy: Delete
-      UpdateReplacePolicy: Delete
-      Properties:
-        Description: JWT signing secret for the Travellier ${sls:stage} environment.
-        GenerateSecretString:
-          PasswordLength: 64
-          ExcludePunctuation: true
-  Outputs:
-    ApiUrl:
-      Description: HTTP API endpoint for the deployed environment.
-      Value:
-        Fn::GetAtt:
-          - HttpApi
-          - ApiEndpoint
-    MongoConfigurationSecretArn:
-      Description: ARN of the MongoDB configuration secret.
-      Value:
-        Ref: MongoConfigurationSecret
-    JwtSigningSecretArn:
-      Description: ARN of the JWT signing secret.
-      Value:
-        Ref: JwtSigningSecret
+  - Resources:
+      PhotoBucket:
+        Type: AWS::S3::Bucket
+        Properties:
+          BucketEncryption:
+            ServerSideEncryptionConfiguration:
+              - ServerSideEncryptionByDefault:
+                  SSEAlgorithm: AES256
+          CorsConfiguration:
+            CorsRules:
+              - AllowedHeaders:
+                  - Content-Type
+                AllowedMethods:
+                  - PUT
+                AllowedOrigins:
+                  - capacitor://localhost
+                  - http://localhost
+                MaxAge: 3000
+          OwnershipControls:
+            Rules:
+              - ObjectOwnership: BucketOwnerEnforced
+          PublicAccessBlockConfiguration:
+            BlockPublicAcls: true
+            BlockPublicPolicy: true
+            IgnorePublicAcls: true
+            RestrictPublicBuckets: true
+      MongoConfigurationSecret:
+        Type: AWS::SecretsManager::Secret
+        DeletionPolicy: Delete
+        UpdateReplacePolicy: Delete
+        Properties:
+          Description: MongoDB connection settings for the Travellier ${sls:stage} environment.
+      JwtSigningSecret:
+        Type: AWS::SecretsManager::Secret
+        DeletionPolicy: Delete
+        UpdateReplacePolicy: Delete
+        Properties:
+          Description: JWT signing secret for the Travellier ${sls:stage} environment.
+          GenerateSecretString:
+            PasswordLength: 64
+            ExcludePunctuation: true
+    Outputs:
+      ApiUrl:
+        Description: HTTP API endpoint for the deployed environment.
+        Value:
+          Fn::GetAtt:
+            - HttpApi
+            - ApiEndpoint
+      MongoConfigurationSecretArn:
+        Description: ARN of the MongoDB configuration secret.
+        Value:
+          Ref: MongoConfigurationSecret
+      JwtSigningSecretArn:
+        Description: ARN of the JWT signing secret.
+        Value:
+          Ref: JwtSigningSecret
+  - ${file(infrastructure/pending-services.cjs):resources}

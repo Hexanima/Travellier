@@ -78,6 +78,15 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+.env.*
+!.env.example
+# Server push credentials must never be versioned.
+*.p8
+*.p12
+service-account*.json
+service_account*.json
+service.json
+*-firebase-adminsdk-*.json
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
