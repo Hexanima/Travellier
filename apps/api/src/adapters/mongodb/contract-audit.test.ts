@@ -137,4 +137,15 @@ describe("read-only approved contract audit", () => {
     expect(await auditMongoContracts(database)).toEqual({ findings: [] });
     expect(await snapshotDocuments(database)).toEqual(before);
   });
+
+  it("reports shares whose per-row rounding makes the remainder negative without modifying the expense", async () => {
+    const identities = [1, 2, 3, 4].map((n) => new ObjectId(n.toString(16).padStart(24, "0")));
+    const { insertedId } = await database.collection("postExpenses").insertOne({ ...completeExpense(), totalAmount: 0.02,
+      shares: [...identities.slice(0, 3).map((identity) => share("percent", 30, identity)), share("remainder", null, identities[3])] });
+    const before = await snapshotDocuments(database);
+    expect((await auditMongoContracts(database)).findings).toEqual([expect.objectContaining({
+      code: "expense_incomplete", documentId: insertedId, fields: ["shares"],
+    })]);
+    expect(await snapshotDocuments(database)).toEqual(before);
+  });
 });

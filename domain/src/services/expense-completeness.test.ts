@@ -56,6 +56,26 @@ describe("expense completeness diagnostics", () => {
     expect(fields({ ...complete(), totalAmount: 0.07, payments: [row("amount", 0.01), row("percent", 600 / 7)],
       shares: [row("amount", 0.01), row("percent", 600 / 7, otherUser)] })).toEqual([]);
   });
+  it("rejects a negative remainder caused by rounding partial percentage shares per row", () => {
+    const identities = [1, 2, 3, 4].map((n) => n.toString(16).padStart(24, "0"));
+    expect(fields({ ...complete(), totalAmount: 0.02,
+      shares: [...identities.slice(0, 3).map((identity) => row("percent", 30, identity)), row("remainder", null, identities[3])] })).toEqual(["shares"]);
+  });
+  it("rejects rounded excess for partial mixed shares with an explicit remainder", () => {
+    const identities = [1, 2, 3, 4, 5].map((n) => n.toString(16).padStart(24, "0"));
+    expect(fields({ ...complete(), totalAmount: 0.03,
+      shares: [row("amount", 0.01, identities[0]), ...identities.slice(1, 4).map((identity) => row("percent", 20, identity)), row("remainder", null, identities[4])] })).toEqual(["shares"]);
+  });
+  it("keeps partial rounded shares valid when their remainder is non-negative", () => {
+    expect(fields({ ...complete(), totalAmount: 0.02,
+      shares: [row("percent", 30), row("percent", 30, otherUser), row("remainder", null, "000000000000000000000003")] })).toEqual([]);
+  });
+  it("allows cent residue adjustment for exactly complete percentage rows", () => {
+    const identities = [1, 2, 3, 4].map((n) => n.toString(16).padStart(24, "0"));
+    expect(fields({ ...complete(), totalAmount: 0.02,
+      payments: identities.map((identity) => row("percent", 25, identity)),
+      shares: identities.map((identity) => row("percent", 25, identity)) })).toEqual([]);
+  });
   it("rejects excess percentage or mixed coverage even when cent rounding hides it", () => {
     expect(fields({ ...complete(), totalAmount: 0.01, payments: [row("percent", 60), row("percent", 50)],
       shares: [row("percent", 60), row("percent", 50, otherUser)] })).toEqual(["payments", "shares"]);
