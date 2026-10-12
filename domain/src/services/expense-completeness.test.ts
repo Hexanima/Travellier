@@ -41,6 +41,21 @@ describe("expense completeness diagnostics", () => {
     expect(fields({ ...complete(), totalAmount: 0.05, payments: [row("percent", 50), row("percent", 50)],
       shares: [row("percent", 50), row("percent", 50, otherUser)] })).toEqual([]);
   });
+  it.each([
+    [0.01, [row("percent", 60)], [row("percent", 60)], ["payments", "shares"]],
+    [0.01, [row("percent", 60)], [row("percent", 100)], ["payments"]],
+    [0.01, [row("percent", 100)], [row("percent", 60)], ["shares"]],
+    [0.02, [row("amount", 0.01), row("percent", 40)], [row("amount", 0.01), row("percent", 40, otherUser)], ["payments", "shares"]],
+  ])("reports incomplete coverage before rounding for total %s", (totalAmount, payments, shares, expected) => {
+    expect(fields({ ...complete(), totalAmount, payments, shares })).toEqual(expected);
+  });
+  it("accepts a small expense whose partial fixed shares explicitly distribute the remainder", () => {
+    expect(fields({ ...complete(), totalAmount: 0.01, shares: [row("percent", 60), row("remainder", null, otherUser)] })).toEqual([]);
+  });
+  it("tolerates floating point residue in complete mixed coverage", () => {
+    expect(fields({ ...complete(), totalAmount: 0.07, payments: [row("amount", 0.01), row("percent", 600 / 7)],
+      shares: [row("amount", 0.01), row("percent", 600 / 7, otherUser)] })).toEqual([]);
+  });
   it("rejects excess percentage or mixed coverage even when cent rounding hides it", () => {
     expect(fields({ ...complete(), totalAmount: 0.01, payments: [row("percent", 60), row("percent", 50)],
       shares: [row("percent", 60), row("percent", 50, otherUser)] })).toEqual(["payments", "shares"]);

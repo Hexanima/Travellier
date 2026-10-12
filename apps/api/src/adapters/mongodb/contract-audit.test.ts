@@ -116,4 +116,15 @@ describe("read-only approved contract audit", () => {
       shares: [share("percent", 50), share("percent", 50, legacyIds.user)] });
     expect(await auditMongoContracts(database)).toEqual({ findings: [] });
   });
+
+  it("reports partial percentage coverage on a one-cent expense without modifying it", async () => {
+    const { insertedId } = await database.collection("postExpenses").insertOne({ ...completeExpense(), totalAmount: 0.01,
+      payments: [payment("percent", 60)], shares: [share("percent", 60)] });
+    const before = await snapshotDocuments(database);
+    expect((await auditMongoContracts(database)).findings).toEqual([expect.objectContaining({
+      code: "expense_incomplete", collection: "postExpenses", documentId: insertedId,
+      fields: ["payments", "shares"],
+    })]);
+    expect(await snapshotDocuments(database)).toEqual(before);
+  });
 });

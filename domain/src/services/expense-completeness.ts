@@ -30,12 +30,11 @@ const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boo
   if (percent - 100 > Number.EPSILON * 100 * 8) return false;
   if (totalCents === undefined) return true;
   // Check coverage only, without resolving per-person amounts or producing debts.
-  // Aggregate percentages before rounding so a complete agreement may retain its cent residue.
+  // Require full coverage before rounding; only complete agreements may resolve cent residue.
   const rawCoverage = amountCents + totalCents * percent / 100;
   const tolerance = Number.EPSILON * Math.max(1, totalCents, rawCoverage) * 8;
   if (rawCoverage - totalCents > tolerance) return false;
-  const covered = Math.round(rawCoverage);
-  return Number.isSafeInteger(covered) && (hasRemainder ? covered <= totalCents : covered === totalCents);
+  return Number.isFinite(rawCoverage) && (hasRemainder || Math.abs(rawCoverage - totalCents) <= tolerance);
 };
 
 /** Pure diagnostic: does not adapt paidBy, infer agreements, or calculate balances. */
