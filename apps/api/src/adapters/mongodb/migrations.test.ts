@@ -8,6 +8,7 @@ import {
   ITINERARY_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
+import { OUTBOX_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID } from "./pending-contract-migrations.js";
 
 const prdCollections = [
   "users",
@@ -132,10 +133,10 @@ describe("MongoDB schema migration", () => {
       .toArray();
 
     expect(collections.map(({ name }) => name).sort()).toEqual(
-      [...prdCollections, "_migrations"].sort(),
+      [...prdCollections, "outboxEvents", "_migrations"].sort(),
     );
     expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
-      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID].sort(),
+      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID].sort(),
     );
   });
 

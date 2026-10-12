@@ -39,13 +39,12 @@ export const connectMongoDatabase = async (
 
   try {
     await client.connect();
+    return {
+      database: client.db(config.databaseName),
+      close: () => client.close(),
+    };
   } catch (error) {
     await client.close();
     throw error;
   }
-
-  return {
-    database: client.db(config.databaseName),
-    close: () => client.close(),
-  };
 };

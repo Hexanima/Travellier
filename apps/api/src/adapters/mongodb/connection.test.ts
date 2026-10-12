@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { MongoClient } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
 import {
@@ -53,5 +54,25 @@ describe("MongoDB connection adapter", () => {
     expect(await connection.database.collection("health").countDocuments()).toBe(1);
 
     await connection.close();
+  });
+
+  it("closes a connected client when construction of Db rejects a dotted database name", async () => {
+    const clients: MongoClient[] = [];
+    const closed: MongoClient[] = [];
+    const connect = MongoClient.prototype.connect;
+    vi.spyOn(MongoClient.prototype, "connect").mockImplementation(async function (this: MongoClient) {
+      clients.push(this);
+      this.once("topologyClosed", () => closed.push(this));
+      return connect.call(this);
+    });
+    try {
+      await expect(connectMongoDatabase({ uri: server.getUri(), databaseName: "dev.audit" })).rejects.toThrow("Database names cannot contain the character '.'");
+      expect(clients).toHaveLength(1);
+      expect(closed).toEqual(clients);
+    } finally {
+      // Clean up the actual client even in the failing RED phase.
+      await Promise.all(clients.map((client) => client.close()));
+      vi.restoreAllMocks();
+    }
   });
 });

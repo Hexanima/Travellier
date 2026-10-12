@@ -58,6 +58,40 @@ El runner registra la migración aplicada en la colección técnica `_migrations
 
 T32 agrega la migración `0003-unique-itinerary-identity`: conserva los índices existentes e impone unicidad de `(tripId, destinationId, date, type)` en `itineraryDays`. Ejecutar `yarn workspace api migrate:mongodb` con la configuración de la base antes de usar esta versión. La migración rechaza duplicados históricos sin borrar días ni referencias; requiere resolverlos explícitamente.
 
+### Contratos pendientes (T44)
+
+Antes de evolucionar contratos de datos, ejecutar la auditoría de solo lectura con la configuración de la base que se desea inspeccionar:
+
+```bash
+yarn workspace api audit:mongodb
+```
+
+La salida JSON contiene `findings`, ordenados por colección y `_id`, con `code`, `collection`, `documentId`, `tripId`, `fields` y `relatedIds`. Los ObjectId se imprimen como hexadecimal sin cambiar su tipo almacenado. Los códigos de salida son **0** sin hallazgos, **2** con contratos por revisar y **1** ante un error operativo. Ante errores no se imprimen URI ni credenciales. El comando no crea colecciones, índices ni versiones, ni adapta datos. Los hallazgos se recalculan en cada ejecución, aunque las migraciones ya estén aplicadas.
+
+| Código | Diagnóstico |
+| --- | --- |
+| `post_multiple_links` | Más de una referencia directa entre actividad, padre y transporte. No elige cuál conservar. |
+| `post_legacy_day` | Un post conserva `dayId` heredado. `referenceStatus` distingue `valid`, `missing`, `different_trip` e `invalid`. El `dayId` de actividades sigue siendo válido y no es un hallazgo. |
+| `expense_legacy_paid_by` | Un `paidBy` ObjectId conocido todavía no tiene pagos registrados; `relatedIds` conserva esa identidad, aunque ya no sea integrante. |
+| `expense_incomplete` | Campos faltantes/inválidos, pagos o reparto sin cubrir el total, exceso de cobertura o partes duplicadas. No calcula deudas, convierte monedas ni propone acuerdos. |
+
+Una cadena válida con ramas y vínculo exclusivo al padre no produce un hallazgo de vínculos múltiples. Los posts sin `dayId` tampoco. Un gasto incompleto se conserva; no se considera apto para balance por pasar una migración de índices. La auditoría es un diagnóstico previo, no un validador exhaustivo de ciclos, referencias o balances ni una garantía frente a escrituras concurrentes.
+
+Las nuevas migraciones son aditivas y se ejecutan después de `0001–0003`, cuyas definiciones permanecen intactas:
+
+| Versión | Índices nuevos |
+| --- | --- |
+| `0004-publication-and-personal-agenda-indexes` | `posts.tripId_createdAt_desc`: `{ tripId: 1, createdAt: -1 }`; `activityParticipations.tripId_userId_status`: `{ tripId: 1, userId: 1, status: 1 }`. |
+| `0005-notification-outbox-indexes` | `outboxEvents.eventKey_unique`: `{ eventKey: 1 }` único; `outboxEvents.status_availableAt`: `{ status: 1, availableAt: 1 }`. |
+
+Se mantienen todos los índices anteriores, incluidos los únicos de membresías, participaciones, likes, gastos, posiciones de destinos, direcciones de transporte e identidad de itinerario, además del TTL de refresh tokens. No se quitan índices heredados de `dayId` ni se borra `activityVotes`.
+
+`outboxEvents` prepara el almacenamiento técnico para avisos/push de T91–T92; no almacena vínculos al calendario nativo de T96. Su contrato base reserva `_id: ObjectId`, `tripId: ObjectId`, `eventKey: string` (clave estable de deduplicación de la operación), `type: string`, `status: string`, `availableAt: Date` y `createdAt: Date` en UTC. Los IDs de recursos/destinatarios que incorpore T91 deben ser ObjectId. La máquina de estados, el payload y la emisión transaccional se implementarán en T91–T92; T44 solo versiona sus índices y no impone un validador de documentos. No hay TTL ni eliminación de eventos en estas migraciones.
+
+Cada versión se registra en `_migrations` solo después de crear todos sus índices. Si un índice existente tiene una definición incompatible o hay claves de evento duplicadas, la operación falla y conserva los datos y el índice conflictivo. Los índices ya creados pueden permanecer: después de una resolución explícita se puede repetir `migrate:mongodb` sin duplicar versiones ni modificar sus fechas. Los hallazgos del auditor no bloquean por sí solos estos índices aditivos; la evolución funcional posterior debe revisar el reporte y resolver incompatibilidades explícitamente.
+
+Los fixtures de T44 están en `test/legacy-contract-fixture.ts` y solo se cargan desde pruebas con MongoDB efímero, sin usar `.env` ni reiniciar una base dev. Incluyen un gasto con importe y `paidBy` conocidos, sin `currency`, `payments` ni `shares`. **T80** realizará la adaptación idempotente a un único pago `percent: 100`; T44 no la ejecuta, no infiere moneda/reparto ni cambia fechas o importes. Los tests verifican conservación BSON, índices anteriores, idempotencia, reintentos tras fallos y ausencia de escrituras durante la auditoría.
+
 Los POST/PATCH de transportes y los cambios de orden de destinos regeneran el itinerario en una transacción MongoDB con coordinación por Trip. Un fallo aborta el cambio completo. Los cambios que invaliden actividades o eliminen días con actividades/posts responden HTTP 409 con código `ItineraryConflictError`.
 
 ## API de actividades (T36)

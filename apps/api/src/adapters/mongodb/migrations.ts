@@ -3,6 +3,7 @@ import {
   type Db,
   type IndexDescription,
 } from "mongodb";
+import { migratePendingContracts } from "./pending-contract-migrations.js";
 
 export const MONGO_MIGRATION_ID = "0001-create-prd-schema";
 export const JOURNEY_MIGRATION_ID = "0002-unique-journey-order-and-direction";
@@ -205,4 +206,6 @@ export const migrateMongoSchema = async (database: Db): Promise<void> => {
     await days.createIndex({ tripId: 1, destinationId: 1, date: 1, type: 1 }, { name: "itinerary_identity_unique", unique: true });
     await migrations.insertOne({ id: ITINERARY_MIGRATION_ID, appliedAt: new Date() });
   }
+
+  await migratePendingContracts(database);
 };
