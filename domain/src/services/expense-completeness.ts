@@ -2,16 +2,35 @@ import { err, ok, type Result } from "../types/result.js";
 import { ValidationError, type ValidationIssue } from "../errors/validation-error.js";
 import { createObjectId } from "../value-objects/object-id.js";
 
-// Round a scaled decimal half-up without binary multiplication at a rounding boundary.
-const roundDecimal = (value: unknown, multiplier: bigint, divisor: bigint): number | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+type DecimalFraction = { numerator: bigint; denominator: bigint };
+
+const decimalFraction = (value: number): DecimalFraction => {
   const [mantissa, exponent = "0"] = value.toString().split("e");
   const [whole, fraction = ""] = mantissa.split(".");
   const coefficient = BigInt(whole + fraction);
   const shift = Number(exponent) - fraction.length;
   const scale = 10n ** BigInt(Math.abs(shift));
-  const numerator = coefficient * multiplier * (shift >= 0 ? scale : 1n);
-  const denominator = divisor * (shift < 0 ? scale : 1n);
+  return { numerator: coefficient * (shift >= 0 ? scale : 1n), denominator: shift < 0 ? scale : 1n };
+};
+
+const addDecimals = (left: DecimalFraction, right: DecimalFraction): DecimalFraction => {
+  // Decimal denominators are powers of ten, so the larger is a common denominator.
+  const denominator = left.denominator > right.denominator ? left.denominator : right.denominator;
+  return { numerator: left.numerator * (denominator / left.denominator) + right.numerator * (denominator / right.denominator), denominator };
+};
+
+const withinTolerance = (difference: bigint, denominator: bigint, tolerance: number): boolean => {
+  const margin = decimalFraction(tolerance);
+  const magnitude = difference < 0n ? -difference : difference;
+  return magnitude * margin.denominator <= margin.numerator * denominator;
+};
+
+// Round a scaled decimal half-up without binary multiplication at a rounding boundary.
+const roundDecimal = (value: unknown, multiplier: bigint, divisor: bigint): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  const fraction = decimalFraction(value);
+  const numerator = fraction.numerator * multiplier;
+  const denominator = fraction.denominator * divisor;
   const rounded = (numerator + denominator / 2n) / denominator;
   return rounded <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(rounded) : undefined;
 };
@@ -20,9 +39,9 @@ const decimalCents = (value: unknown) => roundDecimal(value, 100n, 1n);
 const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boolean): boolean => {
   if (!Array.isArray(rows) || rows.length === 0) return false;
   const identities = new Set<string>();
-  let amountCents = 0;
+  let amountCents = 0n;
   let roundedCoverage = 0n;
-  let percent = 0;
+  let percent: DecimalFraction = { numerator: 0n, denominator: 1n };
   let hasRemainder = false;
   for (const row of rows) {
     if (row === null || typeof row !== "object" || typeof row.userId !== "string") return false;
@@ -38,10 +57,10 @@ const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boo
     if (row.unit === "amount") {
       const cents = decimalCents(row.value);
       if (cents === undefined) return false;
-      amountCents += cents;
+      amountCents += BigInt(cents);
       roundedCoverage += BigInt(cents);
     } else if (row.unit === "percent" && row.value <= 100) {
-      percent += row.value;
+      percent = addDecimals(percent, decimalFraction(row.value));
       if (totalCents !== undefined) {
         const cents = roundDecimal(row.value, BigInt(totalCents), 100n);
         if (cents === undefined) return false;
@@ -49,17 +68,22 @@ const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boo
       }
     } else return false;
   }
-  if (percent - 100 > Number.EPSILON * 100 * 8) return false;
+  const percentExcess = percent.numerator - 100n * percent.denominator;
+  if (percentExcess > 0n && !withinTolerance(percentExcess, percent.denominator, Number.EPSILON * 100 * 8)) return false;
   if (totalCents === undefined) return true;
   // Validate coverage and rounded row totals without producing debts or changing agreements.
   // Require full coverage before rounding; only complete agreements may resolve cent residue.
-  const rawCoverage = amountCents + totalCents * percent / 100;
-  const tolerance = Number.EPSILON * Math.max(1, totalCents, rawCoverage) * 8;
-  if (rawCoverage - totalCents > tolerance) return false;
-  const fullyCovered = Math.abs(rawCoverage - totalCents) <= tolerance;
+  const total = BigInt(totalCents);
+  if (amountCents > total) return false;
+  const denominator = 100n * percent.denominator;
+  const difference = (total - amountCents) * denominator - total * percent.numerator;
+  // Fixed cents compare exactly. Fractional percentage noise is bounded below one whole cent.
+  const tolerance = Math.min(0.25, Number.EPSILON * Math.max(1, totalCents) * 8);
+  const fullyCovered = difference === 0n || (percent.numerator > 0n && withinTolerance(difference, denominator, tolerance));
+  if (difference < 0n && !fullyCovered) return false;
   // A partial agreement cannot absorb rounded excess into a negative remainder.
-  if (!fullyCovered && roundedCoverage > BigInt(totalCents)) return false;
-  return Number.isFinite(rawCoverage) && (hasRemainder || fullyCovered);
+  if (!fullyCovered && roundedCoverage > total) return false;
+  return hasRemainder || fullyCovered;
 };
 
 /** Pure diagnostic: does not adapt paidBy, infer agreements, or calculate balances. */

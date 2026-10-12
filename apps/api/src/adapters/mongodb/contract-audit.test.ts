@@ -148,4 +148,14 @@ describe("read-only approved contract audit", () => {
     })]);
     expect(await snapshotDocuments(database)).toEqual(before);
   });
+
+  it("reports a missing fixed cent in a large expense without changing its stored amounts", async () => {
+    const { insertedId } = await database.collection("postExpenses").insertOne({ ...completeExpense(), totalAmount: 10000000000000,
+      payments: [payment("amount", 9999999999999.99)] });
+    const before = await snapshotDocuments(database);
+    expect((await auditMongoContracts(database)).findings).toEqual([expect.objectContaining({
+      code: "expense_incomplete", documentId: insertedId, fields: ["payments"],
+    })]);
+    expect(await snapshotDocuments(database)).toEqual(before);
+  });
 });

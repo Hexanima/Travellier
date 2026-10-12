@@ -100,4 +100,31 @@ describe("expense completeness diagnostics", () => {
   it.each(["payments", "shares"])("does not round a fixed %s amount below the half-cent boundary upward", (field) => {
     expect(fields({ ...complete(), totalAmount: 1.01, [field]: [row("amount", 1.0049999999999997)] })).toEqual([field]);
   });
+
+  describe.each(["payments", "shares"])("large %s coverage", (field) => {
+    it.each([
+      ["one fixed cent missing", [row("amount", 9999999999999.99)]],
+      ["one fixed cent extra", [row("amount", 10000000000000.01)]],
+      ["one percentage cent missing", [row("percent", 99.9999999999999)]],
+      ["one mixed cent missing", [row("amount", 5000000000000), row("percent", 49.9999999999999, otherUser)]],
+      ["one percentage cent extra", [row("percent", 50.0000000000001), row("percent", 50, otherUser)]],
+    ])("diagnoses %s", (_name, rows) => {
+      expect(fields({ ...complete(), totalAmount: 10000000000000, [field]: rows })).toEqual([field]);
+    });
+  });
+  it("sums fixed cents exactly even when their aggregate exceeds the safe Number range", () => {
+    expect(fields({ ...complete(), totalAmount: 90071992547409.9,
+      payments: [row("amount", 90071992547409.9), row("amount", 0.03)] })).toEqual(["payments"]);
+  });
+  it("rejects one fixed cent of excess rather than allowing a negative large remainder", () => {
+    expect(fields({ ...complete(), totalAmount: 10000000000000,
+      shares: [row("amount", 10000000000000.01), row("remainder", null, otherUser)] })).toEqual(["shares"]);
+  });
+  it("accepts complete large fixed and mixed coverage and an explicitly assigned last cent", () => {
+    expect(fields({ ...complete(), totalAmount: 10000000000000,
+      payments: [row("amount", 10000000000000)],
+      shares: [row("amount", 5000000000000), row("percent", 50, otherUser)] })).toEqual([]);
+    expect(fields({ ...complete(), totalAmount: 10000000000000,
+      shares: [row("percent", 99.9999999999999), row("remainder", null, otherUser)] })).toEqual([]);
+  });
 });
