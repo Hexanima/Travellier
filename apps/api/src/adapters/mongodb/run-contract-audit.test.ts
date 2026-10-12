@@ -19,10 +19,10 @@ beforeEach(() => { database = client.db(`audit_runner_${++counter}`); });
 afterEach(() => { vi.restoreAllMocks(); });
 afterAll(async () => { await client?.close(); await server?.stop(); });
 
-const cli = (uri = server.getUri()) => spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./run-contract-audit.ts", import.meta.url))], {
+const cli = (uri = server.getUri(), databaseName = database.databaseName) => spawnSync(process.execPath, ["--import", "tsx", fileURLToPath(new URL("./run-contract-audit.ts", import.meta.url))], {
   cwd: fileURLToPath(new URL("../../../", import.meta.url)),
   env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP,
-    MONGODB_URI: uri, MONGODB_DATABASE_NAME: database.databaseName },
+    MONGODB_URI: uri, MONGODB_DATABASE_NAME: databaseName },
   encoding: "utf8", timeout: 15_000,
 });
 
@@ -70,5 +70,15 @@ describe("MongoDB contract audit runner", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("MongoDB contract audit failed.");
     expect(result.stderr).not.toContain("invalid-uri-with-secret");
+  }, 20_000);
+
+  it("exits naturally with code 1 when Db rejects the database name after connection", () => {
+    const result = cli(server.getUri(), "dev.audit");
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("MongoDB contract audit failed.");
+    expect(result.stderr).not.toContain(server.getUri());
   }, 20_000);
 });
