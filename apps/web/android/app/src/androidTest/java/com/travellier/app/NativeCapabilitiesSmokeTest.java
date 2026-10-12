@@ -108,6 +108,15 @@ public class NativeCapabilitiesSmokeTest {
     }
 
     @Test public void b_capturesAnActualPhotoThroughNativeCamera() throws Exception {
+        if (Build.VERSION.SDK_INT == 24) {
+            // AOSP API 24 PermissionsActivity restarts CameraActivity without the capture
+            // intent. Complete the external camera's first-run setup before testing our bridge.
+            device.executeShellCommand("am start -W -a android.media.action.STILL_IMAGE_CAMERA -p com.android.camera2");
+            dismissExternalCameraPermissions();
+            assertTrue(device.wait(Until.hasObject(By.res("com.android.camera2:id/shutter_button")), TIMEOUT));
+            device.pressBack();
+            assertTrue(device.wait(Until.hasObject(By.pkg(APP)), TIMEOUT));
+        }
         installAdapterBundle();
         begin("photos.select('camera')");
         dismissExternalCameraPermissions();
@@ -185,7 +194,13 @@ public class NativeCapabilitiesSmokeTest {
                 continue;
             }
             UiObject2 button = device.findObject(By.res(Pattern.compile(".*:id/permission_allow.*")));
-            if (button != null) { button.click(); SystemClock.sleep(250); }
+            if (button != null) {
+                UiObject2 deny = device.findObject(By.res(Pattern.compile(".*:id/permission_deny_button")));
+                boolean location = device.hasObject(By.text(Pattern.compile("(?i).*location.*")));
+                if (location && deny != null) deny.click();
+                else button.click();
+                SystemClock.sleep(250);
+            }
             else if (device.hasObject(By.res(Pattern.compile(".*:id/shutter_button")))) return;
             else SystemClock.sleep(200);
         }

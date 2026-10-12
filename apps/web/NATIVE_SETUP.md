@@ -85,6 +85,8 @@ corepack yarn workspace web cap:test:android
 
 La suite verifica arranque y consulta sin diálogos, captura y selección con archivos de imagen decodificables, ausencia de permisos generales de almacenamiento y calendario concedido/denegado. Los fixtures se indexan con el escáner de medios del emulador y se eliminan por su referencia propia. La concesión de calendario se prueba al final: revocar un permiso concedido desde el proceso de instrumentación mata ese mismo proceso, por lo que el runner prepara el estado fuera de él.
 
+La cámara AOSP del AVD API 24 necesita completar su primer inicio antes de probar el intent de captura: su [PermissionsActivity](https://android.googlesource.com/platform/packages/apps/Camera2/+/android-7.0.0_r1/src/com/android/camera/PermissionsActivity.java) vuelve a abrir `CameraActivity` sin conservar el intent original. El test prepara únicamente esa app externa, rechaza ubicación y desactiva el etiquetado de ubicaciones; después ejecuta el adaptador real. No concede permisos a Travellier. Esta evidencia cubre la cámara del sistema preparada y no acredita ese primer inicio defectuoso del proveedor AOSP.
+
 ### Matriz Android en CI
 
 El job `android-native` de `.github/workflows/ci.yml` ejecuta la suite en AVDs x86_64 de API **24 y 33**, independientemente del job de calidad. Publica resultados JUnit/HTML, capturas y respuestas JSON como artifacts `t46-android-api-24` y `t46-android-api-33`, también al fallar. Los archivos de evidencia se copian a `/sdcard/Download/t46-smoke` antes de desinstalar el APK y se descargan a `apps/web/android-smoke-results/` (ignorado por Git).
