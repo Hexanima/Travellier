@@ -82,6 +82,20 @@ describe("native capabilities", () => {
     expect(spies.camera.requestPermissions).not.toHaveBeenCalled();
   });
 
+  it.each(["android", "ios"])("reports denied gallery access on %s without requesting permissions again", async (platform) => {
+    const { dependencies, spies } = fixture(platform);
+    spies.camera.chooseFromGallery.mockRejectedValueOnce({
+      code: "OS-PLUG-CAMR-0005",
+      message: "Couldn't access your photo gallery because access wasn't provided.",
+    });
+
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({
+      ok: false,
+      error: { tag: "NativeCapabilityError", kind: "denied" },
+    });
+    expect(spies.camera.requestPermissions).not.toHaveBeenCalled();
+  });
+
   it("preserves limited library access as a usable permission state", async () => {
     const { dependencies, setPermission } = fixture();
     setPermission("limited");
