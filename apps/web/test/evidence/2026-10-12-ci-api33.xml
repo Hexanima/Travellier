@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuite name="com.travellier.app.NativeCapabilitiesSmokeTest" tests="5" failures="0" errors="0" skipped="0" time="28.118" timestamp="2026-10-12T23:02:51" hostname="localhost">
+  <properties>
+    <property name="device" value="emulator-5554 - 13" />
+    <property name="flavor" value="" />
+    <property name="project" value=":app" />
+  </properties>
+  <testcase name="a_startupAndCalendarCheckDoNotPrompt" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="6.093" />
+  <testcase name="b_capturesAnActualPhotoThroughNativeCamera" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="7.469" />
+  <testcase name="c_selectsAnActualPhotoWithoutBroadStoragePermission" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="7.577" />
+  <testcase name="d_calendarDenialDoesNotClaimAccess" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="3.079" />
+  <testcase name="e_calendarPermissionCanBeGrantedInContext" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="2.613" />
+</testsuite>

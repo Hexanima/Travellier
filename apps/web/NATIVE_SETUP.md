@@ -126,6 +126,7 @@ Comprobaciones manuales en un dispositivo de prueba, sin datos ajenos:
 | Calendario rechazado sin anunciar acceso | Correcto | Correcto |
 | Calendario concedido mediante diálogo contextual | Correcto | Correcto |
 
-- **Pendiente:** recepción push con configuración real FCM/APNs; compilación/firma iOS en macOS y pruebas en iPhone físico; resultado del job nuevo en GitHub después del push. Estas evidencias no acreditan entrega push ni sincronización de eventos de T96.
+- GitHub Actions: [ejecución 38319600852](https://github.com/Hexanima/Travellier/actions/runs/38319600852), commit `b53b6967ca891835368fa018d7529f3b32e97f1a`, correcta para calidad y ambas APIs. Los informes `test/evidence/2026-10-12-ci-api24.xml` y `2026-10-12-ci-api33.xml` registran **5 tests sin fallos por API**. Capturas, resultados JSON y logs nativos están en los artifacts de esa ejecución.
+- **Pendiente:** recepción push con configuración real FCM/APNs; compilación/firma iOS en macOS y pruebas en iPhone físico. Estas evidencias no acreditan entrega push ni sincronización de eventos de T96.
 
 Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/environment-setup), [Camera](https://capacitorjs.com/docs/apis/camera), [Push Notifications](https://capacitorjs.com/docs/apis/push-notifications), [Calendar](https://capacitorjs.com/docs/apis/calendar).
