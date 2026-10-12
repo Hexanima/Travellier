@@ -61,4 +61,23 @@ describe("expense completeness diagnostics", () => {
       shares: [row("percent", 60), row("percent", 50, otherUser)] })).toEqual(["payments", "shares"]);
     expect(fields({ ...complete(), totalAmount: 0.01, payments: [row("amount", 0.01), row("percent", 10)] })).toEqual(["payments"]);
   });
+
+  describe.each(["totalAmount", "payments", "shares"])("decimal rounding of %s", (field) => {
+    it.each([
+      [1.005, 1.01], [1.015, 1.02], [2.675, 2.68], [1.255, 1.26], [0.005, 0.01],
+      [1.0049999999999997, 1], [1.0050000000000001, 1.01], [5e-7, 0],
+    ])("rounds %s consistently to %s", (value, rounded) => {
+      const expense = { ...complete(), totalAmount: rounded, payments: [row("amount", rounded)] };
+      const input = field === "totalAmount" ? { ...expense, totalAmount: value }
+        : { ...expense, [field]: [row("amount", value)] };
+      expect(checkExpenseCompleteness(input)).toEqual({ ok: true, value: undefined });
+    });
+  });
+
+  it.each([Number.POSITIVE_INFINITY, -1, 1e21, 90071992547409.92])("rejects an invalid or unsafe decimal total %s", (totalAmount) => {
+    expect(fields({ ...complete(), totalAmount })).toContain("totalAmount");
+  });
+  it.each(["payments", "shares"])("does not round a fixed %s amount below the half-cent boundary upward", (field) => {
+    expect(fields({ ...complete(), totalAmount: 1.01, [field]: [row("amount", 1.0049999999999997)] })).toEqual([field]);
+  });
 });

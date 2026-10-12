@@ -2,6 +2,18 @@ import { err, ok, type Result } from "../types/result.js";
 import { ValidationError, type ValidationIssue } from "../errors/validation-error.js";
 import { createObjectId } from "../value-objects/object-id.js";
 
+// Round the decimal representation half-up, without binary multiplication at the half-cent boundary.
+const decimalCents = (value: unknown): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  const [mantissa, exponent = "0"] = value.toString().split("e");
+  const [whole, fraction = ""] = mantissa.split(".");
+  const coefficient = BigInt(whole + fraction);
+  const shift = Number(exponent) + 2 - fraction.length;
+  const scale = 10n ** BigInt(Math.abs(shift));
+  const rounded = shift >= 0 ? coefficient * scale : (coefficient + scale / 2n) / scale;
+  return rounded <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(rounded) : undefined;
+};
+
 const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boolean): boolean => {
   if (!Array.isArray(rows) || rows.length === 0) return false;
   const identities = new Set<string>();
@@ -20,8 +32,8 @@ const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boo
     }
     if (typeof row.value !== "number" || !Number.isFinite(row.value) || row.value < 0) return false;
     if (row.unit === "amount") {
-      const cents = Math.round(row.value * 100);
-      if (!Number.isSafeInteger(cents)) return false;
+      const cents = decimalCents(row.value);
+      if (cents === undefined) return false;
       amountCents += cents;
     } else if (row.unit === "percent" && row.value <= 100) {
       percent += row.value;
@@ -41,9 +53,7 @@ const rowsComplete = (rows: unknown, totalCents: number | undefined, shares: boo
 export const checkExpenseCompleteness = (input: Record<string, unknown>): Result<void, ValidationError> => {
   const issues: ValidationIssue[] = [];
   const incomplete = (field: string) => issues.push({ field, code: "incomplete_or_invalid", message: `Expense ${field} is incomplete or invalid.` });
-  const amount = input.totalAmount;
-  const totalCents = typeof amount === "number" && Number.isFinite(amount) && amount >= 0 && Number.isSafeInteger(Math.round(amount * 100))
-    ? Math.round(amount * 100) : undefined;
+  const totalCents = decimalCents(input.totalAmount);
   if (totalCents === undefined) incomplete("totalAmount");
   if (input.currency !== "ARS" && input.currency !== "EUR" && input.currency !== "USD") incomplete("currency");
   if (!rowsComplete(input.payments, totalCents, false)) incomplete("payments");

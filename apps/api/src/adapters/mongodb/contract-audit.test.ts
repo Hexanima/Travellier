@@ -127,4 +127,14 @@ describe("read-only approved contract audit", () => {
     })]);
     expect(await snapshotDocuments(database)).toEqual(before);
   });
+
+  it("accepts decimal half-cent rounding in totals and fixed rows without adapting stored amounts", async () => {
+    await database.collection("postExpenses").insertMany([
+      { ...completeExpense(), totalAmount: 1.01, payments: [payment("amount", 1.005)], shares: [share("amount", 1.005)] },
+      { ...completeExpense(), postId: legacyIds.root, totalAmount: 1.005, payments: [payment("amount", 1.01)] },
+    ]);
+    const before = await snapshotDocuments(database);
+    expect(await auditMongoContracts(database)).toEqual({ findings: [] });
+    expect(await snapshotDocuments(database)).toEqual(before);
+  });
 });
