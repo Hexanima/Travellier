@@ -3,7 +3,7 @@ import { delimiter, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const minimumJavaVersion = 17;
+const minimumJavaVersion = 21;
 const maximumJavaVersion = 21;
 
 export const selectAndroidJavaHome = ({ candidates, readMajorVersion }) => {
@@ -24,7 +24,7 @@ export const selectAndroidJavaHome = ({ candidates, readMajorVersion }) => {
   }
 
   throw new Error(
-    `No se encontró un JDK ${minimumJavaVersion} a ${maximumJavaVersion} compatible para Android. Configurá ANDROID_JAVA_HOME o JAVA_HOME.`,
+    `No se encontró un JDK 21 compatible para Android. Configurá ANDROID_JAVA_HOME o JAVA_HOME.`,
   );
 };
 

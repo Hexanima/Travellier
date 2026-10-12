@@ -35,6 +35,18 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Usamos la cámara para que puedas agregar fotos a tus recuerdos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Podés seleccionar fotos para tus recuerdos del viaje.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Permite guardar una foto cuando lo solicites.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Permite agregar y actualizar los eventos de tus viajes en el calendario.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>Permite agregar los eventos de tus viajes al calendario.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Permite actualizar o quitar los eventos vinculados a tus viajes.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

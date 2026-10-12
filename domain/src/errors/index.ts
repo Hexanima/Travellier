@@ -21,3 +21,4 @@ export * from "./activity-not-found-error.js";
 export * from "./activity-voting-disabled-error.js";
 export * from "./activity-voting-closed-error.js";
 export * from "./post-not-found-error.js";
+export * from "./native-capability-error.js";

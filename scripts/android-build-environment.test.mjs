@@ -22,6 +22,14 @@ test('rejects the build when no compatible Android JDK is available', () => {
         candidates: ['C:\\Program Files\\Eclipse Adoptium\\jdk-25'],
         readMajorVersion: () => 25,
       }),
-    /JDK 17 a 21 compatible/,
+    /JDK 21 compatible/,
   );
+});
+
+test('skips JDK 17 because Capacitor 8 compiles Java 21 sources', () => {
+  const selected = selectAndroidJavaHome({
+    candidates: ['jdk-17', 'jdk-21'],
+    readMajorVersion: (javaHome) => Number(javaHome.slice(4)),
+  });
+  assert.equal(selected, 'jdk-21');
 });

@@ -50,7 +50,7 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn workspace web cap:build:android`
 - `corepack yarn workspace web cap:build:ios` (macOS con Xcode)
 
-Para compilar Android, `cap:build:android` usa automáticamente un JDK 17 a 21. En Windows también detecta el JBR de Android Studio. Si no está disponible, configurá `ANDROID_JAVA_HOME` o `JAVA_HOME`; el JDK 25 no es compatible con la versión de Gradle incluida en el proyecto.
+Para compilar Android, `cap:build:android` usa un JDK 21, requerido por las fuentes Java de Capacitor 8. En Windows también detecta el JBR de Android Studio. Si no está disponible, configurá `ANDROID_JAVA_HOME` o `JAVA_HOME`; JDK 17 y 25 no son compatibles con este setup.
 
 El comando genera el APK debug en `apps/web/android/app/build/outputs/apk/debug/app-debug.apk`; un release firmado requiere las credenciales de firma correspondientes.
 

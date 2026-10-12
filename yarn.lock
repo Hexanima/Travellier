@@ -621,6 +621,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@capacitor/calendar@npm:1.0.1":
+  version: 1.0.1
+  resolution: "@capacitor/calendar@npm:1.0.1"
+  peerDependencies:
+    "@capacitor/core": ">=8.0.0"
+  checksum: 10c0/0d5a5f154a86036edcbbca284e0a67776411465bda8d399d7dc8270f2de7ef6afc3cd3a1b0a90b3c911e5df418c98027aef3505ac7e557a85f196e88deae9b50
+  languageName: node
+  linkType: hard
+
+"@capacitor/camera@npm:8.2.5":
+  version: 8.2.5
+  resolution: "@capacitor/camera@npm:8.2.5"
+  peerDependencies:
+    "@capacitor/core": ">=8.0.0"
+  checksum: 10c0/804ac580d730650aaf0d0d78e30480357174612ea9029967108b637fb0e1f65517cbe576467b80154c62da40cabde1caa147913d225cbf257049536289c20332
+  languageName: node
+  linkType: hard
+
 "@capacitor/cli@npm:8.5.2":
   version: 8.5.2
   resolution: "@capacitor/cli@npm:8.5.2"
@@ -674,6 +692,15 @@ __metadata:
   peerDependencies:
     "@capacitor/core": ">=8.0.0"
   checksum: 10c0/cbed0229a685f484c396fd043354688fdeec69264f322180b62c5adb0322561b288a63eb38ee9b38cf78ea7dbc3b9dc8dd8c2e52b54a7f752a1b2f07bfd29f0d
+  languageName: node
+  linkType: hard
+
+"@capacitor/push-notifications@npm:8.1.3":
+  version: 8.1.3
+  resolution: "@capacitor/push-notifications@npm:8.1.3"
+  peerDependencies:
+    "@capacitor/core": ">=8.0.0"
+  checksum: 10c0/b64d3dffd79d2a8aa5847c293b166489fc094f61956b3beefe53ac62984dda7d1bf7d2c193eba21f9e0267fadcc38778ff3cdab480a5ae1354a202be7a73d889
   languageName: node
   linkType: hard
 
@@ -5189,10 +5216,13 @@ __metadata:
   dependencies:
     "@capacitor/android": "npm:8.5.2"
     "@capacitor/app": "npm:8.1.1"
+    "@capacitor/calendar": "npm:1.0.1"
+    "@capacitor/camera": "npm:8.2.5"
     "@capacitor/cli": "npm:8.5.2"
     "@capacitor/core": "npm:8.5.2"
     "@capacitor/ios": "npm:8.5.2"
     "@capacitor/preferences": "npm:8.0.1"
+    "@capacitor/push-notifications": "npm:8.1.3"
     "@eslint/js": "npm:^9.36.0"
     "@types/node": "npm:^24.6.0"
     "@types/react": "npm:^19.1.16"
