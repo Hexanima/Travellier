@@ -127,7 +127,17 @@ export const safeDeploymentError = (error) => error instanceof InfrastructureCon
   ? error.message : 'Infrastructure deployment failed; inspect resource status without logging credentials'
 
 export const validateConsumerConfiguration = ({ consumerArn, accountId, roleArn, configuration }) => {
-  if (consumerArn.split(':')[4] !== accountId || !roleArn || configuration.FunctionArn !== consumerArn.split(':').slice(0, 7).join(':') ||
+  const requested = consumerArn.split(':')
+  const returned = configuration.FunctionArn?.split(':') ?? []
+  const qualifier = requested[7]
+  // GetFunctionConfiguration resolves aliases to versions. Compare the same
+  // function identity on both sides without changing the ARN used by SQS.
+  const qualifierMismatch = qualifier !== undefined && (/^\d+$/.test(qualifier)
+    ? configuration.Version !== qualifier || (returned[7] !== undefined && returned[7] !== qualifier)
+    : !/^[1-9]\d*$/.test(configuration.Version ?? '') ||
+      (returned[7] !== undefined && returned[7] !== qualifier && returned[7] !== configuration.Version))
+  if (requested[4] !== accountId || !roleArn || returned.length > 8 ||
+    returned.slice(0, 7).join(':') !== requested.slice(0, 7).join(':') || qualifierMismatch ||
     configuration.Role !== roleArn || configuration.Runtime !== 'nodejs22.x' || !Number.isInteger(configuration.Timeout) || configuration.Timeout <= 0 || configuration.Timeout > 60 ||
     configuration.State !== 'Active' || configuration.LastUpdateStatus !== 'Successful') {
     throw new InfrastructureConfigurationError('Consumer must be active, use its stage worker role and Node.js 22, with timeout at most 60 seconds')

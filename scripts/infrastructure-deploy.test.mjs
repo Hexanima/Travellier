@@ -107,6 +107,47 @@ describe('infrastructure deployer', () => {
       }
       assert.throws(() => validate({ ...input, accountId: '999999999999' }), /consumer/i)
     })
+
+    for (const kind of ['events', 'storage-deletion']) {
+      const functionArn = `arn:aws:lambda:sa-east-1:123456789012:function:travellier-api-dev-${kind}`
+      const configuration = { FunctionArn: functionArn, Role: 'stage-worker-role', Runtime: 'nodejs22.x', Timeout: 60,
+        State: 'Active', LastUpdateStatus: 'Successful' }
+      const input = { consumerArn: functionArn, accountId: '123456789012', roleArn: 'stage-worker-role', configuration }
+
+      it(`${kind}: accepts the requested published version returned by AWS`, () => {
+        for (const returnedArn of [functionArn, `${functionArn}:7`]) {
+          assert.doesNotThrow(() => deploymentModule.validateConsumerConfiguration({ ...input,
+            consumerArn: `${functionArn}:7`, configuration: { ...configuration, FunctionArn: returnedArn, Version: '7' } }))
+        }
+      })
+
+      it(`${kind}: accepts an alias resolved to a published version and preserves the requested ARN`, () => {
+        const name = kind === 'events' ? 'eventsConsumerArn' : 'storageDeletionConsumerArn'
+        const requestedArn = `${functionArn}:release`
+        const options = deploymentModule.readDeploymentOptions(['--stage', 'dev', `--param=${name}=${requestedArn}`])
+        assert.equal(options.consumers[name], requestedArn)
+        assert.ok(options.serverlessArguments.includes(`--param=${name}=${requestedArn}`))
+        assert.doesNotThrow(() => deploymentModule.validateConsumerConfiguration({ ...input,
+          consumerArn: requestedArn, configuration: { ...configuration, FunctionArn: `${functionArn}:7`, Version: '7' } }))
+      })
+
+      it(`${kind}: rejects another function, account, region or requested version`, () => {
+        for (const returnedArn of [functionArn.replace(`dev-${kind}`, `prod-${kind}`),
+          functionArn.replace('123456789012', '999999999999'), functionArn.replace('sa-east-1', 'us-east-1'),
+          `${functionArn}:8`]) {
+          assert.throws(() => deploymentModule.validateConsumerConfiguration({ ...input, consumerArn: `${functionArn}:7`,
+            configuration: { ...configuration, FunctionArn: returnedArn, Version: returnedArn.endsWith(':8') ? '8' : '7' } }), /consumer/i)
+        }
+      })
+
+      it(`${kind}: rejects inconsistent version metadata and another alias`, () => {
+        assert.throws(() => deploymentModule.validateConsumerConfiguration({ ...input, consumerArn: `${functionArn}:7`,
+          configuration: { ...configuration, FunctionArn: `${functionArn}:8`, Version: '7' } }), /consumer/i)
+        assert.throws(() => deploymentModule.validateConsumerConfiguration({ ...input, consumerArn: `${functionArn}:release`,
+          configuration: { ...configuration, FunctionArn: `${functionArn}:another-alias`, Version: '7' } }), /consumer/i)
+      })
+    }
+
     it('restores a previous MongoDB configuration when it differs from AWSCURRENT', async () => {
       const calls = []
       let currentSecretString = '{"uri":"mongodb+srv://travellier.example/database","databaseName":"travellier_new"}'

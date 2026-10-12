@@ -88,6 +88,8 @@ corepack yarn infrastructure:deploy:dev --param=eventsConsumerArn=arn:aws:lambda
 
 El wrapper comprueba antes de desplegar que las funciones sean del stage/región/cuenta, estén activas, usen sus roles y timeout correctos, y que las credenciales/registro coincidan con el aprovisionamiento anterior. La configuración de proveedor/rotación se hace primero con consumidores desactivados. Para desactivar, desplegar sin los parámetros; no vaciar colas ni colecciones.
 
+Los parámetros admiten versiones publicadas (`:7`) y aliases (`:release`). La consulta a Lambda y el mapping SQS conservan el ARN solicitado completo. La validación compara la identidad base de ambos ARNs, verifica la versión solicitada contra `Version` y admite que AWS resuelva un alias a una versión publicada; sigue rechazando otra función, cuenta, región o versión incompatible. [GetFunctionConfiguration](https://docs.aws.amazon.com/lambda/latest/api/API_GetFunctionConfiguration.html).
+
 ## Dispositivos
 
 **Android/FCM:** habilitar FCM HTTP v1 en el proyecto Firebase del entorno y autorizar la cuenta de servicio para enviar mensajes. Registrar el package ID Android correcto. La configuración pública `google-services.json` del cliente es distinta del JSON privado de cuenta de servicio y no permite enviar mensajes como servidor. T46/T90 agregan la integración y permisos Android; T89 vincula tokens FCM con usuarios autenticados.
@@ -119,6 +121,8 @@ Después del deploy autorizado, registrar evidencia sin valores secretos: output
 Para recuperar fallos, inspeccionar primero la DLQ y el trabajo Mongo correspondiente; corregir la causa y autorizar replay controlado. Repetir ticks puede ejecutar otra búsqueda, no debe duplicar avisos de app ni afectar otros Trips. No borrar `storageDeletionJobs` al fallar. La evidencia funcional de limpieza/push se completa con T73/T92.
 
 **T45 no se considera cerrada únicamente por tests locales o `print`.** El empaquetado exige credenciales AWS válidas; el despliegue dev autorizado y las pruebas del proveedor siguen pendientes hasta tener esas credenciales, cuentas y dispositivos. No se modifica el PRD ni el listado de tareas para dar esos criterios por cumplidos.
+
+Decisión del usuario del 2026-10-11, al revisar los comentarios de T45: **el proyecto todavía no se despliega**. El criterio de template compilado validado y despliegue dev queda abierto; commit/push no lo acredita. El reintento de `package:dev` volvió a fallar por credenciales inválidas del perfil `default`, y `sts:GetCallerIdentity` confirmó `InvalidClientTokenId`. No se ejecutó un despliegue ni se reemplazó esa evidencia por templates simulados. Cuando se habilite el despliegue, retomar la validación del template completo y el change set con credenciales dev válidas, y registrar evidencia del despliegue autorizado antes de cerrar T45.
 
 Verificación local del 2026-10-11: lint, typecheck y build exitosos; tests de infraestructura/aprovisionamiento exitosos; suites domain (485), web (566) y API (393) exitosas con `--maxWorkers=2`. La ejecución sin limitar workers tuvo un timeout de cierre de un fixture MongoDB. Serverless resolvió dev/prod con `print`. `cfn-lint` 1.57.2 validó las declaraciones originales y nuevas para ambos stages, con/sin mappings; esto excluye los recursos de API generados por Serverless y no sustituye validar el template compilado. `package:dev` se detuvo al resolver la cuenta AWS por credenciales inválidas del perfil default. No se desplegaron recursos ni se probaron dispositivos.
 
