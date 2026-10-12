@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Device screenshots and instrumentation evidence generated locally.
+android-smoke-results/

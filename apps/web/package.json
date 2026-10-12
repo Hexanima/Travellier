@@ -14,6 +14,8 @@
     "cap:sync:android": "yarn build && cap sync android",
     "cap:sync:ios": "yarn build && cap sync ios",
     "cap:build:android": "node ../../scripts/android-build-environment.mjs",
+    "cap:smoke:bundle": "esbuild test/android-native-smoke.ts --bundle --format=iife --alias:app-domain=../../domain/src/index.ts --outfile=android/app/src/androidTest/assets/native-smoke.js",
+    "cap:test:android": "node ../../scripts/android-build-environment.mjs --test",
     "cap:build:ios": "yarn cap:sync:ios && cap build ios"
   },
   "dependencies": {
@@ -37,6 +39,7 @@
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",
+    "esbuild": "0.25.10",
     "eslint": "^9.36.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.22",
