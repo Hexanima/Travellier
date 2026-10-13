@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.travellier.test.webviewoverlay">
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="24" />
+    <overlay android:targetPackage="android" android:priority="999" />
+    <application android:hasCode="false" android:label="T46 disposable WebView provider" />
+</manifest>

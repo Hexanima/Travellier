@@ -99,3 +99,8 @@ app/src/main/assets/public
 app/src/main/assets/capacitor.config.json
 app/src/main/assets/capacitor.plugins.json
 app/src/main/res/xml/config.xml
+# Per-environment Firebase client configuration supplied locally / by CI.
+app/google-services.json
+
+# Generated adapter bundle injected only by Android instrumentation tests.
+app/src/androidTest/assets/native-smoke.js

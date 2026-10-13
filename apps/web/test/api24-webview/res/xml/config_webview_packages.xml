@@ -1,0 +1,4 @@
+<webviewproviders>
+    <!-- Installed on the disposable API 24 AVD only, never in the app APK. -->
+    <webviewprovider description="Chromium 108 test provider" packageName="org.bromite.webview" availableByDefault="true" />
+</webviewproviders>

@@ -13,3 +13,4 @@ export * from "./trip-activity-port.js";
 export * from "./trip-participation-port.js";
 export * from "./trip-vote-port.js";
 export * from "./trip-post-port.js";
+export * from "./native-capabilities-port.js";
