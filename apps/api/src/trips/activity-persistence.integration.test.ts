@@ -46,23 +46,23 @@ describe("activity persistence and transactions", () => {
   it.each(["admin", "participant"])("persists BSON values and allows CRUD by %s, including another author's activity", async (role) => {
     await db.collection("tripMembers").updateOne({ tripId: trip }, { $set: { role } });
     const activity = await create();
-    expect(activity).toMatchObject({ tripId: id(trip), createdBy: id(actor), scheduledAt: occurrence, status: "confirmed", description: null, mapsUrl: null });
+    expect(activity).toMatchObject({ tripId: id(trip), createdBy: id(actor), scheduledAt: occurrence, description: null, mapsUrl: null });
     const stored = await db.collection("activities").findOne({ _id: new ObjectId(activity.id) });
     expect(stored).toMatchObject({ tripId: trip, dayId: day, createdBy: actor, scheduledAt: occurrence });
     expect(stored!.createdAt).toBeInstanceOf(Date);
     await db.collection("activities").updateOne({ _id: stored!._id }, { $set: { createdBy: new ObjectId(), status: "voting" } });
     const result = await api.updateActivity!({ ...context(), activityId: activity.id, title: "Museo", description: "Centro" });
-    expect(result).toMatchObject({ ok: true, value: { title: "Museo", description: "Centro", status: "voting", createdAt: activity.createdAt } });
+    expect(result).toMatchObject({ ok: true, value: { title: "Museo", description: "Centro", createdAt: activity.createdAt } });
     expect(await api.getActivity!({ ...context(), activityId: activity.id })).toEqual(result);
     expect(await api.listActivities!(context())).toMatchObject({ ok: true, value: [{ title: "Museo" }] });
     expect(await api.deleteActivity!({ ...context(), activityId: activity.id })).toMatchObject({ ok: true });
     expect(await db.collection("activities").countDocuments({ tripId: trip })).toBe(0);
   });
 
-  it("reads current voting configuration and preserves UTC milliseconds", async () => {
+  it("ignores historical voting configuration and preserves UTC milliseconds", async () => {
     await db.collection("trips").updateOne({ _id: trip }, { $set: { votingEnabled: true } });
     const activity = await create();
-    expect(activity.status).toBe("proposed");
+    expect(activity).not.toHaveProperty("status");
     expect(activity.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
   });
 
@@ -93,7 +93,7 @@ describe("activity persistence and transactions", () => {
     expect(await db.collection("activities").countDocuments()).toBe(2);
   });
 
-  it("deletes votes and participations, detaches posts and preserves all other content", async () => {
+  it("preserves historical votes, deletes participations and detaches posts", async () => {
     const activity = await create(); const activityId = new ObjectId(activity.id), otherActivity = new ObjectId();
     const postId = new ObjectId(), parentPostId = new ObjectId(), transportId = new ObjectId();
     await db.collection("posts").insertOne({ _id: postId, tripId: trip, dayId: day, authorId: actor, activityId, parentPostId, transportId,
@@ -111,14 +111,14 @@ describe("activity persistence and transactions", () => {
     expect(await db.collection("posts").findOne({ _id: postId })).toMatchObject({ activityId: null, tripId: trip, dayId: day, parentPostId, transportId,
       description: "Recuerdo", createdAt: occurrence });
     for (const name of ["activityVotes", "activityParticipations"]) {
-      expect(await db.collection(name).countDocuments({ tripId: trip, activityId })).toBe(0);
-      expect(await db.collection(name).countDocuments()).toBe(2);
+      expect(await db.collection(name).countDocuments({ tripId: trip, activityId })).toBe(name === "activityVotes" ? 1 : 0);
+      expect(await db.collection(name).countDocuments()).toBe(name === "activityVotes" ? 3 : 2);
     }
     for (const [name, before] of Object.entries(preserved)) expect(await db.collection(name).find().toArray()).toEqual(before);
     expect(await api.deleteActivity!({ ...context(), activityId: activity.id })).toMatchObject({ ok: false, error: { tag: "ActivityNotFoundError" } });
   });
 
-  it("rolls back detached posts and deleted votes when deleting participations fails", async () => {
+  it("rolls back detached posts and preserves votes when deleting participations fails", async () => {
     const activity = await create(), activityId = new ObjectId(activity.id);
     await db.collection("posts").insertOne({ tripId: trip, activityId });
     await db.collection("activityVotes").insertOne({ tripId: trip, activityId, userId: actor });

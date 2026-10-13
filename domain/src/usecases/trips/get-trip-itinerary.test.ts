@@ -14,10 +14,10 @@ function fixture() {
   const transport = { id: id(5), tripId, destinationId, direction: "outbound" as const, type: "car" as const,
     departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, details: {} };
   const activity = { id: id(6), tripId, dayId: day.id, title: "Paseo", description: null, scheduledAt: time(12), mapsUrl: null,
-    status: "confirmed" as const, createdBy: actor, createdAt: time(17) };
+    createdBy: actor, createdAt: time(17) };
   const post = { id: id(7), tripId, dayId: day.id, authorId: actor, description: null, mapsUrl: null,
     activityId: null, transportId: null, parentPostId: null, createdAt: time(13) };
-  const snapshot: TripItinerarySnapshot = { trip: { id: tripId, expenseMode: "register", votingEnabled: false },
+  const snapshot: TripItinerarySnapshot = { trip: { id: tripId, expenseMode: "register" },
     destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: time(0) }],
     days: [day, { ...day, id: id(8), type: "transit_out", startsAt: time(8), endsAt: time(10), order: 1 }],
     transports: [transport], activities: [activity], posts: [post], expenses: [] };
@@ -32,6 +32,11 @@ function fixture() {
 }
 
 describe("getTripItinerary", () => {
+  it("does not expose a voting configuration", async () => {
+    const result = await fixture().execute();
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).not.toHaveProperty("votingEnabled");
+  });
   it.each(["admin", "participant"] as const)("allows %s and orders persisted slices without merging dates", async (role) => {
     const f = fixture();
     f.dependencies.members.findByTripAndUser = async () => domain.ok({ id: id(9), tripId, userId: actor, role, joinedAt: time(0) });

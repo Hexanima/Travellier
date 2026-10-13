@@ -61,7 +61,7 @@ export const createMongoTripDeletionRepository = (database: Db): TripDeletionPor
               await database.collection("storageDeletionJobs").insertOne({ tripId: mongoTripId, objectKeys, createdAt: new Date() }, options);
             }
             for (const name of ["tripMembers", "destinations", "transports", "itineraryDays", "activities",
-              "activityParticipations", "activityVotes", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes"]) {
+              "activityParticipations", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes"]) {
               await database.collection(name).deleteMany({ tripId: mongoTripId }, options);
             }
             await database.collection("trips").deleteOne({ _id: mongoTripId }, options);

@@ -46,7 +46,7 @@ describe("Mongo itinerary query", () => {
   };
 
   it("maps BSON references, UTC precision, nulls and the expense into one aggregate", async () => {
-    expect(await query()).toMatchObject({ ok: true, value: { tripId: trip.toHexString(), expenseMode: "register", votingEnabled: false,
+    expect(await query()).toMatchObject({ ok: true, value: { tripId: trip.toHexString(), expenseMode: "register",
       destinations: [{ id: destination.toHexString(), name: "Córdoba" }],
       activities: [{ id: activity.toHexString(), scheduledAt: new Date("2026-09-25T12:00:00.789Z"), postIds: [post.toHexString()] }],
       transports: [{ id: transport.toHexString(), departureAt: departure, postIds: [post.toHexString()] }],

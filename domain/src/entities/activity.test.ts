@@ -13,7 +13,7 @@ const day: ItineraryDay = {
   date: new Date("2026-09-25T00:00:00Z"),
   startsAt: new Date("2026-09-25T10:00:00.123Z"), endsAt: new Date("2026-09-25T18:00:00.789Z"),
 };
-const context = { trip: { id: tripId, votingEnabled: false }, days: [day] };
+const context = { trip: { id: tripId }, days: [day] };
 const input = () => ({
   id: id(4), tripId, dayId, title: "Paseo por Córdoba",
   scheduledAt: new Date("2026-09-25T12:00:00.456Z"),
@@ -24,29 +24,23 @@ const issue = (field: string, code: string) => ({
 });
 
 describe("createActivity", () => {
-  it("creates a confirmed planned activity when voting is disabled", () => {
+  it("creates an available planned activity without an approval status", () => {
     const payload = input();
     expect(domain.createActivity(payload, context)).toEqual({
-      ok: true, value: { ...payload, description: null, mapsUrl: null, status: "confirmed" },
+      ok: true, value: { ...payload, description: null, mapsUrl: null },
     });
   });
 
-  it("creates a proposal when the Trip enables voting", () => {
-    expect(domain.createActivity(input(), { ...context, trip: { ...context.trip, votingEnabled: true } }))
-      .toMatchObject({ ok: true, value: { status: "proposed" } });
-  });
-
-  it.each([false, true])("derives status from the Trip despite extra caller fields: voting=%s", (votingEnabled) => {
+  it.each([false, true])("ignores legacy approval fields: voting=%s", (votingEnabled) => {
     expect(domain.createActivity({ ...input(), status: "voting", votingEnabled: !votingEnabled } as never,
-      { ...context, trip: { ...context.trip, votingEnabled } }))
-      .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null,
-        status: votingEnabled ? "proposed" : "confirmed" } });
+      { ...context, trip: { ...context.trip, votingEnabled } } as never))
+      .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null } });
   });
 
   it("preserves description and Maps location", () => {
     const payload = { ...input(), description: "Recorrido por el centro", mapsUrl: "https://maps.app.goo.gl/example" };
     expect(domain.createActivity(payload, context))
-      .toEqual({ ok: true, value: { ...payload, status: "confirmed" } });
+      .toEqual({ ok: true, value: payload });
   });
 
   it("accepts explicit null optional fields", () => {
@@ -71,9 +65,9 @@ describe("createActivity", () => {
       .toMatchObject(issue("tripId", "mismatch"));
   });
 
-  it("rejects an invalid Trip voting configuration", () => {
+  it("does not validate a retired Trip voting configuration", () => {
     expect(domain.createActivity(input(), { ...context, trip: { ...context.trip, votingEnabled: "false" } } as never))
-      .toMatchObject(issue("votingEnabled", "invalid"));
+      .toMatchObject({ ok: true });
   });
 
   it.each([undefined, null])("requires scheduledAt without substituting createdAt: %s", (scheduledAt) => {

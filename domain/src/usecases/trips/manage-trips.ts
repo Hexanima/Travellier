@@ -37,7 +37,6 @@ export interface ListUserTripsPayload {
 
 export interface UpdateTripConfigurationPayload extends GetTripPayload {
   visibility?: TripVisibility;
-  votingEnabled?: boolean;
   expenseMode?: TripExpenseMode;
 }
 
@@ -99,14 +98,11 @@ export const listUserTrips: UseCase<TripManagementDependencies, ListUserTripsPay
 
 const validateConfiguration = (payload: UpdateTripConfigurationPayload): ValidationError | undefined => {
   const issues = [];
-  if (payload.visibility === undefined && payload.votingEnabled === undefined && payload.expenseMode === undefined) {
+  if (payload.visibility === undefined && payload.expenseMode === undefined) {
     issues.push({ field: "configuration", code: "required", message: "At least one configuration field is required." });
   }
   if (payload.visibility !== undefined && payload.visibility !== "private" && payload.visibility !== "public") {
     issues.push({ field: "visibility", code: "invalid", message: "Trip visibility is invalid." });
-  }
-  if (payload.votingEnabled !== undefined && typeof payload.votingEnabled !== "boolean") {
-    issues.push({ field: "votingEnabled", code: "invalid", message: "Trip voting mode is invalid." });
   }
   if (payload.expenseMode !== undefined && payload.expenseMode !== "register" && payload.expenseMode !== "balance") {
     issues.push({ field: "expenseMode", code: "invalid", message: "Trip expense mode is invalid." });
@@ -121,7 +117,6 @@ export const updateTripConfiguration: UseCase<TripManagementDependencies, Update
 
     const update: TripConfigurationUpdate = {
       ...(payload.visibility === undefined ? {} : { visibility: payload.visibility }),
-      ...(payload.votingEnabled === undefined ? {} : { votingEnabled: payload.votingEnabled }),
       ...(payload.expenseMode === undefined ? {} : { expenseMode: payload.expenseMode }),
     };
     const result = await trips.updateConfigurationForMember(payload.tripId, payload.authenticatedUserId, update);

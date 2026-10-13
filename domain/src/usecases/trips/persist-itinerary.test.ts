@@ -57,7 +57,7 @@ function fixture() {
   const addActivity = (dayId: ObjectId, scheduledAt: Date) => {
     const activity = createActivity({ id: id(nextId++), tripId, dayId, scheduledAt,
       title: "Paseo", createdBy: actorId, createdAt: new Date("2026-10-04T12:00:00Z") },
-    { trip: { id: tripId, votingEnabled: false }, days: state.days });
+    { trip: { id: tripId }, days: state.days });
     expect(activity.ok).toBe(true);
     if (!activity.ok) throw activity.error;
     state.activities.push(activity.value);

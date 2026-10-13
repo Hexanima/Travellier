@@ -78,7 +78,7 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     expect((await deleteTripRequest()).statusCode).toBe(204);
     expect(await database.collection("trips").findOne({ _id: tripId })).toBeNull();
     for (const name of tripCollections) {
-      expect(await database.collection(name).countDocuments({ tripId }), name).toBe(0);
+      expect(await database.collection(name).countDocuments({ tripId }), name).toBe(name === "activityVotes" ? 1 : 0);
       expect(await database.collection(name).countDocuments({ tripId: otherTripId }), name).toBe(1);
     }
     expect(await database.collection("trips").findOne({ _id: otherTripId })).not.toBeNull();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ActivityStatus, ActivityVoteValue } from "app-domain";
+import type { ActivityStatus, ActivityVoteValue } from "./legacy-voting-contract.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { ActivityVoteResponse, TripVoteApi, VoteResponse } from "./trip-vote-api.js";
 
@@ -9,7 +9,7 @@ export type VoteState = { kind: "loading" } | { kind: "error"; error: TripFailur
 };
 type States = Record<string, VoteState>;
 type Options = {
-  tripId?: string; enabled: boolean; activities: readonly { id: string; status: ActivityStatus }[]; api?: TripVoteApi;
+  tripId?: string; enabled: boolean; activities: readonly { id: string; status?: ActivityStatus }[]; api?: TripVoteApi;
   onStatus: (activityId: string, status: ActivityStatus) => void; onDisabled: () => void;
 };
 const unavailable = (error?: TripFailure) => error && ["not-found", "forbidden", "unauthorized", "voting-closed", "voting-disabled"].includes(error.kind);
@@ -53,7 +53,7 @@ export function useActivityVotes({ tripId, enabled, activities, api, onStatus, o
   const change = useCallback(async (activityId: string, value: ActivityVoteValue) => {
     const previous = current.current[activityId];
     const activity = latest.current.activities.find((a) => a.id === activityId);
-    if (!api || !tripId || !latest.current.enabled || !activity || activity.status === "confirmed" ||
+    if (!api || !tripId || !latest.current.enabled || !activity || !activity.status || activity.status === "confirmed" ||
       previous?.kind !== "ready" || previous.saving || previous.vote?.value === value || unavailable(previous.error)) return;
     const revision = generation.current;
     publish(activityId, { kind: "ready", vote: previous.vote, saving: value });

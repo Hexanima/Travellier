@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { ActivityStatus } from "app-domain";
+import type { ActivityStatus } from "./legacy-voting-contract.js";
 import { Button, Feedback, LoadingState, Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
@@ -34,7 +34,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
         const result = await activities.get(itinerary.tripId, request.activityId);
         if (!cancelled) {
           setState(result.ok ? { kind: "detail", value: result.value } : { kind: "error", error: result.error });
-          if (result.ok) onStatus?.(result.value.id, result.value.status);
+          if (result.ok && result.value.status) onStatus?.(result.value.id, result.value.status);
         }
       } catch { if (!cancelled) setState({ kind: "error", error: { kind: "network" } }); }
     };
@@ -44,7 +44,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const existing = state.kind === "detail" || state.kind === "edit" ? state.value : undefined;
   const rank = { proposed: 0, voting: 1, confirmed: 2 };
   const aggregateStatus = existing && itinerary.activities.find((a) => a.id === existing.id)?.status;
-  const currentActivity = existing && aggregateStatus && rank[aggregateStatus] > rank[existing.status]
+  const currentActivity = existing && existing.status && aggregateStatus && rank[aggregateStatus] > rank[existing.status]
     ? { ...existing, status: aggregateStatus } : existing;
   // The detail may be newer than the aggregate. Project its confirmed instant before deriving edit context.
   const projected = existing ? projectTripItinerary({ ...itinerary,
@@ -70,7 +70,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       </div> : null}
       {state.kind === "detail" ? <div className="activity-detail">
         <h3>{state.value.title}</h3>
-        <p className="activity-context">{statusLabels[currentActivity?.status ?? state.value.status]}</p>
+        {currentActivity?.status ? <p className="activity-context">{statusLabels[currentActivity.status]}</p> : null}
         {participation}
         {currentActivity ? voting?.(currentActivity) : null}
         <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br /><span className="activity-context">Horarios en {timeZone}</span></p>

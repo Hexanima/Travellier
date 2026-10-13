@@ -27,8 +27,6 @@ import {
   deleteTripActivity,
   getTripActivityParticipation,
   setTripActivityParticipation,
-  getTripActivityVote,
-  setTripActivityVote,
   createTripPost,
   listTripPosts,
   getTripPost,
@@ -45,7 +43,6 @@ import { createMongoTripDeletionRepository } from "../adapters/mongodb/trip-dele
 import { createTripInvitationApi } from "./trip-invitation-api.js";
 import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-activity-repository.js";
 import { createMongoTripParticipationRepository } from "../adapters/mongodb/trip-participation-repository.js";
-import { createMongoTripVoteRepository } from "../adapters/mongodb/trip-vote-repository.js";
 import { createMongoTripPostRepository } from "../adapters/mongodb/trip-post-repository.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -72,7 +69,6 @@ export const createTripApi = (database: Db): TripApi => {
   const deletion = createMongoTripDeletionRepository(database);
   const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
   const participationDependencies = { participations: createMongoTripParticipationRepository(database), createId, now: () => new Date() };
-  const voteDependencies = { votes: createMongoTripVoteRepository(database), createId, now: () => new Date() };
   const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date() };
   return {
     ...createTripInvitationApi(database),
@@ -80,8 +76,6 @@ export const createTripApi = (database: Db): TripApi => {
     listPosts: (payload) => listTripPosts.execute(postDependencies, payload),
     getPost: (payload) => getTripPost.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
-    getActivityVote: (payload) => getTripActivityVote.execute(voteDependencies, payload),
-    setActivityVote: (payload) => setTripActivityVote.execute(voteDependencies, payload),
     getActivityParticipation: (payload) => getTripActivityParticipation.execute(participationDependencies, payload),
     setActivityParticipation: (payload) => setTripActivityParticipation.execute(participationDependencies, payload),
     createActivity: (payload) => createTripActivity.execute(activityDependencies, payload),

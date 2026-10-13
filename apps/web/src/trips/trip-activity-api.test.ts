@@ -18,6 +18,12 @@ const setup = (body: unknown, status = 200) => {
 };
 
 describe("activity HTTP adapter", () => {
+  it("accepts the active activity contract without an approval status", async () => {
+    const value = activity() as Omit<ReturnType<typeof activity>, "status"> & { status?: string };
+    delete value.status;
+    const { api } = setup({ activity: value });
+    expect(await api.get(value.tripId, value.id)).toEqual({ ok: true, value });
+  });
   it.each(["create", "get", "update"] as const)("authenticates %s and accepts the single activity response without postIds", async (operation) => {
     const value = activity();
     const { api, fetch } = setup({ activity: value }, operation === "create" ? 201 : 200);

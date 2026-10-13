@@ -27,7 +27,6 @@ export interface TripCreationRecord {
 
 export interface TripConfigurationUpdate {
   visibility?: TripVisibility;
-  votingEnabled?: boolean;
   expenseMode?: TripExpenseMode;
 }
 

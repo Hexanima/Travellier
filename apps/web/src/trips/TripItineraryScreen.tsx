@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ActivityStatus } from "app-domain";
+import type { ActivityStatus } from "./legacy-voting-contract.js";
 import { Link, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -42,7 +42,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
     onRetry={() => participation.retry(activityId)} /> : null;
   const voteActivities = useMemo(() => state.kind === "ready" ? state.value.activities : [], [state]);
   const onActivityStatus = useCallback((activityId: string, status: ActivityStatus) => {
-    setState((current) => current.kind !== "ready" || !current.value.activities.some((a) => a.id === activityId && statusRank[status] > statusRank[a.status])
+    setState((current) => current.kind !== "ready" || !current.value.activities.some((a) => a.id === activityId && a.status && statusRank[status] > statusRank[a.status])
       ? current : { kind: "ready", value: { ...current.value,
         activities: current.value.activities.map((a) => a.id === activityId ? { ...a, status } : a) } });
   }, []);
@@ -50,10 +50,10 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
     setState((current) => current.kind !== "ready" ? current : { kind: "ready", value: { ...current.value, votingEnabled: false } });
     setAttempt((value) => value + 1);
   }, []);
-  const votingEnabled = state.kind === "ready" && state.value.votingEnabled;
+  const votingEnabled = state.kind === "ready" && state.value.votingEnabled === true;
   const voting = useActivityVotes({ tripId, enabled: votingEnabled, activities: voteActivities, api: votes,
     onStatus: onActivityStatus, onDisabled: onVotingDisabled });
-  const voteControls = (activity: ActivityResponse) => votes && votingEnabled ? <ActivityVoteControls
+  const voteControls = (activity: ActivityResponse) => votes && votingEnabled && activity.status ? <ActivityVoteControls
     title={activity.title} status={activity.status} state={voting.states[activity.id]}
     onChange={(value) => { void voting.change(activity.id, value); }} onRetry={() => voting.retry(activity.id)} /> : null;
   useEffect(() => {
@@ -70,7 +70,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
             const statuses = new Map(current.kind === "ready" ? current.value.activities.map(({ id, status }) => [id, status]) : []);
             return { kind: "ready", value: { ...result.value, activities: result.value.activities.map((activity) => {
               const previous = statuses.get(activity.id);
-              return previous && statusRank[previous] > statusRank[activity.status] ? { ...activity, status: previous } : activity;
+              return previous && activity.status && statusRank[previous] > statusRank[activity.status] ? { ...activity, status: previous } : activity;
             }) } };
           });
           else if (["network", "server"].includes(result.error.kind)) {
@@ -95,9 +95,9 @@ function ItineraryContent({ tripId, itinerary, activities, participations, votes
     setState((current) => {
       if (current.kind !== "ready") return current;
       const previous = current.value.activities.find((a) => a.id === activity.id)?.status;
-      const status = previous && statusRank[previous] > statusRank[activity.status] ? previous : activity.status;
+      const status = previous && activity.status && statusRank[previous] > statusRank[activity.status] ? previous : activity.status;
       return { kind: "ready", value: { ...current.value,
-        activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity, status,
+        activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity, ...(status ? { status } : {}),
           postIds: current.value.posts.filter((post) => post.activityId === activity.id).map((post) => post.id) }],
         days: current.value.days.map((day) => ({ ...day, items: [
           ...day.items.filter((item) => !(item.kind === "activity" && item.id === activity.id)),
@@ -191,7 +191,7 @@ function AgendaItem({ item, clock, publication, onActivity, disabled, participat
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
       </> : item.kind === "activity" ? <>
-        <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4><p className="itinerary-secondary">{statusLabels[item.activity.status]}</p>
+        <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>{item.activity.status ? <p className="itinerary-secondary">{statusLabels[item.activity.status]}</p> : null}
         {item.activity.description ? <p>{item.activity.description}</p> : null}
         {participation}
         {voting}

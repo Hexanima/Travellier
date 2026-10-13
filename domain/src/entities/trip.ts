@@ -12,7 +12,6 @@ export interface Trip {
   description: string | null;
   visibility: TripVisibility;
   inviteCode: string;
-  votingEnabled: boolean;
   expenseMode: TripExpenseMode;
   createdBy: ObjectId;
   createdAt: Date;
@@ -27,7 +26,6 @@ export interface CreateTripWithAdminInput {
   inviteCode: string;
   createdAt: Date;
   visibility?: TripVisibility;
-  votingEnabled?: boolean;
   expenseMode?: TripExpenseMode;
 }
 
@@ -59,11 +57,6 @@ export const createTripWithAdmin = (
       { field: "expenseMode", code: "invalid", message: "Trip expense mode is invalid." },
     ]));
   }
-  if (input.votingEnabled !== undefined && typeof input.votingEnabled !== "boolean") {
-    return err(new ValidationError([
-      { field: "votingEnabled", code: "invalid", message: "Trip voting mode is invalid." },
-    ]));
-  }
 
   const trip: Trip = {
     id: input.tripId,
@@ -71,7 +64,6 @@ export const createTripWithAdmin = (
     description: input.description ?? null,
     visibility: input.visibility ?? "private",
     inviteCode: input.inviteCode,
-    votingEnabled: input.votingEnabled ?? false,
     expenseMode: input.expenseMode ?? "register",
     createdBy: input.creatorId,
     createdAt: input.createdAt,

@@ -55,11 +55,11 @@ describe("local Trip API", () => {
       expect((await fetch(`${baseUrl}/trips/${response.trip.id}`, { headers: outsiderHeaders })).status).toBe(404);
       expect((await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers: outsiderHeaders, body: JSON.stringify({ visibility: "public" }) })).status).toBe(404);
 
-      const updated = await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers, body: JSON.stringify({ visibility: "public", votingEnabled: true, expenseMode: "balance" }) });
+      const updated = await fetch(`${baseUrl}/trips/${response.trip.id}/config`, { method: "PATCH", headers, body: JSON.stringify({ visibility: "public", expenseMode: "balance" }) });
       expect(updated.status).toBe(200);
-      expect(await updated.json()).toMatchObject({ trip: { visibility: "public", votingEnabled: true, expenseMode: "balance" } });
+      expect(await updated.json()).toMatchObject({ trip: { visibility: "public", expenseMode: "balance" } });
       const fetched = await fetch(`${baseUrl}/trips/${response.trip.id}`, { headers });
-      expect(await fetched.json()).toMatchObject({ trip: { visibility: "public", votingEnabled: true, expenseMode: "balance" } });
+      expect(await fetched.json()).toMatchObject({ trip: { visibility: "public", expenseMode: "balance" } });
 
       const publicResponse = await fetch(`${baseUrl}/trips/${response.trip.id}`, { headers: outsiderHeaders });
       expect(publicResponse.status).toBe(200);

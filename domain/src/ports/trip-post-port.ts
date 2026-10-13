@@ -10,7 +10,7 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** Authorization and all references are resolved in the same Trip snapshot. */
 export interface TripPostReadScope {
   findMemberRole: (userId: ObjectId) => AsyncResult<TripRole | undefined>;
-  findTrip: () => AsyncResult<Pick<Trip, "id" | "votingEnabled"> | undefined>;
+  findTrip: () => AsyncResult<Pick<Trip, "id"> | undefined>;
   listDays: () => AsyncResult<ItineraryDay[]>;
   findActivity: (activityId: ObjectId) => AsyncResult<Pick<Activity, "id" | "tripId"> | undefined>;
   findTransport: (transportId: ObjectId) => AsyncResult<Pick<Transport, "id" | "tripId"> | undefined>;

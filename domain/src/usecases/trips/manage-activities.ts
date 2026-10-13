@@ -77,12 +77,12 @@ export const updateTripActivity: UseCase<Dependencies, UpdateTripActivityPayload
     }
     const days = await scope.listDays();
     if (!days.ok) return days;
-    // Validate the merged entity through T35; editing does not transition its status.
+    // Validate the merged entity against the current itinerary.
     const validated = createActivity({ ...current.value,
       ...Object.fromEntries(fields.filter((field) => Object.hasOwn(payload, field)).map((field) => [field, payload[field]])),
     }, { trip: trip.value, days: days.value });
     if (!validated.ok) return validated;
-    const activity = { ...validated.value, status: current.value.status };
+    const activity = validated.value;
     const saved = await scope.replace(activity);
     return saved.ok ? ok(activity) : saved;
   }),

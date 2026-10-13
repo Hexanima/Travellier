@@ -1,4 +1,4 @@
-import type { ActivityStatus, ActivityVoteValue } from "app-domain";
+import type { ActivityStatus, ActivityVoteValue } from "./legacy-voting-contract.js";
 import type { ApiClientError, HttpClient } from "../api/index.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
 

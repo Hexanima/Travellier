@@ -13,10 +13,10 @@ const domainId = (value: MongoObjectId): ObjectId => {
 };
 const toActivity = (value: ActivityDocument): Activity => ({ id: domainId(value._id), tripId: domainId(value.tripId),
   dayId: domainId(value.dayId), title: value.title, description: value.description, scheduledAt: value.scheduledAt,
-  mapsUrl: value.mapsUrl, status: value.status, createdBy: domainId(value.createdBy), createdAt: value.createdAt });
+  mapsUrl: value.mapsUrl, createdBy: domainId(value.createdBy), createdAt: value.createdAt });
 const document = (value: Activity): ActivityDocument => ({ _id: new MongoObjectId(value.id), tripId: new MongoObjectId(value.tripId),
   dayId: new MongoObjectId(value.dayId), title: value.title, description: value.description, scheduledAt: value.scheduledAt,
-  mapsUrl: value.mapsUrl, status: value.status, createdBy: new MongoObjectId(value.createdBy), createdAt: value.createdAt });
+  mapsUrl: value.mapsUrl, createdBy: new MongoObjectId(value.createdBy), createdAt: value.createdAt });
 
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripActivityScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
@@ -28,9 +28,9 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       return ok(member?.role);
     },
     findTrip: async () => {
-      const trip = await database.collection<{ votingEnabled: boolean }>("trips")
-        .findOne({ _id: mongoTripId }, { ...options, projection: { votingEnabled: 1 } });
-      return ok(trip === null ? undefined : { id: tripId, votingEnabled: trip.votingEnabled });
+      const trip = await database.collection("trips")
+        .findOne({ _id: mongoTripId }, { ...options, projection: { _id: 1 } });
+      return ok(trip === null ? undefined : { id: tripId });
     },
     listDays: () => createMongoTripJourneyRepository(database, session).listItineraryDays(tripId),
     list: async () => ok((await activities.find(query, options).sort({ scheduledAt: 1, _id: 1 }).toArray()).map(toActivity)),
@@ -55,7 +55,6 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     remove: async (activityId) => {
       const linked = { ...query, activityId: new MongoObjectId(activityId) };
       await database.collection("posts").updateMany(linked, { $set: { activityId: null } }, options);
-      await database.collection("activityVotes").deleteMany(linked, options);
       await database.collection("activityParticipations").deleteMany(linked, options);
       const result = await activities.deleteOne({ ...query, _id: linked.activityId }, options);
       if (result.deletedCount !== 1) throw new ActivityNotFoundError();

@@ -20,7 +20,7 @@ const validActivity = (value: unknown, tripId: string, activityId?: string): val
   id(value.id) && (activityId === undefined || value.id === activityId) && value.tripId === tripId && id(value.tripId) &&
   id(value.dayId) && typeof value.title === "string" && value.title.trim() !== "" && nullableText(value.description) &&
   nullableText(value.mapsUrl) && timestamp(value.scheduledAt) && timestamp(value.createdAt) && id(value.createdBy) &&
-  ["proposed", "voting", "confirmed"].includes(value.status as string);
+  (value.status === undefined || ["proposed", "voting", "confirmed"].includes(value.status as string));
 const response = (result: { ok: true; value: unknown } | { ok: false; error: ApiClientError }, tripId: string, activityId?: string): TripResult<ActivityResponse> => {
   if (!result.ok) return { ok: false, error: { kind: result.error.kind,
     ...(result.error.fields ? { fields: result.error.fields.map(({ field, message }) => ({ field, message })) } : {}) } };

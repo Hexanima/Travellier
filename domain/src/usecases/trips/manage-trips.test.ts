@@ -21,7 +21,6 @@ const trip: Trip = {
   description: null,
   visibility: "private",
   inviteCode: "VIAJE-X7K2",
-  votingEnabled: false,
   expenseMode: "register",
   createdBy: userId,
   createdAt,
@@ -126,9 +125,15 @@ describe("Trip use cases", () => {
     const repository = { updateConfigurationForMember: async (...args: unknown[]) => { seen.push(args); return ok(view); } };
     const payload = { authenticatedUserId: userId, tripId, visibility: "public", votingEnabled: true, expenseMode: "balance" } as const;
     expect(await updateTripConfiguration.execute({ trips: repository } as never, payload)).toEqual(ok(view));
-    expect(seen).toEqual([[tripId, userId, { visibility: "public", votingEnabled: true, expenseMode: "balance" }]]);
+    expect(seen).toEqual([[tripId, userId, { visibility: "public", expenseMode: "balance" }]]);
     const invalid = await updateTripConfiguration.execute({ trips: repository } as never, { authenticatedUserId: userId, tripId, expenseMode: "invalid" } as never);
     expect(invalid).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expenseMode" }] } });
     expect(seen).toHaveLength(1);
+  });
+
+  it("rejects configuration containing only the retired voting setting", async () => {
+    const result = await updateTripConfiguration.execute({ trips: { updateConfigurationForMember: async () => ok(view) } } as never,
+      { authenticatedUserId: userId, tripId, votingEnabled: true } as never);
+    expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "configuration" }] } });
   });
 });

@@ -22,8 +22,8 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
     try {
       const snapshot = await session.withTransaction<TripItinerarySnapshot | undefined>(async () => {
         const query = { tripId: new MongoObjectId(tripId) }, options = { session };
-        const trip = await database.collection<{ _id: MongoObjectId; expenseMode: "register" | "balance"; votingEnabled: boolean }>("trips")
-          .findOne({ _id: query.tripId }, { ...options, projection: { expenseMode: 1, votingEnabled: 1 } });
+        const trip = await database.collection<{ _id: MongoObjectId; expenseMode: "register" | "balance" }>("trips")
+          .findOne({ _id: query.tripId }, { ...options, projection: { expenseMode: 1 } });
         if (trip === null) return undefined;
         // Driver sessions do not support concurrent operations in a transaction.
         const destinations = await database.collection<Stored<TripDestination>>("destinations").find(query, options).sort({ order: 1, _id: 1 }).toArray();
@@ -35,7 +35,7 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
           .find({ ...query, postId: { $in: posts.map((post) => post._id) } }, options).toArray();
 
         return {
-          trip: { id: id(trip._id), expenseMode: trip.expenseMode, votingEnabled: trip.votingEnabled },
+          trip: { id: id(trip._id), expenseMode: trip.expenseMode },
           destinations: destinations.map((value) => ({ id: id(value._id), tripId: id(value.tripId), name: value.name, order: value.order, createdAt: value.createdAt })),
           days: days.map((value) => ({ id: id(value._id), tripId: id(value.tripId), destinationId: id(value.destinationId), date: value.date,
             type: value.type, startsAt: value.startsAt, endsAt: value.endsAt, order: value.order })),
@@ -43,7 +43,7 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
             direction: value.direction, type: value.type, departurePlace: value.departurePlace, departureAt: value.departureAt,
             arrivalPlace: value.arrivalPlace, arrivalAt: value.arrivalAt, costPerPerson: value.costPerPerson, details: value.details }) as Transport),
           activities: activities.map((value) => ({ id: id(value._id), tripId: id(value.tripId), dayId: id(value.dayId), title: value.title,
-            description: value.description, scheduledAt: value.scheduledAt, mapsUrl: value.mapsUrl, status: value.status,
+            description: value.description, scheduledAt: value.scheduledAt, mapsUrl: value.mapsUrl,
             createdBy: id(value.createdBy), createdAt: value.createdAt })),
           posts: posts.map((value) => ({ id: id(value._id), tripId: id(value.tripId), dayId: id(value.dayId), authorId: id(value.authorId),
             description: value.description, mapsUrl: value.mapsUrl, activityId: optionalId(value.activityId), parentPostId: optionalId(value.parentPostId),

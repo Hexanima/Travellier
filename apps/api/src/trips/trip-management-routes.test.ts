@@ -128,15 +128,16 @@ describe("Trip management routes", () => {
     expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
     const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
     expect(response.statusCode).toBe(200);
-    expect(updateConfiguration).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId, visibility: "public", votingEnabled: true, expenseMode: "balance" });
+    expect(updateConfiguration).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId, visibility: "public", expenseMode: "balance" });
     expect(JSON.parse(response.body)).toEqual({ trip: { ...trip, visibility: "public" } });
   });
 
   it("rejects malformed creation, configuration and trip IDs", async () => {
     const create = vi.fn();
-    const updateConfiguration = vi.fn();
+    const updateConfiguration = vi.fn().mockResolvedValue(ok(trip));
     const get = vi.fn();
     const dependencies = { trips: { create, updateConfiguration, get } } as never;
+    expect((await handleApiRequest({ method: "PATCH", url: `/trips/${tripId}/config`, authenticatedUserId: actorId as never, body: { votingEnabled: true } }, dependencies)).statusCode).toBe(400);
     expect((await handleApiRequest({ method: "POST", url: "/trips", authenticatedUserId: actorId as never, body: { name: "Patagonia" } }, dependencies)).statusCode).toBe(400);
     expect((await handleApiRequest({ method: "PATCH", url: `/trips/${tripId}/config`, authenticatedUserId: actorId as never, body: { visibility: 1 } }, dependencies)).statusCode).toBe(400);
     expect((await handleApiRequest({ method: "GET", url: "/trips/not-an-id", authenticatedUserId: actorId as never }, dependencies)).statusCode).toBe(400);

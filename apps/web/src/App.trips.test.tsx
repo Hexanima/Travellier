@@ -49,6 +49,18 @@ async function render(path: string, session: boolean, trips: Record<string, unkn
 }
 
 describe("App Trip routes", () => {
+  it("edits visibility and expenses without offering a retired voting setting", async () => {
+    const active = { ...memberTrip } as Partial<typeof memberTrip>;
+    delete active.votingEnabled;
+    const updateConfiguration = vi.fn().mockResolvedValue({ ok: true, value: active });
+    const container = await render(`/trips/${tripId}/config`, true, { get: async () => ({ ok: true, value: active }), updateConfiguration });
+    expect(container.querySelector('[name="visibility"]')).not.toBeNull();
+    expect(container.querySelector('[name="expenseMode"]')).not.toBeNull();
+    expect(container.querySelector('[name="votingEnabled"]')).toBeNull();
+    await act(async () => container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(updateConfiguration).toHaveBeenCalledWith(tripId, { visibility: "private", expenseMode: "register" });
+    expect(container.textContent).toContain("Configuración guardada");
+  });
   it("connects admin group deletion and reloads My Trips", async () => {
     const deleteTrip = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     const list = vi.fn().mockResolvedValue({ ok: true, value: [] });

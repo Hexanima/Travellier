@@ -35,9 +35,9 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       return ok(member?.role);
     },
     findTrip: async () => {
-      const trip = await database.collection<{ votingEnabled: boolean }>("trips")
-        .findOne({ _id: mongoTripId }, { ...options, projection: { votingEnabled: 1 } });
-      return ok(trip === null ? undefined : { id: tripId, votingEnabled: trip.votingEnabled });
+      const trip = await database.collection("trips")
+        .findOne({ _id: mongoTripId }, { ...options, projection: { _id: 1 } });
+      return ok(trip === null ? undefined : { id: tripId });
     },
     listDays: () => createMongoTripJourneyRepository(database, session).listItineraryDays(tripId),
     findActivity: (id) => reference("activities", id),
@@ -63,7 +63,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       if (activity.tripId !== tripId) throw new TripNotFoundError();
       await database.collection("activities").insertOne({ _id: new MongoObjectId(activity.id), tripId: mongoTripId,
         dayId: new MongoObjectId(activity.dayId), title: activity.title, description: activity.description, mapsUrl: activity.mapsUrl,
-        scheduledAt: activity.scheduledAt, status: activity.status, createdBy: new MongoObjectId(activity.createdBy), createdAt: activity.createdAt }, options);
+        scheduledAt: activity.scheduledAt, createdBy: new MongoObjectId(activity.createdBy), createdAt: activity.createdAt }, options);
       return ok(undefined);
     },
   };

@@ -1,4 +1,4 @@
-import type { ActivityStatus, ActivityVoteValue } from "app-domain";
+import type { ActivityStatus, ActivityVoteValue } from "./legacy-voting-contract.js";
 import { Button, Feedback, LoadingState } from "../components/index.js";
 import type { VoteState } from "./use-activity-votes.js";
 
