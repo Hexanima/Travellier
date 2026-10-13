@@ -15,6 +15,7 @@ function fixture(platform = "ios") {
       requestPermissions: vi.fn(async () => ({ camera: "granted" as const, photos: "limited" as const })),
       takePhoto: vi.fn(async () => ({ uri: "file://photo.jpg", webPath: "capacitor://photo.jpg", type: MediaType.Photo, saved: false, metadata: { format: "jpeg" } })),
       chooseFromGallery: vi.fn(async () => ({ results: [{ uri: "file://picked.jpg", webPath: "capacitor://picked.jpg", type: MediaType.Photo, saved: false }] })),
+      pickImages: vi.fn(async () => ({ photos: [{ path: "file://picked.jpg", webPath: "capacitor://picked.jpg", format: "jpeg" }] })),
     },
     push: {
       checkPermissions: vi.fn(async () => ({ receive: permission })),
@@ -71,20 +72,23 @@ describe("native capabilities", () => {
   it("uses the system photo picker without broad library permissions on Android", async () => {
     const { dependencies, spies } = fixture("android");
     const result = await createNativeCapabilities(dependencies).photos.select("gallery");
-    expect(result).toMatchObject({ ok: true, value: [{ reference: "file://picked.jpg" }] });
+    expect(result).toEqual({ ok: true, value: [{ reference: "file://picked.jpg", previewUrl: "capacitor://picked.jpg", format: "jpeg" }] });
     expect(spies.camera.requestPermissions).not.toHaveBeenCalled();
-    expect(spies.camera.chooseFromGallery).toHaveBeenCalledWith({ mediaType: MediaTypeSelection.Photo, allowMultipleSelection: true, includeMetadata: true });
+    expect(spies.camera.pickImages).toHaveBeenCalledWith({});
+    expect(spies.camera.chooseFromGallery).not.toHaveBeenCalled();
   });
 
   it("does not request library access for the iOS system picker either", async () => {
     const { dependencies, spies } = fixture();
     await createNativeCapabilities(dependencies).photos.select("gallery");
     expect(spies.camera.requestPermissions).not.toHaveBeenCalled();
+    expect(spies.camera.chooseFromGallery).toHaveBeenCalledWith({ mediaType: MediaTypeSelection.Photo, allowMultipleSelection: true, includeMetadata: true });
+    expect(spies.camera.pickImages).not.toHaveBeenCalled();
   });
 
   it.each(["android", "ios"])("reports denied gallery access on %s without requesting permissions again", async (platform) => {
     const { dependencies, spies } = fixture(platform);
-    spies.camera.chooseFromGallery.mockRejectedValueOnce({
+    (platform === "android" ? spies.camera.pickImages : spies.camera.chooseFromGallery).mockRejectedValueOnce({
       code: "OS-PLUG-CAMR-0005",
       message: "Couldn't access your photo gallery because access wasn't provided.",
     });
@@ -120,6 +124,36 @@ describe("native capabilities", () => {
     const { dependencies, spies } = fixture();
     spies.camera.chooseFromGallery.mockResolvedValueOnce({ results: [] });
     expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "cancelled" } });
+  });
+
+  it("treats an empty Android picker result as cancellation", async () => {
+    const { dependencies, spies } = fixture("android");
+    spies.camera.pickImages.mockResolvedValueOnce({ photos: [] });
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "cancelled" } });
+  });
+
+  it("rejects Android picker photos without a readable native reference", async () => {
+    const { dependencies, spies } = fixture("android");
+    spies.camera.pickImages.mockResolvedValueOnce({ photos: [{ path: "", webPath: "capacitor://picked.jpg", format: "jpeg" }] });
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "native" } });
+  });
+
+  it("preserves Android picker cancellation errors", async () => {
+    const { dependencies, spies } = fixture("android");
+    spies.camera.pickImages.mockRejectedValueOnce(new Error("User cancelled photos app"));
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "cancelled" } });
+  });
+
+  it("reports a denied Android picker URI grant as denied", async () => {
+    const { dependencies, spies } = fixture("android");
+    spies.camera.pickImages.mockRejectedValueOnce(new Error("SecurityException"));
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "denied" } });
+  });
+
+  it("keeps Android picker processing failures as native errors", async () => {
+    const { dependencies, spies } = fixture("android");
+    spies.camera.pickImages.mockRejectedValueOnce(new Error("Unable to resolve photo activity"));
+    expect(await createNativeCapabilities(dependencies).photos.select("gallery")).toMatchObject({ ok: false, error: { kind: "native" } });
   });
 
   it("rejects invalid media without exposing it as a photo", async () => {

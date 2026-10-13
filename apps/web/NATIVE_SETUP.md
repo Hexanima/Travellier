@@ -85,6 +85,10 @@ corepack yarn workspace web cap:test:android
 
 La suite verifica arranque y consulta sin diálogos, captura y selección con archivos de imagen decodificables, ausencia de permisos generales de almacenamiento y calendario concedido/denegado. Los fixtures se indexan con el escáner de medios del emulador y se eliminan por su referencia propia. La concesión de calendario se prueba al final: revocar un permiso concedido desde el proceso de instrumentación mata ese mismo proceso, por lo que el runner prepara el estado fuera de él.
 
+En Android el adaptador de galería usa `Camera.pickImages`, todavía incluido en Camera 8.2.5 aunque deprecado. `chooseFromGallery` tiene una [carrera reportada por el proveedor](https://github.com/ionic-team/capacitor-camera/issues/55) que puede dejar `IONCAMRLoadingActivity` abierta tras devolver imágenes pequeñas. Se observó también en la [ejecución 38320242935](https://github.com/Hexanima/Travellier/actions/runs/38320242935): la imagen era válida pero `MainActivity` permanecía pausada y fallaba el cierre del test. `pickImages` utiliza el picker del sistema sin esa actividad de carga y sin permisos generales de almacenamiento. iOS conserva `chooseFromGallery`. Mantener este workaround hasta verificar una corrección del proveedor; no aumentar timeouts ni ignorar errores de cierre para ocultarlo.
+
+La regresión nativa conserva el fixture de 64×64 y realiza **tres selecciones consecutivas** por ejecución, comprobando que `MainActivity` queda `RESUMED` después de cada resultado. La limpieza y sus errores siguen siendo obligatorios.
+
 La cámara AOSP del AVD API 24 necesita completar su primer inicio antes de probar el intent de captura: su [PermissionsActivity](https://android.googlesource.com/platform/packages/apps/Camera2/+/android-7.0.0_r1/src/com/android/camera/PermissionsActivity.java) vuelve a abrir `CameraActivity` sin conservar el intent original. El test prepara únicamente esa app externa, rechaza ubicación y desactiva el etiquetado de ubicaciones; después ejecuta el adaptador real. No concede permisos a Travellier. Esta evidencia cubre la cámara del sistema preparada y no acredita ese primer inicio defectuoso del proveedor AOSP.
 
 ### Matriz Android en CI
@@ -111,12 +115,13 @@ Comprobaciones manuales en un dispositivo de prueba, sin datos ajenos:
 
 ### Evidencia local — 2026-10-12 (Windows)
 
-- Cliente: lint, typecheck y **600 tests** correctos; build y bundle de instrumentación correctos. Selector JDK/comando/guardas de dispositivo: **7 tests** correctos.
+- Cliente: lint, typecheck y **605 tests** correctos; build y bundle de instrumentación correctos. Selector JDK/comando/guardas de dispositivo: **7 tests** correctos.
 - Android `assembleDebug`: correcto con JBR 21.0.10, SDK 36 y los cinco plugins registrados. APK debug generado; advertencias de `flatDir`/bibliotecas nativas sin stripping no impidieron la compilación.
 - Manifest fusionado: incluye calendario y notificaciones; no incluye micrófono, ubicación ni acceso general al almacenamiento. FCM auto-init permanece deshabilitado.
 - `cap sync` Android/iOS: correcto. Una segunda sincronización conservó sin cambios los 8 archivos de setup verificados (Gradle, SPM, manifest, plist, delegate, entitlements y proyecto Xcode).
 - XML de `Info.plist` y `App.entitlements`: válido. El montaje de App bajo StrictMode no pide permisos ni registra push en el test del cliente.
 - Instrumentación local: **5 tests correctos en API 24 y 5 en API 33**, en AVDs separados con los proveedores indicados. Captura y selección devuelven archivos nativos que se decodifican como imágenes; las pruebas de calendario comprueban además el permiso efectivo del sistema. Resultados/capturas/JSON se conservan localmente en `android-smoke-results/`; los informes JUnit originales se guardan en `test/evidence/`.
+- Regresión del picker corregida: los informes `test/evidence/2026-10-12-picker-api24.xml` y `2026-10-12-picker-api33.xml` registran **5 tests sin fallos por API**, incluyendo las tres selecciones consecutivas con regreso a `MainActivity` y cierre obligatorio del escenario.
 
 | Caso nativo | API 24 / Chromium 108 | API 33 / Google WebView 109 |
 | --- | --- | --- |
@@ -126,7 +131,7 @@ Comprobaciones manuales en un dispositivo de prueba, sin datos ajenos:
 | Calendario rechazado sin anunciar acceso | Correcto | Correcto |
 | Calendario concedido mediante diálogo contextual | Correcto | Correcto |
 
-- GitHub Actions: [ejecución 38319600852](https://github.com/Hexanima/Travellier/actions/runs/38319600852), commit `b53b6967ca891835368fa018d7529f3b32e97f1a`, correcta para calidad y ambas APIs. Los informes `test/evidence/2026-10-12-ci-api24.xml` y `2026-10-12-ci-api33.xml` registran **5 tests sin fallos por API**. Capturas, resultados JSON y logs nativos están en los artifacts de esa ejecución.
+- Evidencia inicial de GitHub Actions: [ejecución 38319600852](https://github.com/Hexanima/Travellier/actions/runs/38319600852), commit `b53b6967ca891835368fa018d7529f3b32e97f1a`, correcta para calidad y ambas APIs. Los informes `test/evidence/2026-10-12-ci-api24.xml` y `2026-10-12-ci-api33.xml` registran **5 tests sin fallos por API**. Esa ejecución anterior al workaround no acredita ausencia de la carrera descrita arriba. Capturas, resultados JSON y logs nativos están en los artifacts de cada nueva ejecución de la matriz.
 - **Pendiente:** recepción push con configuración real FCM/APNs; compilación/firma iOS en macOS y pruebas en iPhone físico. Estas evidencias no acreditan entrega push ni sincronización de eventos de T96.
 
 Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/environment-setup), [Camera](https://capacitorjs.com/docs/apis/camera), [Push Notifications](https://capacitorjs.com/docs/apis/push-notifications), [Calendar](https://capacitorjs.com/docs/apis/calendar).

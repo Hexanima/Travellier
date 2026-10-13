@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='UTF-8' ?>
+<testsuite name="com.travellier.app.NativeCapabilitiesSmokeTest" tests="5" failures="0" errors="0" skipped="0" time="43.169" timestamp="2026-10-13T00:17:16" hostname="localhost">
+  <properties>
+    <property name="device" value="t46-api33(AVD) - 13" />
+    <property name="flavor" value="" />
+    <property name="project" value=":app" />
+  </properties>
+  <testcase name="a_startupAndCalendarCheckDoNotPrompt" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="8.28" />
+  <testcase name="b_capturesAnActualPhotoThroughNativeCamera" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="11.052" />
+  <testcase name="c_selectsAnActualPhotoWithoutBroadStoragePermission" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="15.549" />
+  <testcase name="d_calendarDenialDoesNotClaimAccess" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="3.99" />
+  <testcase name="e_calendarPermissionCanBeGrantedInContext" classname="com.travellier.app.NativeCapabilitiesSmokeTest" time="3.037" />
+</testsuite>

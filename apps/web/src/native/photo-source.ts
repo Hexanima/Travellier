@@ -19,6 +19,22 @@ export function createPhotoSource(camera: NativeDependencies["camera"], platform
         }
         if (permission !== "granted") throw new NativeCapabilityError("denied");
       }
+      if (source === "gallery" && platform() === "android") {
+        // Camera 8.2.5 chooseFromGallery can leave its native loading activity open
+        // for small images (ionic-team/capacitor-camera#55). Its bundled legacy
+        // picker uses the same system selection without that loading activity.
+        const { photos } = await camera.pickImages({}).catch((error: unknown) => {
+          const message = typeof error === "object" && error !== null && "message" in error ? error.message : undefined;
+          if (message === "User cancelled photos app") throw new NativeCapabilityError("cancelled");
+          if (message === "SecurityException") throw new NativeCapabilityError("denied");
+          throw error;
+        });
+        if (!photos.length) throw new NativeCapabilityError("cancelled");
+        return photos.map((photo): SelectedPhoto => {
+          if (!photo.path) throw new NativeCapabilityError("native");
+          return { reference: photo.path, previewUrl: photo.webPath, format: photo.format };
+        });
+      }
       const results = source === "camera"
         ? [await camera.takePhoto({ saveToGallery: false, includeMetadata: true })]
         : (await camera.chooseFromGallery({ mediaType: MediaTypeSelection.Photo, allowMultipleSelection: true, includeMetadata: true })).results;

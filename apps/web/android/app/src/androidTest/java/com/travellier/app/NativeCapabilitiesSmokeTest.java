@@ -12,6 +12,7 @@ import android.os.Build;
 import android.os.SystemClock;
 import android.provider.MediaStore;
 import androidx.test.core.app.ActivityScenario;
+import androidx.lifecycle.Lifecycle;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.By;
@@ -138,6 +139,12 @@ public class NativeCapabilitiesSmokeTest {
     @Test public void c_selectsAnActualPhotoWithoutBroadStoragePermission() throws Exception {
         seedPhoto();
         installAdapterBundle();
+        // Small images exercise the upstream loading-activity race. Repeat real
+        // selections rather than retrying failed assertions or dismissing overlays.
+        for (int selection = 0; selection < 3; selection++) selectPhotoAndReturnToApp();
+    }
+
+    private void selectPhotoAndReturnToApp() throws Exception {
         begin("photos.select('gallery')");
         UiObject2 photo = device.wait(Until.findObject(By.res(Pattern.compile(".*:id/icon_thumbnail"))), 10000);
         if (photo == null) photo = device.findObject(By.desc(Pattern.compile("(?i)^photo taken.*")));
@@ -164,6 +171,12 @@ public class NativeCapabilitiesSmokeTest {
         assertPhotoReadable(result);
         assertFalse(granted(Manifest.permission.READ_EXTERNAL_STORAGE));
         assertFalse(granted(Manifest.permission.WRITE_EXTERNAL_STORAGE));
+        long deadline = SystemClock.uptimeMillis() + TIMEOUT;
+        while (scenario.getState() != Lifecycle.State.RESUMED && SystemClock.uptimeMillis() < deadline) {
+            SystemClock.sleep(100);
+        }
+        if (scenario.getState() != Lifecycle.State.RESUMED) diagnostic("gallery-did-not-return");
+        assertEquals("Gallery left MainActivity behind a native overlay", Lifecycle.State.RESUMED, scenario.getState());
         evidence("gallery-selected", result);
     }
 

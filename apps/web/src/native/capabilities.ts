@@ -9,7 +9,7 @@ import { createCalendarAccess } from "./calendar-access.js";
 export type NativePlatform = () => string;
 export interface NativeDependencies {
   platform: NativePlatform;
-  camera: Pick<CameraPlugin, "checkPermissions" | "requestPermissions" | "takePhoto" | "chooseFromGallery">;
+  camera: Pick<CameraPlugin, "checkPermissions" | "requestPermissions" | "takePhoto" | "chooseFromGallery" | "pickImages">;
   push: Pick<PushNotificationsPlugin, "checkPermissions" | "requestPermissions" | "register" | "unregister" | "addListener">;
   calendar: Pick<CalendarPlugin, "checkPermissions" | "requestPermissions">;
 }
