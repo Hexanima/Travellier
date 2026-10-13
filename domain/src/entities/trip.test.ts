@@ -34,7 +34,6 @@ describe("createTripWithAdmin", () => {
           description: null,
           visibility: "private",
           inviteCode: "VIAJE-X7K2",
-          votingEnabled: false,
           expenseMode: "register",
           createdBy: creatorId,
           createdAt,
@@ -50,7 +49,7 @@ describe("createTripWithAdmin", () => {
     });
   });
 
-  it("keeps the selected visibility, voting, expense mode and description", () => {
+  it("keeps visibility, expense mode and description without a voting setting", () => {
     const result = createTripWithAdmin({
       tripId,
       creatorMembershipId: membershipId,
@@ -60,7 +59,6 @@ describe("createTripWithAdmin", () => {
       inviteCode: "VIAJE-X7K2",
       createdAt,
       visibility: "public",
-      votingEnabled: true,
       expenseMode: "balance",
     });
 
@@ -70,11 +68,11 @@ describe("createTripWithAdmin", () => {
         trip: {
           description: "Ruta de los lagos",
           visibility: "public",
-          votingEnabled: true,
           expenseMode: "balance",
         },
       },
     });
+    if (result.ok) expect(result.value.trip).not.toHaveProperty("votingEnabled");
   });
 
   it("rejects an empty trip name", () => {
@@ -112,7 +110,6 @@ describe("createTripWithAdmin", () => {
   it.each([
     ["visibility", "friends"],
     ["expenseMode", "split"],
-    ["votingEnabled", "yes"],
   ])("rejects an invalid %s", (field, value) => {
     const input = {
       tripId,

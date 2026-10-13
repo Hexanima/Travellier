@@ -4,6 +4,13 @@ import { itineraryFixture } from "./itinerary-test-fixture.js";
 import { createTripItineraryApi } from "./trip-itinerary-api.js";
 
 describe("itinerary client", () => {
+  it("accepts the active itinerary without voting settings or approval statuses", async () => {
+    const itinerary = itineraryFixture();
+    delete (itinerary as { votingEnabled?: boolean }).votingEnabled;
+    itinerary.activities.forEach((activity) => { delete (activity as { status?: string }).status; });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
+  });
   it("reads canonical UTC and legacy urban steps without mutating their fields", async () => {
     const itinerary = itineraryFixture();
     const canonical = { ...itinerary.transports[0], type: "bus_local", details: { steps: [

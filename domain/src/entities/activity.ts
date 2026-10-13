@@ -5,26 +5,23 @@ import { validateActivitySchedule, type ActivitySchedule } from "./activity-sche
 import type { ItineraryDay } from "./itinerary-day.js";
 import type { Trip } from "./trip.js";
 
-export type ActivityStatus = "proposed" | "voting" | "confirmed";
-
 /** Planned and spontaneous activities share the same mandatory occurrence time. */
 export interface Activity extends ActivitySchedule {
   id: ObjectId;
   title: string;
   description: string | null;
   mapsUrl: string | null;
-  status: ActivityStatus;
   createdBy: ObjectId;
   createdAt: Date;
 }
 
-export type CreateActivityInput = Omit<Activity, "status" | "description" | "mapsUrl"> & {
+export type CreateActivityInput = Omit<Activity, "description" | "mapsUrl"> & {
   description?: string | null;
   mapsUrl?: string | null;
 };
 
 export interface CreateActivityContext {
-  trip: Pick<Trip, "id" | "votingEnabled">;
+  trip: Pick<Trip, "id">;
   days: readonly ItineraryDay[];
 }
 
@@ -38,9 +35,6 @@ export const createActivity = (
 ): Result<Activity, ValidationError> => {
   if (input.tripId !== context.trip.id) {
     return invalid("tripId", "mismatch", "Activity must belong to the supplied Trip.");
-  }
-  if (typeof context.trip.votingEnabled !== "boolean") {
-    return invalid("votingEnabled", "invalid", "Trip voting configuration must be a boolean.");
   }
   if (typeof input.title !== "string" || input.title.trim() === "") {
     return invalid("title", "required", "Activity title is required.");
@@ -63,7 +57,6 @@ export const createActivity = (
     description: input.description ?? null,
     scheduledAt: new Date(input.scheduledAt.getTime()),
     mapsUrl: input.mapsUrl ?? null,
-    status: context.trip.votingEnabled ? "proposed" : "confirmed",
     createdBy: input.createdBy,
     createdAt: new Date(input.createdAt.getTime()),
   });

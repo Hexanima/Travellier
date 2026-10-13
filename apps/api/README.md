@@ -108,11 +108,11 @@ Todas las rutas requieren `Authorization: Bearer <accessToken>` y membresía act
 
 POST requiere `title`, `dayId` y `scheduledAt`; acepta `description` y `mapsUrl` opcionales, como texto o `null`. `scheduledAt` debe ser un ISO con fecha, hora y zona explícita (`Z` u offset `±HH:mm`), con hasta tres decimales para los segundos. Por ejemplo: `2026-09-25T09:00:00.456-03:00`. Las fechas se almacenan como BSON `Date` y se devuelven normalizadas a UTC (`2026-09-25T12:00:00.456Z`). El día debe ser una franja de actividad del mismo Trip y el instante debe pertenecer a ella, respetando los límites exactos de llegada y salida.
 
-PATCH permite únicamente `title`, `dayId`, `scheduledAt`, `description` y `mapsUrl`. Conserva campos omitidos; `null` limpia los opcionales y se rechaza en fecha/hora o día. Cambiar el día requiere que el horario resultante sea válido en la nueva franja. La API controla ID, Trip, autoría, `createdAt` y estado: estos campos del body no alteran el registro. POST deriva `confirmed` con votación desactivada y `proposed` con votación habilitada. PATCH conserva el estado; las transiciones de votación pertenecen a T40.
+PATCH permite únicamente `title`, `dayId`, `scheduledAt`, `description` y `mapsUrl`. Conserva campos omitidos; `null` limpia los opcionales y se rechaza en fecha/hora o día. Cambiar el día requiere que el horario resultante sea válido en la nueva franja. La API controla ID, Trip, autoría y `createdAt`: estos campos del body no alteran el registro. Desde T47 las actividades no tienen estado de aprobación ni configuración de votación; `status` y `votingEnabled` heredados del body se ignoran. Los planes están disponibles al crearse, pueden ser simultáneos y permanecen visibles sin participantes, sin aprobación ni mínimos.
 
 Sin JWT válido responde 401; usuarios externos y Trips inaccesibles responden 404. Una actividad ausente o de otro Trip devuelve 404 `ActivityNotFoundError`. JSON/IDs de ruta malformados y PATCH sin campos editables devuelven 400. Los errores de campos y horarios devuelven 422 `ValidationError`, con detalles en `error.fields`.
 
-Las mutaciones leen membresía, configuración y días dentro de la misma transacción, coordinada por Trip con transportes y bajas. La expulsión de participantes revoca la membresía dentro de una transacción con la misma coordinación: una mutación de actividad confirma antes de la expulsión o, si la expulsión se confirma primero, se rechaza por falta de membresía. Un fallo revierte todas las escrituras. DELETE elimina actividad, votos y participaciones y desvincula sus posts con `activityId: null`; conserva sus demás datos y relaciones, fotos, gastos, likes y comentarios. GET usa un snapshot sin modificar datos. La consulta agregada del itinerario refleja los cambios en su siguiente lectura.
+Las mutaciones leen membresía, existencia del Trip y días dentro de la misma transacción, coordinada por Trip con transportes y bajas. La expulsión de participantes revoca la membresía dentro de una transacción con la misma coordinación: una mutación de actividad confirma antes de la expulsión o, si la expulsión se confirma primero, se rechaza por falta de membresía. Un fallo revierte todas las escrituras. DELETE elimina actividad y participaciones y desvincula sus posts con `activityId: null`; conserva sus demás datos y relaciones, fotos, gastos, likes y comentarios. GET usa un snapshot sin modificar datos. La consulta agregada del itinerario refleja los cambios en su siguiente lectura.
 
 ## API de Posts (T43)
 
@@ -144,7 +144,7 @@ Para crear una actividad espontánea y su primer post, enviar `newActivity` en e
 }
 ```
 
-`newActivity` requiere título y `scheduledAt`; acepta descripción y Maps opcionales. Usa el día del post, que debe ser una franja de actividad, y valida el horario dentro de la ventana exacta del destino. La fecha requiere zona explícita y admite hasta tres decimales, como en T36; la respuesta normaliza UTC y conserva milisegundos. Su estado inicial es `confirmed` con votación desactivada o `proposed` con votación habilitada. No se admite combinar `newActivity` con un `activityId` no nulo. La creación conjunta solo está disponible en POST; PATCH no crea actividades.
+`newActivity` requiere título y `scheduledAt`; acepta descripción y Maps opcionales. Usa el día del post, que debe ser una franja de actividad, y valida el horario dentro de la ventana exacta del destino. La fecha requiere zona explícita y admite hasta tres decimales, como en T36; la respuesta normaliza UTC y conserva milisegundos. La actividad resultante no contiene `status` ni genera votos, independientemente de la configuración histórica del Trip. No se admite combinar `newActivity` con un `activityId` no nulo. La creación conjunta solo está disponible en POST; PATCH no crea actividades.
 
 Membresía, configuración, día y relaciones se leen dentro de la misma transacción que las escrituras, coordinada por Trip con regeneración del itinerario, expulsiones y bajas de actividades/Trip. Cualquier error aborta todos los cambios; la creación conjunta nunca deja uno de los dos registros persistido parcialmente. GET usa snapshots sin escrituras. El itinerario refleja los cambios en su siguiente consulta, y eliminar una actividad sigue desvinculando sus posts sin alterar sus demás datos.
 
@@ -163,32 +163,21 @@ Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual de
 
 PUT requiere un body como `{ "status": "going" }`. Los únicos estados válidos son `going`, `not_going` y `pending`. La respuesta contiene `id`, `tripId`, `activityId`, `userId`, `status` y `updatedAt` en ISO UTC con milisegundos. La API controla identidad, referencias y fecha; los campos protegidos enviados en el body se ignoran. Repetir PUT conserva el ID y un único registro, y actualiza la fecha del cambio.
 
-No se crean participaciones automáticamente: GET sin registro devuelve `null` y no escribe. `pending` se puede registrar explícitamente con PUT. Cambiar la respuesta propia conserva íntegramente las respuestas de otros miembros y no modifica el estado de la actividad ni sus votos.
+No se crean participaciones automáticamente: GET sin registro devuelve `null` y no escribe. `pending` se puede registrar explícitamente con PUT. Cambiar la respuesta propia conserva íntegramente las respuestas de otros miembros y no modifica la actividad ni los votos históricos.
 
 Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o de otro Trip responde 404 `ActivityNotFoundError`. Identificadores malformados, JSON inválido o un body que no sea objeto responden 400. Un estado ausente, `null` o distinto de los tres admitidos responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503; los fallos inesperados responden 500 genérico.
 
 La colección `activityParticipations` conserva el índice único `{ activityId: 1, userId: 1 }` de T04. Los identificadores y referencias se almacenan como BSON `ObjectId`, y `updatedAt` como BSON `Date`; `tripId` coincide con el de la actividad. PUT autoriza y realiza el upsert en una misma transacción coordinada por Trip con eliminación de actividades, baja del Trip y expulsión de miembros. Los conflictos de escritura se reintentan mediante el driver y cualquier fallo aborta los cambios. Una eliminación no deja participaciones huérfanas; si la expulsión se confirma primero, la escritura se rechaza por falta de membresía. GET usa un snapshot sin modificar datos. T38 no requiere una nueva migración.
 
-## API de votos de actividades (T40)
+## Retiro de votación (T47)
 
-Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden consultar y reemplazar exclusivamente su propio voto; `userId` se obtiene del JWT.
+El contrato activo de Trips e itinerarios omite `votingEnabled`; el de actividades omite `status`. PATCH `/trips/:tripId/config` permite únicamente `visibility` y `expenseMode`: una solicitud con solo `votingEnabled` responde 400; combinado con campos válidos, el campo retirado se ignora.
 
-| Método | Ruta | Respuesta |
-|---|---|---|
-| GET | `/trips/:tripId/activities/:activityId/vote` | 200 `{ vote, activityStatus }`; `vote` es `null` si no existe |
-| PUT | `/trips/:tripId/activities/:activityId/vote` | 200 `{ vote, activityStatus }`, tanto al registrar como al reemplazar |
+GET/PUT `/trips/:tripId/activities/:activityId/vote` ya no tienen rutas ni servicios activos. Con JWT válido responden 404 `NotFound` tanto en Lambda como en el servidor local, sin crear, reemplazar o consultar votos. Los adaptadores de entrada conservan su validación de JWT.
 
-PUT requiere `{ "value": "up" }` o `{ "value": "down" }`. El voto contiene `id`, `tripId`, `activityId`, `userId`, `value` y `createdAt` en ISO UTC con milisegundos. ID, referencias y fecha son controlados por la API; los campos protegidos enviados en el body se ignoran. Reemplazar o repetir el voto conserva su ID y fecha original de creación, sin duplicar registros ni alterar votos de otros miembros o participaciones.
+`activityVotes`, su índice único y sus documentos se conservan como histórico, también al eliminar una actividad o un Trip; pueden conservar referencias a recursos eliminados y quedan fuera del contrato activo. Los campos almacenados `trips.votingEnabled` y `activities.status` se ignoran en lecturas, se conservan en ediciones y no se incorporan a documentos nuevos. No se reescriben migraciones aplicadas ni se ejecuta una limpieza de datos.
 
-El primer voto, a favor o en contra, pasa `proposed` a `voting`. Los votos posteriores conservan `voting`; no hay confirmación automática por mayoría o unanimidad. La transición está encapsulada en la política de dominio `transitionAfterActivityVote`, para incorporar la futura regla de consenso. Las actividades `confirmed` rechazan nuevos votos y reemplazos. La API de edición de actividades sigue conservando estado y votos: el tratamiento de votos al editar una propuesta y las contrapropuestas requieren una definición posterior.
-
-Con votación desactivada, PUT responde 409 `ActivityVotingDisabledError` sin escrituras. Una actividad confirmada responde 409 `ActivityVotingClosedError`. GET permite consultar el voto propio existente aun con votación desactivada o actividad confirmada; no crea votos ni modifica estado o revisión del Trip.
-
-Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o ajena responde 404 `ActivityNotFoundError`. IDs malformados, JSON inválido o body que no sea objeto responden 400. Un valor ausente, `null` o distinto de `up`/`down` responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503 y los fallos inesperados responden 500 genérico.
-
-`activityVotes` reutiliza el índice único `{ activityId: 1, userId: 1 }` de T04. IDs y referencias se guardan como BSON `ObjectId`, y `createdAt` como BSON `Date`; `tripId` coincide con el de la actividad. No requiere una nueva migración.
-
-PUT autoriza, lee la configuración, realiza el upsert y aplica la transición en una misma transacción, coordinada por Trip con bajas de actividades/Trip, cambios de configuración e itinerario y expulsiones. Los conflictos de escritura se reintentan mediante el driver y cualquier error aborta todos los cambios. Una baja no deja votos huérfanos; si una expulsión o desactivación se confirma primero, el voto se rechaza. GET usa un snapshot consistente. El estado actualizado aparece en la siguiente lectura de la actividad o del itinerario. La interfaz de votación corresponde a T41 y las notificaciones a T57.
+El cliente acepta los DTO nuevos sin inventar estados de aprobación ni realizar requests de voto. Los tipos y controles legados quedan confinados al cliente para su retiro completo en T59.
 
 ## Consulta de itinerario (T33)
 
@@ -202,7 +191,7 @@ HTTP 200 devuelve `{ itinerary }`, con configuración, destinos, días, transpor
 
 | Campo | Contrato |
 |---|---|
-| `tripId`, `expenseMode`, `votingEnabled` | Identidad y configuración del Trip. |
+| `tripId`, `expenseMode` | Identidad y configuración del Trip. |
 | `destinations` | Destinos ordenados por `order`, con sus nombres. |
 | `days` | Franjas persistidas ordenadas por `order`, sin fusionar fechas coincidentes. Incluyen `items` y `expenseSummary`. |
 | `days[].items` | Referencias `{ kind: "transport" \| "activity" \| "post", id, at }` ordenadas por instante; empate por tipo (transporte, actividad, post) y después por ID. |
@@ -225,7 +214,6 @@ Ejemplo completo con un post vinculado a actividad, transporte y otro post; su g
   "itinerary": {
     "tripId": "000000000000000000000001",
     "expenseMode": "register",
-    "votingEnabled": false,
     "destinations": [{
       "id": "000000000000000000000003", "tripId": "000000000000000000000001",
       "name": "Córdoba", "order": 1, "createdAt": "2026-09-20T12:00:00.000Z"
@@ -266,7 +254,7 @@ Ejemplo completo con un post vinculado a actividad, transporte y otro post; su g
     "activities": [{
       "id": "000000000000000000000006", "tripId": "000000000000000000000001", "dayId": "000000000000000000000004",
       "title": "Paseo", "description": null, "scheduledAt": "2026-09-25T12:00:00.000Z", "mapsUrl": null,
-      "status": "confirmed", "createdBy": "000000000000000000000002", "createdAt": "2026-09-25T11:00:00.000Z",
+      "createdBy": "000000000000000000000002", "createdAt": "2026-09-25T11:00:00.000Z",
       "postIds": ["000000000000000000000007"]
     }],
     "posts": [{

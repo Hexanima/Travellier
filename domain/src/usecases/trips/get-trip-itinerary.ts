@@ -58,7 +58,7 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
   const itemRank = { transport: 0, activity: 1, post: 2 };
 
   return {
-    tripId, expenseMode: snapshot.trip.expenseMode, votingEnabled: snapshot.trip.votingEnabled, destinations,
+    tripId, expenseMode: snapshot.trip.expenseMode, destinations,
     activities: activities.map((activity) => ({ ...activity, postIds: (postsByActivity.get(activity.id) ?? []).map((post) => post.id) })),
     transports: transports.map((transport) => ({ ...transport, postIds: (postsByTransport.get(transport.id) ?? []).map((post) => post.id) })),
     posts: postViews,

@@ -29,7 +29,8 @@ describe("post persistence and transactions", () => {
   it.each([false, true])("stores joint creation with voting=%s and UTC milliseconds", async (votingEnabled) => {
     await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { votingEnabled } });
     const { post, activity } = await create({ newActivity: { title: "Cena", scheduledAt: f.occurrence } });
-    expect(activity).toMatchObject({ status: votingEnabled ? "proposed" : "confirmed", scheduledAt: f.occurrence, createdBy: post.authorId });
+    expect(activity).toMatchObject({ scheduledAt: f.occurrence, createdBy: post.authorId });
+    expect(activity).not.toHaveProperty("status");
     const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
     expect(stored!.activityId).toEqual(new ObjectId(activity!.id));
     expect(await f.db.collection("activities").findOne({ _id: stored!.activityId })).toMatchObject({ scheduledAt: f.occurrence, dayId: f.day, tripId: f.trip });

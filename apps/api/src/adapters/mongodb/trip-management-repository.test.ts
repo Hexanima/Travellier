@@ -45,7 +45,7 @@ describe("Mongo Trip management repository", () => {
     return {
       trip: {
         id: tripId, name: "Patagonia", description: null, visibility: "private", inviteCode: code,
-        votingEnabled: false, expenseMode: "register", createdBy: creatorId, createdAt,
+        expenseMode: "register", createdBy: creatorId, createdAt,
       },
       creatorMembership: {
         id: domainId(new ObjectId()), tripId, userId: creatorId, role: "admin", joinedAt: createdAt,
@@ -146,8 +146,8 @@ describe("Mongo Trip management repository", () => {
     await repository.createWithAdminAndDestination(input);
     const outsider = domainId(new ObjectId());
     expect(await repository.updateConfigurationForMember(input.trip.id, outsider, { visibility: "public" })).toEqual({ ok: true, value: undefined });
-    expect(await repository.updateConfigurationForMember(input.trip.id, input.trip.createdBy, { visibility: "public", votingEnabled: true, expenseMode: "balance" })).toMatchObject({
-      ok: true, value: { visibility: "public", votingEnabled: true, expenseMode: "balance" },
+    expect(await repository.updateConfigurationForMember(input.trip.id, input.trip.createdBy, { visibility: "public", expenseMode: "balance" })).toMatchObject({
+      ok: true, value: { visibility: "public", expenseMode: "balance" },
     });
   });
 });

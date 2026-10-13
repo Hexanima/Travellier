@@ -23,7 +23,7 @@ export interface ItineraryExpense {
 }
 
 export interface TripItinerarySnapshot {
-  trip: Pick<Trip, "id" | "expenseMode" | "votingEnabled">;
+  trip: Pick<Trip, "id" | "expenseMode">;
   destinations: TripDestination[];
   days: ItineraryDay[];
   transports: Transport[];
@@ -43,7 +43,6 @@ export interface ItineraryExpenseSummary { totalAmount: number; expenseCount: nu
 export interface TripItinerary {
   tripId: ObjectId;
   expenseMode: Trip["expenseMode"];
-  votingEnabled: boolean;
   destinations: TripDestination[];
   days: (ItineraryDay & { items: ItineraryItem[]; expenseSummary: ItineraryExpenseSummary })[];
   transports: (Transport & { postIds: ObjectId[] })[];

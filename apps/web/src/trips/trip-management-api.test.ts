@@ -19,6 +19,18 @@ const configuredTrip = {
 };
 
 describe("createTripManagementApi", () => {
+  it("accepts the active member contract without a voting configuration", async () => {
+    const activeTrip = { ...configuredTrip } as Partial<typeof configuredTrip>;
+    delete activeTrip.votingEnabled;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: activeTrip } });
+    const api = createTripManagementApi({ get } as never);
+    expect(await api.get(trip.id)).toEqual({ ok: true, value: { ...activeTrip, kind: "member" } });
+  });
+  it("sends only supported configuration fields even when a legacy caller supplies votingEnabled", async () => {
+    const patch = vi.fn().mockResolvedValue({ ok: true, value: { trip: configuredTrip } });
+    await createTripManagementApi({ patch } as never).updateConfiguration(trip.id, { visibility: "public", votingEnabled: true, expenseMode: "balance" });
+    expect(patch).toHaveBeenCalledWith(`/trips/${trip.id}/config`, { visibility: "public", expenseMode: "balance" });
+  });
   it("deletes a Trip through authenticated HTTP and preserves permission failures", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "Forbidden" } }), { status: 403 }));
@@ -122,7 +134,7 @@ describe("createTripManagementApi", () => {
     expect(await api.get(trip.id)).toEqual({ ok: false, error: { kind: "server" } });
   });
 
-  it("updates only the three configuration fields", async () => {
+  it("updates only supported configuration fields", async () => {
     const patch = vi.fn().mockResolvedValue({ ok: true, value: { trip: { ...configuredTrip, visibility: "public", votingEnabled: true, expenseMode: "balance" } } });
     const api = createTripManagementApi({ get: vi.fn(), post: vi.fn(), patch } as never);
     const input = { visibility: "public" as const, votingEnabled: true, expenseMode: "balance" as const };
@@ -131,7 +143,7 @@ describe("createTripManagementApi", () => {
       ok: true,
       value: { ...configuredTrip, ...input, kind: "member" },
     });
-    expect(patch).toHaveBeenCalledWith(`/trips/${trip.id}/config`, input);
+    expect(patch).toHaveBeenCalledWith(`/trips/${trip.id}/config`, { visibility: input.visibility, expenseMode: input.expenseMode });
   });
 
   it("preserves validation errors when an update is rejected", async () => {

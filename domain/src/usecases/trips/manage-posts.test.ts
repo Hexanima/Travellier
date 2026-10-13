@@ -144,8 +144,9 @@ describe("Trip post use cases", () => {
     votingEnabled = enabled;
     const result = await create({ newActivity });
     expect(result).toMatchObject({ ok: true, value: { post: { activityId: id(21), authorId: actor },
-      activity: { id: id(21), createdBy: actor, createdAt, scheduledAt: newActivity.scheduledAt, status: enabled ? "proposed" : "confirmed" } } });
+      activity: { id: id(21), createdBy: actor, createdAt, scheduledAt: newActivity.scheduledAt } } });
     expect(records).toHaveLength(1); expect(activities).toHaveLength(1);
+    expect(activities[0]).not.toHaveProperty("status");
   });
 
   it("rejects ambiguous activity input and invalid schedules before persisting", async () => {

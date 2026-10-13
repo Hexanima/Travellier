@@ -27,7 +27,7 @@ type Options = { votes?: Partial<TripVoteApi>; value?: TripItineraryResponse; st
 async function render(options: Options = {}) {
   const value = options.value ?? fixture();
   const getItinerary = vi.fn(options.getItinerary ?? (async (tripId: string) => ({ ok: true as const, value: { ...structuredClone(value), tripId } })));
-  const get = vi.fn<TripVoteApi["get"]>(async (_tripId, id) => ({ ok: true, value: { vote: null, activityStatus: value.activities.find((a) => a.id === id)!.status } }));
+  const get = vi.fn<TripVoteApi["get"]>(async (_tripId, id) => ({ ok: true, value: { vote: null, activityStatus: value.activities.find((a) => a.id === id)!.status! } }));
   const set = vi.fn<TripVoteApi["set"]>(async (tripId, id, next) => ({ ok: true, value: { vote: vote(id, next, tripId), activityStatus: "voting" } }));
   const votes = { get, set, ...options.votes };
   const getActivity = vi.fn(async (_tripId: string, id: string) => ({ ok: true as const,
@@ -61,6 +61,19 @@ const click = async (scope: HTMLElement, label: string) => act(async () => butto
 const selected = (scope: HTMLElement) => voting(scope)?.querySelector('[aria-pressed="true"]')?.textContent;
 
 describe("activity voting in itinerary and detail", () => {
+  it("renders the active contract without approval labels or vote requests in agenda and detail", async () => {
+    const value = fixture();
+    delete (value as { votingEnabled?: boolean }).votingEnabled;
+    value.activities.forEach((activity) => { delete (activity as { status?: string }).status; });
+    const { container, get, set } = await render({ value });
+    expect(card(container).textContent).toContain("Paseo por el centro");
+    expect(card(container).querySelector('fieldset[aria-label^="Tu participación"]')).not.toBeNull();
+    await click(card(container), "Paseo por el centro");
+    expect(container.querySelector('.activity-detail')?.textContent).toContain("Paseo por el centro");
+    expect(container.querySelector('fieldset[aria-label^="Tu voto"]')).toBeNull();
+    for (const label of ["Propuesta", "En votación", "Confirmada"]) expect(container.textContent).not.toContain(label);
+    expect(get).not.toHaveBeenCalled(); expect(set).not.toHaveBeenCalled();
+  });
   it("loads absence without creating votes and keeps participation separate", async () => {
     const { container, get, set } = await render();
     expect(voting(card(container))?.textContent).toContain("Todavía no votaste");

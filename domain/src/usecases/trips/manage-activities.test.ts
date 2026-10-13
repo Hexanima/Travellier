@@ -15,13 +15,13 @@ const fields = { dayId, title: "Paseo", scheduledAt: new Date("2026-09-25T12:00:
 const createdAt = new Date("2026-10-04T12:00:00.789Z");
 
 describe("Trip activity use cases", () => {
-  let role: TripRole | undefined, votingEnabled: boolean, days: ItineraryDay[], records: Activity[];
+  let role: TripRole | undefined, days: ItineraryDay[], records: Activity[];
   let scope: TripActivityScope, activities: TripActivityPort;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; days = [day]; records = [];
+    role = "participant"; days = [day]; records = [];
     scope = {
       findMemberRole: async (userId) => domain.ok(userId === actor ? role : undefined),
-      findTrip: async () => domain.ok({ id: tripId, votingEnabled }),
+      findTrip: async () => domain.ok({ id: tripId }),
       listDays: async () => domain.ok(days),
       list: async () => domain.ok(records),
       find: async (activityId) => domain.ok(records.find((r) => r.id === activityId)),
@@ -37,21 +37,23 @@ describe("Trip activity use cases", () => {
     return domain.createTripActivity.execute(dependencies(), { ...context, ...fields });
   };
   const seed = () => { records = [{ id: activityId, tripId, ...fields, description: "Centro", mapsUrl: "https://maps.app.goo.gl/example",
-    status: "voting", createdBy: other, createdAt }]; };
+    createdBy: other, createdAt }]; };
 
   it.each(["admin", "participant"] as const)("allows %s to create with server metadata and edit another member's activity", async (memberRole) => {
     role = memberRole;
     expect(await create()).toEqual(domain.ok({ id: activityId, tripId, ...fields, description: null, mapsUrl: null,
-      status: "confirmed", createdBy: actor, createdAt }));
+      createdBy: actor, createdAt }));
     seed();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
       .toEqual(domain.ok({ ...records[0], title: "Museo" }));
-    expect(records[0]).toMatchObject({ createdBy: other, createdAt, status: "voting", scheduledAt: fields.scheduledAt });
+    expect(records[0]).toMatchObject({ createdBy: other, createdAt, scheduledAt: fields.scheduledAt });
   });
 
-  it("derives proposal status from current Trip configuration", async () => {
-    votingEnabled = true;
-    expect(await create()).toMatchObject({ ok: true, value: { status: "proposed" } });
+  it("edits an activity without adding an approval status", async () => {
+    seed();
+    const result = await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).not.toHaveProperty("status");
   });
 
   it.each(["createTripActivity", "listTripActivities", "getTripActivity", "updateTripActivity", "deleteTripActivity"] as const)(
@@ -84,7 +86,7 @@ describe("Trip activity use cases", () => {
     expect(await domain.getTripActivity.execute(dependencies(), { ...context, activityId })).toEqual(domain.ok(records[0]));
   });
 
-  it("clears optional fields without changing identity, status or author", async () => {
+  it("clears optional fields without changing identity or author", async () => {
     seed(); expect(domain.updateTripActivity).toBeDefined();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, description: null, mapsUrl: null }))
       .toEqual(domain.ok({ ...records[0], description: null, mapsUrl: null }));
@@ -126,7 +128,7 @@ describe("Trip activity use cases", () => {
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, dayId: next.id }))
       .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, dayId: next.id, scheduledAt: next.startsAt }))
-      .toMatchObject({ ok: true, value: { dayId: next.id, scheduledAt: next.startsAt, status: "voting" } });
+      .toMatchObject({ ok: true, value: { dayId: next.id, scheduledAt: next.startsAt } });
   });
 
   it.each(["admin", "participant"] as const)("allows %s to delete another member's activity", async (memberRole) => {

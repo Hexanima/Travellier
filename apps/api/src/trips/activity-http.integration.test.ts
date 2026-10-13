@@ -21,7 +21,7 @@ describe("activity HTTP API", () => {
   const create = async () => {
     const response = await request("POST", path, input());
     expect(response.statusCode).toBe(201);
-    return JSON.parse(response.body).activity as { id: string; dayId: string; createdAt: string; createdBy: string; scheduledAt: string; status: string };
+    return JSON.parse(response.body).activity as { id: string; dayId: string; createdAt: string; createdBy: string; scheduledAt: string };
   };
   beforeAll(async () => {
     server = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -48,13 +48,13 @@ describe("activity HTTP API", () => {
       createdBy: new ObjectId().toHexString(), authenticatedUserId: new ObjectId().toHexString(), createdAt: "2000-01-01T00:00:00Z", status: "voting", votingEnabled: true });
     expect(response.statusCode).toBe(201);
     const activity = JSON.parse(response.body).activity;
-    expect(activity).toMatchObject({ tripId: trip.toHexString(), createdBy: actor.toHexString(), status: "confirmed", scheduledAt: input().scheduledAt });
+    expect(activity).toMatchObject({ tripId: trip.toHexString(), createdBy: actor.toHexString(), scheduledAt: input().scheduledAt });
     const updated = await request("PATCH", `${path}/${activity.id}`, { title: "Museo", description: "Centro", mapsUrl: null,
       tripId: new ObjectId().toHexString(), status: "voting", createdBy: new ObjectId().toHexString(), createdAt: "2000-01-01T00:00:00Z" });
     expect(updated.statusCode).toBe(200);
     const result = JSON.parse(updated.body).activity;
     expect(result).toMatchObject({ title: "Museo", description: "Centro", scheduledAt: activity.scheduledAt, createdAt: activity.createdAt,
-      createdBy: activity.createdBy, status: "confirmed" });
+      createdBy: activity.createdBy });
     expect(JSON.parse((await request("GET", `${path}/${activity.id}`)).body)).toEqual({ activity: result });
     expect(JSON.parse((await request("GET", path)).body)).toEqual({ activities: [result] });
     const removed = await request("DELETE", `${path}/${activity.id}`);

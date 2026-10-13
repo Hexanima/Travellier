@@ -8,7 +8,7 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** Every operation uses the same Trip and persistence snapshot. */
 export interface TripActivityReadScope {
   findMemberRole: (userId: ObjectId) => AsyncResult<TripRole | undefined>;
-  findTrip: () => AsyncResult<Pick<Trip, "id" | "votingEnabled"> | undefined>;
+  findTrip: () => AsyncResult<Pick<Trip, "id"> | undefined>;
   listDays: () => AsyncResult<ItineraryDay[]>;
   list: () => AsyncResult<Activity[]>;
   find: (activityId: ObjectId) => AsyncResult<Activity | undefined>;
@@ -17,7 +17,7 @@ export interface TripActivityReadScope {
 export interface TripActivityScope extends TripActivityReadScope {
   insert: (activity: Activity) => AsyncResult<void>;
   replace: (activity: Activity) => AsyncResult<void>;
-  /** Detach posts, remove votes/participations and delete the activity atomically. */
+  /** Atomically detach posts and delete the activity and participations. Preserve historical votes. */
   remove: (activityId: ObjectId) => AsyncResult<void>;
 }
 

@@ -19,7 +19,8 @@ export type MemberTripDetail = TripSummary & {
   kind: "member";
   visibility: TripVisibility;
   inviteCode: string;
-  votingEnabled: boolean;
+  /** Legacy responses only; removed from the active backend in T47. */
+  votingEnabled?: boolean;
   expenseMode: TripExpenseMode;
 };
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
@@ -49,7 +50,7 @@ const isMemberTrip = (value: unknown): value is Omit<MemberTripDetail, "kind"> =
   isTripSummary(value) && isRecord(value) &&
   (value.visibility === "private" || value.visibility === "public") &&
   typeof value.inviteCode === "string" && value.inviteCode.trim() !== "" &&
-  typeof value.votingEnabled === "boolean" &&
+  (value.votingEnabled === undefined || typeof value.votingEnabled === "boolean") &&
   (value.expenseMode === "register" || value.expenseMode === "balance");
 
 const isPublicTrip = (value: unknown): value is Omit<PublicTripDetail, "kind"> =>
@@ -122,7 +123,11 @@ export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" 
       : { ok: true, value: trip };
   },
   updateConfiguration: async (tripId, input) => {
-    const result = await client.patch<unknown>(`/trips/${encodeURIComponent(tripId)}/config`, input);
+    const payload = {
+      ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
+      ...(input.expenseMode === undefined ? {} : { expenseMode: input.expenseMode }),
+    };
+    const result = await client.patch<unknown>(`/trips/${encodeURIComponent(tripId)}/config`, payload);
     if (!result.ok) return { ok: false, error: toFailure(result.error) };
     const trip = isRecord(result.value) ? parseTripDetail(result.value.trip) : undefined;
     return trip?.kind === "member"
