@@ -45,7 +45,7 @@ describe("participation HTTP API", () => {
     const empty = await request("GET");
     expect(empty.statusCode).toBe(200); expect(JSON.parse(empty.body)).toEqual({ participation: null });
     let identity: string | undefined;
-    for (const status of ["going", "not_going", "pending", "pending"]) {
+    for (const status of ["going", "not_going", "going"]) {
       const response = await request("PUT", { status });
       expect(response.statusCode).toBe(200);
       const record = JSON.parse(response.body).participation;
@@ -108,7 +108,7 @@ describe("participation HTTP API", () => {
     expect((await handleApiRequest({ method: "PUT", url: path, authenticatedUserId: id(actor), body: "{" }, { trips: api })).statusCode).toBe(400);
     expect(await db.collection("activityParticipations").countDocuments()).toBe(0);
   });
-  it.each([{}, { status: null }, { status: "confirmed" }, { status: "GOING" }, { status: 1 }, { status: {} }, { status: [] }])(
+  it.each([{}, { status: null }, { status: "pending" }, { status: "confirmed" }, { status: "GOING" }, { status: 1 }, { status: {} }, { status: [] }])(
     "returns field validation for invalid status %s without changing an existing response", async (body) => {
       expect((await request("PUT", { status: "going" })).statusCode).toBe(200);
       const before = await db.collection("activityParticipations").find().toArray();
@@ -141,11 +141,62 @@ describe("participation HTTP API", () => {
       }
     }
     const headers = { authorization: `Bearer ${await token(now + 60)}` };
-    const response = await handler({ rawPath: path, headers, body: JSON.stringify({ status: "pending", userId: other.toHexString() }),
+    const response = await handler({ rawPath: path, headers, body: JSON.stringify({ status: "going", userId: other.toHexString() }),
       requestContext: { http: { method: "PUT" } } });
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body).participation).toMatchObject({ userId: actor.toHexString(), status: "pending" });
+    expect(JSON.parse(response.body).participation).toMatchObject({ userId: actor.toHexString(), status: "going" });
     const read = await handler({ rawPath: path, headers, requestContext: { http: { method: "GET" } } });
     expect(read.statusCode).toBe(200); expect(JSON.parse(read.body)).toEqual(JSON.parse(response.body));
+  });
+  describe("schedule conflicts", () => {
+    let second: ObjectId, secondPath: string;
+    const at = (hour: number, minute = 0) => new Date(Date.UTC(2026, 10, 10, hour, minute));
+    const confirmationBody = (body: { error: { conflicts: { activityId: string; scheduledAt: string; durationMinutes: number | null }[];
+      activity: { scheduledAt: string; durationMinutes: number | null } } }) => ({ status: "going",
+      confirmedConflicts: body.error.conflicts, confirmedActivity: body.error.activity });
+    beforeEach(async () => {
+      second = new ObjectId(); secondPath = `/trips/${trip}/activities/${second}/participation`;
+      await db.collection("activities").updateOne({ _id: activity }, { $set: { scheduledAt: at(10), durationMinutes: 60 } });
+      await db.collection("activities").insertOne({ _id: second, tripId: trip, dayId: new ObjectId(), title: "Cena", status: "confirmed",
+        scheduledAt: at(10, 30), durationMinutes: 60, createdBy: other, createdAt: new Date(), description: null, mapsUrl: null });
+      expect((await request("PUT", { status: "going" }, actor, secondPath)).statusCode).toBe(200);
+    });
+    it("returns 409 with every incompatible activity and no writes, then confirms both updates together", async () => {
+      const before = await db.collection("activityParticipations").find().toArray();
+      const conflict = await request("PUT", { status: "going" });
+      expect(conflict.statusCode).toBe(409);
+      const body = JSON.parse(conflict.body);
+      expect(body.error).toMatchObject({ code: "ParticipationConflictError", conflicts: [{ activityId: second.toHexString(), reason: "overlap",
+        scheduledAt: at(10, 30).toISOString(), durationMinutes: 60 }], activity: { scheduledAt: at(10).toISOString(), durationMinutes: 60 } });
+      expect(await db.collection("activityParticipations").find().toArray()).toEqual(before);
+      const confirmed = await request("PUT", { ...confirmationBody(body), userId: other.toHexString() });
+      expect(confirmed.statusCode).toBe(200);
+      expect(JSON.parse(confirmed.body).participation).toMatchObject({ activityId: activity.toHexString(), userId: actor.toHexString(), status: "going" });
+      expect(JSON.parse((await request("GET", undefined, actor, secondPath)).body).participation.status).toBe("not_going");
+    });
+    it("returns 409 again without writes when the snapshot is stale", async () => {
+      const body = JSON.parse((await request("PUT", { status: "going" })).body);
+      await db.collection("activities").updateOne({ _id: second }, { $set: { durationMinutes: 45 } });
+      const before = await db.collection("activityParticipations").find().toArray();
+      const again = await request("PUT", confirmationBody(body));
+      expect(again.statusCode).toBe(409);
+      expect(JSON.parse(again.body).error.conflicts[0]).toMatchObject({ durationMinutes: 45 });
+      expect(await db.collection("activityParticipations").find().toArray()).toEqual(before);
+    });
+    it.each(["x", [null], [{ activityId: "z", scheduledAt: "2026-11-10T10:30:00.000Z" }], [{ activityId: "a".repeat(24), scheduledAt: "nope" }]])(
+      "returns 422 for malformed confirmedConflicts %j without writes", async (confirmedConflicts) => {
+        const before = await db.collection("activityParticipations").find().toArray();
+        const response = await request("PUT", { status: "going", confirmedConflicts });
+        expect(response.statusCode).toBe(422);
+        expect(JSON.parse(response.body)).toMatchObject({ error: { code: "ValidationError", fields: [{ field: "confirmedConflicts" }] } });
+        expect(await db.collection("activityParticipations").find().toArray()).toEqual(before);
+      });
+    it("rejects pending without changing the record or its decisionRequired mark", async () => {
+      const mark = { reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: new Date() };
+      await db.collection("activityParticipations").updateOne({ activityId: second, userId: actor }, { $set: { status: "pending", decisionRequired: mark } });
+      const before = await db.collection("activityParticipations").find().toArray();
+      expect((await request("PUT", { status: "pending" }, actor, secondPath)).statusCode).toBe(422);
+      expect(await db.collection("activityParticipations").find().toArray()).toEqual(before);
+    });
   });
 });

@@ -161,11 +161,23 @@ Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual de
 | GET | `/trips/:tripId/activities/:activityId/participation` | 200 `{ participation }`, o `{ participation: null }` si no existe respuesta |
 | PUT | `/trips/:tripId/activities/:activityId/participation` | 200 `{ participation }`, tanto al registrar como al reemplazar el estado |
 
-PUT requiere un body como `{ "status": "going" }`. Los únicos estados válidos son `going`, `not_going` y `pending`. La respuesta contiene `id`, `tripId`, `activityId`, `userId`, `status` y `updatedAt` en ISO UTC con milisegundos. La API controla identidad, referencias y fecha; los campos protegidos enviados en el body se ignoran. Repetir PUT conserva el ID y un único registro, y actualiza la fecha del cambio.
+PUT requiere un body como `{ "status": "going" }`. Los únicos estados que se pueden enviar son `going` y `not_going`; `pending` es solo un estado inicial o generado por el sistema, se conserva en las lecturas y enviarlo responde 422 sin cambios. La respuesta contiene `id`, `tripId`, `activityId`, `userId`, `status` y `updatedAt` en ISO UTC con milisegundos. La API controla identidad, referencias y fecha; los campos protegidos enviados en el body se ignoran. Repetir PUT conserva el ID y un único registro, y actualiza la fecha del cambio.
 
-No se crean participaciones automáticamente: GET sin registro devuelve `null` y no escribe. `pending` se puede registrar explícitamente con PUT. Cambiar la respuesta propia conserva íntegramente las respuestas de otros miembros y no modifica la actividad ni los votos históricos.
+No se crean participaciones automáticamente: GET sin registro devuelve `null` y no escribe. Guardar `going` o `not_going` limpia atómicamente `decisionRequired` (la marca la escribirá T53; `pending` rechazado no la modifica). Cambiar la respuesta propia conserva íntegramente las respuestas de otros miembros y no modifica la actividad ni los votos históricos.
 
 Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o de otro Trip responde 404 `ActivityNotFoundError`. Identificadores malformados, JSON inválido o un body que no sea objeto responden 400. Un estado ausente, `null` o distinto de los tres admitidos responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503; los fallos inesperados responden 500 genérico.
+
+### Confirmación de conflictos de agenda (T51)
+
+`going` revisa la agenda del usuario en el Trip (política de T50). Sin conflictos guarda 200 `{ participation }`. Con conflictos y sin confirmación válida responde 409 sin escribir:
+
+```json
+{ "error": { "code": "ParticipationConflictError", "message": "...",
+  "conflicts": [{ "activityId": "...", "reason": "overlap | same_start", "scheduledAt": "ISO UTC", "durationMinutes": 60 }],
+  "activity": { "scheduledAt": "ISO UTC", "durationMinutes": 60 } } }
+```
+
+Para confirmar se repite el PUT con `{ "status": "going", "confirmedConflicts": [{ "activityId", "scheduledAt", "durationMinutes" }], "confirmedActivity": { "scheduledAt", "durationMinutes" } }` (los valores devueltos en el 409). El servidor revalida dentro de la transacción del Trip: si los conflictos o el horario de la actividad elegida cambiaron, responde 409 de nuevo con el snapshot nuevo y no escribe. Si coinciden, guarda `not_going` en cada actividad incompatible propia y `going` en la elegida en la misma transacción. `confirmedConflicts` o `confirmedActivity` malformados responden 422 `ValidationError`. Nunca se modifican participaciones de otros usuarios.
 
 La colección `activityParticipations` conserva el índice único `{ activityId: 1, userId: 1 }` de T04. Los identificadores y referencias se almacenan como BSON `ObjectId`, y `updatedAt` como BSON `Date`; `tripId` coincide con el de la actividad. PUT autoriza y realiza el upsert en una misma transacción coordinada por Trip con eliminación de actividades, baja del Trip y expulsión de miembros. Los conflictos de escritura se reintentan mediante el driver y cualquier fallo aborta los cambios. Una eliminación no deja participaciones huérfanas; si la expulsión se confirma primero, la escritura se rechaza por falta de membresía. GET usa un snapshot sin modificar datos. T38 no requiere una nueva migración.
 

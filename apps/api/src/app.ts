@@ -45,6 +45,7 @@ import {
   type Activity,
   type ActivityParticipation,
   type SetTripActivityParticipationPayload,
+  type SetTripActivityParticipationResult,
   type CreateTripActivityPayload,
   type UpdateTripActivityPayload,
   type TripActivityPayload,
@@ -120,7 +121,7 @@ export interface TripApi extends TripInvitationApi {
   getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
-  setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<ActivityParticipation>;
+  setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<Activity>;
   listActivities?: (payload: TripActivityPayload) => AsyncResult<Activity[]>;
   getActivity?: (payload: ActivityDetailPayload) => AsyncResult<Activity>;
@@ -595,8 +596,16 @@ export const handleApiRequest = async (
     }
     if (!payload) return invalidRequestResponse();
     if (!dependencies.trips?.setActivityParticipation) return unavailableResponse();
-    const result = await dependencies.trips.setActivityParticipation({ ...context, status: payload.status });
-    return result.ok ? jsonResponse(200, { participation: result.value }) : errorResponse(result.error);
+    const result = await dependencies.trips.setActivityParticipation({ ...context, status: payload.status,
+      confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
+    if (!result.ok) return errorResponse(result.error);
+    if (result.value.outcome === "saved") return jsonResponse(200, { participation: result.value.participation });
+    const { conflicts, activity } = result.value;
+    return jsonResponse(409, { error: { code: "ParticipationConflictError",
+      message: "The activity overlaps with other activities in your agenda. Confirm to switch plans.",
+      conflicts: conflicts.map((c) => ({ activityId: c.activityId, reason: c.reason, scheduledAt: c.scheduledAt.toISOString(),
+        durationMinutes: c.durationMinutes })),
+      activity: { scheduledAt: activity.scheduledAt.toISOString(), durationMinutes: activity.durationMinutes } } });
   }
 
   const postListMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts$/);
