@@ -18,7 +18,7 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
   const savingRef = useRef(false);
   const update = (field: keyof ActivityFormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
-    setErrors((current) => { const next = { ...current }; delete next[field]; delete next.scheduledAt; delete next.dayId; return next; });
+    setErrors((current) => { const next = { ...current }; delete next[field]; if (field.startsWith("duration")) { delete next.durationHours; delete next.durationMinutes; } delete next.scheduledAt; delete next.dayId; return next; });
     setFailure(undefined); setMessage("");
   };
   const chooseWindowStart = () => {
@@ -34,21 +34,26 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
     if (!prepared.ok) { setErrors(prepared.errors); return; }
     const changes: Partial<ActivityInput> = existing ? Object.fromEntries(
       (Object.keys(prepared.value) as (keyof ActivityInput)[]).filter((key) => {
+        if (key === "durationMinutes") return prepared.value.durationMinutes !== (existing.durationMinutes ?? null);
         if ((key === "title" || key === "description" || key === "mapsUrl") && values[key] === (existing[key] ?? "")) return false;
         return prepared.value[key] !== existing[key];
       })
         .map((key) => [key, prepared.value[key]]),
-    ) : prepared.value;
+    ) : Object.fromEntries(Object.entries(prepared.value).filter(([key, value]) => key !== "durationMinutes" || value !== null)) as ActivityInput;
     if (existing && Object.keys(changes).length === 0) { setMessage("No hay cambios para guardar."); return; }
     setErrors({}); savingRef.current = true; setSaving(true); onBusyChange(true);
     try {
-      const result = existing ? await activities.update(context.tripId, existing.id, changes) : await activities.create(context.tripId, prepared.value);
+      const result = existing ? await activities.update(context.tripId, existing.id, changes) : await activities.create(context.tripId, changes as ActivityInput);
       if (result.ok) onSaved(result.value);
       else {
         setFailure(result.error);
-        if (result.error.kind === "validation") setErrors(Object.fromEntries((result.error.fields ?? []).map(({ field }) => [field,
+        if (result.error.kind === "validation") setErrors(Object.fromEntries((result.error.fields ?? []).map(({ field, code }) => [field,
           field === "scheduledAt" || field === "dayId" ? "Elegí un horario dentro de la franja de actividad vigente."
-            : field === "title" ? "Ingresá un título válido." : "Revisá este campo.",
+            : field === "title" ? "Ingresá un título válido."
+            : field === "durationMinutes" ? code === "outside_window"
+              ? "La actividad terminaría después de la salida del destino. Acortá la duración o cambiá el horario."
+              : "Ingresá una duración válida."
+            : "Revisá este campo.",
         ])));
       }
     } catch { setFailure({ kind: "network" }); }
@@ -70,6 +75,15 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
       <TextField label="Hora prevista" name="time" type="time" value={values.time} required loading={saving}
         error={errors.time ?? errors.scheduledAt ?? errors.dayId} onChange={(event) => update("time", event.target.value)} />
     </div>
+    <fieldset className="activity-duration" disabled={saving}>
+      <legend>Duración estimada · opcional</legend>
+      <div className="activity-date-time">
+        <TextField label="Horas" name="durationHours" type="text" inputMode="numeric" value={values.durationHours} loading={saving}
+          error={errors.durationHours} onChange={(event) => update("durationHours", event.target.value)} />
+        <TextField label="Minutos de duración" name="durationMinutes" type="text" inputMode="numeric" value={values.durationMinutes} loading={saving}
+          error={errors.durationMinutes} onChange={(event) => update("durationMinutes", event.target.value)} />
+      </div>
+    </fieldset>
     {!existing ? <Button type="button" disabled={saving} onClick={chooseWindowStart}>Usar inicio de franja</Button> : null}
     {exactScheduledAt ? <p className="activity-context">Hora exacta: <time dateTime={exactScheduledAt}>{clock.format(new Date(exactScheduledAt))}</time>.</p> : null}
     <TextAreaField label="Descripción (opcional)" name="description" value={values.description} loading={saving} error={errors.description}
