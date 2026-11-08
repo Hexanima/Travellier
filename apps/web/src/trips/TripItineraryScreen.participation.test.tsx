@@ -54,7 +54,7 @@ describe("individual itinerary participation", () => {
     const { container } = await render({ get: async (_tripId, id) => ({ ok: true, value: response(id, status) }) });
     expect(selected(card(container))).toBe({ going: "Voy", not_going: "No voy", pending: "Sin responder" }[status]);
   });
-  it("changes all three states locally and preserves itinerary content and global activity status", async () => {
+  it("changes all three states locally and preserves the itinerary content", async () => {
     const { container, set, getItinerary, fixture } = await render();
     const beforePosts = Array.from(container.querySelectorAll("[data-itinerary-post]")).map((el) => el.outerHTML);
     const beforeExpenses = Array.from(container.querySelectorAll("[data-itinerary-expenses]")).map((el) => el.outerHTML);
@@ -63,7 +63,7 @@ describe("individual itinerary participation", () => {
       await click(card(container), label); expect(selected(card(container))).toBe(label);
       expect(set).toHaveBeenLastCalledWith(fixture.tripId, itineraryId(8), status);
       expect(selected(card(container, itineraryId(9)))).toBe("Sin responder");
-      expect(card(container).textContent).toContain("Confirmada");
+      expect(card(container).textContent).not.toContain("Confirmada");
     }
     expect(getItinerary).toHaveBeenCalledOnce();
     expect(Array.from(container.querySelectorAll("[data-itinerary-post]")).map((el) => el.outerHTML)).toEqual(beforePosts);

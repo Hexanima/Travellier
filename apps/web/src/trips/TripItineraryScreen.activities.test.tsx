@@ -119,7 +119,7 @@ describe("itinerary activity flows", () => {
     const { container, get, update } = await render(fixture);
     await click(container, "Paseo por el centro");
     expect(get).toHaveBeenCalledWith(fixture.tripId, itineraryId(8));
-    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Confirmada");
+    expect(container.querySelector('[role="dialog"]')?.textContent).not.toContain("Confirmada");
     expect(container.querySelector('[role="dialog"] a[href="https://maps.app.goo.gl/example"]')).not.toBeNull();
     await click(container, "Editar actividad"); await field(container, "title", "Paseo nocturno"); await field(container, "time", "14:00"); await save(container);
     expect(update).toHaveBeenCalledWith(fixture.tripId, itineraryId(8), { title: "Paseo nocturno", scheduledAt: "2026-09-25T17:00:00.000Z" });

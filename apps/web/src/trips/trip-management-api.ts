@@ -12,21 +12,18 @@ export type TripVisibility = "private" | "public";
 export type TripExpenseMode = "register" | "balance";
 export type TripConfigurationUpdate = {
   visibility?: TripVisibility;
-  votingEnabled?: boolean;
   expenseMode?: TripExpenseMode;
 };
 export type MemberTripDetail = TripSummary & {
   kind: "member";
   visibility: TripVisibility;
   inviteCode: string;
-  /** Legacy responses only; removed from the active backend in T47. */
-  votingEnabled?: boolean;
   expenseMode: TripExpenseMode;
 };
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
 export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type PublicTripJoinResult = { tripId: string; joined: boolean };
-export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination" | "voting-disabled" | "voting-closed"; fields?: readonly { field: string; message: string }[] };
+export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination"; fields?: readonly { field: string; message: string }[] };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;
@@ -50,12 +47,11 @@ const isMemberTrip = (value: unknown): value is Omit<MemberTripDetail, "kind"> =
   isTripSummary(value) && isRecord(value) &&
   (value.visibility === "private" || value.visibility === "public") &&
   typeof value.inviteCode === "string" && value.inviteCode.trim() !== "" &&
-  (value.votingEnabled === undefined || typeof value.votingEnabled === "boolean") &&
   (value.expenseMode === "register" || value.expenseMode === "balance");
 
 const isPublicTrip = (value: unknown): value is Omit<PublicTripDetail, "kind"> =>
   isTripSummary(value) && isRecord(value) && value.visibility === "public" &&
-  !("inviteCode" in value) && !("votingEnabled" in value) && !("expenseMode" in value) &&
+  !("inviteCode" in value) && !("expenseMode" in value) &&
   !("createdBy" in value) && !("createdAt" in value);
 
 const toPublicTrip = (value: Omit<PublicTripDetail, "kind">): PublicTripDetail => ({

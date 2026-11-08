@@ -14,21 +14,19 @@ const configuredTrip = {
   ...trip,
   visibility: "private",
   inviteCode: "VIAJE-X7K2",
-  votingEnabled: false,
   expenseMode: "register",
 };
 
 describe("createTripManagementApi", () => {
-  it("accepts the active member contract without a voting configuration", async () => {
-    const activeTrip = { ...configuredTrip } as Partial<typeof configuredTrip>;
-    delete activeTrip.votingEnabled;
-    const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: activeTrip } });
+  it.each([{}, { votingEnabled: true }])("accepts a member without voting settings and tolerates a legacy votingEnabled: %j", async (legacy) => {
+    const memberTrip = { ...configuredTrip, ...legacy };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: memberTrip } });
     const api = createTripManagementApi({ get } as never);
-    expect(await api.get(trip.id)).toEqual({ ok: true, value: { ...activeTrip, kind: "member" } });
+    expect(await api.get(trip.id)).toEqual({ ok: true, value: { ...memberTrip, kind: "member" } });
   });
-  it("sends only supported configuration fields even when a legacy caller supplies votingEnabled", async () => {
+  it("sends only supported configuration fields", async () => {
     const patch = vi.fn().mockResolvedValue({ ok: true, value: { trip: configuredTrip } });
-    await createTripManagementApi({ patch } as never).updateConfiguration(trip.id, { visibility: "public", votingEnabled: true, expenseMode: "balance" });
+    await createTripManagementApi({ patch } as never).updateConfiguration(trip.id, { visibility: "public", expenseMode: "balance" });
     expect(patch).toHaveBeenCalledWith(`/trips/${trip.id}/config`, { visibility: "public", expenseMode: "balance" });
   });
   it("deletes a Trip through authenticated HTTP and preserves permission failures", async () => {
@@ -135,9 +133,9 @@ describe("createTripManagementApi", () => {
   });
 
   it("updates only supported configuration fields", async () => {
-    const patch = vi.fn().mockResolvedValue({ ok: true, value: { trip: { ...configuredTrip, visibility: "public", votingEnabled: true, expenseMode: "balance" } } });
+    const patch = vi.fn().mockResolvedValue({ ok: true, value: { trip: { ...configuredTrip, visibility: "public", expenseMode: "balance" } } });
     const api = createTripManagementApi({ get: vi.fn(), post: vi.fn(), patch } as never);
-    const input = { visibility: "public" as const, votingEnabled: true, expenseMode: "balance" as const };
+    const input = { visibility: "public" as const, expenseMode: "balance" as const };
 
     expect(await api.updateConfiguration(trip.id, input)).toEqual({
       ok: true,

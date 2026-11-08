@@ -14,7 +14,7 @@ const adminId = "507f1f77bcf86cd799439011";
 const participantId = "507f1f77bcf86cd799439012";
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null,
   primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2",
-  votingEnabled: false, expenseMode: "register" };
+  expenseMode: "register" };
 const admin = { id: "507f1f77bcf86cd799439013", userId: adminId, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
 const participant = { id: "507f1f77bcf86cd799439014", userId: participantId, name: "Ana", role: "participant", joinedAt: "2026-09-24T13:00:00.000Z" };
 const roots: ReturnType<typeof createRoot>[] = [];

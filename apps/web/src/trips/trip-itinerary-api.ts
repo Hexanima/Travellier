@@ -2,22 +2,19 @@ import { readTransport, type ObjectId, type TripItinerary } from "app-domain";
 import { journeyTransportForDomain } from "./trip-journey-api.js";
 import type { HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
-import type { ActivityStatus } from "./legacy-voting-contract.js";
 
 /** HTTP serialization is distinct from domain entities: IDs and UTC dates arrive as strings. */
 type Serialized<T> = T extends Date ? string : T extends ObjectId ? string :
   T extends readonly (infer U)[] ? Serialized<U>[] : T extends object ? { [K in keyof T]: Serialized<T[K]> } : T;
 type ActiveItineraryResponse = Serialized<TripItinerary>;
-/** Optional legacy fields are confined to the client until T59. Never synthesize approval. */
 /** Transitorio hasta T63: la API ya no emite `arrival` (retirado en T57); el cliente lo tolera por datos/tests previos. */
 type TransitionalDay = Omit<ActiveItineraryResponse["days"][number], "type"> &
   { type: ActiveItineraryResponse["days"][number]["type"] | "arrival" };
 export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities" | "days"> & {
   days: TransitionalDay[];
-  votingEnabled?: boolean;
   // durationMinutes stays optional here until T61 adds it to the client forms and makes it required.
   activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
-    { durationMinutes?: number | null; status?: ActivityStatus })[];
+    { durationMinutes?: number | null })[];
 };
 export type ItineraryDayResponse = TripItineraryResponse["days"][number];
 export type ItineraryPostResponse = TripItineraryResponse["posts"][number];
@@ -48,7 +45,7 @@ const day = (v: unknown) => entity(v) && id(v.destinationId) && timestamp(v.date
   (v.endsAt === null || (timestamp(v.endsAt) && Date.parse(v.endsAt) >= Date.parse(v.startsAt))) &&
   order(v.order) && list(v.items, item) && summary(v.expenseSummary);
 const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nullableText(v.description) &&
-  timestamp(v.scheduledAt) && nullableText(v.mapsUrl) && (v.status === undefined || ["proposed", "voting", "confirmed"].includes(v.status as string)) &&
+  timestamp(v.scheduledAt) && nullableText(v.mapsUrl) &&
   id(v.createdBy) && timestamp(v.createdAt) && ids(v.postIds);
 const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && nullableText(v.breakdown) &&
   nullableId(v.paidBy) && timestamp(v.createdAt);
@@ -63,7 +60,7 @@ const transport = (v: unknown) => {
 
 const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse => {
   if (!record(v) || !id(v.tripId) || v.tripId !== tripId ||
-      !["register", "balance"].includes(v.expenseMode as string) || (v.votingEnabled !== undefined && typeof v.votingEnabled !== "boolean") ||
+      !["register", "balance"].includes(v.expenseMode as string) ||
       !list(v.destinations, destination) || !list(v.days, day) || !list(v.transports, transport) ||
       !list(v.activities, activity) || !list(v.posts, post)) return false;
   const sets = Object.fromEntries(["destinations", "days", "transports", "activities", "posts"].map((key) => {

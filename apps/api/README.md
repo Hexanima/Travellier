@@ -195,7 +195,7 @@ GET/PUT `/trips/:tripId/activities/:activityId/vote` ya no tienen rutas ni servi
 
 `activityVotes`, su índice único y sus documentos se conservan como histórico, también al eliminar una actividad o un Trip; pueden conservar referencias a recursos eliminados y quedan fuera del contrato activo. Los campos almacenados `trips.votingEnabled` y `activities.status` se ignoran en lecturas, se conservan en ediciones y no se incorporan a documentos nuevos. No se reescriben migraciones aplicadas ni se ejecuta una limpieza de datos.
 
-El cliente acepta los DTO nuevos sin inventar estados de aprobación ni realizar requests de voto. Los tipos y controles legados quedan confinados al cliente para su retiro completo en T59.
+El cliente acepta los DTO nuevos sin inventar estados de aprobación ni realizar requests de voto. Los tipos y controles legados del cliente se retiraron por completo en T59.
 
 ## Consulta de itinerario (T33)
 
