@@ -19,6 +19,13 @@ describe("itinerary route", () => {
     expect(getItinerary).toHaveBeenCalledExactlyOnceWith({ tripId: trip, authenticatedUserId: actor });
   });
 
+  it("serializes unplaced posts and context with millisecond ISO dates", async () => {
+    const context = { parentPostId: null, rootPostId: "a", rootActivityId: null, rootTransportId: null, placement: "independent" };
+    const value = { tripId: trip, days: [], posts: [], unplacedPosts: [{ id: "a", dayId: null, createdAt: new Date("2026-11-01T10:00:00.123Z"), context, expense: null }] };
+    const response = await handleApiRequest({ method: "GET", url, authenticatedUserId: actor }, dependencies(vi.fn().mockResolvedValue(ok(value))));
+    expect(JSON.parse(response.body)).toEqual({ itinerary: { ...value, unplacedPosts: [{ ...value.unplacedPosts[0], createdAt: "2026-11-01T10:00:00.123Z" }] } });
+  });
+
   it("requires authentication before accessing itinerary data", async () => {
     const getItinerary = vi.fn();
     expect((await handleApiRequest({ method: "GET", url }, dependencies(getItinerary))).statusCode).toBe(401);

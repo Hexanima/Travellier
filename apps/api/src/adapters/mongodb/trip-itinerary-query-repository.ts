@@ -14,7 +14,7 @@ const id = (value: MongoObjectId): ObjectId => {
   return result.value;
 };
 const optionalId = (value: MongoObjectId | null | undefined) => value == null ? null : id(value);
-/** Posts created since T54 have no day; legacy ones keep theirs for the transitional projection. */
+/** Posts created since T54 have no day; legacy ones keep theirs only as stored data: the domain computes dayId by context (T56). */
 const legacyDayId = (value: { dayId?: unknown }) => optionalId(value.dayId as MongoObjectId | null | undefined);
 
 /** Independent of the mutation repository: a GET never acquires a Trip write lock. */

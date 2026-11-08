@@ -107,42 +107,6 @@ describe("getTripItinerary", () => {
     expect(result.value.days[1]!.items.filter((item) => item.kind === "post").map((item) => item.id)).toEqual([id(7)]);
   });
 
-  it("retains dayId for a late publication and sums each expense once in both modes", async () => {
-    const f = fixture();
-    f.snapshot.posts[0] = { ...f.post, activityId: f.activity.id, transportId: f.transport.id, createdAt: new Date("2026-10-03T12:00:00.789Z") };
-    f.snapshot.posts.push({ ...f.post, id: id(10), createdAt: time(11) });
-    f.snapshot.expenses = [
-      { id: id(20), tripId, postId: f.post.id, totalAmount: 0.1, breakdown: null, paidBy: null, createdAt: time(14) },
-      { id: id(21), tripId, postId: id(10), totalAmount: 0.2, breakdown: "agua", paidBy: actor, createdAt: time(14) },
-    ];
-    for (const mode of ["register", "balance"] as const) {
-      f.snapshot.trip.expenseMode = mode;
-      const result = await f.execute();
-      expect(result.ok).toBe(true);
-      if (!result.ok) continue;
-      expect(result.value.expenseMode).toBe(mode);
-      expect(result.value.days[1]!.expenseSummary.totalAmount).toBeCloseTo(0.3);
-      expect(result.value.days[1]!.expenseSummary.expenseCount).toBe(2);
-      expect(result.value.days[0]!.expenseSummary).toEqual({ totalAmount: 0, expenseCount: 0 });
-      expect(result.value.posts.find((p) => p.id === f.post.id)).toMatchObject({ dayId: f.day.id, createdAt: f.snapshot.posts[0]!.createdAt });
-    }
-  });
-
-  it.each([undefined, null])("does not break on a post without a legacy day (%s) and keeps it out of the days", async (dayId) => {
-    const f = fixture();
-    f.snapshot.posts.push({ ...f.post, id: id(10), dayId, createdAt: time(11) } as never);
-    if (dayId === undefined) delete (f.snapshot.posts[1] as { dayId?: unknown }).dayId;
-    f.snapshot.expenses = [{ id: id(21), tripId, postId: id(10), totalAmount: 5, breakdown: null, paidBy: null, createdAt: time(14) }];
-    const result = await f.execute();
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.posts.map((p) => p.id)).toEqual([f.post.id]);
-    for (const day of result.value.days) {
-      expect(day.items.some((item) => item.id === id(10))).toBe(false);
-      expect(day.expenseSummary.expenseCount).toBe(0);
-    }
-  });
-
   it("keeps multi-day transports in their own destination and direction", async () => {
     const f = fixture();
     f.snapshot.transports[0] = { ...f.transport, departureAt: new Date("2026-09-24T20:00:00.123Z") };
@@ -174,5 +138,246 @@ describe("getTripItinerary", () => {
     const result = await f.execute();
     expect(result).toMatchObject({ ok: true, value: { posts: [{ id: id(7), parentPostId: id(10), expense: null }, { id: id(10), parentPostId: id(7), expense: null }],
       activities: [{ id: id(6) }], days: [{ expenseSummary: { totalAmount: 0 } }, { expenseSummary: { totalAmount: 0 } }] } });
+  });
+});
+
+describe("getTripItinerary projection of memories by context (T56)", () => {
+  const iso = (value: string) => new Date(value);
+  const fresh = () => { const f = fixture(); f.snapshot.posts = []; return f; };
+  const mk = (f: ReturnType<typeof fixture>, n: number, fields: Record<string, unknown> = {}) => {
+    const base = { ...f.post } as Record<string, unknown>;
+    delete base.dayId;
+    f.snapshot.posts.push({ ...base, id: id(n), createdAt: time(13), ...fields } as never);
+  };
+  const run = async (f: ReturnType<typeof fixture>) => {
+    const result = await f.execute();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unexpected");
+    return result.value;
+  };
+  const expense = (n: number, postId: domain.ObjectId, totalAmount: number) =>
+    ({ id: id(n), tripId, postId, totalAmount, breakdown: null, paidBy: null, createdAt: time(14) });
+  /** Same invariants the current web validator enforces over the response. */
+  const expectCompatible = (value: domain.TripItinerary) => {
+    const dayIds = new Set(value.days.map((day) => day.id)), postIds = new Set(value.posts.map((post) => post.id));
+    const activityIds = new Set(value.activities.map((a) => a.id)), transportIds = new Set(value.transports.map((t) => t.id));
+    for (const post of value.posts) {
+      expect(dayIds.has(post.dayId)).toBe(true);
+      if (post.parentPostId !== null) expect(postIds.has(post.parentPostId)).toBe(true);
+      if (post.activityId !== null) expect(activityIds.has(post.activityId)).toBe(true);
+      if (post.transportId !== null) expect(transportIds.has(post.transportId)).toBe(true);
+    }
+    for (const owner of [...value.activities, ...value.transports]) for (const postId of owner.postIds) expect(postIds.has(postId)).toBe(true);
+    for (const day of value.days) for (const item of day.items) if (item.kind === "post") expect(postIds.has(item.id)).toBe(true);
+    const all = [...value.posts, ...value.unplacedPosts].map((post) => post.id);
+    expect(new Set(all).size).toBe(all.length);
+  };
+
+  it("projects a post without dayId by its publication slice with context", async () => {
+    const f = fresh(); mk(f, 10, { createdAt: time(11) });
+    const value = await run(f);
+    expect(value.posts.map((p) => p.id)).toEqual([id(10)]);
+    expect(value.posts[0]).toMatchObject({ dayId: f.day.id, context: { parentPostId: null, rootPostId: id(10), rootActivityId: null, rootTransportId: null, placement: "independent" } });
+    expect(value.days[1]!.items.filter((i) => i.kind === "post")).toEqual([{ kind: "post", id: id(10), at: time(11) }]);
+    expect(value.unplacedPosts).toEqual([]);
+    expectCompatible(value);
+  });
+
+  it("includes direct and nested descendants published later outside the itinerary without duplicating them as independents", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id, createdAt: time(13) });
+    mk(f, 11, { parentPostId: id(10), createdAt: iso("2026-10-03T12:00:00.789Z") });
+    mk(f, 12, { parentPostId: id(11), createdAt: iso("2026-10-04T12:00:00.001Z") });
+    const value = await run(f);
+    expect(value.activities[0]!.postIds).toEqual([id(10), id(11), id(12)]);
+    expect(value.posts.map((p) => [p.id, p.dayId, p.context.placement, p.context.rootActivityId, p.context.rootPostId])).toEqual([
+      [id(10), f.day.id, "activity", f.activity.id, id(10)], [id(11), f.day.id, "activity", f.activity.id, id(10)],
+      [id(12), f.day.id, "activity", f.activity.id, id(10)]]);
+    expect(value.posts.find((p) => p.id === id(12))).toMatchObject({ parentPostId: id(11), context: { parentPostId: id(11) } });
+    expect(value.unplacedPosts).toEqual([]);
+    expect(value.days.flatMap((d) => d.items).filter((i) => i.kind === "post")).toEqual([]);
+    expectCompatible(value);
+  });
+
+  it("handles branches under the same root activity without duplicates", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id }); mk(f, 11, { parentPostId: id(10), createdAt: time(14) });
+    mk(f, 12, { parentPostId: id(11), createdAt: time(15) }); mk(f, 13, { parentPostId: id(11), createdAt: time(16) });
+    mk(f, 14, { parentPostId: id(10), createdAt: time(15) });
+    const value = await run(f);
+    expect(value.activities[0]!.postIds).toEqual([id(10), id(11), id(12), id(14), id(13)]);
+    expect(value.posts).toHaveLength(5);
+    expectCompatible(value);
+  });
+
+  it("projects transport posts and descendants published later into transports.postIds without independent items", async () => {
+    const f = fresh();
+    mk(f, 10, { transportId: f.transport.id, createdAt: iso("2026-09-26T09:00:00.000Z") });
+    mk(f, 11, { parentPostId: id(10), createdAt: iso("2026-10-01T09:00:00.000Z") });
+    const value = await run(f);
+    expect(value.transports[0]!.postIds).toEqual([id(10), id(11)]);
+    expect(value.posts.map((p) => [p.id, p.dayId, p.context.placement, p.context.rootTransportId])).toEqual([
+      [id(10), id(8), "transport", f.transport.id], [id(11), id(8), "transport", f.transport.id]]);
+    expect(value.days.flatMap((d) => d.items).filter((i) => i.kind === "post")).toEqual([]);
+    expectCompatible(value);
+  });
+
+  it("sends a post outside every slice and date to unplacedPosts with its expense, outside postIds and summaries", async () => {
+    const f = fresh(); mk(f, 10, { createdAt: iso("2026-11-01T10:00:00.000Z") });
+    f.snapshot.expenses = [expense(20, id(10), 7)];
+    const value = await run(f);
+    expect(value.posts).toEqual([]);
+    expect(value.unplacedPosts).toMatchObject([{ id: id(10), dayId: null, expense: { totalAmount: 7 }, context: { placement: "independent", rootPostId: id(10) } }]);
+    for (const day of value.days) { expect(day.items.some((i) => i.id === id(10))).toBe(false); expect(day.expenseSummary.expenseCount).toBe(0); }
+    expectCompatible(value);
+  });
+
+  it("keeps every post of a Trip without itinerary", async () => {
+    const f = fresh();
+    Object.assign(f.snapshot, { days: [], transports: [], activities: [], destinations: [], expenses: [] });
+    mk(f, 10, { createdAt: time(11) }); mk(f, 11, { parentPostId: id(10) });
+    const value = await run(f);
+    expect(value.posts).toEqual([]);
+    expect(value.unplacedPosts.map((p) => [p.id, p.parentPostId, p.context.parentPostId])).toEqual([[id(10), null, null], [id(11), id(10), id(10)]]);
+  });
+
+  it("projects intermediate days, a post inside one and a post after the trip", async () => {
+    const f = fresh();
+    const mid = { ...f.day, id: id(50), type: "activity" as const, date: iso("2026-09-26T00:00:00.000Z"), startsAt: iso("2026-09-26T00:00:00.000Z"), endsAt: iso("2026-09-27T00:00:00.000Z"), order: 3 };
+    f.snapshot.days.push(mid);
+    const empty = await run(f);
+    expect(empty.days.find((d) => d.id === id(50))!.items).toEqual([]);
+    mk(f, 10, { createdAt: iso("2026-09-26T15:00:00.000Z") }); mk(f, 11, { createdAt: iso("2026-09-28T15:00:00.000Z") });
+    const value = await run(f);
+    expect(value.days.find((d) => d.id === id(50))!.items).toEqual([{ kind: "post", id: id(10), at: iso("2026-09-26T15:00:00.000Z") }]);
+    expect(value.unplacedPosts.map((p) => p.id)).toEqual([id(11)]);
+    expectCompatible(value);
+  });
+
+  it("uses an inclusive start, exclusive end and preserves milliseconds", async () => {
+    const f = fresh();
+    mk(f, 10, { createdAt: time(10) }); mk(f, 11, { createdAt: iso("2026-09-25T09:59:59.999Z") });
+    const value = await run(f);
+    expect(value.posts.find((p) => p.id === id(10))).toMatchObject({ dayId: f.day.id, createdAt: time(10) });
+    expect(value.posts.find((p) => p.id === id(11))).toMatchObject({ dayId: id(8), createdAt: iso("2026-09-25T09:59:59.999Z") });
+    expect(value.days[0]!.items.map((i) => [i.kind, i.id, i.at.toISOString()])).toEqual([
+      ["transport", id(5), time(8).toISOString()], ["post", id(11), "2026-09-25T09:59:59.999Z"]]);
+  });
+
+  it("anchors a post in a gap of the same UTC date to the lowest-order slice", async () => {
+    const f = fresh();
+    f.snapshot.days[0] = { ...f.day, startsAt: time(10), endsAt: time(12) };
+    mk(f, 10, { createdAt: time(15) }); mk(f, 11, { createdAt: time(5) });
+    const value = await run(f);
+    expect(value.posts.map((p) => [p.id, p.dayId])).toEqual([[id(11), id(8)], [id(10), id(8)]]);
+  });
+
+  it("assigns slices that share a date by instant", async () => {
+    const f = fresh();
+    mk(f, 10, { createdAt: time(9) }); mk(f, 11, { createdAt: time(11) });
+    const value = await run(f);
+    expect(value.posts.map((p) => [p.id, p.dayId])).toEqual([[id(10), id(8)], [id(11), f.day.id]]);
+  });
+
+  it("sums each expense once by effective activity day or publication slice", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id, createdAt: time(13) });
+    mk(f, 11, { parentPostId: id(10), createdAt: iso("2026-10-03T12:00:00.000Z") });
+    mk(f, 12, { createdAt: time(9) });
+    mk(f, 13, { transportId: f.transport.id, createdAt: time(9) });
+    f.snapshot.expenses = [expense(20, id(11), 1), expense(21, id(12), 2), expense(22, id(13), 4)];
+    for (const mode of ["register", "balance"] as const) {
+      f.snapshot.trip.expenseMode = mode;
+      const value = await run(f);
+      expect(value.days[1]!.expenseSummary).toEqual({ totalAmount: 1, expenseCount: 1 });
+      expect(value.days[0]!.expenseSummary).toEqual({ totalAmount: 6, expenseCount: 2 });
+    }
+  });
+
+  it("orders items and postIds stably by instant and id", async () => {
+    const f = fresh();
+    mk(f, 12, { activityId: f.activity.id, createdAt: time(14) }); mk(f, 11, { activityId: f.activity.id, createdAt: time(14) });
+    mk(f, 14, { createdAt: time(12) });
+    mk(f, 13, { createdAt: time(12) });
+    const value = await run(f);
+    expect(value.activities[0]!.postIds).toEqual([id(11), id(12)]);
+    expect(value.days[1]!.items.map((i) => [i.kind, i.id])).toEqual([["activity", id(6)], ["post", id(13)], ["post", id(14)]]);
+  });
+
+  it("does not throw, expand or duplicate for cycles, a missing parent or a parent of another Trip", async () => {
+    const f = fresh();
+    mk(f, 10, { parentPostId: id(11) }); mk(f, 11, { parentPostId: id(10) });
+    mk(f, 12, { parentPostId: id(77), createdAt: time(14) });
+    f.snapshot.posts.push({ ...(f.post as object), dayId: null, id: id(78), tripId: id(99), activityId: f.activity.id } as never);
+    mk(f, 13, { parentPostId: id(78), createdAt: time(15) });
+    const value = await run(f);
+    expect(value.posts.map((p) => p.id)).toEqual([id(10), id(11), id(12), id(13)]);
+    expect(value.activities[0]!.postIds).toEqual([]);
+    for (const post of value.posts) expect(post.context).toMatchObject({ rootPostId: post.id, placement: "independent" });
+    expectCompatible(value);
+  });
+
+  it("nulls the compatible parent link when the parent is unplaced but keeps it in context", async () => {
+    const f = fresh();
+    mk(f, 10, { createdAt: iso("2026-12-01T00:00:00.000Z") });
+    mk(f, 11, { parentPostId: id(10), createdAt: time(11) });
+    const value = await run(f);
+    expect(value.unplacedPosts.map((p) => p.id)).toEqual([id(10)]);
+    expect(value.posts).toMatchObject([{ id: id(11), parentPostId: null, context: { parentPostId: id(10), rootPostId: id(10), placement: "independent" } }]);
+    expectCompatible(value);
+  });
+
+  it("does not depend on the process time zone: a gap instant near UTC midnight anchors by UTC date", async () => {
+    const f = fresh();
+    f.snapshot.days = [{ ...f.day, id: id(61), date: iso("2026-09-25T00:00:00.000Z"), startsAt: iso("2026-09-25T00:00:00.000Z"), endsAt: iso("2026-09-26T00:00:00.000Z"), order: 1 },
+      { ...f.day, id: id(60), date: iso("2026-09-26T00:00:00.000Z"), startsAt: iso("2026-09-26T10:00:00.000Z"), endsAt: iso("2026-09-26T20:00:00.000Z"), order: 2 }];
+    f.snapshot.activities = []; f.snapshot.transports = [];
+    const instants = [iso("2026-09-26T02:30:00.123Z"), iso("2026-09-26T20:30:00.456Z")];
+    instants.forEach((createdAt, index) => mk(f, 10 + index, { createdAt }));
+    const previous = process.env.TZ;
+    try {
+      for (const zone of ["Pacific/Kiritimati", "America/Argentina/Buenos_Aires", "UTC"]) {
+        process.env.TZ = zone;
+        // 02:30Z is 25/09 in Buenos Aires and 20:30Z is 27/09 in Kiritimati: only a UTC fallback gives the same answer everywhere.
+        for (const instant of instants) expect(domain.dayForInstant(f.snapshot.days, instant)?.id, zone + instant.toISOString()).toBe(id(60));
+        const value = await run(f);
+        expect(value.posts.map((p) => [p.id, p.dayId, p.createdAt.toISOString()]), zone).toEqual([
+          [id(10), id(60), "2026-09-26T02:30:00.123Z"], [id(11), id(60), "2026-09-26T20:30:00.456Z"]]);
+        expect(value.unplacedPosts, zone).toEqual([]);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;
+    }
+  });
+
+  it("keeps a transport post published outside every slice in its transit day without summing its expense", async () => {
+    const f = fresh();
+    mk(f, 10, { transportId: f.transport.id, createdAt: iso("2026-11-01T10:00:00.000Z") });
+    f.snapshot.expenses = [expense(20, id(10), 9)];
+    const value = await run(f);
+    expect(value.posts).toMatchObject([{ id: id(10), dayId: id(8), expense: { totalAmount: 9 }, context: { placement: "transport", rootTransportId: f.transport.id } }]);
+    expect(value.unplacedPosts).toEqual([]);
+    expect(value.transports[0]!.postIds).toEqual([id(10)]);
+    for (const day of value.days) expect(day.expenseSummary).toEqual({ totalAmount: 0, expenseCount: 0 });
+    expectCompatible(value);
+  });
+
+  it("does not throw or duplicate for a chain deeper than MAX_POST_CHAIN_DEPTH and projects the too-deep link as independent", async () => {
+    const f = fresh();
+    const levels = domain.MAX_POST_CHAIN_DEPTH + 1, first = 5000;
+    mk(f, first, { activityId: f.activity.id });
+    for (let level = 1; level <= levels; level++) mk(f, first + level, { parentPostId: id(first + level - 1) });
+    const value = await run(f);
+    const deepest = id(first + levels), reachable = id(first + levels - 1);
+    expect(value.posts).toHaveLength(levels + 1);
+    expect(new Set(value.posts.map((p) => p.id)).size).toBe(levels + 1);
+    expect(value.unplacedPosts).toEqual([]);
+    expect(value.posts.find((p) => p.id === reachable)).toMatchObject({ context: { placement: "activity", rootPostId: id(first), rootActivityId: f.activity.id } });
+    expect(value.posts.find((p) => p.id === deepest)).toMatchObject({ parentPostId: reachable, activityId: null,
+      context: { placement: "independent", rootPostId: deepest, rootActivityId: null, parentPostId: reachable } });
+    expect(value.activities[0]!.postIds).toHaveLength(levels);
+    expect(value.activities[0]!.postIds).not.toContain(deepest);
+    expect(value.days[1]!.items.filter((i) => i.kind === "post").map((i) => i.id)).toEqual([deepest]);
+    expectCompatible(value);
   });
 });

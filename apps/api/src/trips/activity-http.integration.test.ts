@@ -164,7 +164,7 @@ describe("activity HTTP API", () => {
     expect(itinerary.days[0].items).toEqual([{ kind: "activity", id: activity.id, at: activity.scheduledAt }]);
   });
 
-  it("updates itinerary placement and detaches posts on deletion without moving their own day", async () => {
+  it("updates itinerary placement and detaches posts on deletion and keeps them as unplaced when published outside the dates", async () => {
     const activity = await create(), secondDay = new ObjectId(), postId = new ObjectId();
     const baseDay = await db.collection("itineraryDays").findOne({ _id: day });
     await db.collection("itineraryDays").insertOne({ ...baseDay!, _id: secondDay, order: 2, date: new Date("2026-09-26T00:00:00Z"),
@@ -180,8 +180,10 @@ describe("activity HTTP API", () => {
     expect((await request("DELETE", `${path}/${activity.id}`)).statusCode).toBe(204);
     const removed = await query();
     expect(removed.activities).toEqual([]); expect(removed.days[1]!.items).toEqual([]);
-    expect(removed.days[0]!.items).toMatchObject([{ kind: "post", id: postId.toHexString() }]);
-    expect(removed.posts[0]).toMatchObject({ dayId: day.toHexString(), activityId: null });
+    // T56: the legacy dayId is no longer used; the post was published outside the Trip dates, so it is kept as unplaced.
+    expect(removed.days[0]!.items).toEqual([]);
+    expect(removed.posts).toEqual([]);
+    expect(removed.unplacedPosts).toMatchObject([{ id: postId.toHexString(), dayId: null, activityId: null, description: "Recuerdo" }]);
   });
 
   describe("duration", () => {

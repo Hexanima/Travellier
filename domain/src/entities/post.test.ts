@@ -288,6 +288,12 @@ describe("resolvePostChain", () => {
       value: { rootPostId: c.id, rootActivityId: id(5), ancestors: [b, c] } });
   });
 
+  it("reports the root transport of the chain", () => {
+    const root = chainPost(30, { transportId: id(6) }), child = chainPost(31, { parentPostId: root.id });
+    expect(domain.resolvePostChain(child, lookup([root, child]))).toMatchObject({ ok: true, value: { rootTransportId: id(6), rootActivityId: null } });
+    expect(domain.resolvePostChain(root, lookup([root]))).toMatchObject({ ok: true, value: { rootTransportId: id(6) } });
+  });
+
   it("supports branches that share the same root", () => {
     const root = chainPost(30, { activityId: id(5) }), b = chainPost(31, { parentPostId: root.id });
     const d = chainPost(33, { parentPostId: root.id }), e = chainPost(34, { parentPostId: b.id });
