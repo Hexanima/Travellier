@@ -80,7 +80,6 @@ describe("AuthScreen", () => {
     let complete!: (value: unknown) => void;
     const request = vi.fn(() => new Promise((resolve) => { complete = resolve; }));
     const container = await renderAuthScreen({ mode, auth: { login: request, register: request } as never });
-    if (mode === "register") await setValue(container.querySelector('[name="name"]') as HTMLInputElement, "Nico");
     await setValue(container.querySelector('[name="email"]') as HTMLInputElement, "nico@example.test");
     await setValue(container.querySelector('[name="password"]') as HTMLInputElement, "secret-pass");
     await submit(container);
@@ -101,7 +100,7 @@ describe("AuthScreen", () => {
     await submit(container);
 
     expect(container.textContent).toContain("Ingresá un email válido.");
-    expect(container.textContent).toContain("Ingresá tu nombre.");
+    expect(container.textContent).not.toContain("Ingresá tu nombre.");
     expect(container.textContent).toContain("Ingresá una contraseña.");
     expect(register).not.toHaveBeenCalled();
   });
@@ -139,17 +138,18 @@ describe("AuthScreen", () => {
       auth: { register },
     });
 
-    await setValue(container.querySelector("[name=name]") as HTMLInputElement, "Nico");
     await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
     await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
     await submit(container);
 
     expect(register).toHaveBeenCalledWith({
       email: "nico@example.test",
-      name: "Nico",
       password: "secret-pass",
     });
+    expect(Object.keys(register.mock.calls[0]![0])).toEqual(["email", "password"]);
     expect(container.textContent).toContain("Tu cuenta fue creada. Ya podés iniciar sesión.");
+    expect(container.textContent).not.toMatch(/verific|correo/i);
+    expect(container.querySelector('a[href="/login"]')?.textContent).toBe("Iniciar sesión");
   });
 
   it("shows one generic message for a failed login without exposing account details", async () => {
@@ -182,7 +182,6 @@ describe("AuthScreen", () => {
       },
     });
 
-    await setValue(container.querySelector("[name=name]") as HTMLInputElement, "Nico");
     await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
     await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
     await submit(container);
@@ -190,5 +189,52 @@ describe("AuthScreen", () => {
     expect(container.textContent).toContain("No pudimos crear tu cuenta con esos datos.");
     expect(container.textContent).not.toContain("Unable to register with the provided details.");
     expect(container.textContent).not.toContain("RegistrationFailed");
+  });
+
+  it("does not render or require a name in registration", async () => {
+    const container = await renderAuthScreen({ mode: "register", auth: { register: vi.fn() } });
+
+    expect(container.querySelector("[name=name]")).toBeNull();
+    expect(container.textContent).not.toContain("Nombre");
+  });
+
+  it("keeps email and password after a failed registration", async () => {
+    const register = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const container = await renderAuthScreen({ mode: "register", auth: { register } });
+
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+    await submit(container);
+
+    expect(container.textContent).toContain("No pudimos crear tu cuenta con esos datos.");
+    expect((container.querySelector("[name=email]") as HTMLInputElement).value).toBe("nico@example.test");
+    expect((container.querySelector("[name=password]") as HTMLInputElement).value).toBe("secret-pass");
+  });
+
+  it.each(["login", "register"] as const)("ignores a second %s submit in the same tick", async (mode) => {
+    const request = vi.fn(() => new Promise(() => undefined));
+    const container = await renderAuthScreen({ mode, auth: { login: request, register: request } as never });
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+
+    await act(async () => {
+      const form = container.querySelector("form")!;
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows retrying after a failed registration", async () => {
+    const register = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const container = await renderAuthScreen({ mode: "register", auth: { register } });
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+
+    await submit(container);
+    await submit(container);
+
+    expect(register).toHaveBeenCalledTimes(2);
   });
 });
