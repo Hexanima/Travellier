@@ -9,6 +9,7 @@ type TransportDocument = Omit<Transport, "id" | "tripId" | "destinationId"> & {
 type ItineraryDayDocument = Omit<ItineraryDay, "id" | "tripId" | "destinationId"> & {
   _id: MongoObjectId; tripId: MongoObjectId; destinationId: MongoObjectId;
 };
+const itineraryDayTypes = ["transit_out", "activity", "transit_return"] as const;
 const domainId = (value: MongoObjectId): ObjectId => {
   const result = createObjectId(value.toHexString());
   if (!result.ok) throw result.error;
@@ -137,17 +138,15 @@ export const createMongoTripJourneyRepository = (database: Db, session?: ClientS
       });
     },
     listItineraryDays: (tripId) => perform(async () => {
-      const documents = await itineraryDays.find({ tripId: new MongoObjectId(tripId) }, options).sort({ order: 1 }).toArray();
+      const documents = await itineraryDays.find({ tripId: new MongoObjectId(tripId), type: { $in: [...itineraryDayTypes] } }, options).sort({ order: 1 }).toArray();
       return documents.map(({ _id, ...day }) => ({ ...day, id: domainId(_id), tripId: domainId(day.tripId), destinationId: domainId(day.destinationId) }));
     }),
     listItineraryReferences: (tripId) => perform(async () => {
       const query = { tripId: new MongoObjectId(tripId) };
-      const activities = await database.collection<{ dayId: MongoObjectId; scheduledAt: Date }>("activities")
-        .find(query, { ...options, projection: { dayId: 1, scheduledAt: 1 } }).toArray();
-      const posts = await database.collection<{ dayId?: MongoObjectId | null }>("posts")
-        .find(query, { ...options, projection: { dayId: 1 } }).toArray();
-      return { activities: activities.map((item) => ({ dayId: domainId(item.dayId), scheduledAt: item.scheduledAt })),
-        posts: posts.map((item) => ({ dayId: item.dayId == null ? null : domainId(item.dayId) })) };
+      const activities = await database.collection<{ dayId: MongoObjectId; scheduledAt: Date; durationMinutes?: number | null }>("activities")
+        .find(query, { ...options, projection: { dayId: 1, scheduledAt: 1, durationMinutes: 1 } }).toArray();
+      return { activities: activities.map((item) => ({ dayId: domainId(item.dayId), scheduledAt: item.scheduledAt,
+        durationMinutes: item.durationMinutes ?? null })) };
     }),
     replaceItineraryDays: async (tripId, days) => {
       if (!session) return repository.withTransaction(tripId, (scoped) => scoped.replaceItineraryDays(tripId, days));
@@ -161,7 +160,8 @@ export const createMongoTripJourneyRepository = (database: Db, session?: ClientS
               type: day.type, startsAt: day.startsAt, endsAt: day.endsAt, order: day.order } }, upsert: true,
           } })), options);
         }
-        await itineraryDays.deleteMany({ tripId: mongoTripId, _id: { $nin: ids } }, options);
+        // Legacy rows of retired types (e.g. `arrival`) are neither exposed nor deleted.
+        await itineraryDays.deleteMany({ tripId: mongoTripId, type: { $in: [...itineraryDayTypes] }, _id: { $nin: ids } }, options);
       });
     },
   };

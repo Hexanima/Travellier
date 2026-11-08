@@ -115,7 +115,7 @@ describe("Trip activity use cases", () => {
     expect(records).toEqual(before);
   });
 
-  it.each(["transit_out", "arrival", "transit_return"] as const)("rejects a %s day", async (type) => {
+  it.each(["transit_out", "transit_return"] as const)("rejects a %s day", async (type) => {
     days = [{ ...day, type }];
     expect(await create()).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
   });

@@ -50,7 +50,7 @@ describe("validateActivitySchedule", () => {
       .toMatchObject(issue("dayId", "mismatch"));
   });
 
-  it.each(["transit_out", "transit_return", "arrival"] as const)("rejects %s slices even on the same date", (type) => {
+  it.each(["transit_out", "transit_return"] as const)("rejects %s slices even on the same date", (type) => {
     expect(domain.validateActivitySchedule(schedule(), [{ ...day, type }]))
       .toMatchObject(issue("dayId", "invalid"));
   });

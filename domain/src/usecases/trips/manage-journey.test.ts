@@ -18,7 +18,7 @@ const member = { id: id("507f1f77bcf86cd799439015"), tripId, userId: actorId, ro
 
 const journeyStub = (overrides: Partial<TripJourneyPort>): TripJourneyPort => {
   const journeys = { listDestinations: async () => ok([destination]), listTransports: async () => ok([transport]),
-    listItineraryDays: async () => ok([]), listItineraryReferences: async () => ok({ activities: [], posts: [] }),
+    listItineraryDays: async () => ok([]), listItineraryReferences: async () => ok({ activities: [] }),
     replaceItineraryDays: async () => ok(undefined), ...overrides } as TripJourneyPort;
   journeys.withTransaction = async (_tripId, work) => work(journeys);
   return journeys;

@@ -93,7 +93,7 @@ describe("local destination and transport API", () => {
       expect(expanded.slice(1).map((day) => day._id)).toEqual(complete.map((day) => day._id));
       expect((await patch()).status).toBe(200);
       expect(await readDays()).toEqual(expanded);
-      await database.collection("posts").insertOne({ tripId: new ObjectId(first.id), dayId: complete[1]!._id, createdAt: new Date() });
+      await database.collection("activities").insertOne({ tripId: new ObjectId(first.id), dayId: complete[1]!._id, scheduledAt: complete[1]!.startsAt, createdAt: new Date() });
       const rejected = await fetch(`${base}${transportPath}/${savedTransport.id}`, { method: "PATCH", headers,
         body: JSON.stringify({ arrivalAt: "2026-09-25T10:00:00Z" }) });
       expect(rejected.status).toBe(409);

@@ -69,7 +69,7 @@ type DaySlice = Omit<ItineraryDayDraft, "order">;
 const utcDayDurationMs = 24 * 60 * 60 * 1_000;
 
 const appendSlices = (slices: DaySlice[], tripId: ObjectId, destinationId: ObjectId,
-  type: Exclude<ItineraryDayType, "arrival">, startsAt: Date, endsAt: Date): void => {
+  type: ItineraryDayType, startsAt: Date, endsAt: Date): void => {
   const end = endsAt.getTime();
   let start = startsAt.getTime();
   while (start < end) {

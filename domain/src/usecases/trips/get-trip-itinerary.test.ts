@@ -121,12 +121,12 @@ describe("getTripItinerary", () => {
     expect(result.value.days[1]!.items).toEqual([{ kind: "transport", id: id(5), at: time(8) }]);
   });
 
-  it("preserves arrival and null bounds without inferring a transport", async () => {
+  it("preserves null bounds without inferring a transport", async () => {
     const f = fixture();
-    f.snapshot.days[0] = { ...f.day, type: "arrival", endsAt: null };
+    f.snapshot.days[0] = { ...f.day, type: "activity", endsAt: null };
     f.snapshot.activities = []; f.snapshot.posts = [];
     const result = await f.execute();
-    expect(result).toMatchObject({ ok: true, value: { days: [{ items: [{ kind: "transport", id: id(5) }] }, { type: "arrival", endsAt: null, items: [] }] } });
+    expect(result).toMatchObject({ ok: true, value: { days: [{ items: [{ kind: "transport", id: id(5) }] }, { type: "activity", endsAt: null, items: [] }] } });
   });
 
   it("does not expand cyclic parent links or include foreign data and expenses", async () => {

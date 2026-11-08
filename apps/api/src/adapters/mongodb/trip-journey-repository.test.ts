@@ -28,7 +28,7 @@ describe("Mongo Trip journey repository", () => {
   }, 120_000);
   afterAll(async () => { await client?.close(); await server?.stop(); });
   beforeEach(async () => {
-    await Promise.all(["trips", "destinations", "transports"].map((name) => database.collection(name).deleteMany({})));
+    await Promise.all(["trips", "destinations", "transports", "itineraryDays", "activities", "posts"].map((name) => database.collection(name).deleteMany({})));
     tripId = new ObjectId();
     otherTripId = new ObjectId();
     firstId = new ObjectId();
@@ -81,5 +81,48 @@ describe("Mongo Trip journey repository", () => {
     const repository = createMongoTripJourneyRepository(database);
     expect(await repository.insertTransport(transport(tripId, firstId))).toMatchObject({ ok: true });
     expect(await repository.insertTransport(transport(tripId, firstId))).toMatchObject({ ok: false, error: { tag: "JourneyConflictError" } });
+  });
+
+  describe("legacy arrival rows and activity references", () => {
+    const slice = (type: string, order: number) => ({ _id: new ObjectId(), tripId, destinationId: firstId, date: new Date("2026-09-25T00:00:00Z"),
+      type, startsAt: new Date("2026-09-25T08:00:00Z"), endsAt: null, order });
+
+    it("lists days without the retired arrival type and keeps the row stored", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const legacy = slice("arrival", 1), current = slice("transit_out", 2);
+      await database.collection("itineraryDays").insertMany([legacy, current]);
+      const listed = await repository.listItineraryDays(domainId(tripId));
+      expect(listed).toMatchObject({ ok: true, value: [{ id: current._id.toHexString(), type: "transit_out" }] });
+      expect(await database.collection("itineraryDays").findOne({ _id: legacy._id })).toEqual(legacy);
+    });
+
+    it("replaces days without deleting arrival rows, but removes obsolete current rows only of the Trip", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const legacy = slice("arrival", 1), obsolete = slice("activity", 2), foreign = { ...slice("activity", 1), tripId: otherTripId };
+      const kept = { ...slice("transit_out", 3) };
+      await database.collection("itineraryDays").insertMany([legacy, obsolete, foreign, kept]);
+      const { _id, ...rest } = { ...kept, type: "transit_out" as const };
+      expect(await repository.replaceItineraryDays(domainId(tripId), [{ ...rest, id: domainId(_id), tripId: domainId(tripId), destinationId: domainId(firstId) }]))
+        .toMatchObject({ ok: true });
+      expect(await database.collection("itineraryDays").findOne({ _id: legacy._id })).toEqual(legacy);
+      expect(await database.collection("itineraryDays").findOne({ _id: obsolete._id })).toBeNull();
+      expect(await database.collection("itineraryDays").findOne({ _id: foreign._id })).toEqual(foreign);
+      expect(await database.collection("itineraryDays").findOne({ _id: kept._id })).toMatchObject({ type: "transit_out" });
+    });
+
+    it("projects activity durations as null when absent and omits posts", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const dayId = new ObjectId();
+      await database.collection("activities").insertMany([
+        { tripId, dayId, scheduledAt: new Date("2026-09-25T09:00:00.123Z"), durationMinutes: 90 },
+        { tripId, dayId, scheduledAt: new Date("2026-09-25T10:00:00Z") },
+      ]);
+      await database.collection("posts").insertOne({ tripId, dayId, createdAt: new Date() });
+      const references = await repository.listItineraryReferences(domainId(tripId));
+      expect(references).toEqual({ ok: true, value: { activities: [
+        { dayId: domainId(dayId), scheduledAt: new Date("2026-09-25T09:00:00.123Z"), durationMinutes: 90 },
+        { dayId: domainId(dayId), scheduledAt: new Date("2026-09-25T10:00:00Z"), durationMinutes: null },
+      ] } });
+    });
   });
 });
