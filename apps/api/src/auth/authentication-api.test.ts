@@ -164,6 +164,52 @@ describe("authentication API", () => {
     expect(JSON.stringify(result)).not.toContain("accessToken");
   });
 
+  it("registers without a name, logs in immediately and reads a nameless profile", async () => {
+    const auth = createAuthenticationApi({ database, jwtSecret });
+    const registered = await auth.register({ email: "nameless@example.test", password: "secret-pass" });
+
+    expect(registered).toEqual({
+      ok: true,
+      value: { id: expect.any(String), email: "nameless@example.test", name: null },
+    });
+    if (!registered.ok) return;
+    const stored = await database.collection("users").findOne({ email: "nameless@example.test" });
+    expect(stored).toMatchObject({ name: null, avatarS3Key: null });
+    expect(stored?.passwordHash).not.toBe("secret-pass");
+
+    const login = await auth.login({ email: "nameless@example.test", password: "secret-pass" });
+    expect(login).toMatchObject({
+      ok: true,
+      value: { accessToken: expect.any(String), refreshToken: expect.any(String) },
+    });
+    if (!login.ok) return;
+
+    await expect(auth.getProfile({ authenticatedUserId: registered.value.id })).resolves.toEqual({
+      ok: true,
+      value: { name: null, email: "nameless@example.test", avatar: null },
+    });
+
+    const refreshed = await auth.refresh({ refreshToken: login.value.refreshToken });
+    expect(refreshed).toMatchObject({ ok: true, value: { refreshToken: expect.any(String) } });
+    expect(await auth.refresh({ refreshToken: login.value.refreshToken }))
+      .toMatchObject({ ok: false, error: { tag: "InvalidSessionError" } });
+    if (!refreshed.ok) return;
+    expect(await auth.logout({ refreshToken: refreshed.value.refreshToken })).toEqual({ ok: true, value: undefined });
+    expect(await auth.refresh({ refreshToken: refreshed.value.refreshToken }))
+      .toMatchObject({ ok: false, error: { tag: "InvalidSessionError" } });
+  });
+
+  it("rejects a wrong password and an unknown email with the same error", async () => {
+    const auth = createAuthenticationApi({ database, jwtSecret });
+    await auth.register({ email: "wrong-password@example.test", password: "secret-pass" });
+
+    const wrongPassword = await auth.login({ email: "wrong-password@example.test", password: "other-pass" });
+    const unknownEmail = await auth.login({ email: "unknown@example.test", password: "secret-pass" });
+
+    expect(wrongPassword).toMatchObject({ ok: false, error: { tag: "InvalidCredentialsError" } });
+    expect(unknownEmail).toEqual(wrongPassword);
+  });
+
   it("reads and updates the authenticated user's public profile", async () => {
     const auth = createAuthenticationApi({ database, jwtSecret });
     const registered = await auth.register({

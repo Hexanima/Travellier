@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { MongoClient, type Db } from "mongodb";
+import { MongoClient, ObjectId, type Db } from "mongodb";
 
 import { createMongoAuthenticationRepositories } from "./authentication-repositories.js";
 
@@ -114,5 +114,37 @@ describe("Mongo authentication repositories", () => {
       ok: true,
       value: { email: "profile-second@example.test", name: "Second", avatarS3Key: null },
     });
+  });
+
+  it("stores a missing name as null and reads legacy users without changing them", async () => {
+    const { users } = createMongoAuthenticationRepositories(database);
+    const created = await users.create({
+      email: "nameless@example.test",
+      name: null,
+      passwordHash: "bcrypt-hash",
+    });
+
+    expect(created).toMatchObject({ ok: true, value: { name: null, avatarS3Key: null } });
+    expect(await database.collection("users").findOne({ email: "nameless@example.test" }))
+      .toMatchObject({ name: null, avatarS3Key: null });
+
+    const legacyWithoutName = new ObjectId();
+    const legacyWithProfile = new ObjectId();
+    const createdAt = new Date("2026-09-21T12:00:00.000Z");
+    await database.collection("users").insertMany([
+      { _id: legacyWithoutName, email: "legacy-nameless@example.test", passwordHash: "hash", avatarS3Key: null, createdAt },
+      { _id: legacyWithProfile, email: "legacy@example.test", name: "Legacy", passwordHash: "hash", avatarS3Key: "avatars/legacy.jpg", createdAt },
+    ]);
+
+    expect(await users.findById(legacyWithoutName.toHexString() as never)).toMatchObject({
+      ok: true,
+      value: { email: "legacy-nameless@example.test", name: null, avatarS3Key: null },
+    });
+    expect(await users.findByEmail("legacy@example.test")).toMatchObject({
+      ok: true,
+      value: { name: "Legacy", avatarS3Key: "avatars/legacy.jpg" },
+    });
+    expect(await database.collection("users").findOne({ _id: legacyWithoutName }))
+      .not.toHaveProperty("name");
   });
 });

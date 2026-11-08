@@ -21,7 +21,7 @@ type MembershipDocument = {
   joinedAt: Date;
 };
 
-type UserNameDocument = { _id: MongoObjectId; name: string };
+type UserNameDocument = { _id: MongoObjectId; name?: string | null };
 
 const domainId = (id: MongoObjectId): ObjectId => {
   const result = createObjectId(id.toHexString());
@@ -61,10 +61,14 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
           { _id: { $in: documents.map((member) => member.userId) } },
           { projection: { name: 1 } },
         ).toArray();
-        const names = new Map(userDocuments.map((user) => [user._id.toHexString(), user.name]));
+        const names = new Map(userDocuments.map((user) => [
+          user._id.toHexString(),
+          typeof user.name === "string" && user.name.trim() !== "" ? user.name : null,
+        ]));
         const summaries: TripMemberSummary[] = documents.map((document) => {
-          const name = names.get(document.userId.toHexString());
-          if (name === undefined) throw new Error("Trip member user is missing.");
+          const userId = document.userId.toHexString();
+          if (!names.has(userId)) throw new Error("Trip member user is missing.");
+          const name = names.get(userId) ?? null;
           return {
             id: domainId(document._id),
             userId: domainId(document.userId),
