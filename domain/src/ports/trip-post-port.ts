@@ -1,3 +1,4 @@
+import type { ActivityParticipation } from "../entities/activity-participation.js";
 import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
 import type { Post } from "../entities/post.js";
@@ -24,6 +25,12 @@ export interface TripPostScope extends TripPostReadScope {
   insert: (post: Post) => AsyncResult<void>;
   replace: (post: Post) => AsyncResult<void>;
   insertActivity: (activity: Activity) => AsyncResult<void>;
+  /** Complete activities of the Trip, to review the author's agenda in the same snapshot. */
+  listActivities: () => AsyncResult<Activity[]>;
+  /** Every participation of this user in the Trip. */
+  listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
+  /** Upsert only this activity/user pair in the same transaction. */
+  saveParticipation: (participation: ActivityParticipation) => AsyncResult<ActivityParticipation>;
 }
 
 export interface TripPostPort {
