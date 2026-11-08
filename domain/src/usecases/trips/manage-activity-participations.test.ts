@@ -54,9 +54,10 @@ describe("individual activity participation use cases", () => {
     expect(domain.setTripActivityParticipation).toBeDefined();
     return domain.setTripActivityParticipation.execute(dependencies(), { ...context, authenticatedUserId, status, ...extra });
   };
-  const set = async (status: unknown, authenticatedUserId = actor) => {
+  const set = async (status: unknown, authenticatedUserId = actor): Promise<domain.Result<ActivityParticipation, domain.TaggedError>> => {
     const result = await request(status, {}, authenticatedUserId);
-    return result.ok && result.value.outcome === "saved" ? domain.ok(result.value.participation) : result;
+    if (!result.ok) return result;
+    return result.value.outcome === "saved" ? domain.ok(result.value.participation) : domain.err(new domain.UnknownError("confirmation_required"));
   };
   const get = () => {
     expect(domain.getTripActivityParticipation).toBeDefined();
