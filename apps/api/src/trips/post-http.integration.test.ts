@@ -291,7 +291,7 @@ describe("post HTTP API", () => {
     expect(itinerary.unplacedPosts.map((p: { id: string }) => p.id).sort()).toEqual([parent.id, child.id].sort());
     expect(itinerary.posts.find((p: { id: string }) => p.id === post.id)).toMatchObject({ dayId: activity.dayId, context: { placement: "activity", rootActivityId: activity.id, rootTransportId: transport.id } });
     expect(itinerary.activities).toMatchObject([{ id: activity.id, postIds: [post.id] }]);
-    expect(itinerary.transports.find((t: { id: string }) => t.id === transport.id).postIds).toContain(post.id);
+    expect(itinerary.transports.find((t: { id: string }) => t.id === transport.id).postIds).toEqual([post.id]);
     expect(itinerary.unplacedPosts.find((p: { id: string }) => p.id === child.id)).toMatchObject({ dayId: null, parentPostId: parent.id, context: { parentPostId: parent.id, rootPostId: parent.id } });
     expect(post).toMatchObject({ transportId: transport.id, parentPostId: null, activityId: activity.id });
     expect(child).toMatchObject({ parentPostId: parent.id, activityId: null, transportId: null });

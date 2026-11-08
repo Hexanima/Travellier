@@ -327,14 +327,57 @@ describe("getTripItinerary projection of memories by context (T56)", () => {
     expectCompatible(value);
   });
 
-  it("does not depend on the process time zone and keeps the instant", async () => {
+  it("does not depend on the process time zone: a gap instant near UTC midnight anchors by UTC date", async () => {
     const f = fresh();
-    f.snapshot.days = [{ ...f.day, id: id(60), date: iso("2026-09-26T00:00:00.000Z"), startsAt: iso("2026-09-26T00:00:00.000Z"), endsAt: iso("2026-09-27T00:00:00.000Z") },
-      { ...f.day, id: id(61), date: iso("2026-09-25T00:00:00.000Z"), startsAt: iso("2026-09-25T00:00:00.000Z"), endsAt: iso("2026-09-26T00:00:00.000Z"), order: 1 }];
+    f.snapshot.days = [{ ...f.day, id: id(61), date: iso("2026-09-25T00:00:00.000Z"), startsAt: iso("2026-09-25T00:00:00.000Z"), endsAt: iso("2026-09-26T00:00:00.000Z"), order: 1 },
+      { ...f.day, id: id(60), date: iso("2026-09-26T00:00:00.000Z"), startsAt: iso("2026-09-26T10:00:00.000Z"), endsAt: iso("2026-09-26T20:00:00.000Z"), order: 2 }];
     f.snapshot.activities = []; f.snapshot.transports = [];
-    mk(f, 10, { createdAt: iso("2026-09-26T02:30:00.123Z") });
+    const instants = [iso("2026-09-26T02:30:00.123Z"), iso("2026-09-26T20:30:00.456Z")];
+    instants.forEach((createdAt, index) => mk(f, 10 + index, { createdAt }));
+    const previous = process.env.TZ;
+    try {
+      for (const zone of ["Pacific/Kiritimati", "America/Argentina/Buenos_Aires", "UTC"]) {
+        process.env.TZ = zone;
+        // 02:30Z is 25/09 in Buenos Aires and 20:30Z is 27/09 in Kiritimati: only a UTC fallback gives the same answer everywhere.
+        for (const instant of instants) expect(domain.dayForInstant(f.snapshot.days, instant)?.id, zone + instant.toISOString()).toBe(id(60));
+        const value = await run(f);
+        expect(value.posts.map((p) => [p.id, p.dayId, p.createdAt.toISOString()]), zone).toEqual([
+          [id(10), id(60), "2026-09-26T02:30:00.123Z"], [id(11), id(60), "2026-09-26T20:30:00.456Z"]]);
+        expect(value.unplacedPosts, zone).toEqual([]);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous;
+    }
+  });
+
+  it("keeps a transport post published outside every slice in its transit day without summing its expense", async () => {
+    const f = fresh();
+    mk(f, 10, { transportId: f.transport.id, createdAt: iso("2026-11-01T10:00:00.000Z") });
+    f.snapshot.expenses = [expense(20, id(10), 9)];
     const value = await run(f);
-    expect(value.posts[0]).toMatchObject({ dayId: id(60) });
-    expect(value.posts[0]!.createdAt.toISOString()).toBe("2026-09-26T02:30:00.123Z");
+    expect(value.posts).toMatchObject([{ id: id(10), dayId: id(8), expense: { totalAmount: 9 }, context: { placement: "transport", rootTransportId: f.transport.id } }]);
+    expect(value.unplacedPosts).toEqual([]);
+    expect(value.transports[0]!.postIds).toEqual([id(10)]);
+    for (const day of value.days) expect(day.expenseSummary).toEqual({ totalAmount: 0, expenseCount: 0 });
+    expectCompatible(value);
+  });
+
+  it("does not throw or duplicate for a chain deeper than MAX_POST_CHAIN_DEPTH and projects the too-deep link as independent", async () => {
+    const f = fresh();
+    const levels = domain.MAX_POST_CHAIN_DEPTH + 1, first = 5000;
+    mk(f, first, { activityId: f.activity.id });
+    for (let level = 1; level <= levels; level++) mk(f, first + level, { parentPostId: id(first + level - 1) });
+    const value = await run(f);
+    const deepest = id(first + levels), reachable = id(first + levels - 1);
+    expect(value.posts).toHaveLength(levels + 1);
+    expect(new Set(value.posts.map((p) => p.id)).size).toBe(levels + 1);
+    expect(value.unplacedPosts).toEqual([]);
+    expect(value.posts.find((p) => p.id === reachable)).toMatchObject({ context: { placement: "activity", rootPostId: id(first), rootActivityId: f.activity.id } });
+    expect(value.posts.find((p) => p.id === deepest)).toMatchObject({ parentPostId: reachable, activityId: null,
+      context: { placement: "independent", rootPostId: deepest, rootActivityId: null, parentPostId: reachable } });
+    expect(value.activities[0]!.postIds).toHaveLength(levels);
+    expect(value.activities[0]!.postIds).not.toContain(deepest);
+    expect(value.days[1]!.items.filter((i) => i.kind === "post").map((i) => i.id)).toEqual([deepest]);
+    expectCompatible(value);
   });
 });

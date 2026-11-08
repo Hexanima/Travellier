@@ -112,15 +112,20 @@ describe("Mongo itinerary query", () => {
       rootTransportId: transport.toHexString(), placement: "transport" } });
   });
 
-  it("returns every post as unplaced in a Trip without itinerary, with one read of posts and one of expenses", async () => {
+  it("returns every post as unplaced in a Trip without itinerary, with one read of posts and one of expenses whatever the chain depth", async () => {
     for (const name of ["itineraryDays", "transports", "activities", "destinations"]) await db.collection(name).deleteMany({});
-    const independent = new ObjectId();
-    await db.collection("posts").insertOne({ _id: independent, tripId: trip, authorId: actor, description: "Libre", mapsUrl: null,
-      activityId: null, transportId: null, parentPostId: post, createdAt: new Date("2026-09-25T13:00:00.123Z") });
+    const independent = new ObjectId(), deeper = [new ObjectId(), new ObjectId(), new ObjectId()];
+    const link = (_id: ObjectId, parentPostId: ObjectId, hour: number) => ({ _id, tripId: trip, authorId: actor, description: "Libre", mapsUrl: null,
+      activityId: null, transportId: null, parentPostId, createdAt: new Date(`2026-09-25T${hour}:00:00.123Z`) });
+    // Four levels below the seeded root post: a lookup/aggregate per level would add reads and be detected below.
+    await db.collection("posts").insertMany([link(independent, post, 13), link(deeper[0]!, independent, 14), link(deeper[1]!, deeper[0]!, 15), link(deeper[2]!, deeper[1]!, 16)]);
     await db.collection("postExpenses").insertOne({ tripId: trip, postId: independent, totalAmount: 3, breakdown: null, paidBy: actor, createdAt: arrival });
     const reads: string[] = [];
+    const writes = ["insert", "update", "delete", "findAndModify"];
     const listener = (event: { commandName: string; command: Record<string, unknown> }) => {
-      if (event.commandName === "find" && ["posts", "postExpenses"].includes(String(event.command.find))) reads.push(String(event.command.find));
+      // Every command on the two collections counts (find, aggregate, count, distinct, getMore...), whatever its name.
+      const target = String(event.command[event.commandName] ?? event.command.collection);
+      if (["posts", "postExpenses"].includes(target) && !writes.includes(event.commandName)) reads.push(`${event.commandName}:${target}`);
     };
     client.on("commandStarted", listener);
     const result = await query();
@@ -128,9 +133,9 @@ describe("Mongo itinerary query", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.posts).toEqual([]);
-    expect(result.value.unplacedPosts.map((p) => p.id)).toEqual([post.toHexString(), independent.toHexString()]);
+    expect(result.value.unplacedPosts.map((p) => p.id)).toEqual([post, independent, ...deeper].map((v) => v.toHexString()));
     expect(result.value.unplacedPosts[1]).toMatchObject({ dayId: null, parentPostId: post.toHexString(), createdAt: new Date("2026-09-25T13:00:00.123Z"), expense: { totalAmount: 3 } });
-    expect(reads.sort()).toEqual(["postExpenses", "posts"]);
+    expect(reads.sort()).toEqual(["find:postExpenses", "find:posts"]);
   });
 
   it("uses a bounded number of queries as the number of days grows and does not write", async () => {
