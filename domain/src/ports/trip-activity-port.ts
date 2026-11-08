@@ -18,7 +18,11 @@ export interface TripActivityReadScope {
 export interface TripActivityScope extends TripActivityReadScope {
   /** Every participation of this user in the Trip. */
   listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
-  /** Upsert only this activity/user pair in the same transaction; going/not_going clears decisionRequired atomically. */
+  /** `going` participations of the activity whose user is a current Trip member (former members keep theirs as a record). */
+  listGoingParticipants: (activityId: ObjectId) => AsyncResult<ActivityParticipation[]>;
+  /** `going` participations of these users in the Trip (batch, avoids one query per user). */
+  listGoingParticipationsByUsers: (userIds: ObjectId[]) => AsyncResult<ActivityParticipation[]>;
+  /** Upsert only this activity/user pair in the same transaction; going/not_going clears decisionRequired atomically and pending persists the given marker. */
   saveParticipation: (participation: ActivityParticipation) => AsyncResult<ActivityParticipation>;
   insert: (activity: Activity) => AsyncResult<void>;
   replace: (activity: Activity) => AsyncResult<void>;

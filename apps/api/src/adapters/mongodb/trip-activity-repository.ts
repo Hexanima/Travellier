@@ -43,6 +43,16 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       return ok(activity === null ? undefined : toActivity(activity));
     },
     listUserParticipations: store.listUserParticipations,
+    listGoingParticipants: async (activityId) => {
+      const going = await store.listGoingOfActivity(activityId);
+      if (!going.ok || going.value.length === 0) return going;
+      // Former members keep their going as a record but are never evaluated or marked.
+      const members = await database.collection<{ userId: MongoObjectId }>("tripMembers")
+        .find({ ...query, userId: { $in: going.value.map((p) => new MongoObjectId(p.userId)) } }, { ...options, projection: { userId: 1 } }).toArray();
+      const current = new Set(members.map((m) => m.userId.toHexString()));
+      return ok(going.value.filter((p) => current.has(p.userId)));
+    },
+    listGoingParticipationsByUsers: store.listGoingByUsers,
     saveParticipation: store.save,
     insert: async (activity) => {
       if (activity.tripId !== tripId) throw new TripNotFoundError();

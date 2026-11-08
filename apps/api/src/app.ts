@@ -49,6 +49,7 @@ import {
   type CreateTripActivityPayload,
   type CreateTripActivityResult,
   type UpdateTripActivityPayload,
+  type UpdateTripActivityResult,
   type TripActivityPayload,
   type ActivityDetailPayload,
   type ActivityEditableFields,
@@ -126,7 +127,7 @@ export interface TripApi extends TripInvitationApi {
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<CreateTripActivityResult>;
   listActivities?: (payload: TripActivityPayload) => AsyncResult<Activity[]>;
   getActivity?: (payload: ActivityDetailPayload) => AsyncResult<Activity>;
-  updateActivity?: (payload: UpdateTripActivityPayload) => AsyncResult<Activity>;
+  updateActivity?: (payload: UpdateTripActivityPayload) => AsyncResult<UpdateTripActivityResult>;
   deleteActivity?: (payload: ActivityDetailPayload) => AsyncResult<void>;
   create?: (payload: CreateTripPayload) => AsyncResult<TripView>;
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
@@ -693,7 +694,8 @@ export const handleApiRequest = async (
         if (Object.keys(parsed.value).length === 0) return invalidRequestResponse();
         if (!trips?.updateActivity) return unavailableResponse();
         const result = await trips.updateActivity({ ...detail, ...parsed.value });
-        return result.ok ? jsonResponse(200, { activity: result.value }) : errorResponse(result.error);
+        // `affected` (other members' agendas) is internal; only the activity is returned.
+        return result.ok ? jsonResponse(200, { activity: result.value.activity }) : errorResponse(result.error);
       }
       if (request.method === "DELETE") {
         if (!trips?.deleteActivity) return unavailableResponse();

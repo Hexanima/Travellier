@@ -53,8 +53,8 @@ describe("activity persistence and transactions", () => {
     expect(stored!.createdAt).toBeInstanceOf(Date);
     await db.collection("activities").updateOne({ _id: stored!._id }, { $set: { createdBy: new ObjectId(), status: "voting" } });
     const result = await api.updateActivity!({ ...context(), activityId: activity.id, title: "Museo", description: "Centro" });
-    expect(result).toMatchObject({ ok: true, value: { title: "Museo", description: "Centro", createdAt: activity.createdAt } });
-    expect(await api.getActivity!({ ...context(), activityId: activity.id })).toEqual(result);
+    expect(result).toMatchObject({ ok: true, value: { activity: { title: "Museo", description: "Centro", createdAt: activity.createdAt } } });
+    expect(await api.getActivity!({ ...context(), activityId: activity.id })).toEqual({ ok: true, value: (result as { value: { activity: Activity } }).value.activity });
     expect(await api.listActivities!(context())).toMatchObject({ ok: true, value: [{ title: "Museo" }] });
     expect(await api.deleteActivity!({ ...context(), activityId: activity.id })).toMatchObject({ ok: true });
     expect(await db.collection("activities").countDocuments({ tripId: trip })).toBe(0);
@@ -209,12 +209,12 @@ describe("activity persistence and transactions", () => {
       expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) }))
         .toMatchObject({ durationMinutes: 90, scheduledAt: occurrence });
       const edited = await api.updateActivity!({ ...context(), activityId: result.value.activity.id, title: "Museo" });
-      expect(edited).toMatchObject({ ok: true, value: { durationMinutes: 90 } });
+      expect(edited).toMatchObject({ ok: true, value: { activity: { durationMinutes: 90 } } });
       const stored = await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) });
       expect(stored!.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
       expect(stored).toMatchObject({ durationMinutes: 90, title: "Museo" });
       expect(await api.updateActivity!({ ...context(), activityId: result.value.activity.id, durationMinutes: null }))
-        .toMatchObject({ ok: true, value: { durationMinutes: null } });
+        .toMatchObject({ ok: true, value: { activity: { durationMinutes: null } } });
       expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) })).toMatchObject({ durationMinutes: null });
     });
 
@@ -350,6 +350,164 @@ describe("activity persistence and transactions", () => {
       const before = await state();
       expect(await run({ confirmedConflicts: "x" })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
       expect(await state()).toEqual(before);
+    });
+  });
+
+  describe("decisionRequired on schedule edits (T53)", () => {
+    const at = (iso: string) => new Date(iso);
+    const editedId = new ObjectId(), planA = new ObjectId();
+    const addMember = async () => {
+      const user = new ObjectId();
+      await db.collection("tripMembers").insertOne({ tripId: trip, userId: user, role: "participant", joinedAt: new Date() });
+      return user;
+    };
+    const seedActivity = (_id: ObjectId, start: string, duration: number | null) => db.collection("activities").insertOne({ _id, tripId: trip,
+      dayId: day, title: "Plan", description: null, scheduledAt: at(start), durationMinutes: duration, mapsUrl: null, createdBy: actor, createdAt: new Date() });
+    const seedPart = (activityId: ObjectId, userId: ObjectId, status = "going") => db.collection("activityParticipations").insertOne({
+      _id: new ObjectId(), tripId: trip, activityId, userId, status, updatedAt: at("2026-01-01T00:00:00Z"), decisionRequired: null });
+    const record = (activityId: ObjectId, userId: ObjectId) => db.collection("activityParticipations").findOne({ tripId: trip, activityId, userId });
+    const edit = (patch: Record<string, unknown>) => api.updateActivity!({ ...context(), activityId: id(editedId), ...patch } as never);
+    const state = () => Promise.all(["activities", "activityParticipations"].map((name) => db.collection(name).find().toArray()));
+    beforeEach(async () => {
+      await seedActivity(editedId, "2026-09-25T10:30:00Z", 60);
+      await seedActivity(planA, "2026-09-25T12:00:00Z", 60);
+    });
+
+    it("persists pending with a decisionRequired marker for the conflicted going and keeps everything else", async () => {
+      const u1 = await addMember(), u2 = await addMember();
+      await seedPart(editedId, actor); await seedPart(planA, actor);
+      await seedPart(editedId, u1); await seedPart(planA, u1);
+      await seedPart(editedId, u2);
+      const planBefore = await record(planA, u1);
+      const before = Date.now();
+      const result = await edit({ scheduledAt: at("2026-09-25T12:30:00Z") });
+      expect(result).toMatchObject({ ok: true, value: { activity: { scheduledAt: at("2026-09-25T12:30:00Z") } } });
+      if (!result.ok) throw result.error;
+      expect(result.value.affected.map((p) => p.userId).sort()).toEqual([id(actor), id(u1)].sort());
+      for (const user of [actor, u1]) {
+        const stored = await record(editedId, user);
+        expect(stored).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict", changedFields: ["scheduledAt"] } });
+        expect(stored!.decisionRequired.changedAt).toBeInstanceOf(Date);
+        expect(stored!.decisionRequired.changedAt.getTime()).toBeGreaterThanOrEqual(before);
+        expect(stored!.updatedAt.getTime()).toBeGreaterThanOrEqual(before);
+      }
+      expect((await record(editedId, actor))!.decisionRequired.changedAt).toEqual((await record(editedId, u1))!.decisionRequired.changedAt);
+      expect(await record(planA, u1)).toEqual(planBefore);
+      expect(await record(editedId, u2)).toMatchObject({ status: "going", decisionRequired: null });
+      expect(await db.collection("activityParticipations").countDocuments({ status: "not_going" })).toBe(0);
+    });
+
+    it("marks durationMinutes only when only the duration changes", async () => {
+      await seedPart(editedId, actor); await seedPart(planA, actor);
+      expect(await edit({ durationMinutes: 150 })).toMatchObject({ ok: true });
+      expect(await record(editedId, actor)).toMatchObject({ status: "pending", decisionRequired: { changedFields: ["durationMinutes"] } });
+    });
+
+    it("does not change participations when only content or location changes or the schedule is identical", async () => {
+      await seedPart(editedId, actor); await seedPart(planA, actor);
+      const before = (await state())[1];
+      expect(await edit({ title: "Otro", description: "d", mapsUrl: "https://maps.app.goo.gl/x" })).toMatchObject({ ok: true });
+      expect(await edit({ scheduledAt: at("2026-09-25T10:30:00Z"), durationMinutes: 60 })).toMatchObject({ ok: true });
+      expect((await state())[1]).toEqual(before);
+    });
+
+    it("keeps a previous marker untouched on a second edit and never touches former members", async () => {
+      const u1 = await addMember(), gone = new ObjectId();
+      const marker = { reason: "schedule_conflict", changedFields: ["durationMinutes"], changedAt: at("2026-11-01T00:00:00Z") };
+      await seedPart(planA, u1);
+      await db.collection("activityParticipations").insertOne({ _id: new ObjectId(), tripId: trip, activityId: editedId, userId: u1, status: "pending",
+        updatedAt: at("2026-11-01T00:00:00Z"), decisionRequired: marker });
+      await seedPart(editedId, gone);
+      await seedPart(planA, gone);
+      const before = (await state())[1];
+      expect(await edit({ scheduledAt: at("2026-09-25T12:30:00Z") })).toMatchObject({ ok: true, value: { affected: [] } });
+      expect((await state())[1]).toEqual(before);
+    });
+
+    it("removes the marker only with an explicit going/not_going answer", async () => {
+      await seedPart(editedId, actor); await seedPart(planA, actor);
+      await edit({ scheduledAt: at("2026-09-25T12:30:00Z") });
+      expect(await api.setActivityParticipation!({ ...context(), activityId: id(editedId), status: "not_going" })).toMatchObject({ ok: true });
+      expect(await record(editedId, actor)).toMatchObject({ status: "not_going", decisionRequired: null });
+    });
+
+    it("rolls back the activity and every participation when a later write fails", async () => {
+      const u1 = await addMember();
+      for (const user of [actor, u1]) { await seedPart(editedId, user); await seedPart(planA, user); }
+      const before = await state();
+      const collection = db.collection("activityParticipations");
+      const original = collection.findOneAndUpdate.bind(collection);
+      let calls = 0;
+      vi.spyOn(collection, "findOneAndUpdate").mockImplementation(((...args: unknown[]) => {
+        if (++calls === 2) return Promise.reject(new Error("forced failure"));
+        return (original as (...a: unknown[]) => unknown)(...args);
+      }) as never);
+      const open = db.collection.bind(db);
+      vi.spyOn(db, "collection").mockImplementation(((name: string, options?: never) => name === "activityParticipations" ? collection : open(name, options)) as never);
+      const result = await edit({ scheduledAt: at("2026-09-25T12:30:00Z") });
+      expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(result).not.toHaveProperty("value");
+      expect(calls).toBe(2);
+      vi.restoreAllMocks();
+      expect(await state()).toEqual(before);
+    });
+
+    it("serializes an edit with a concurrent going of the same user so both overlapping plans are never going", async () => {
+      await seedPart(planA, actor); await seedPart(editedId, actor, "pending");
+      const [edited, responded] = await Promise.all([edit({ scheduledAt: at("2026-09-25T12:30:00Z") }),
+        api.setActivityParticipation!({ ...context(), activityId: id(editedId), status: "going" })]);
+      expect(edited.ok && responded.ok).toBe(true);
+      expect(await record(planA, actor)).toMatchObject({ status: "going" });
+      expect((await record(editedId, actor))!.status).toBe("pending");
+    });
+
+    describe("edit and expulsion of a participant", () => {
+      const conflicting = { scheduledAt: at("2026-09-25T12:30:00Z") };
+      let admin: ObjectId, member: ObjectId, stays: ObjectId;
+      const expel = () => api.expelMember!({ tripId: id(trip), actorUserId: id(admin), targetUserId: id(member) });
+      const marker = { reason: "schedule_conflict", changedFields: ["scheduledAt"] };
+      beforeEach(async () => {
+        admin = await addMember(); member = await addMember(); stays = await addMember();
+        await db.collection("tripMembers").updateOne({ tripId: trip, userId: admin }, { $set: { role: "admin" } });
+        for (const user of [member, stays]) { await seedPart(editedId, user); await seedPart(planA, user); }
+      });
+      const expectCommon = async () => {
+        expect(await db.collection("tripMembers").countDocuments({ tripId: trip, userId: member })).toBe(0);
+        expect(await record(editedId, stays)).toMatchObject({ status: "pending", decisionRequired: marker });
+        expect(await record(planA, member)).toMatchObject({ status: "going", decisionRequired: null });
+      };
+      const expectExpelledFirst = async () => {
+        await expectCommon();
+        // The edit never writes a marker on someone who is no longer a member; the started-activity record is kept as is.
+        expect(await record(editedId, member)).toMatchObject({ status: "going", decisionRequired: null });
+      };
+      const expectEditedFirst = async () => {
+        await expectCommon();
+        // The edit committed while the user was still a member; the record is kept (activity already started) with its marker.
+        expect(await record(editedId, member)).toMatchObject({ status: "pending", decisionRequired: marker });
+      };
+
+      it("expulsion first: the edit does not mark the former member", async () => {
+        expect(await expel()).toMatchObject({ ok: true });
+        expect(await edit(conflicting)).toMatchObject({ ok: true, value: { affected: [{ userId: id(stays) }] } });
+        await expectExpelledFirst();
+      });
+
+      it("edit first: the member is marked and the expulsion then keeps the started-activity record", async () => {
+        expect(await edit(conflicting)).toMatchObject({ ok: true });
+        expect(await expel()).toMatchObject({ ok: true });
+        await expectEditedFirst();
+      });
+
+      it("concurrent edit and expulsion end in exactly one of the two serialized orders", async () => {
+        const [edited, expelled] = await Promise.all([edit(conflicting), expel()]);
+        expect(edited.ok && expelled.ok).toBe(true);
+        if (!edited.ok) throw edited.error;
+        const marked = (await record(editedId, member))!.status === "pending";
+        // The affected set tells which order happened and must agree with the stored record.
+        expect(edited.value.affected.map((p) => p.userId).sort()).toEqual((marked ? [member, stays] : [stays]).map(id).sort());
+        if (marked) await expectEditedFirst(); else await expectExpelledFirst();
+      });
     });
   });
 });

@@ -27,6 +27,8 @@ describe("Trip activity use cases", () => {
       find: async (activityId) => domain.ok(records.find((r) => r.id === activityId)),
       listUserParticipations: async (userId) => domain.ok(participations.filter((p) => p.userId === userId)),
       saveParticipation: async (p) => { participations.push(p); return domain.ok(p); },
+      listGoingParticipants: async () => domain.ok([]),
+      listGoingParticipationsByUsers: async () => domain.ok([]),
       insert: async (activity) => { records.push(activity); return domain.ok(undefined); },
       replace: async (activity) => { records = records.map((r) => r.id === activity.id ? activity : r); return domain.ok(undefined); },
       remove: async (activityId) => { records = records.filter((r) => r.id !== activityId); return domain.ok(undefined); },
@@ -47,7 +49,7 @@ describe("Trip activity use cases", () => {
     expect(await create()).toMatchObject(domain.ok({ outcome: "created", activity }));
     seed();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
-      .toEqual(domain.ok({ ...records[0], title: "Museo" }));
+      .toEqual(domain.ok({ activity: { ...records[0], title: "Museo" }, affected: [] }));
     expect(records[0]).toMatchObject({ createdBy: other, createdAt, scheduledAt: fields.scheduledAt });
   });
 
@@ -55,7 +57,7 @@ describe("Trip activity use cases", () => {
     seed();
     const result = await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).not.toHaveProperty("status");
+    if (result.ok) expect(result.value.activity).not.toHaveProperty("status");
   });
 
   it.each(["createTripActivity", "listTripActivities", "getTripActivity", "updateTripActivity", "deleteTripActivity"] as const)(
@@ -91,7 +93,7 @@ describe("Trip activity use cases", () => {
   it("clears optional fields without changing identity or author", async () => {
     seed(); expect(domain.updateTripActivity).toBeDefined();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, description: null, mapsUrl: null }))
-      .toEqual(domain.ok({ ...records[0], description: null, mapsUrl: null }));
+      .toEqual(domain.ok({ activity: { ...records[0], description: null, mapsUrl: null }, affected: [] }));
   });
 
   it.each([
@@ -130,7 +132,7 @@ describe("Trip activity use cases", () => {
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, dayId: next.id }))
       .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, dayId: next.id, scheduledAt: next.startsAt }))
-      .toMatchObject({ ok: true, value: { dayId: next.id, scheduledAt: next.startsAt } });
+      .toMatchObject({ ok: true, value: { activity: { dayId: next.id, scheduledAt: next.startsAt } } });
   });
 
   it("creates with an optional duration and stores null when absent", async () => {
@@ -144,17 +146,17 @@ describe("Trip activity use cases", () => {
   it("edits only the duration and clears it with null", async () => {
     seed();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, durationMinutes: 45 }))
-      .toEqual(domain.ok({ ...records[0], durationMinutes: 45 }));
+      .toEqual(domain.ok({ activity: { ...records[0], durationMinutes: 45 }, affected: [] }));
     expect(records[0]).toMatchObject({ durationMinutes: 45 });
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, durationMinutes: null }))
-      .toMatchObject({ ok: true, value: { durationMinutes: null } });
+      .toMatchObject({ ok: true, value: { activity: { durationMinutes: null } } });
     expect(records[0]).toMatchObject({ durationMinutes: null });
   });
 
   it("preserves start milliseconds and duration when editing only content", async () => {
     seed(); records[0] = { ...records[0]!, durationMinutes: 30 };
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
-      .toMatchObject({ ok: true, value: { title: "Museo", durationMinutes: 30, scheduledAt: new Date("2026-09-25T12:00:00.456Z") } });
+      .toMatchObject({ ok: true, value: { activity: { title: "Museo", durationMinutes: 30, scheduledAt: new Date("2026-09-25T12:00:00.456Z") } } });
     expect(records[0]!.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
   });
 
@@ -215,6 +217,7 @@ describe("createTripActivity author participation (T52)", () => {
         parts = [...parts.filter((r) => !(r.activityId === p.activityId && r.userId === p.userId)), p];
         return domain.ok(p);
       },
+      listGoingParticipants: async () => domain.ok([]), listGoingParticipationsByUsers: async () => domain.ok([]),
       insert: async (a) => {
         if (failOn === "insert") return domain.err(new domain.UnknownError("insert"));
         log.push(`insert:${a.id}`); recordsLocal.push(a); return domain.ok(undefined);
@@ -293,5 +296,144 @@ describe("createTripActivity author participation (T52)", () => {
   it("ignores not_going and pending plans", async () => {
     parts = [part(first, actor, "not_going"), part(second, actor, "pending")];
     expect(await run()).toMatchObject({ ok: true, value: { outcome: "created" } });
+  });
+});
+
+describe("updateTripActivity decisionRequired (T53)", () => {
+  const edited = id(40), planA = id(41), planB = id(42), u1 = id(50), u2 = id(51), u3 = id(52);
+  const wide = { ...day, startsAt: new Date("2026-09-25T08:00:00Z"), endsAt: new Date("2026-09-25T20:00:00Z") };
+  const now = new Date("2026-11-08T15:00:00.321Z");
+  let partSeq = 0;
+  let acts: Activity[], parts: ActivityParticipation[], members: Set<ObjectId>, writes: string[], reads: string[], failAt: number | undefined, replaced: Activity[];
+  const act = (n: ObjectId, at: string, durationMinutes: number | null): Activity => ({ id: n, tripId, dayId, title: "Plan", description: null,
+    scheduledAt: new Date(at), durationMinutes, mapsUrl: null, createdBy: other, createdAt });
+  const part = (activityId: ObjectId, userId: ObjectId, status: ActivityParticipation["status"], decisionRequired?: ActivityParticipation["decisionRequired"]): ActivityParticipation =>
+    ({ id: id(300 + partSeq++), tripId, activityId, userId, status, updatedAt: createdAt, ...(decisionRequired ? { decisionRequired } : {}) });
+  const port = (): TripActivityPort => {
+    const scope: TripActivityScope = {
+      findMemberRole: async () => domain.ok("participant"), findTrip: async () => domain.ok({ id: tripId }),
+      listDays: async () => domain.ok([wide]), list: async () => domain.ok(acts),
+      find: async (a) => domain.ok(acts.find((r) => r.id === a)),
+      listUserParticipations: async (u) => { reads.push("user"); return domain.ok(parts.filter((p) => p.userId === u)); },
+      listGoingParticipants: async (a) => { reads.push("going"); return domain.ok(parts.filter((p) => p.activityId === a && p.status === "going" && members.has(p.userId))); },
+      listGoingParticipationsByUsers: async (users) => { reads.push("batch"); return domain.ok(parts.filter((p) => p.status === "going" && users.includes(p.userId))); },
+      saveParticipation: async (p) => {
+        if (failAt !== undefined && writes.length >= failAt) return domain.err(new domain.UnknownError("save"));
+        writes.push(`${p.activityId}:${p.userId}`);
+        parts = [...parts.filter((r) => !(r.activityId === p.activityId && r.userId === p.userId)), p];
+        return domain.ok(p);
+      },
+      insert: async () => domain.ok(undefined),
+      replace: async (a) => { replaced.push(a); acts = acts.map((r) => r.id === a.id ? a : r); return domain.ok(undefined); },
+      remove: async () => domain.ok(undefined),
+    };
+    return { withReadSnapshot: async (_, w) => w(scope), withTransaction: async (_, w) => {
+      const saved = { a: [...acts], p: [...parts] };
+      const result = await w(scope);
+      if (!result.ok) { acts = saved.a; parts = saved.p; }
+      return result;
+    } };
+  };
+  const edit = (patch: Record<string, unknown>) => domain.updateTripActivity.execute({ activities: port(), now: () => now },
+    { ...context, activityId: edited, ...patch } as never);
+  const at = (hhmm: string) => new Date(`2026-09-25T${hhmm}:00Z`);
+  beforeEach(() => {
+    // edited: 10:00-11:00. planA 12:00-13:00 (user's other plan), planB 14:00 without duration.
+    acts = [act(edited, "2026-09-25T10:00:00Z", 60), act(planA, "2026-09-25T12:00:00Z", 60), act(planB, "2026-09-25T14:00:00Z", null)];
+    members = new Set([actor, u1, u2, u3]); writes = []; reads = []; failAt = undefined; replaced = [];
+    parts = [part(edited, u1, "going"), part(planA, u1, "going"), part(edited, u2, "going")];
+  });
+  const stored = (a: ObjectId, u: ObjectId) => parts.find((p) => p.activityId === a && p.userId === u);
+
+  it("moves a conflicted going to pending with scheduledAt marker and one UTC instant", async () => {
+    const result = await edit({ scheduledAt: at("12:30") });
+    expect(stored(edited, u1)).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: now } });
+    expect(result).toMatchObject({ ok: true, value: { affected: [{ userId: u1, status: "pending" }] } });
+  });
+  it("marks only durationMinutes when only the duration changes", async () => {
+    await edit({ durationMinutes: 150 });
+    expect(stored(edited, u1)!.decisionRequired).toMatchObject({ changedFields: ["durationMinutes"] });
+  });
+  it("marks both fields in canonical order", async () => {
+    await edit({ durationMinutes: 150, scheduledAt: at("11:00") });
+    expect(stored(edited, u1)!.decisionRequired).toMatchObject({ changedFields: ["scheduledAt", "durationMinutes"] });
+  });
+  it("does not write compatible going participants", async () => {
+    const result = await edit({ scheduledAt: at("09:00") });
+    expect(writes).toEqual([]);
+    expect(stored(edited, u1)).toMatchObject({ status: "going", updatedAt: createdAt });
+    expect(result).toMatchObject({ ok: true, value: { affected: [] } });
+  });
+  it("marks the editor/creator when going with a conflict, without confirmation", async () => {
+    parts.push(part(edited, actor, "going"), part(planA, actor, "going"));
+    const result = await edit({ scheduledAt: at("12:30") });
+    expect(result).toMatchObject({ ok: true, value: { activity: { id: edited } } });
+    expect(stored(edited, actor)).toMatchObject({ status: "pending", decisionRequired: { changedFields: ["scheduledAt"] } });
+  });
+  it("writes only the (edited, user) pair and never other plans", async () => {
+    const before = structuredClone(stored(planA, u1));
+    await edit({ scheduledAt: at("12:30") });
+    expect(writes).toEqual([`${edited}:${u1}`]);
+    expect(stored(planA, u1)).toEqual(before);
+  });
+  it("leaves previous markers, not_going and users without a record untouched", async () => {
+    const prev = { reason: "schedule_conflict" as const, changedFields: ["durationMinutes" as const], changedAt: new Date("2026-11-01T00:00:00Z") };
+    parts = [part(edited, u1, "pending", prev), part(planA, u1, "going"), part(edited, u2, "not_going"), part(planA, u2, "going"), part(planA, u3, "going")];
+    await edit({ scheduledAt: at("12:30") });
+    expect(writes).toEqual([]);
+    expect(stored(edited, u1)!.decisionRequired).toEqual(prev);
+    expect(stored(edited, u2)!.status).toBe("not_going");
+    expect(stored(edited, u3)).toBeUndefined();
+  });
+  it.each([{ title: "Nuevo" }, { description: "x" }, { mapsUrl: "https://maps.app.goo.gl/x" }, { dayId },
+    { scheduledAt: at("10:00") }, { durationMinutes: 60 }, { durationMinutes: 60, scheduledAt: at("10:00") }])(
+    "does not read or write participations for %j", async (patch) => {
+      const result = await edit(patch);
+      expect(result).toMatchObject({ ok: true, value: { affected: [] } });
+      expect(reads).toEqual([]); expect(writes).toEqual([]);
+    });
+  it("treats an undefined stored duration as null for comparison", async () => {
+    acts[0] = { ...acts[0]!, durationMinutes: undefined as never };
+    await edit({ durationMinutes: null });
+    expect(reads).toEqual([]);
+  });
+  it("does not evaluate or mark former members with going", async () => {
+    members.delete(u1);
+    await edit({ scheduledAt: at("12:30") });
+    expect(stored(edited, u1)).toMatchObject({ status: "going" });
+    expect(writes).toEqual([]);
+  });
+  it("treats contiguous activities as compatible", async () => {
+    await edit({ scheduledAt: at("11:00") });
+    expect(writes).toEqual([]);
+  });
+  it("without duration only an identical start conflicts", async () => {
+    acts[0] = { ...acts[0]!, durationMinutes: null }; acts[1] = { ...acts[1]!, durationMinutes: null };
+    await edit({ scheduledAt: at("12:01") });
+    expect(writes).toEqual([]);
+    await edit({ scheduledAt: at("12:00") });
+    expect(stored(edited, u1)).toMatchObject({ status: "pending", decisionRequired: { changedFields: ["scheduledAt"] } });
+  });
+  it("fails on a later write without reporting affected and rolls back", async () => {
+    parts = [part(edited, u1, "going"), part(planA, u1, "going"), part(edited, u3, "going"), part(planA, u3, "going")];
+    const before = structuredClone(parts);
+    failAt = 1;
+    const result = await edit({ scheduledAt: at("12:30") });
+    expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+    expect(result).not.toHaveProperty("value");
+    expect(parts).toEqual(before);
+    expect(acts[0]!.scheduledAt).toEqual(at("10:00"));
+  });
+  it("does not write anything when validation fails", async () => {
+    const result = await edit({ durationMinutes: 800 });
+    expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+    expect(replaced).toEqual([]); expect(writes).toEqual([]); expect(reads).toEqual([]);
+  });
+  it("lists exactly the marked records in affected", async () => {
+    parts = [part(edited, u1, "going"), part(planA, u1, "going"), part(edited, u2, "going"), part(edited, u3, "going"), part(planB, u3, "going")];
+    const result = await edit({ scheduledAt: at("12:30") });
+    if (!result.ok) throw result.error;
+    expect(result.value.affected.map((p) => p.userId)).toEqual([u1]);
+    expect(result.value.affected[0]).toEqual(stored(edited, u1));
   });
 });
