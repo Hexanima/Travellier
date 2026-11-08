@@ -4,6 +4,13 @@ import type { ObjectId } from "../value-objects/object-id.js";
 
 export type ActivityParticipationStatus = "going" | "not_going" | "pending";
 
+/** Persisted personal marker: the user must decide again. Written by the system (schedule edits), cleared only by an explicit going/not_going. */
+export interface ParticipationDecisionRequired {
+  reason: "schedule_conflict";
+  changedFields: ("scheduledAt" | "durationMinutes")[];
+  changedAt: Date;
+}
+
 export interface ActivityParticipation {
   id: ObjectId;
   tripId: ObjectId;
@@ -11,6 +18,8 @@ export interface ActivityParticipation {
   userId: ObjectId;
   status: ActivityParticipationStatus;
   updatedAt: Date;
+  /** Absent or null when no decision is required. */
+  decisionRequired?: ParticipationDecisionRequired | null;
 }
 
 export type CreateActivityParticipationInput = Omit<ActivityParticipation, "status"> & { status: unknown };
