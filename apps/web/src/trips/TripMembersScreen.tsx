@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
+import { displayName } from "../profile/display-name.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 
@@ -124,7 +125,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
       const result = await members.expel(tripId, target.userId);
       if (result.ok) {
         setMemberList((current) => current && { ...current, members: current.members.filter((member) => member.userId !== target.userId) });
-        setMessage({ text: `${target.name} fue expulsado del viaje.`, error: false });
+        setMessage({ text: `${displayName(target.name)} fue expulsado del viaje.`, error: false });
         setTarget(undefined);
       } else if (result.error.kind === "forbidden") {
         setTarget(undefined);
@@ -213,7 +214,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
               <List aria-label="Integrantes del viaje">
                 {memberList.members.map((member) => (
                   <ListItem key={member.id} className="trip-member-item">
-                    <span>{member.name}{member.userId === memberList.currentUserId ? " (vos)" : ""}</span>
+                    <span>{displayName(member.name)}{member.userId === memberList.currentUserId ? " (vos)" : ""}</span>
                     <span className="trip-member-role">{member.role === "admin" ? "Admin" : "Participante"}</span>
                   </ListItem>
                 ))}
@@ -225,8 +226,8 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
                 <p>Solo los administradores pueden expulsar participantes.</p>
                 {memberList.members.filter((member) => member.role === "participant").map((member) => (
                   <div className="trip-member-admin-row" key={member.id}>
-                    <span>{member.name}</span>
-                    <Button error disabled={deleting} data-member-action="expel" aria-label={`Expulsar a ${member.name}`} onClick={() => { setTarget(member); setExpelError(undefined); }}>Expulsar</Button>
+                    <span>{displayName(member.name)}</span>
+                    <Button error disabled={deleting} data-member-action="expel" aria-label={`Expulsar a ${displayName(member.name)}`} onClick={() => { setTarget(member); setExpelError(undefined); }}>Expulsar</Button>
                   </div>
                 ))}
                 <h3>Eliminar viaje</h3>
@@ -237,7 +238,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
           </>
         ) : null}
         <Modal isOpen={target !== undefined} title="Expulsar participante" onClose={() => setTarget(undefined)} loading={expelling} error={expelError}>
-          <p>¿Querés expulsar a {target?.name} de este viaje?</p>
+          <p>¿Querés expulsar a {target ? displayName(target.name) : ""} de este viaje?</p>
           <div className="trip-members-actions">
             <Button onClick={() => setTarget(undefined)}>Cancelar</Button>
             <Button error onClick={() => void confirmExpel()} loading={expelling} loadingLabel="Expulsando…">Confirmar expulsión</Button>
