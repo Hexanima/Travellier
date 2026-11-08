@@ -7,7 +7,15 @@ export interface ActivitySchedule {
   tripId: ObjectId;
   dayId: ObjectId;
   scheduledAt: Date;
+  /** Optional positive whole minutes; the end is derived, never stored. */
+  durationMinutes?: number | null;
 }
+
+const MINUTE_MS = 60_000;
+
+/** Derived end instant (start + duration), or null when the duration is absent. */
+export const activityEndsAt = (schedule: Pick<ActivitySchedule, "scheduledAt" | "durationMinutes">): Date | null =>
+  schedule.durationMinutes == null ? null : new Date(schedule.scheduledAt.getTime() + schedule.durationMinutes * MINUTE_MS);
 
 const invalid = (field: string, code: string, message: string) =>
   err(new ValidationError([{ field, code, message }]));
@@ -40,6 +48,23 @@ export const validateActivitySchedule = (
     next.startsAt instanceof Date && next.startsAt.getTime() === end);
   if (timestamp < start || timestamp > end || (timestamp === end && nextActivity)) {
     return invalid("scheduledAt", "outside_window", "Activity date and time must belong to the selected activity slice.");
+  }
+  const duration = input.durationMinutes;
+  if (duration == null) return ok(undefined);
+  if (typeof duration !== "number" || !Number.isInteger(duration) || duration <= 0) {
+    return invalid("durationMinutes", "invalid", "Activity duration must be a positive whole number of minutes.");
+  }
+  // The destination window continues through contiguous activity slices of the same Trip and destination.
+  let limit = end;
+  for (;;) {
+    const following = days.find((value) => value.tripId === input.tripId && value.destinationId === day.destinationId &&
+      value.type === "activity" && value.startsAt instanceof Date && value.startsAt.getTime() === limit &&
+      value.endsAt instanceof Date && value.endsAt.getTime() > limit);
+    if (!following) break;
+    limit = following.endsAt!.getTime();
+  }
+  if (timestamp + duration * MINUTE_MS > limit) {
+    return invalid("durationMinutes", "outside_window", "Activity end must not exceed the destination departure.");
   }
   return ok(undefined);
 };

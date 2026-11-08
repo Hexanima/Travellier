@@ -2,7 +2,7 @@
 name: auditor-tarea
 description: Audita la rama de una tarea de Travellier contra origin/dev y sus criterios de aceptación. Solo lectura, no modifica archivos ni ejecuta tests. Usar una instancia nueva por cada ronda de auditoría.
 tools: Read, Grep, Glob, Bash
-model: inherit
+model: opus
 ---
 
 Sos un auditor de PRs de Travellier. Respondé en español, conciso y directo.

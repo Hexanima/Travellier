@@ -141,6 +141,29 @@ describe("post HTTP API", () => {
     expect(await f.snapshot()).toEqual(before);
   });
 
+  it("creates a spontaneous activity with duration preserving start, duration and milliseconds", async () => {
+    const response = await f.request("POST", f.path(), { ...input(),
+      newActivity: { title: "Cena", scheduledAt: "2026-09-25T09:00:00.456-03:00", durationMinutes: 90 } });
+    expect(response.statusCode, response.body).toBe(201);
+    const { post, activity } = JSON.parse(response.body);
+    expect(activity).toMatchObject({ scheduledAt: "2026-09-25T12:00:00.456Z", durationMinutes: 90 });
+    expect(post.activityId).toBe(activity.id);
+    expect(await f.db.collection("activities").findOne({ _id: new ObjectId(activity.id) }))
+      .toMatchObject({ scheduledAt: new Date("2026-09-25T12:00:00.456Z"), durationMinutes: 90 });
+    const plain = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    expect(JSON.parse(plain.body).activity).toMatchObject({ durationMinutes: null });
+  });
+
+  it.each(["90", true, {}, 0, -1, 2.5, 400])("rejects spontaneous duration %s without creating post or activity", async (durationMinutes) => {
+    const before = await f.snapshot();
+    const response = await f.request("POST", f.path(), { ...input(),
+      newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString(), durationMinutes } });
+    expect(response.statusCode).toBe(422);
+    expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "durationMinutes" }] } });
+    expect(await f.snapshot()).toEqual(before);
+    expect(await f.db.collection("activities").countDocuments()).toBe(0);
+  });
+
   it("reflects transport and parent links and preserves post content when its activity is deleted", async () => {
     const transport = await f.configureTransports(), parent = await create();
     const response = await f.request("POST", f.path(), { ...input(), transportId: transport.id, parentPostId: parent.id,

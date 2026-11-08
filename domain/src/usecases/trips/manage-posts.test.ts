@@ -158,6 +158,28 @@ describe("Trip post use cases", () => {
     }
   });
 
+  it("creates a spontaneous activity with an optional duration and keeps millisecond precision", async () => {
+    const result = await create({ newActivity: { ...newActivity, durationMinutes: 90 } });
+    expect(result).toMatchObject({ ok: true, value: { activity: { scheduledAt: new Date("2026-09-25T12:00:00.456Z"),
+      durationMinutes: 90 } } });
+    expect(activities[0]).toMatchObject({ scheduledAt: new Date("2026-09-25T12:00:00.456Z"), durationMinutes: 90 });
+    expect(domain.activityEndsAt(activities[0]!)).toEqual(new Date("2026-09-25T13:30:00.456Z"));
+  });
+
+  it("stores a spontaneous activity without duration as null", async () => {
+    expect(await create({ newActivity })).toMatchObject({ ok: true, value: { activity: { durationMinutes: null } } });
+  });
+
+  it.each([0, -5, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 400])(
+    "rejects a spontaneous activity duration %s without inserting the activity or post", async (durationMinutes) => {
+      let writes = 0;
+      scope.insert = async () => { writes++; return domain.ok(undefined); };
+      scope.insertActivity = async () => { writes++; return domain.ok(undefined); };
+      expect(await create({ newActivity: { ...newActivity, durationMinutes } }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "durationMinutes" }] } });
+      expect(writes).toBe(0);
+    });
+
   it.each(["insert", "insertActivity"] as const)("propagates %s failure and rolls back joint creation", async (method) => {
     scope[method] = async () => domain.err(new domain.UnknownError("failed"));
     expect(await create({ newActivity })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });

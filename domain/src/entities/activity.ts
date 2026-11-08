@@ -5,9 +5,10 @@ import { validateActivitySchedule, type ActivitySchedule } from "./activity-sche
 import type { ItineraryDay } from "./itinerary-day.js";
 import type { Trip } from "./trip.js";
 
-/** Planned and spontaneous activities share the same mandatory occurrence time. */
+/** Planned and spontaneous activities share the same mandatory occurrence time and optional duration. */
 export interface Activity extends ActivitySchedule {
   id: ObjectId;
+  durationMinutes: number | null;
   title: string;
   description: string | null;
   mapsUrl: string | null;
@@ -15,7 +16,8 @@ export interface Activity extends ActivitySchedule {
   createdAt: Date;
 }
 
-export type CreateActivityInput = Omit<Activity, "description" | "mapsUrl"> & {
+export type CreateActivityInput = Omit<Activity, "description" | "mapsUrl" | "durationMinutes"> & {
+  durationMinutes?: number | null;
   description?: string | null;
   mapsUrl?: string | null;
 };
@@ -56,6 +58,7 @@ export const createActivity = (
     title: input.title,
     description: input.description ?? null,
     scheduledAt: new Date(input.scheduledAt.getTime()),
+    durationMinutes: input.durationMinutes ?? null,
     mapsUrl: input.mapsUrl ?? null,
     createdBy: input.createdBy,
     createdAt: new Date(input.createdAt.getTime()),

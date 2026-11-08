@@ -470,6 +470,11 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
       fields[field] = payload[field] as string | null;
     }
   }
+  if (Object.hasOwn(payload, "durationMinutes")) {
+    // Positivity and the destination window are domain rules; only the JSON type is checked here.
+    if (typeof payload.durationMinutes !== "number" && payload.durationMinutes !== null) return invalid("durationMinutes");
+    fields.durationMinutes = payload.durationMinutes;
+  }
   return ok(fields);
 };
 
@@ -498,7 +503,7 @@ const postPayload = (payload: Record<string, unknown>, creating: boolean):
     const parsed = activityPayload({ ...value, dayId: fields.dayId }, true);
     if (!parsed.ok) return parsed;
     fields.newActivity = { title: parsed.value.title!, scheduledAt: parsed.value.scheduledAt!,
-      description: parsed.value.description, mapsUrl: parsed.value.mapsUrl };
+      description: parsed.value.description, mapsUrl: parsed.value.mapsUrl, durationMinutes: parsed.value.durationMinutes };
   }
   return ok(fields);
 };

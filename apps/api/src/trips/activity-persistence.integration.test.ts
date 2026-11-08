@@ -197,4 +197,46 @@ describe("activity persistence and transactions", () => {
       expect(activity.scheduledAt.getTime()).toBeLessThanOrEqual(persistedDay!.endsAt.getTime());
     }
   });
+
+  describe("duration", () => {
+    it("stores and reads durationMinutes and keeps millisecond start when editing content", async () => {
+      const result = await api.createActivity!({ ...input(), durationMinutes: 90 });
+      expect(result).toMatchObject({ ok: true, value: { durationMinutes: 90, scheduledAt: occurrence } });
+      if (!result.ok) throw result.error;
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) }))
+        .toMatchObject({ durationMinutes: 90, scheduledAt: occurrence });
+      const edited = await api.updateActivity!({ ...context(), activityId: result.value.id, title: "Museo" });
+      expect(edited).toMatchObject({ ok: true, value: { durationMinutes: 90 } });
+      const stored = await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) });
+      expect(stored!.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
+      expect(stored).toMatchObject({ durationMinutes: 90, title: "Museo" });
+      expect(await api.updateActivity!({ ...context(), activityId: result.value.id, durationMinutes: null }))
+        .toMatchObject({ ok: true, value: { durationMinutes: null } });
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) })).toMatchObject({ durationMinutes: null });
+    });
+
+    it("stores null when created without duration", async () => {
+      const activity = await create();
+      expect(activity.durationMinutes).toBeNull();
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(activity.id) })).toMatchObject({ durationMinutes: null });
+    });
+
+    it("reads a legacy document without the field as null", async () => {
+      const legacy = new ObjectId();
+      await db.collection("activities").insertOne({ _id: legacy, tripId: trip, dayId: day, title: "Legado", description: null,
+        scheduledAt: occurrence, mapsUrl: null, createdBy: actor, createdAt: new Date("2026-09-01T00:00:00Z") });
+      expect(await api.getActivity!({ ...context(), activityId: id(legacy) })).toMatchObject({ ok: true, value: { durationMinutes: null } });
+      expect(await api.listActivities!(context())).toMatchObject({ ok: true, value: [{ durationMinutes: null }] });
+    });
+
+    it("writes nothing when the end exceeds the destination window", async () => {
+      expect(await api.createActivity!({ ...input(), durationMinutes: 400 }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+      expect(await db.collection("activities").countDocuments()).toBe(0);
+      const activity = await create(), before = await db.collection("activities").find().toArray();
+      expect(await api.updateActivity!({ ...context(), activityId: activity.id, durationMinutes: 400 }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+      expect(await db.collection("activities").find().toArray()).toEqual(before);
+    });
+  });
 });

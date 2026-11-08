@@ -104,3 +104,72 @@ describe("validateActivitySchedule", () => {
     expect(domain.validateActivitySchedule(schedule(), [])).toMatchObject(issue("dayId", "not_found"));
   });
 });
+describe("activity duration", () => {
+  const withDuration = (durationMinutes: unknown, at = new Date("2026-09-25T12:00:00.456Z"), selected = dayId) =>
+    ({ tripId, dayId: selected, scheduledAt: at, durationMinutes }) as never;
+
+  it.each([undefined, null])("validates only the start without duration: %s", (durationMinutes) => {
+    const input = withDuration(durationMinutes, day.endsAt!);
+    expect(domain.validateActivitySchedule(input, [day])).toEqual({ ok: true, value: undefined });
+    expect(domain.activityEndsAt(input)).toBeNull();
+  });
+
+  it.each([0, -1, -30, 1.5, 0.1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, "30", {}, true])(
+    "rejects a nonpositive or noninteger duration: %s", (durationMinutes) => {
+      expect(domain.validateActivitySchedule(withDuration(durationMinutes), [day, next]))
+        .toMatchObject(issue("durationMinutes", "invalid"));
+    });
+
+  it("derives the end from start and duration preserving milliseconds", () => {
+    expect(domain.activityEndsAt(withDuration(90))).toEqual(new Date("2026-09-25T13:30:00.456Z"));
+  });
+
+  it("does not mutate the start when deriving the end", () => {
+    const input = withDuration(90) as { scheduledAt: Date };
+    domain.activityEndsAt(input as never)!.setTime(0);
+    expect(input.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
+  });
+
+  it("accepts an interval crossing midnight over contiguous slices of the same destination", () => {
+    const input = withDuration(180, new Date("2026-09-25T22:30:00.456Z"));
+    expect(domain.validateActivitySchedule(input, [day, next])).toEqual({ ok: true, value: undefined });
+    expect(domain.activityEndsAt(input)).toEqual(new Date("2026-09-26T01:30:00.456Z"));
+  });
+
+  it("accepts an end exactly at the final departure", () => {
+    const at = new Date(next.endsAt!.getTime() - 60 * 60_000);
+    expect(domain.validateActivitySchedule(withDuration(60, at, next.id), [day, next])).toEqual({ ok: true, value: undefined });
+    const fromFirst = new Date(next.endsAt!.getTime() - 20 * 60 * 60_000);
+    expect(domain.validateActivitySchedule(withDuration(20 * 60, fromFirst), [day, next])).toEqual({ ok: true, value: undefined });
+  });
+
+  it.each([1, 60_000])("rejects an end exceeding the final departure by %s ms", (excess) => {
+    const at = new Date(next.endsAt!.getTime() - 60 * 60_000 + excess);
+    expect(domain.validateActivitySchedule(withDuration(60, at, next.id), [day, next]))
+      .toMatchObject(issue("durationMinutes", "outside_window"));
+  });
+
+  it("accepts an end at midnight on a final slice without a phantom next day", () => {
+    expect(domain.validateActivitySchedule(withDuration(60, new Date("2026-09-25T23:00:00Z")), [day]))
+      .toEqual({ ok: true, value: undefined });
+    expect(domain.validateActivitySchedule(withDuration(61, new Date("2026-09-25T23:00:00Z")), [day]))
+      .toMatchObject(issue("durationMinutes", "outside_window"));
+  });
+
+  it.each([{ destinationId: id(9) }, { tripId: id(9) }, { type: "transit_return" as const }])(
+    "rejects an end inside a contiguous slice that is not the same destination window: %s", (patch) => {
+      expect(domain.validateActivitySchedule(withDuration(120, new Date("2026-09-25T23:00:00Z")), [day, { ...next, ...patch }]))
+        .toMatchObject(issue("durationMinutes", "outside_window"));
+    });
+
+  it("rejects an end that crosses a gap between slices", () => {
+    const later = { ...next, startsAt: new Date("2026-09-26T08:00:00Z") };
+    expect(domain.validateActivitySchedule(withDuration(120, new Date("2026-09-25T23:00:00Z")), [day, later]))
+      .toMatchObject(issue("durationMinutes", "outside_window"));
+  });
+
+  it("validates the start before the duration", () => {
+    expect(domain.validateActivitySchedule(withDuration(0, new Date(day.startsAt.getTime() - 1)), [day]))
+      .toMatchObject(issue("scheduledAt", "outside_window"));
+  });
+});

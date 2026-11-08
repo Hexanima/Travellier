@@ -11,7 +11,9 @@ type ActiveItineraryResponse = Serialized<TripItinerary>;
 /** Optional legacy fields are confined to the client until T59. Never synthesize approval. */
 export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities"> & {
   votingEnabled?: boolean;
-  activities: (ActiveItineraryResponse["activities"][number] & { status?: ActivityStatus })[];
+  // durationMinutes stays optional here until T61 adds it to the client forms and makes it required.
+  activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
+    { durationMinutes?: number | null; status?: ActivityStatus })[];
 };
 export type ItineraryDayResponse = TripItineraryResponse["days"][number];
 export type ItineraryPostResponse = TripItineraryResponse["posts"][number];

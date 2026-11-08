@@ -46,7 +46,7 @@ describe("aggregate itinerary HTTP API", () => {
     const activity = new ObjectId(), secondActivity = new ObjectId(), spontaneous = new ObjectId(), combined = new ObjectId(), transitPost = new ObjectId();
     const activityBase = { tripId, dayId: days[1]!._id, title: "Paseo", description: null, mapsUrl: null, status: "confirmed", createdBy: actor, createdAt: new Date("2026-09-26T23:00:00Z") };
     await db.collection("activities").insertMany([
-      { ...activityBase, _id: secondActivity, scheduledAt: new Date("2026-09-25T14:00:00Z") },
+      { ...activityBase, _id: secondActivity, scheduledAt: new Date("2026-09-25T14:00:00Z"), durationMinutes: 90 },
       { ...activityBase, _id: activity, scheduledAt: new Date("2026-09-25T12:00:00Z") },
     ]);
     const postBase = { tripId, dayId: days[1]!._id, authorId: actor, description: null, mapsUrl: null, activityId: null, transportId: null, parentPostId: null };
@@ -64,13 +64,15 @@ describe("aggregate itinerary HTTP API", () => {
     expect(response.status).toBe(200);
     const { itinerary } = await response.json() as { itinerary: {
       days: { id: string; order: number; startsAt: string; items: { kind: string; id: string }[]; expenseSummary: { totalAmount: number; expenseCount: number } }[];
-      activities: { id: string; postIds: string[] }[]; transports: { id: string; postIds: string[] }[];
+      activities: { id: string; postIds: string[]; durationMinutes: number | null }[]; transports: { id: string; postIds: string[] }[];
       posts: { id: string; dayId: string; activityId: string | null; transportId: string | null; parentPostId: string | null; createdAt: string }[];
     } };
     expect(itinerary.days.map((day) => day.order)).toEqual([1, 2, 3, 4]);
     expect(itinerary.days[1]!.startsAt).toBe("2026-09-25T10:00:00.456Z");
     expect(itinerary.days[1]!.items).toMatchObject([{ kind: "activity", id: activity.toHexString() }, { kind: "post", id: spontaneous.toHexString() }, { kind: "activity", id: secondActivity.toHexString() }]);
     expect(itinerary.activities[0]!.postIds).toEqual([combined.toHexString()]);
+    expect(itinerary.activities.map((value) => ({ id: value.id, durationMinutes: value.durationMinutes }))).toEqual([
+      { id: activity.toHexString(), durationMinutes: null }, { id: secondActivity.toHexString(), durationMinutes: 90 }]);
     expect(itinerary.transports.find((t) => t.id === outbound.id)!.postIds).toEqual([transitPost.toHexString(), combined.toHexString()]);
     expect(itinerary.posts).toHaveLength(3);
     expect(itinerary.posts.find((p) => p.id === combined.toHexString())).toMatchObject({ dayId: days[1]!._id.toHexString(), activityId: activity.toHexString(),

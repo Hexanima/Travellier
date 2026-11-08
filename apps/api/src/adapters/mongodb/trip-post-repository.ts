@@ -63,7 +63,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       if (activity.tripId !== tripId) throw new TripNotFoundError();
       await database.collection("activities").insertOne({ _id: new MongoObjectId(activity.id), tripId: mongoTripId,
         dayId: new MongoObjectId(activity.dayId), title: activity.title, description: activity.description, mapsUrl: activity.mapsUrl,
-        scheduledAt: activity.scheduledAt, createdBy: new MongoObjectId(activity.createdBy), createdAt: activity.createdAt }, options);
+        scheduledAt: activity.scheduledAt, durationMinutes: activity.durationMinutes, createdBy: new MongoObjectId(activity.createdBy), createdAt: activity.createdAt }, options);
       return ok(undefined);
     },
   };

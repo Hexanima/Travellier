@@ -36,12 +36,12 @@ describe("Trip activity use cases", () => {
     expect(domain.createTripActivity).toBeDefined();
     return domain.createTripActivity.execute(dependencies(), { ...context, ...fields });
   };
-  const seed = () => { records = [{ id: activityId, tripId, ...fields, description: "Centro", mapsUrl: "https://maps.app.goo.gl/example",
+  const seed = () => { records = [{ id: activityId, tripId, ...fields, durationMinutes: null, description: "Centro", mapsUrl: "https://maps.app.goo.gl/example",
     createdBy: other, createdAt }]; };
 
   it.each(["admin", "participant"] as const)("allows %s to create with server metadata and edit another member's activity", async (memberRole) => {
     role = memberRole;
-    expect(await create()).toEqual(domain.ok({ id: activityId, tripId, ...fields, description: null, mapsUrl: null,
+    expect(await create()).toEqual(domain.ok({ id: activityId, tripId, ...fields, durationMinutes: null, description: null, mapsUrl: null,
       createdBy: actor, createdAt }));
     seed();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
@@ -129,6 +129,52 @@ describe("Trip activity use cases", () => {
       .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, dayId: next.id, scheduledAt: next.startsAt }))
       .toMatchObject({ ok: true, value: { dayId: next.id, scheduledAt: next.startsAt } });
+  });
+
+  it("creates with an optional duration and stores null when absent", async () => {
+    expect(await domain.createTripActivity.execute(dependencies(), { ...context, ...fields, durationMinutes: 90 }))
+      .toMatchObject({ ok: true, value: { durationMinutes: 90, scheduledAt: fields.scheduledAt } });
+    expect(records[0]).toMatchObject({ durationMinutes: 90 });
+    records = [];
+    expect(await create()).toMatchObject({ ok: true, value: { durationMinutes: null } });
+  });
+
+  it("edits only the duration and clears it with null", async () => {
+    seed();
+    expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, durationMinutes: 45 }))
+      .toEqual(domain.ok({ ...records[0], durationMinutes: 45 }));
+    expect(records[0]).toMatchObject({ durationMinutes: 45 });
+    expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, durationMinutes: null }))
+      .toMatchObject({ ok: true, value: { durationMinutes: null } });
+    expect(records[0]).toMatchObject({ durationMinutes: null });
+  });
+
+  it("preserves start milliseconds and duration when editing only content", async () => {
+    seed(); records[0] = { ...records[0]!, durationMinutes: 30 };
+    expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
+      .toMatchObject({ ok: true, value: { title: "Museo", durationMinutes: 30, scheduledAt: new Date("2026-09-25T12:00:00.456Z") } });
+    expect(records[0]!.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
+  });
+
+  it.each([
+    { durationMinutes: 400 }, { durationMinutes: 0 }, { durationMinutes: 2.5 },
+    { scheduledAt: new Date("2026-09-25T17:45:00Z"), durationMinutes: 30 },
+  ])("rejects an edit whose end exceeds the destination window without replacing: %s", async (patch) => {
+    seed(); records[0] = { ...records[0]!, durationMinutes: 30 };
+    let replaced = false;
+    scope.replace = async () => { replaced = true; return domain.ok(undefined); };
+    expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, ...patch }))
+      .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "durationMinutes" }] } });
+    expect(replaced).toBe(false);
+  });
+
+  it("rejects moving the start so that the stored duration exceeds the window", async () => {
+    seed(); records[0] = { ...records[0]!, durationMinutes: 60 };
+    const before = structuredClone(records);
+    expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId,
+      scheduledAt: new Date("2026-09-25T17:30:00Z") }))
+      .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "durationMinutes", code: "outside_window" }] } });
+    expect(records).toEqual(before);
   });
 
   it.each(["admin", "participant"] as const)("allows %s to delete another member's activity", async (memberRole) => {
