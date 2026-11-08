@@ -47,6 +47,7 @@ import {
   type SetTripActivityParticipationPayload,
   type SetTripActivityParticipationResult,
   type CreateTripActivityPayload,
+  type CreateTripActivityResult,
   type UpdateTripActivityPayload,
   type TripActivityPayload,
   type ActivityDetailPayload,
@@ -122,7 +123,7 @@ export interface TripApi extends TripInvitationApi {
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
-  createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<Activity>;
+  createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<CreateTripActivityResult>;
   listActivities?: (payload: TripActivityPayload) => AsyncResult<Activity[]>;
   getActivity?: (payload: ActivityDetailPayload) => AsyncResult<Activity>;
   updateActivity?: (payload: UpdateTripActivityPayload) => AsyncResult<Activity>;
@@ -437,6 +438,14 @@ const profileUpdatePayload = (
   };
 };
 
+/** 409 shared by the participation endpoint and activity creation: the user must confirm switching plans. */
+const participationConflictResponse = ({ conflicts, activity }: Extract<CreateTripActivityResult, { outcome: "confirmation_required" }>) =>
+  jsonResponse(409, { error: { code: "ParticipationConflictError",
+    message: "The activity overlaps with other activities in your agenda. Confirm to switch plans.",
+    conflicts: conflicts.map((c) => ({ activityId: c.activityId, reason: c.reason, scheduledAt: c.scheduledAt.toISOString(),
+      durationMinutes: c.durationMinutes })),
+    activity: { scheduledAt: activity.scheduledAt.toISOString(), durationMinutes: activity.durationMinutes } } });
+
 const activityPayload = (payload: Record<string, unknown>, creating: boolean): Result<Partial<ActivityEditableFields>, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Activity ${field} is ${code === "required" ? "required" : "invalid"}.` },
@@ -600,12 +609,7 @@ export const handleApiRequest = async (
       confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
     if (!result.ok) return errorResponse(result.error);
     if (result.value.outcome === "saved") return jsonResponse(200, { participation: result.value.participation });
-    const { conflicts, activity } = result.value;
-    return jsonResponse(409, { error: { code: "ParticipationConflictError",
-      message: "The activity overlaps with other activities in your agenda. Confirm to switch plans.",
-      conflicts: conflicts.map((c) => ({ activityId: c.activityId, reason: c.reason, scheduledAt: c.scheduledAt.toISOString(),
-        durationMinutes: c.durationMinutes })),
-      activity: { scheduledAt: activity.scheduledAt.toISOString(), durationMinutes: activity.durationMinutes } } });
+    return participationConflictResponse(result.value);
   }
 
   const postListMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts$/);
@@ -668,8 +672,12 @@ export const handleApiRequest = async (
       const parsed = activityPayload(payload, true);
       if (!parsed.ok) return errorResponse(parsed.error);
       if (!trips?.createActivity) return unavailableResponse();
-      const result = await trips.createActivity({ ...context, ...parsed.value } as CreateTripActivityPayload);
-      return result.ok ? jsonResponse(201, { activity: result.value }) : errorResponse(result.error);
+      const result = await trips.createActivity({ ...context, ...parsed.value,
+        confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity } as CreateTripActivityPayload);
+      if (!result.ok) return errorResponse(result.error);
+      return result.value.outcome === "created"
+        ? jsonResponse(201, { activity: result.value.activity, participation: result.value.participation })
+        : participationConflictResponse(result.value);
     }
     if (activityId?.ok) {
       const detail = { ...context, activityId: activityId.value };

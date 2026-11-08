@@ -1,6 +1,7 @@
 import { ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
 import { ActivityNotFoundError, createObjectId, err, ok, TaggedError, TripNotFoundError, UnknownError,
   type Activity, type AsyncResult, type ObjectId, type TripActivityPort, type TripActivityScope, type TripRole } from "app-domain";
+import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
 type ActivityDocument = Omit<Activity, "id" | "tripId" | "dayId" | "createdBy" | "durationMinutes"> & {
@@ -23,6 +24,7 @@ const document = (value: Activity): ActivityDocument => ({ _id: new MongoObjectI
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripActivityScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
   const activities = database.collection<ActivityDocument>("activities");
+  const store = createParticipationStore(database.collection<ParticipationDocument>("activityParticipations"), tripId, session);
   return {
     findMemberRole: async (userId) => {
       const member = await database.collection<{ role: TripRole }>("tripMembers")
@@ -40,6 +42,8 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       const activity = await activities.findOne({ ...query, _id: new MongoObjectId(activityId) }, options);
       return ok(activity === null ? undefined : toActivity(activity));
     },
+    listUserParticipations: store.listUserParticipations,
+    saveParticipation: store.save,
     insert: async (activity) => {
       if (activity.tripId !== tripId) throw new TripNotFoundError();
       await activities.insertOne(document(activity), options);

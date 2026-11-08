@@ -22,7 +22,8 @@ describe("activity persistence and transactions", () => {
     const result = await api.createActivity!(input());
     expect(result.ok, JSON.stringify(result)).toBe(true);
     if (!result.ok) throw result.error;
-    return result.value;
+    if (result.value.outcome !== "created") throw new Error("Activity not created.");
+    return result.value.activity;
   };
   beforeAll(async () => {
     server = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
@@ -98,6 +99,8 @@ describe("activity persistence and transactions", () => {
     const postId = new ObjectId(), parentPostId = new ObjectId(), transportId = new ObjectId();
     await db.collection("posts").insertOne({ _id: postId, tripId: trip, dayId: day, authorId: actor, activityId, parentPostId, transportId,
       description: "Recuerdo", mapsUrl: null, createdAt: occurrence });
+    // The author's going created with the activity is replaced by the fixture below.
+    await db.collection("activityParticipations").deleteMany({});
     for (const name of ["activityVotes", "activityParticipations"]) {
       await db.collection(name).insertMany([{ activityId, tripId: trip, userId: actor }, { activityId: otherActivity, tripId: trip, userId: actor },
         { activityId, tripId: new ObjectId(), userId: new ObjectId() }]);
@@ -201,18 +204,18 @@ describe("activity persistence and transactions", () => {
   describe("duration", () => {
     it("stores and reads durationMinutes and keeps millisecond start when editing content", async () => {
       const result = await api.createActivity!({ ...input(), durationMinutes: 90 });
-      expect(result).toMatchObject({ ok: true, value: { durationMinutes: 90, scheduledAt: occurrence } });
-      if (!result.ok) throw result.error;
-      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) }))
+      expect(result).toMatchObject({ ok: true, value: { outcome: "created", activity: { durationMinutes: 90, scheduledAt: occurrence } } });
+      if (!result.ok || result.value.outcome !== "created") throw new Error("Activity not created.");
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) }))
         .toMatchObject({ durationMinutes: 90, scheduledAt: occurrence });
-      const edited = await api.updateActivity!({ ...context(), activityId: result.value.id, title: "Museo" });
+      const edited = await api.updateActivity!({ ...context(), activityId: result.value.activity.id, title: "Museo" });
       expect(edited).toMatchObject({ ok: true, value: { durationMinutes: 90 } });
-      const stored = await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) });
+      const stored = await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) });
       expect(stored!.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
       expect(stored).toMatchObject({ durationMinutes: 90, title: "Museo" });
-      expect(await api.updateActivity!({ ...context(), activityId: result.value.id, durationMinutes: null }))
+      expect(await api.updateActivity!({ ...context(), activityId: result.value.activity.id, durationMinutes: null }))
         .toMatchObject({ ok: true, value: { durationMinutes: null } });
-      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.id) })).toMatchObject({ durationMinutes: null });
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(result.value.activity.id) })).toMatchObject({ durationMinutes: null });
     });
 
     it("stores null when created without duration", async () => {
@@ -237,6 +240,116 @@ describe("activity persistence and transactions", () => {
       expect(await api.updateActivity!({ ...context(), activityId: activity.id, durationMinutes: 400 }))
         .toMatchObject({ ok: false, error: { tag: "ValidationError" } });
       expect(await db.collection("activities").find().toArray()).toEqual(before);
+    });
+  });
+
+  describe("author participation (T52)", () => {
+    const other = () => new ObjectId();
+    const at = (iso: string) => new Date(iso);
+    const seedGoing = async (start: string, duration: number | null, status = "going", user = actor) => {
+      const _id = new ObjectId();
+      await db.collection("activities").insertOne({ _id, tripId: trip, dayId: day, title: "Previo", description: null, scheduledAt: at(start),
+        durationMinutes: duration, mapsUrl: null, createdBy: other(), createdAt: new Date() });
+      await db.collection("activityParticipations").insertOne({ _id: new ObjectId(), tripId: trip, activityId: _id, userId: user, status,
+        updatedAt: new Date(), decisionRequired: null });
+      return _id;
+    };
+    const snapshotOf = (items: { id: ObjectId; start: string; duration: number | null }[]) => items.map((i) => ({ activityId: id(i.id),
+      scheduledAt: i.start, durationMinutes: i.duration }));
+    const chosen = { scheduledAt: occurrence.toISOString(), durationMinutes: 60 };
+    const status = async (activityId: ObjectId, user = actor) =>
+      (await db.collection("activityParticipations").findOne({ tripId: trip, activityId, userId: user }))?.status;
+    const state = () => Promise.all(["activities", "activityParticipations"].map((name) => db.collection(name).find().toArray()));
+    const run = (extra: Record<string, unknown> = {}) => api.createActivity!({ ...input(), durationMinutes: 60, ...extra } as never);
+
+    it("stores the activity and the author's going atomically, without records for other members", async () => {
+      const member = other();
+      await db.collection("tripMembers").insertOne({ tripId: trip, userId: member, role: "participant", joinedAt: new Date() });
+      const result = await run();
+      expect(result).toMatchObject({ ok: true, value: { outcome: "created", participation: { userId: id(actor), status: "going" } } });
+      if (!result.ok || result.value.outcome !== "created") throw new Error("not created");
+      expect(await db.collection("activities").countDocuments({ tripId: trip })).toBe(1);
+      expect(await status(new ObjectId(result.value.activity.id))).toBe("going");
+      expect(await db.collection("activityParticipations").countDocuments({ userId: member })).toBe(0);
+      expect(await db.collection("activityParticipations").countDocuments()).toBe(1);
+    });
+
+    it("requires confirmation before inserting and lists every incompatible plan", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60), b = await seedGoing("2026-09-25T12:30:00Z", 30);
+      const before = await state();
+      const result = await run();
+      expect(result).toMatchObject({ ok: true, value: { outcome: "confirmation_required", conflicts: [{ activityId: id(a) }, { activityId: id(b) }] } });
+      expect(await state()).toEqual(before);
+    });
+
+    it("applies the confirmed not_going in previous plans and going in the new one", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60), b = await seedGoing("2026-09-25T12:30:00Z", 30);
+      const c = await seedGoing("2026-09-25T16:00:00Z", 30), foreign = other(), theirs = await seedGoing("2026-09-25T11:30:00Z", 60, "going", foreign);
+      const result = await run({ confirmedConflicts: snapshotOf([{ id: a, start: "2026-09-25T11:30:00Z", duration: 60 },
+        { id: b, start: "2026-09-25T12:30:00Z", duration: 30 }]), confirmedActivity: chosen });
+      expect(result).toMatchObject({ ok: true, value: { outcome: "created" } });
+      if (!result.ok || result.value.outcome !== "created") throw new Error("not created");
+      expect([await status(a), await status(b), await status(c), await status(theirs, foreign)]).toEqual(["not_going", "not_going", "going", "going"]);
+      expect(await status(new ObjectId(result.value.activity.id))).toBe("going");
+    });
+
+    it("asks again, without writing, when the confirmation is stale", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60);
+      const stale = snapshotOf([{ id: a, start: "2026-09-25T11:30:00Z", duration: 60 }]);
+      await db.collection("activities").updateOne({ _id: a }, { $set: { durationMinutes: 90 } });
+      const before = await state();
+      expect(await run({ confirmedConflicts: stale, confirmedActivity: chosen })).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+      expect(await state()).toEqual(before);
+      // The conflict disappeared: it is created and the previous plan keeps going.
+      await db.collection("activities").updateOne({ _id: a }, { $set: { scheduledAt: at("2026-09-25T16:00:00Z") } });
+      expect(await run({ confirmedConflicts: stale, confirmedActivity: chosen })).toMatchObject({ ok: true, value: { outcome: "created" } });
+      expect(await status(a)).toBe("going");
+    });
+
+    it("rolls back the activity and every participation change when a save fails midway", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60);
+      const before = await state();
+      const collection = db.collection("activityParticipations");
+      const original = collection.findOneAndUpdate.bind(collection);
+      let calls = 0;
+      vi.spyOn(collection, "findOneAndUpdate").mockImplementation(((...args: unknown[]) => {
+        if (++calls === 2) return Promise.reject(new Error("forced failure"));
+        return (original as (...a: unknown[]) => unknown)(...args);
+      }) as never);
+      const open = db.collection.bind(db);
+      vi.spyOn(db, "collection").mockImplementation(((name: string, options?: never) => name === "activityParticipations" ? collection : open(name, options)) as never);
+      expect(await run({ confirmedConflicts: snapshotOf([{ id: a, start: "2026-09-25T11:30:00Z", duration: 60 }]), confirmedActivity: chosen }))
+        .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(calls).toBe(2);
+      vi.restoreAllMocks();
+      expect(await state()).toEqual(before);
+    });
+
+    it("serializes with a concurrent going of the author so both overlapping plans are never going", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60, "pending");
+      const [created, responded] = await Promise.all([run(), api.setActivityParticipation!({ ...context(), activityId: id(a), status: "going" })]);
+      expect(created.ok && responded.ok).toBe(true);
+      const outcomes = [created, responded].map((r) => r.ok ? (r.value as { outcome: string }).outcome : "error");
+      expect(outcomes.filter((o) => o === "confirmation_required")).toHaveLength(1);
+      expect(await db.collection("activityParticipations").countDocuments({ userId: actor, status: "going" })).toBe(1);
+    });
+
+    it("keeps the activity visible when the author stops attending or the participation is deleted", async () => {
+      const created = await run();
+      if (!created.ok || created.value.outcome !== "created") throw new Error("not created");
+      const activityId = created.value.activity.id;
+      expect(await api.setActivityParticipation!({ ...context(), activityId, status: "not_going" })).toMatchObject({ ok: true });
+      expect(await db.collection("activities").countDocuments({ _id: new ObjectId(activityId) })).toBe(1);
+      await db.collection("activityParticipations").deleteMany({ tripId: trip });
+      expect(await api.getActivity!({ ...context(), activityId })).toMatchObject({ ok: true, value: { id: activityId } });
+      expect(await api.listActivities!(context())).toMatchObject({ ok: true, value: [{ id: activityId }] });
+    });
+
+    it("reports a malformed confirmation as a validation error without writing", async () => {
+      await seedGoing("2026-09-25T11:30:00Z", 60);
+      const before = await state();
+      expect(await run({ confirmedConflicts: "x" })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+      expect(await state()).toEqual(before);
     });
   });
 });

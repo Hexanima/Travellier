@@ -92,8 +92,9 @@ describe("post persistence and transactions", () => {
     const { post } = await create();
     const activity = await f.api.createActivity!({ ...f.context(), dayId: domainId(f.day), title: "Cena", scheduledAt: f.occurrence });
     if (!activity.ok) throw activity.error;
-    const [linked, deleted] = await Promise.all([f.api.updatePost!({ ...f.context(), postId: post.id, activityId: activity.value.id }),
-      f.api.deleteActivity!({ ...f.context(), activityId: activity.value.id })]);
+    if (activity.value.outcome !== "created") throw new Error("Activity not created.");
+    const [linked, deleted] = await Promise.all([f.api.updatePost!({ ...f.context(), postId: post.id, activityId: activity.value.activity.id }),
+      f.api.deleteActivity!({ ...f.context(), activityId: activity.value.activity.id })]);
     expect(deleted.ok).toBe(true);
     if (!linked.ok) expect(linked.error.tag).toBe("ValidationError");
     expect(await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) })).toMatchObject({ activityId: null, authorId: f.actor });
