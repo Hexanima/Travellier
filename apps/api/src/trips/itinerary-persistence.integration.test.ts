@@ -70,22 +70,143 @@ describe("persisted itinerary transactions", () => {
     expect(await days()).toEqual(expanded);
   });
 
-  it.each(["activities", "posts"])("rejects deleting a day with %s without changing any data", async (collection) => {
+  it("rejects deleting a day with activities without changing any data", async () => {
     const { api, outbound } = await configure();
     const before = await days();
     const reference = { tripId: trip, dayId: before[1]!._id, scheduledAt: new Date("2026-09-25T12:00:00Z"), createdAt: new Date("2026-10-01T12:00:00Z"), transportId: new ObjectId(outbound.id) };
-    await database.collection(collection).insertOne(reference);
+    await database.collection("activities").insertOne(reference);
     const postId = new ObjectId();
     await database.collection("postPhotos").insertOne({ postId, s3Key: "photo" });
     await database.collection("postExpenses").insertOne({ postId, amount: 42 });
-    const dependent = await database.collection(collection).find().toArray();
+    const dependent = await database.collection("activities").find().toArray();
     expect(await api.updateTransport!({ ...context(), transportId: outbound.id, arrivalAt: new Date("2026-09-26T10:00:00Z") }))
       .toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
     expect(await days()).toEqual(before);
     expect(await database.collection("transports").findOne({ _id: new ObjectId(outbound.id) })).toMatchObject({ arrivalAt: outbound.arrivalAt });
-    expect(await database.collection(collection).find().toArray()).toEqual(dependent);
+    expect(await database.collection("activities").find().toArray()).toEqual(dependent);
     expect(await database.collection("postPhotos").findOne({ postId })).toMatchObject({ s3Key: "photo" });
     expect(await database.collection("postExpenses").findOne({ postId })).toMatchObject({ amount: 42 });
+  });
+
+  it("does not block removing a day that a legacy post references and leaves the post identical", async () => {
+    const { api, outbound } = await configure();
+    const before = await days();
+    const postId = new ObjectId();
+    await database.collection("posts").insertOne({ _id: postId, tripId: trip, dayId: before[1]!._id, authorId: actor,
+      description: "Recuerdo", createdAt: new Date("2026-10-01T12:00:00.123Z"), transportId: new ObjectId(outbound.id) });
+    const post = await database.collection("posts").findOne({ _id: postId });
+    expect((await api.updateTransport!({ ...context(), transportId: outbound.id, arrivalAt: new Date("2026-09-26T10:00:00Z") })).ok).toBe(true);
+    expect(await database.collection("itineraryDays").findOne({ _id: before[1]!._id })).toBeNull();
+    expect(await database.collection("posts").findOne({ _id: postId })).toEqual(post);
+  });
+
+  describe("activity end versus the destination window", () => {
+    const snapshot = async () => ({
+      transports: await database.collection("transports").find({ tripId: trip }).sort({ _id: 1 }).toArray(),
+      days: await days(),
+      activities: await database.collection("activities").find({ tripId: trip }).sort({ _id: 1 }).toArray(),
+      activityParticipations: await database.collection("activityParticipations").find({ tripId: trip }).sort({ _id: 1 }).toArray(),
+      posts: await database.collection("posts").find({ tripId: trip }).sort({ _id: 1 }).toArray(),
+    });
+    const seedActivity = async (dayId: ObjectId, scheduledAt = new Date("2026-09-26T12:00:00Z"), durationMinutes: number | null = 120) => {
+      const _id = new ObjectId();
+      await database.collection("activities").insertOne({ _id, tripId: trip, dayId, title: "Paseo", scheduledAt, durationMinutes,
+        createdBy: actor, createdAt: new Date("2026-10-01T12:00:00Z") });
+      await database.collection("activityParticipations").insertOne({ tripId: trip, activityId: _id, userId: actor, status: "going" });
+      await database.collection("posts").insertOne({ tripId: trip, activityId: _id, createdAt: new Date("2026-10-02T00:00:00.321Z") });
+      return _id;
+    };
+    const shortenReturn = (api: ReturnType<typeof createTripApi>, returnId: DomainId, departureAt: Date) =>
+      api.updateTransport!({ ...context(), transportId: returnId, departureAt });
+
+    it("rejects an edit that leaves the end outside the window and keeps the whole state", async () => {
+      const { api, returning } = await configure();
+      await seedActivity((await days())[2]!._id);
+      const before = await snapshot();
+      expect(await shortenReturn(api, returning.id, new Date("2026-09-26T13:00:00Z")))
+        .toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("accepts the exact end limit, rejects one millisecond past it and never touches activities", async () => {
+      const { api, returning } = await configure();
+      await seedActivity((await days())[2]!._id);
+      const before = await snapshot();
+      expect((await shortenReturn(api, returning.id, new Date("2026-09-26T14:00:00Z"))).ok).toBe(true);
+      const after = await snapshot();
+      expect(after.activities).toEqual(before.activities);
+      expect(after.activityParticipations).toEqual(before.activityParticipations);
+      expect(after.posts).toEqual(before.posts);
+      expect(after.days[2]!._id).toEqual(before.days[2]!._id);
+      expect(await shortenReturn(api, returning.id, new Date("2026-09-26T13:59:59.999Z")))
+        .toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await snapshot()).toEqual(after);
+    });
+
+    it("rejects a transport creation that leaves the end outside the window", async () => {
+      const { api, returning } = await configure();
+      await seedActivity((await days())[2]!._id);
+      await database.collection("transports").deleteOne({ _id: new ObjectId(returning.id) });
+      const before = await snapshot();
+      expect(await api.createTransport!({ ...input("return"), departureAt: new Date("2026-09-26T13:00:00Z"), arrivalAt: new Date("2026-09-26T15:00:00Z") }))
+        .toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it.each([1, 2, 3, 4, 5])("never loses an accepted write when activity changes race a shortening PATCH (run %i)", async () => {
+      const { api, returning } = await configure();
+      const dayId = (await days())[2]!._id;
+      const existing = await seedActivity(dayId, new Date("2026-09-26T09:00:00Z"), 30);
+      const other = new ObjectId();
+      await database.collection("tripMembers").insertOne({ tripId: trip, userId: other, role: "participant", joinedAt: new Date() });
+      const [patched, created, edited] = await Promise.all([
+        shortenReturn(api, returning.id, new Date("2026-09-26T13:00:00Z")),
+        api.createActivity!({ ...context(), authenticatedUserId: domainId(other), dayId: domainId(dayId), title: "Cena", scheduledAt: new Date("2026-09-26T12:00:00Z"), durationMinutes: 120 }),
+        api.updateActivity!({ ...context(), activityId: domainId(existing), durationMinutes: 300 }),
+      ]);
+      const finalTransport = await database.collection("transports").findOne({ _id: new ObjectId(returning.id) });
+      const limit = finalTransport!.departureAt.getTime();
+      const stored = await database.collection("activities").find({ tripId: trip }).toArray();
+      for (const activity of stored) {
+        const end = activity.scheduledAt.getTime() + (activity.durationMinutes ?? 0) * 60_000;
+        expect(end).toBeLessThanOrEqual(limit);
+      }
+      expect(stored.some((activity) => activity.title === "Cena")).toBe(created.ok && created.value.outcome === "created");
+      expect(stored.find((activity) => activity._id.equals(existing))!.durationMinutes).toBe(edited.ok ? 300 : 30);
+      if (patched.ok) expect(limit).toBe(new Date("2026-09-26T13:00:00Z").getTime());
+      else expect(patched).toMatchObject({ error: { tag: "ItineraryConflictError" } });
+      // The PATCH wins only if neither long activity was accepted, and vice versa.
+      expect(patched.ok && (created.ok || edited.ok)).toBe(false);
+      expect((await days()).filter((day) => day.type === "activity").at(-1)!.endsAt.getTime()).toBe(limit);
+    });
+
+    it("keeps order contiguous and loses no write across two concurrent transport PATCHes", async () => {
+      const { api, outbound, returning } = await configure();
+      const results = await Promise.all([
+        api.updateTransport!({ ...context(), transportId: outbound.id, arrivalPlace: "Nuevo" }),
+        shortenReturn(api, returning.id, new Date("2026-09-26T13:00:00Z")),
+      ]);
+      expect(results.every((result) => result.ok)).toBe(true);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(outbound.id) })).toMatchObject({ arrivalPlace: "Nuevo" });
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(returning.id) })).toMatchObject({ departureAt: new Date("2026-09-26T13:00:00Z") });
+      expect((await days()).map((day) => day.order)).toEqual([1, 2, 3, 4]);
+    });
+  });
+
+  describe("legacy arrival rows", () => {
+    it("filters them on read without deleting them, even after a transport PATCH", async () => {
+      const { api, outbound } = await configure();
+      const legacy = { _id: new ObjectId(), tripId: trip, destinationId: destination, date: new Date("2026-09-25T00:00:00Z"),
+        type: "arrival", startsAt: new Date("2026-09-25T10:00:00.456Z"), endsAt: null, order: 99 };
+      await database.collection("itineraryDays").insertOne(legacy);
+      const repository = createMongoTripJourneyRepository(database);
+      const listed = await repository.listItineraryDays(domainId(trip));
+      expect(listed.ok && listed.value.map((day) => day.type)).toEqual(["transit_out", "activity", "activity", "transit_return"]);
+      expect((await api.updateTransport!({ ...context(), transportId: outbound.id, costPerPerson: 7 })).ok).toBe(true);
+      expect(await database.collection("itineraryDays").findOne({ _id: legacy._id })).toEqual(legacy);
+      expect(await repository.listItineraryDays(domainId(trip))).toMatchObject({ ok: true });
+      expect((await days()).filter((day) => day.type !== "arrival")).toHaveLength(4);
+    });
   });
 
   it("rejects shrinking past an activity, then accepts a compatible shrink preserving all references", async () => {

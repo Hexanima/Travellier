@@ -29,7 +29,7 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
         if (trip === null) return undefined;
         // Driver sessions do not support concurrent operations in a transaction.
         const destinations = await database.collection<Stored<TripDestination>>("destinations").find(query, options).sort({ order: 1, _id: 1 }).toArray();
-        const days = await database.collection<Stored<ItineraryDay>>("itineraryDays").find(query, options).sort({ order: 1, _id: 1 }).toArray();
+        const days = await database.collection<Stored<ItineraryDay>>("itineraryDays").find({ ...query, type: { $in: ["transit_out", "activity", "transit_return"] } }, options).sort({ order: 1, _id: 1 }).toArray();
         const transports = await database.collection<Stored<Transport>>("transports").find(query, options).sort({ departureAt: 1, _id: 1 }).toArray();
         const activities = await database.collection<Stored<ItineraryActivity>>("activities").find(query, options).sort({ scheduledAt: 1, _id: 1 }).toArray();
         const posts = await database.collection<Stored<ItineraryPost>>("posts").find(query, options).sort({ createdAt: 1, _id: 1 }).toArray();

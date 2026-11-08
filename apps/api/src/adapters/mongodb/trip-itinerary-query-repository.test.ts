@@ -55,6 +55,15 @@ describe("Mongo itinerary query", () => {
         expense: { totalAmount: 42.5, paidBy: actor.toHexString() } }] } });
   });
 
+  it("filters legacy arrival days from the aggregate without deleting them", async () => {
+    const legacy = { _id: new ObjectId(), tripId: trip, destinationId: destination, date: new Date("2026-09-25T00:00:00Z"),
+      type: "arrival", startsAt: arrival, endsAt: null, order: 0 };
+    await db.collection("itineraryDays").insertOne(legacy);
+    const result = await query();
+    expect(result.ok && result.value.days.map((item) => item.id)).toEqual([day.toHexString()]);
+    expect(await db.collection("itineraryDays").findOne({ _id: legacy._id })).toEqual(legacy);
+  });
+
   it("restricts public Trip content to members and returns missing Trips as not found", async () => {
     expect(await query(new ObjectId())).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
     await db.collection("trips").deleteOne({ _id: trip });
