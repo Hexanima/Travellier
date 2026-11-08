@@ -10,6 +10,11 @@ Las reglas del proyecto, la fuente de verdad y las reglas funcionales están en 
 - El estado de una tarjeta de Trello o el nombre de una rama no prueban que una tarea cumpla sus criterios. Revisar código y pruebas antes de declarar algo implementado o rehacerlo.
 - Plan vigente: `docs/versiones/v1/TAREAS_PENDIENTES.md` (T44 en adelante). Sus totales iniciales (70 tareas / 400 h) y las frases sobre la sincronización con Trello son históricas.
 
+## Proceso de tareas
+
+- Para desarrollar y auditar tareas pendientes en fila usar el skill `avanzar-tareas` (`/avanzar-tareas`), con los subagentes `planificador-tarea` y `auditor-tarea`.
+- Bloqueos y dudas para el usuario: `docs/REVISION_PENDIENTE.md`.
+
 ## Colaboración
 
 - Responder en español, conciso y directo, sin introducciones ni resúmenes innecesarios.
