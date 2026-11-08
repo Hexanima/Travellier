@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { Db, MongoClient, ObjectId } from "mongodb";
+import { Collection, Db, MongoClient, ObjectId } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { createObjectId, err, generateItineraryDays, UnknownError, type ObjectId as DomainId } from "app-domain";
 import { migrateMongoSchema } from "../adapters/mongodb/migrations.js";
@@ -177,6 +177,56 @@ describe("persisted itinerary transactions", () => {
       else expect(patched).toMatchObject({ error: { tag: "ItineraryConflictError" } });
       // The PATCH wins only if neither long activity was accepted, and vice versa.
       expect(patched.ok && (created.ok || edited.ok)).toBe(false);
+      expect((await days()).filter((day) => day.type === "activity").at(-1)!.endsAt.getTime()).toBe(limit);
+    });
+
+    it("serializes a shortening PATCH paused after reading references against an activity that only fits the original window", async () => {
+      // Regeneration (transports/itineraryDays) and activity writes touch different documents, so only the shared
+      // Trip lock ($inc destinationOrderRevision on `trips`) serializes them. Without it, the PATCH validates against
+      // stale references while the activity commits, and both are accepted (write skew).
+      const { api, returning } = await configure();
+      const dayId = (await days())[2]!._id;
+      const originalFind = Collection.prototype.find;
+      let reached!: () => void, release!: () => void;
+      const paused = new Promise<void>((resolve) => { reached = resolve; });
+      const barrier = new Promise<void>((resolve) => { release = resolve; });
+      let armed = true;
+      vi.spyOn(Collection.prototype, "find").mockImplementation(function (this: Collection, ...args: Parameters<Collection["find"]>) {
+        const cursor = originalFind.apply(this, args);
+        const projection = (args[1] as { projection?: Record<string, number>; session?: unknown } | undefined);
+        if (!armed || this.collectionName !== "activities" || projection?.session === undefined
+          || Object.keys(projection.projection ?? {}).join() !== "dayId,scheduledAt,durationMinutes") return cursor;
+        const toArray = cursor.toArray.bind(cursor);
+        cursor.toArray = async () => {
+          const references = await toArray();
+          if (armed) { armed = false; reached(); await barrier; }
+          return references;
+        };
+        return cursor;
+      } as typeof Collection.prototype.find);
+      const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      const patching = shortenReturn(api, returning.id, new Date("2026-09-26T13:00:00Z"));
+      await paused;
+      // Ends at 14:00: fits the original window (until 18:00) but not the shortened one (until 13:00).
+      const creating = api.createActivity!({ ...context(), dayId: domainId(dayId), title: "Cena",
+        scheduledAt: new Date("2026-09-26T12:00:00Z"), durationMinutes: 120 });
+      // With the lock the creation keeps retrying (write conflict) until the PATCH commits; without it, it settles now.
+      await Promise.race([creating, delay(300)]);
+      release();
+      const [patched, created] = await Promise.all([patching, creating]);
+      const stored = await database.collection("activities").find({ tripId: trip }).toArray();
+      const transport = await database.collection("transports").findOne({ _id: new ObjectId(returning.id) });
+      const limit = transport!.departureAt.getTime();
+      const longActivity = stored.some((activity) => activity.title === "Cena");
+      expect(patched.ok && created.ok && longActivity).toBe(false);
+      for (const activity of stored) {
+        expect(activity.scheduledAt.getTime() + (activity.durationMinutes ?? 0) * 60_000).toBeLessThanOrEqual(limit);
+      }
+      // The PATCH committed first under the lock, so the activity is rejected against the shortened window.
+      expect(patched.ok).toBe(true);
+      expect(created).toMatchObject({ ok: false });
+      expect(longActivity).toBe(false);
+      expect(limit).toBe(new Date("2026-09-26T13:00:00Z").getTime());
       expect((await days()).filter((day) => day.type === "activity").at(-1)!.endsAt.getTime()).toBe(limit);
     });
 
