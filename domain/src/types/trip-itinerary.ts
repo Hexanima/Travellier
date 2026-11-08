@@ -9,8 +9,21 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** Keep the read contract compatible while sharing the activity entity's fields. */
 export type ItineraryActivity = Activity;
 
-/** Transitional (T56): the itinerary only projects posts that still carry their legacy day. */
-export type ItineraryPost = Omit<Post, "dayId"> & { dayId: ObjectId };
+/** Where a memory is projected: its effective activity, its effective transport, or by its own publication. */
+export type ItineraryPostPlacement = "activity" | "transport" | "independent";
+
+/** Additive context: `parentPostId` is the real parent; the root fields come from walking the chain. */
+export interface ItineraryPostContext {
+  parentPostId: ObjectId | null;
+  rootPostId: ObjectId;
+  rootActivityId: ObjectId | null;
+  rootTransportId: ObjectId | null;
+  placement: ItineraryPostPlacement;
+}
+
+/** `dayId` is computed from the context (never the stored legacy one); it is null only for unplaced posts. */
+export type ItineraryPost = Omit<Post, "dayId"> & { dayId: ObjectId; context: ItineraryPostContext };
+export type UnplacedItineraryPost = Omit<ItineraryPost, "dayId"> & { dayId: null };
 
 export interface ItineraryExpense {
   id: ObjectId;
@@ -28,7 +41,7 @@ export interface TripItinerarySnapshot {
   days: ItineraryDay[];
   transports: Transport[];
   activities: ItineraryActivity[];
-  /** Includes posts created without a day; the read model drops them until T56. */
+  /** Includes posts created without a day; the read model projects them by context. */
   posts: Post[];
   expenses: ItineraryExpense[];
 }
@@ -49,4 +62,6 @@ export interface TripItinerary {
   transports: (Transport & { postIds: ObjectId[] })[];
   activities: (ItineraryActivity & { postIds: ObjectId[] })[];
   posts: (ItineraryPost & { expense: ItineraryExpense | null })[];
+  /** Posts with no projectable day (published outside existing dates or in a Trip without itinerary). */
+  unplacedPosts: (UnplacedItineraryPost & { expense: ItineraryExpense | null })[];
 }

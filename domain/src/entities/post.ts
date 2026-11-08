@@ -96,6 +96,7 @@ export interface PostChain {
   ancestors: Post[];
   rootPostId: ObjectId;
   rootActivityId: ObjectId | null;
+  rootTransportId: ObjectId | null;
 }
 
 /** Walks immediate parents up to the root; tolerates corrupt data by reporting cycles instead of looping. */
@@ -111,5 +112,5 @@ export const resolvePostChain = (post: Post, lookup: (postId: ObjectId) => Post 
     ancestors.push(parent);
     current = parent;
   }
-  return ok({ ancestors, rootPostId: current.id, rootActivityId: current.activityId });
+  return ok({ ancestors, rootPostId: current.id, rootActivityId: current.activityId, rootTransportId: current.transportId });
 };
