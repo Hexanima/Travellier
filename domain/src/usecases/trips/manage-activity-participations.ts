@@ -7,7 +7,8 @@ import type { TripParticipationPort, TripParticipationReadScope } from "../../po
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
-import { createObjectId, type ObjectId } from "../../value-objects/object-id.js";
+import type { ObjectId } from "../../value-objects/object-id.js";
+import { parseConfirmed, parseConfirmedActivity, sameSnapshot } from "./agenda-confirmation.js";
 import type { ActivityDetailPayload } from "./manage-activities.js";
 
 export type SetTripActivityParticipationPayload = ActivityDetailPayload & { status: unknown; confirmedConflicts?: unknown;
@@ -18,7 +19,6 @@ export type SetTripActivityParticipationResult =
   | { outcome: "saved"; participation: ActivityParticipation }
   | { outcome: "confirmation_required"; conflicts: ActivityConflict[]; activity: { scheduledAt: Date; durationMinutes: number | null } };
 
-interface ConfirmedConflict { activityId: string; scheduledAt: number; durationMinutes: number | null }
 interface Dependencies { participations: TripParticipationPort }
 interface WriteDependencies extends Dependencies { createId: () => ObjectId; now: () => Date }
 
@@ -45,42 +45,6 @@ export const getTripActivityParticipation: UseCase<Dependencies, ActivityDetailP
 };
 
 const invalid = (field: string, code: string, message: string) => err(new ValidationError([{ field, code, message }]));
-
-const parseConfirmed = (value: unknown) => {
-  if (value === undefined || value === null) return ok(undefined);
-  const bad = () => invalid("confirmedConflicts", "invalid", "Confirmed conflicts must be a list of activityId, scheduledAt and durationMinutes.");
-  if (!Array.isArray(value)) return bad();
-  const parsed: ConfirmedConflict[] = [];
-  for (const item of value as unknown[]) {
-    if (typeof item !== "object" || item === null) return bad();
-    const { activityId, scheduledAt, durationMinutes } = item as Record<string, unknown>;
-    const start = scheduledAt instanceof Date ? scheduledAt.getTime()
-      : typeof scheduledAt === "number" ? scheduledAt : typeof scheduledAt === "string" ? Date.parse(scheduledAt) : NaN;
-    const duration = durationMinutes === undefined ? null : durationMinutes;
-    if (typeof activityId !== "string" || !createObjectId(activityId).ok || !Number.isFinite(start) ||
-      (duration !== null && (typeof duration !== "number" || !Number.isFinite(duration)))) return bad();
-    parsed.push({ activityId, scheduledAt: start, durationMinutes: duration });
-  }
-  return ok(parsed);
-};
-
-const parseConfirmedActivity = (value: unknown): { scheduledAt: number; durationMinutes: number | null } | undefined | "invalid" => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "object") return "invalid";
-  const { scheduledAt, durationMinutes } = value as Record<string, unknown>;
-  const start = scheduledAt instanceof Date ? scheduledAt.getTime()
-    : typeof scheduledAt === "number" ? scheduledAt : typeof scheduledAt === "string" ? Date.parse(scheduledAt) : NaN;
-  const duration = durationMinutes === undefined ? null : durationMinutes;
-  if (!Number.isFinite(start) || (duration !== null && (typeof duration !== "number" || !Number.isFinite(duration)))) return "invalid";
-  return { scheduledAt: start, durationMinutes: duration };
-};
-
-const sameSnapshot = (confirmed: ConfirmedConflict[], conflicts: readonly ActivityConflict[]) => {
-  const key = (c: ConfirmedConflict) => `${c.activityId}|${c.scheduledAt}|${c.durationMinutes ?? ""}`;
-  const expected = conflicts.map((c) => key({ activityId: c.activityId, scheduledAt: c.scheduledAt.getTime(), durationMinutes: c.durationMinutes })).sort();
-  const received = confirmed.map(key).sort();
-  return expected.length === received.length && expected.every((value, index) => value === received[index]);
-};
 
 export const setTripActivityParticipation: UseCase<WriteDependencies, SetTripActivityParticipationPayload, SetTripActivityParticipationResult, TaggedError> = {
   execute: ({ participations, createId, now }, payload) => participations.withTransaction(payload.tripId, async (scope) => {

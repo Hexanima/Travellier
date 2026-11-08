@@ -21,9 +21,10 @@ describe("post HTTP API", () => {
     const parent = await create();
     const activity = await f.api.createActivity!({ ...f.context(), dayId: domainId(f.day), title: "Cena", scheduledAt: f.occurrence });
     if (!activity.ok) throw activity.error;
+    if (activity.value.outcome !== "created") throw new Error("Activity not created.");
     const transport = new ObjectId();
     await f.db.collection("transports").insertOne({ _id: transport, tripId: f.trip });
-    return { activityId: activity.value.id, parentPostId: parent.id, transportId: transport.toHexString() };
+    return { activityId: activity.value.activity.id, parentPostId: parent.id, transportId: transport.toHexString() };
   };
 
   it.each(["admin", "participant"])("allows %s to create, edit, consult and clear fields preserving server metadata", async (role) => {
@@ -113,6 +114,13 @@ describe("post HTTP API", () => {
     const response = await handler({ rawPath: f.path(), headers: { authorization: `Bearer ${await token(now + 60)}` }, body: JSON.stringify(input()), requestContext: { http: { method: "POST" } } });
     expect(response.statusCode).toBe(201);
     expect(JSON.parse(response.body).post.authorId).toBe(f.actor.toHexString());
+  });
+
+  it("keeps creating a joint activity without the author's going until T58", async () => {
+    const response = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(Object.keys(JSON.parse(response.body)).sort()).toEqual(["activity", "post"]);
+    expect(await f.db.collection("activityParticipations").countDocuments()).toBe(0);
   });
 
   it.each(["2026-09-25T09:00:00.456-03:00", "2026-09-25T12:00:00.456Z"])("creates joint activity at %s and exposes both in itinerary", async (scheduledAt) => {

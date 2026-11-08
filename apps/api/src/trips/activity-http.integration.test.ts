@@ -199,7 +199,10 @@ describe("activity HTTP API", () => {
       const created = JSON.parse(withDuration.body).activity;
       expect(created).toMatchObject({ durationMinutes: 90, scheduledAt: "2026-09-25T12:00:00.456Z" });
       expect(created).not.toHaveProperty("endsAt");
+      // The author's own going would now conflict with the next creation at the same instant.
+      await db.collection("activityParticipations").deleteMany({});
       expect((await create())).toMatchObject({ durationMinutes: null });
+      await db.collection("activityParticipations").deleteMany({});
       const explicitNull = await request("POST", path, { ...input(), durationMinutes: null });
       expect(JSON.parse(explicitNull.body).activity).toMatchObject({ durationMinutes: null });
       expect(JSON.parse((await request("GET", `${path}/${created.id}`)).body).activity).toEqual(created);
@@ -261,5 +264,57 @@ describe("activity HTTP API", () => {
       expect((await request("PATCH", `${path}/${activity.id}`, { durationMinutes: 400 })).statusCode).toBe(422);
       expect(JSON.parse((await request("GET", `${path}/${activity.id}`)).body)).toEqual(before);
     });
+  });
+
+  describe("author participation (T52)", () => {
+    const seedGoing = async (start: string, duration: number | null) => {
+      const _id = new ObjectId();
+      await db.collection("activities").insertOne({ _id, tripId: trip, dayId: day, title: "Previo", description: null, scheduledAt: new Date(start),
+        durationMinutes: duration, mapsUrl: null, createdBy: new ObjectId(), createdAt: new Date() });
+      await db.collection("activityParticipations").insertOne({ _id: new ObjectId(), tripId: trip, activityId: _id, userId: actor, status: "going", updatedAt: new Date() });
+      return _id;
+    };
+    const body = (extra: Record<string, unknown> = {}) => ({ ...input(), durationMinutes: 60, ...extra });
+
+    it("returns 201 with the activity and the author's going, ignoring forged identity and timestamps", async () => {
+      const forged = new ObjectId().toHexString();
+      const response = await request("POST", path, body({ id: forged, userId: forged, createdBy: forged, status: "pending", updatedAt: "2000-01-01T00:00:00Z",
+        participation: { status: "not_going" } }));
+      expect(response.statusCode).toBe(201);
+      const { activity, participation } = JSON.parse(response.body);
+      expect(activity).toMatchObject({ createdBy: actor.toHexString() });
+      expect(activity.id).not.toBe(forged);
+      expect(participation).toMatchObject({ activityId: activity.id, userId: actor.toHexString(), status: "going" });
+      expect(participation.updatedAt).not.toBe("2000-01-01T00:00:00.000Z");
+    });
+
+    it("keeps working for a client that sends no confirmation fields when there is no conflict", async () => {
+      const response = await request("POST", path, input());
+      expect(response.statusCode).toBe(201);
+      expect(JSON.parse(response.body)).toMatchObject({ activity: { title: "Paseo" }, participation: { status: "going" } });
+    });
+
+    it("answers 409 ParticipationConflictError without inserting, then applies the confirmation", async () => {
+      const a = await seedGoing("2026-09-25T11:30:00Z", 60);
+      const first = await request("POST", path, body());
+      expect(first.statusCode).toBe(409);
+      expect(JSON.parse(first.body)).toEqual({ error: { code: "ParticipationConflictError",
+        message: expect.any(String),
+        conflicts: [{ activityId: a.toHexString(), reason: expect.any(String), scheduledAt: "2026-09-25T11:30:00.000Z", durationMinutes: 60 }],
+        activity: { scheduledAt: "2026-09-25T12:00:00.456Z", durationMinutes: 60 } } });
+      expect(await db.collection("activities").countDocuments()).toBe(1);
+      const confirmed = await request("POST", path, body({ confirmedConflicts: JSON.parse(first.body).error.conflicts.map(
+        (c: { activityId: string; scheduledAt: string; durationMinutes: number }) => ({ activityId: c.activityId, scheduledAt: c.scheduledAt, durationMinutes: c.durationMinutes })),
+        confirmedActivity: JSON.parse(first.body).error.activity }));
+      expect(confirmed.statusCode).toBe(201);
+      expect(await db.collection("activityParticipations").findOne({ activityId: a, userId: actor })).toMatchObject({ status: "not_going" });
+    });
+
+    it.each([{ confirmedConflicts: "x" }, { confirmedConflicts: [{ activityId: "bad" }] }, { confirmedConflicts: [], confirmedActivity: "x" }])(
+      "rejects a malformed confirmation like the participation endpoint: %j", async (extra) => {
+        const response = await request("POST", path, body(extra));
+        expect(response.statusCode).toBe(422);
+        expect(await db.collection("activities").countDocuments()).toBe(0);
+      });
   });
 });

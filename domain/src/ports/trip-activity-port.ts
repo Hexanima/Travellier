@@ -1,3 +1,4 @@
+import type { ActivityParticipation } from "../entities/activity-participation.js";
 import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
 import type { TripRole } from "../entities/trip-member.js";
@@ -15,6 +16,10 @@ export interface TripActivityReadScope {
 }
 
 export interface TripActivityScope extends TripActivityReadScope {
+  /** Every participation of this user in the Trip. */
+  listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
+  /** Upsert only this activity/user pair in the same transaction; going/not_going clears decisionRequired atomically. */
+  saveParticipation: (participation: ActivityParticipation) => AsyncResult<ActivityParticipation>;
   insert: (activity: Activity) => AsyncResult<void>;
   replace: (activity: Activity) => AsyncResult<void>;
   /** Atomically detach posts and delete the activity and participations. Preserve historical votes. */

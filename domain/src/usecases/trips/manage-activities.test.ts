@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ItineraryDay, ObjectId, TripActivityPort, TripActivityScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, TripActivityPort, TripActivityScope, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -15,23 +15,25 @@ const fields = { dayId, title: "Paseo", scheduledAt: new Date("2026-09-25T12:00:
 const createdAt = new Date("2026-10-04T12:00:00.789Z");
 
 describe("Trip activity use cases", () => {
-  let role: TripRole | undefined, days: ItineraryDay[], records: Activity[];
+  let role: TripRole | undefined, days: ItineraryDay[], records: Activity[], participations: ActivityParticipation[], nextId: number;
   let scope: TripActivityScope, activities: TripActivityPort;
   beforeEach(() => {
-    role = "participant"; days = [day]; records = [];
+    role = "participant"; days = [day]; records = []; participations = []; nextId = 100;
     scope = {
       findMemberRole: async (userId) => domain.ok(userId === actor ? role : undefined),
       findTrip: async () => domain.ok({ id: tripId }),
       listDays: async () => domain.ok(days),
       list: async () => domain.ok(records),
       find: async (activityId) => domain.ok(records.find((r) => r.id === activityId)),
+      listUserParticipations: async (userId) => domain.ok(participations.filter((p) => p.userId === userId)),
+      saveParticipation: async (p) => { participations.push(p); return domain.ok(p); },
       insert: async (activity) => { records.push(activity); return domain.ok(undefined); },
       replace: async (activity) => { records = records.map((r) => r.id === activity.id ? activity : r); return domain.ok(undefined); },
       remove: async (activityId) => { records = records.filter((r) => r.id !== activityId); return domain.ok(undefined); },
     };
     activities = { withTransaction: async (_, work) => work(scope), withReadSnapshot: async (_, work) => work(scope) };
   });
-  const dependencies = () => ({ activities, createId: () => activityId, now: () => createdAt });
+  const dependencies = () => ({ activities, createId: () => (nextId === 100 ? (nextId++, activityId) : id(nextId++)), now: () => createdAt });
   const create = async () => {
     expect(domain.createTripActivity).toBeDefined();
     return domain.createTripActivity.execute(dependencies(), { ...context, ...fields });
@@ -41,8 +43,8 @@ describe("Trip activity use cases", () => {
 
   it.each(["admin", "participant"] as const)("allows %s to create with server metadata and edit another member's activity", async (memberRole) => {
     role = memberRole;
-    expect(await create()).toEqual(domain.ok({ id: activityId, tripId, ...fields, durationMinutes: null, description: null, mapsUrl: null,
-      createdBy: actor, createdAt }));
+    const activity = { id: activityId, tripId, ...fields, durationMinutes: null, description: null, mapsUrl: null, createdBy: actor, createdAt };
+    expect(await create()).toMatchObject(domain.ok({ outcome: "created", activity }));
     seed();
     expect(await domain.updateTripActivity.execute(dependencies(), { ...context, activityId, title: "Museo" }))
       .toEqual(domain.ok({ ...records[0], title: "Museo" }));
@@ -133,10 +135,10 @@ describe("Trip activity use cases", () => {
 
   it("creates with an optional duration and stores null when absent", async () => {
     expect(await domain.createTripActivity.execute(dependencies(), { ...context, ...fields, durationMinutes: 90 }))
-      .toMatchObject({ ok: true, value: { durationMinutes: 90, scheduledAt: fields.scheduledAt } });
+      .toMatchObject({ ok: true, value: { outcome: "created", activity: { durationMinutes: 90, scheduledAt: fields.scheduledAt } } });
     expect(records[0]).toMatchObject({ durationMinutes: 90 });
     records = [];
-    expect(await create()).toMatchObject({ ok: true, value: { durationMinutes: null } });
+    expect(await create()).toMatchObject({ ok: true, value: { activity: { durationMinutes: null } } });
   });
 
   it("edits only the duration and clears it with null", async () => {
@@ -190,5 +192,106 @@ describe("Trip activity use cases", () => {
     expect(await create()).toEqual(failure);
     scope.findMemberRole = async () => failure;
     expect(await domain.listTripActivities.execute(dependencies(), context)).toEqual(failure);
+  });
+});
+
+describe("createTripActivity author participation (T52)", () => {
+  const first = id(30), second = id(31), mine = new Date("2026-09-25T12:00:00.456Z");
+  const wide = { ...day, endsAt: new Date("2026-09-25T20:00:00Z") };
+  let recordsLocal: Activity[], parts: ActivityParticipation[], log: string[], failOn: string | undefined, ids: number;
+  const act = (n: ObjectId, at: string, durationMinutes: number | null): Activity => ({ id: n, tripId, dayId, title: "Plan", description: null,
+    scheduledAt: new Date(at), durationMinutes, mapsUrl: null, createdBy: other, createdAt });
+  const part = (activityId: ObjectId, userId: ObjectId, status: ActivityParticipation["status"]): ActivityParticipation =>
+    ({ id: id(60 + parts.length), tripId, activityId, userId, status, updatedAt: createdAt });
+  const port = (): TripActivityPort => {
+    const scope: TripActivityScope = {
+      findMemberRole: async () => domain.ok("participant"), findTrip: async () => domain.ok({ id: tripId }),
+      listDays: async () => domain.ok([wide]), list: async () => domain.ok(recordsLocal),
+      find: async (a) => domain.ok(recordsLocal.find((r) => r.id === a)),
+      listUserParticipations: async (u) => domain.ok(parts.filter((p) => p.userId === u)),
+      saveParticipation: async (p) => {
+        if (failOn === "save") return domain.err(new domain.UnknownError("save"));
+        log.push(`save:${p.activityId}:${p.status}`);
+        parts = [...parts.filter((r) => !(r.activityId === p.activityId && r.userId === p.userId)), p];
+        return domain.ok(p);
+      },
+      insert: async (a) => {
+        if (failOn === "insert") return domain.err(new domain.UnknownError("insert"));
+        log.push(`insert:${a.id}`); recordsLocal.push(a); return domain.ok(undefined);
+      },
+      replace: async () => domain.ok(undefined), remove: async () => domain.ok(undefined),
+    };
+    return { withReadSnapshot: async (_, w) => w(scope), withTransaction: async (_, w) => {
+      const saved = { r: [...recordsLocal], p: [...parts] };
+      const result = await w(scope);
+      if (!result.ok) { recordsLocal = saved.r; parts = saved.p; }
+      return result;
+    } };
+  };
+  const run = (extra: Record<string, unknown> = {}, durationMinutes: number | null = 60) => domain.createTripActivity.execute(
+    { activities: port(), createId: () => id(ids++), now: () => createdAt },
+    { ...context, dayId, title: "Mio", scheduledAt: mine, durationMinutes, ...extra } as never);
+  beforeEach(() => {
+    recordsLocal = [act(first, "2026-09-25T11:30:00Z", 60), act(second, "2026-09-25T12:30:00Z", 30), act(id(32), "2026-09-25T16:00:00Z", 30)];
+    parts = []; log = []; failOn = undefined; ids = 200;
+    parts = [part(first, actor, "going"), part(second, actor, "going"), part(id(32), actor, "going"), part(first, other, "going")];
+  });
+  const snapshot = () => [first, second].map((a) => { const r = recordsLocal.find((x) => x.id === a)!;
+    return { activityId: a, scheduledAt: r.scheduledAt.toISOString(), durationMinutes: r.durationMinutes }; });
+  const chosen = { scheduledAt: mine.toISOString(), durationMinutes: 60 };
+
+  it("inserts the activity and the author's going without records for other members", async () => {
+    parts = []; recordsLocal = [];
+    const result = await run();
+    expect(result).toMatchObject({ ok: true, value: { outcome: "created", participation: { activityId: id(200), userId: actor, status: "going" } } });
+    expect(log).toEqual([`insert:${id(200)}`, `save:${id(200)}:going`]);
+    expect(parts.filter((p) => p.userId !== actor)).toEqual([]);
+  });
+
+  it("asks for confirmation listing every incompatible plan without writing", async () => {
+    const result = await run();
+    expect(result).toMatchObject({ ok: true, value: { outcome: "confirmation_required",
+      conflicts: [{ activityId: first }, { activityId: second }], activity: { scheduledAt: mine, durationMinutes: 60 } } });
+    expect(log).toEqual([]); expect(recordsLocal).toHaveLength(3);
+  });
+
+  it("applies a matching confirmation: not_going in the previous plans and going in the new one", async () => {
+    const result = await run({ confirmedConflicts: snapshot(), confirmedActivity: chosen });
+    expect(result).toMatchObject({ ok: true, value: { outcome: "created" } });
+    expect(log).toEqual([`insert:${id(200)}`, `save:${first}:not_going`, `save:${second}:not_going`, `save:${id(200)}:going`]);
+    expect(parts.find((p) => p.activityId === id(32))?.status).toBe("going");
+    expect(parts.find((p) => p.activityId === first && p.userId === other)?.status).toBe("going");
+  });
+
+  it("asks again, without writing, when the conflict set changed or the chosen schedule differs", async () => {
+    const stale = snapshot().slice(0, 1);
+    expect(await run({ confirmedConflicts: stale, confirmedActivity: chosen })).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+    expect(await run({ confirmedConflicts: snapshot(), confirmedActivity: { ...chosen, durationMinutes: 45 } }))
+      .toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+    expect(await run({ confirmedConflicts: snapshot() })).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+    expect(log).toEqual([]);
+  });
+
+  it("rejects malformed confirmations", async () => {
+    expect(await run({ confirmedConflicts: "x", confirmedActivity: chosen })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+    expect(await run({ confirmedConflicts: snapshot(), confirmedActivity: "x" })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+    expect(log).toEqual([]);
+  });
+
+  it.each(["insert", "save"])("aborts everything when %s fails", async (step) => {
+    failOn = step;
+    const before = structuredClone(parts);
+    expect(await run({ confirmedConflicts: snapshot(), confirmedActivity: chosen })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+    expect(recordsLocal).toHaveLength(3); expect(parts).toEqual(before);
+  });
+
+  it("does not ask for confirmation nor write when the activity itself is invalid", async () => {
+    expect(await run({}, 600)).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "durationMinutes" }] } });
+    expect(log).toEqual([]);
+  });
+
+  it("ignores not_going and pending plans", async () => {
+    parts = [part(first, actor, "not_going"), part(second, actor, "pending")];
+    expect(await run()).toMatchObject({ ok: true, value: { outcome: "created" } });
   });
 });
