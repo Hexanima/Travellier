@@ -165,7 +165,7 @@ PUT requiere un body como `{ "status": "going" }`. Los únicos estados que se pu
 
 No se crean participaciones automáticamente: GET sin registro devuelve `null` y no escribe. Guardar `going` o `not_going` limpia atómicamente `decisionRequired` (la marca la escribirá T53; `pending` rechazado no la modifica). Cambiar la respuesta propia conserva íntegramente las respuestas de otros miembros y no modifica la actividad ni los votos históricos.
 
-Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o de otro Trip responde 404 `ActivityNotFoundError`. Identificadores malformados, JSON inválido o un body que no sea objeto responden 400. Un estado ausente, `null` o distinto de los tres admitidos responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503; los fallos inesperados responden 500 genérico.
+Sin JWT válido responde 401. Usuarios externos o expulsados y Trips inaccesibles responden 404 `TripNotFoundError`; una actividad ausente o de otro Trip responde 404 `ActivityNotFoundError`. Identificadores malformados, JSON inválido o un body que no sea objeto responden 400. Un estado ausente, `null`, `pending` o distinto de `going`/`not_going` responde 422 `ValidationError`, con detalles en `error.fields`. Una dependencia sin configurar responde 503; los fallos inesperados responden 500 genérico.
 
 ### Confirmación de conflictos de agenda (T51)
 
