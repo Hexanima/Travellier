@@ -30,11 +30,15 @@ describe("createPost", () => {
     } });
   });
 
-  it.each(Array.from({ length: 8 }, (_, mask) => mask))("accepts independent link combination %i", (mask) => {
+  it.each(Array.from({ length: 8 }, (_, mask) => mask))("validates link combination %i", (mask) => {
     const selected = { activityId: mask & 1 ? links.activityId : null,
       parentPostId: mask & 2 ? links.parentPostId : null, transportId: mask & 4 ? links.transportId : null };
-    expect(domain.createPost({ ...input(), ...selected }, linkedContext()))
-      .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null, ...selected } });
+    const result = domain.createPost({ ...input(), ...selected }, linkedContext());
+    if ((mask & 2) !== 0 && (mask & 5) !== 0) {
+      expect(result).toMatchObject(issue("parentPostId", "conflict"));
+      return;
+    }
+    expect(result).toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null, ...selected } });
   });
 
   it.each([0, 1, 2, 3])("rejects self-reference when creating link combination %i", (mask) => {
@@ -106,12 +110,28 @@ describe("createPost", () => {
     expect(domain.createPost(input(), { ...context(), [key]: { id: id(99), tripId: id(99) } })).toMatchObject({ ok: true });
   });
 
-  it("accepts activity and parent post on other days and transport to another destination within the Trip", () => {
+  it("accepts activity and transport on other days or destinations within the Trip", () => {
     const resolved = { ...linkedContext(),
       activity: { ...linkedContext().activity, dayId: id(20), scheduledAt: new Date("2026-09-26T12:00:00Z") },
-      parentPost: { ...linkedContext().parentPost, dayId: id(21) },
       transport: { ...linkedContext().transport, destinationId: id(22) } };
-    expect(domain.createPost({ ...input(), ...links }, resolved)).toMatchObject({ ok: true, value: links });
+    const both = { activityId: links.activityId, transportId: links.transportId };
+    expect(domain.createPost({ ...input(), ...both }, resolved)).toMatchObject({ ok: true, value: both });
+  });
+
+  it.each([
+    ["activity", { parentPostId: links.parentPostId, activityId: links.activityId }],
+    ["transport", { parentPostId: links.parentPostId, transportId: links.transportId }],
+    ["activity and transport", links],
+  ])("rejects a parent post together with %s", (_name, selected) => {
+    expect(domain.createPost({ ...input(), ...selected }, linkedContext())).toMatchObject(issue("parentPostId", "conflict"));
+  });
+
+  it.each([
+    ["independent", {}], ["parent only", { parentPostId: links.parentPostId }],
+    ["activity only", { activityId: links.activityId }], ["transport only", { transportId: links.transportId }],
+    ["activity and transport", { activityId: links.activityId, transportId: links.transportId }],
+  ])("accepts %s", (_name, selected) => {
+    expect(domain.createPost({ ...input(), ...selected }, linkedContext())).toMatchObject({ ok: true, value: selected });
   });
 
   it("preserves UTC publication instants and milliseconds supplied with a local offset", () => {
@@ -120,7 +140,7 @@ describe("createPost", () => {
   });
 
   it("returns independent dates without mutating input or resolved context", () => {
-    const payload = Object.freeze({ ...input(), ...links }), resolved = linkedContext();
+    const payload = Object.freeze({ ...input(), activityId: links.activityId, transportId: links.transportId }), resolved = linkedContext();
     const before = structuredClone({ payload, resolved });
     const first = domain.createPost(payload, resolved), second = domain.createPost(payload, resolved);
     expect(first.ok).toBe(true);
@@ -138,9 +158,30 @@ const post = (linked = false): domain.Post => ({
 });
 
 describe("relinkPost", () => {
-  it("adds all three links to an existing spontaneous post through the public domain export", () => {
+  it("adds activity and transport to an existing spontaneous post through the public domain export", () => {
     expect(domain).toHaveProperty("relinkPost", expect.any(Function));
-    expect(domain.relinkPost(post(), links, linkedContext())).toEqual({ ok: true, value: post(true) });
+    const both = { activityId: links.activityId, transportId: links.transportId };
+    expect(domain.relinkPost(post(), both, linkedContext())).toEqual({ ok: true, value: { ...post(), ...both } });
+  });
+
+  it("rejects adding a parent to a post that keeps activity or transport", () => {
+    const withActivity = { ...post(), activityId: links.activityId };
+    expect(domain.relinkPost(withActivity, { parentPostId: links.parentPostId }, linkedContext()))
+      .toMatchObject(issue("parentPostId", "conflict"));
+    const withTransport = { ...post(), transportId: links.transportId };
+    expect(domain.relinkPost(withTransport, { parentPostId: links.parentPostId }, linkedContext()))
+      .toMatchObject(issue("parentPostId", "conflict"));
+  });
+
+  it("moves to a parent when the same change clears activity and transport", () => {
+    expect(domain.relinkPost(post(true), { parentPostId: links.parentPostId, activityId: null, transportId: null }, linkedContext()))
+      .toEqual({ ok: true, value: { ...post(), parentPostId: links.parentPostId } });
+  });
+
+  it("rejects adding activity to a child post", () => {
+    const child = { ...post(), parentPostId: links.parentPostId };
+    expect(domain.relinkPost(child, { activityId: links.activityId }, linkedContext()))
+      .toMatchObject(issue("parentPostId", "conflict"));
   });
 
   it.each([0, 1, 2, 3])("rejects self-reference when relinking combination %i without changing the original post", (mask) => {
@@ -156,33 +197,39 @@ describe("relinkPost", () => {
       .toEqual({ ok: true, value: { ...post(), [field]: links[field] } });
   });
 
-  it.each(references)("replaces %s while retaining the other links and original post data", (field, key) => {
-    expect(domain.relinkPost(post(true), { [field]: id(10) }, {
+  const compatible = (field: string) => field === "parentPostId"
+    ? { ...post(), parentPostId: links.parentPostId } : { ...post(true), parentPostId: null };
+
+  it.each(references)("replaces %s while retaining the compatible links and original post data", (field, key) => {
+    const base = compatible(field);
+    expect(domain.relinkPost(base, { [field]: id(10) }, {
       ...linkedContext(), [key]: { id: id(10), tripId },
-    })).toEqual({ ok: true, value: { ...post(true), [field]: id(10) } });
+    })).toEqual({ ok: true, value: { ...base, [field]: id(10) } });
   });
 
   it.each(references)("removes %s without changing the remaining links", (field, key) => {
-    expect(domain.relinkPost(post(true), { [field]: null }, { ...linkedContext(), [key]: undefined }))
-      .toEqual({ ok: true, value: { ...post(true), [field]: null } });
+    const base = compatible(field);
+    expect(domain.relinkPost(base, { [field]: null }, { ...linkedContext(), [key]: undefined }))
+      .toEqual({ ok: true, value: { ...base, [field]: null } });
   });
 
   it("removes all links to make the post independent", () => {
-    expect(domain.relinkPost(post(true), { activityId: null, parentPostId: null, transportId: null }, context()))
+    expect(domain.relinkPost({ ...post(true), parentPostId: null }, { activityId: null, parentPostId: null, transportId: null }, context()))
       .toEqual({ ok: true, value: post() });
   });
 
   it("preserves every omitted link", () => {
-    expect(domain.relinkPost(post(true), {}, linkedContext())).toEqual({ ok: true, value: post(true) });
+    const base = { ...post(true), parentPostId: null };
+    expect(domain.relinkPost(base, {}, linkedContext())).toEqual({ ok: true, value: base });
   });
 
   it.each(references)("preserves explicitly undefined %s", (field) => {
-    expect(domain.relinkPost(post(true), { [field]: undefined }, linkedContext()))
-      .toEqual({ ok: true, value: post(true) });
+    const base = { ...post(true), parentPostId: null };
+    expect(domain.relinkPost(base, { [field]: undefined }, linkedContext())).toEqual({ ok: true, value: base });
   });
 
   it.each(references)("rejects cross-Trip replacement of %s without changing the original post", (field, key) => {
-    const original = Object.freeze(post(true)), before = structuredClone(original);
+    const original = Object.freeze(compatible(field)), before = structuredClone(original);
     expect(domain.relinkPost(original, { [field]: id(10) }, {
       ...linkedContext(), [key]: { id: id(10), tripId: id(99) },
     })).toMatchObject(issue(field, "mismatch"));
@@ -190,14 +237,14 @@ describe("relinkPost", () => {
   });
 
   it.each(references)("rejects unresolved replacement of %s without changing the original post", (field, key) => {
-    const original = Object.freeze(post(true)), before = structuredClone(original);
+    const original = Object.freeze(compatible(field)), before = structuredClone(original);
     expect(domain.relinkPost(original, { [field]: id(10) }, { ...linkedContext(), [key]: null }))
       .toMatchObject(issue(field, "not_found"));
     expect(original).toEqual(before);
   });
 
   it("validates retained links as well as replacements", () => {
-    expect(domain.relinkPost(post(true), { activityId: null }, {
+    expect(domain.relinkPost({ ...post(), parentPostId: links.parentPostId }, { activityId: null }, {
       ...linkedContext(), parentPost: { id: links.parentPostId, tripId: id(99) },
     })).toMatchObject(issue("parentPostId", "mismatch"));
   });
@@ -208,23 +255,62 @@ describe("relinkPost", () => {
   });
 
   it("keeps createdAt with milliseconds and drops any legacy day", () => {
-    const result = domain.relinkPost({ ...post(), dayId: id(2) }, links, linkedContext());
-    expect(result).toEqual({ ok: true, value: post(true) });
+    const result = domain.relinkPost({ ...post(), dayId: id(2) }, { activityId: links.activityId }, linkedContext());
+    expect(result).toEqual({ ok: true, value: { ...post(), activityId: links.activityId } });
     if (result.ok) expect(result.value.createdAt.getMilliseconds()).toBe(789);
   });
 
   it("ignores extra caller fields that attempt to change identity, ownership or content", () => {
-    expect(domain.relinkPost(post(), { ...links, id: id(99), tripId: id(99), dayId: id(99), authorId: id(99),
+    expect(domain.relinkPost(post(), { activityId: links.activityId, id: id(99), tripId: id(99), dayId: id(99), authorId: id(99),
       createdAt: new Date(0), description: "Changed", mapsUrl: null } as never, linkedContext()))
-      .toEqual({ ok: true, value: post(true) });
+      .toEqual({ ok: true, value: { ...post(), activityId: links.activityId } });
   });
 
   it("returns an independent publication date and preserves the resolved context", () => {
     const original = Object.freeze(post()), resolved = linkedContext(), before = structuredClone({ original, resolved });
-    const result = domain.relinkPost(original, links, resolved);
+    const result = domain.relinkPost(original, { activityId: links.activityId, transportId: links.transportId }, resolved);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     result.value.createdAt.setTime(0);
     expect({ original, resolved }).toEqual(before);
+  });
+});
+
+describe("resolvePostChain", () => {
+  const chainPost = (n: number, fields: Partial<domain.Post> = {}): domain.Post =>
+    ({ ...post(), id: id(n), ...fields });
+  const lookup = (posts: domain.Post[]) => (postId: domain.ObjectId) => posts.find((p) => p.id === postId);
+
+  it("resolves the root activity of A -> B -> C by walking to the highest ancestor", () => {
+    const c = chainPost(30, { activityId: id(5) }), b = chainPost(31, { parentPostId: c.id }), a = chainPost(32, { parentPostId: b.id });
+    expect(domain).toHaveProperty("resolvePostChain", expect.any(Function));
+    expect(domain.resolvePostChain(a, lookup([a, b, c]))).toMatchObject({ ok: true,
+      value: { rootPostId: c.id, rootActivityId: id(5), ancestors: [b, c] } });
+  });
+
+  it("supports branches that share the same root", () => {
+    const root = chainPost(30, { activityId: id(5) }), b = chainPost(31, { parentPostId: root.id });
+    const d = chainPost(33, { parentPostId: root.id }), e = chainPost(34, { parentPostId: b.id });
+    const all = [root, b, d, e];
+    for (const leaf of [d, e]) {
+      expect(domain.resolvePostChain(leaf, lookup(all))).toMatchObject({ ok: true, value: { rootActivityId: id(5) } });
+    }
+  });
+
+  it("returns a null root activity for independent roots and a post without parent", () => {
+    const root = chainPost(30), child = chainPost(31, { parentPostId: root.id });
+    expect(domain.resolvePostChain(child, lookup([root, child]))).toMatchObject({ ok: true, value: { rootActivityId: null } });
+    expect(domain.resolvePostChain(root, lookup([root]))).toMatchObject({ ok: true, value: { rootPostId: root.id, rootActivityId: null, ancestors: [] } });
+  });
+
+  it("reports corrupt cycles and missing ancestors without hanging", () => {
+    const a = chainPost(30, { parentPostId: id(31) }), b = chainPost(31, { parentPostId: id(32) }), c = chainPost(32, { parentPostId: id(30) });
+    expect(domain.resolvePostChain(a, lookup([a, b, c]))).toMatchObject(issue("parentPostId", "cycle"));
+    expect(domain.resolvePostChain(a, lookup([a]))).toMatchObject(issue("parentPostId", "not_found"));
+  });
+
+  it("stops at the technical limit", () => {
+    const posts = Array.from({ length: 1100 }, (_, i) => chainPost(1000 + i, { parentPostId: i === 1099 ? null : id(1001 + i) }));
+    expect(domain.resolvePostChain(posts[0]!, lookup(posts))).toMatchObject(issue("parentPostId", "too_deep"));
   });
 });

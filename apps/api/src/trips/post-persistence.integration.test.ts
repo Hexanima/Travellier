@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
+import { childPostsQuery } from "../adapters/mongodb/trip-post-repository.js";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
 
 describe("post persistence and transactions", () => {
@@ -77,6 +78,83 @@ describe("post persistence and transactions", () => {
       f.api.updatePost!({ ...f.context(), postId: post.id, mapsUrl: "Maps" })]);
     expect(results.every((r) => r.ok)).toBe(true);
     expect(await f.api.getPost!({ ...f.context(), postId: post.id })).toMatchObject({ ok: true, value: { description: "Edited", mapsUrl: "Maps" } });
+  });
+
+  it("serializes two opposite parent edits so exactly one wins and no cycle is persisted", async () => {
+    const { post: a } = await create(), { post: b } = await create();
+    for (let round = 0; round < 3; round++) {
+      await f.db.collection("posts").updateMany({}, { $set: { parentPostId: null } });
+      const results = await Promise.all([f.api.updatePost!({ ...f.context(), postId: a.id, parentPostId: b.id }),
+        f.api.updatePost!({ ...f.context(), postId: b.id, parentPostId: a.id })]);
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      const failed = results.find((r) => !r.ok);
+      expect(failed).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "parentPostId", code: "cycle" }] } });
+      const stored = await f.db.collection("posts").find({ tripId: f.trip }).toArray();
+      expect(stored.filter((p) => p.parentPostId !== null)).toHaveLength(1);
+    }
+  });
+
+  it("serializes concurrent edits that could close a longer cycle", async () => {
+    const { post: a } = await create(), { post: b } = await create(), { post: c } = await create();
+    const results = await Promise.all([f.api.updatePost!({ ...f.context(), postId: a.id, parentPostId: b.id }),
+      f.api.updatePost!({ ...f.context(), postId: b.id, parentPostId: c.id }),
+      f.api.updatePost!({ ...f.context(), postId: c.id, parentPostId: a.id })]);
+    expect(results.filter((r) => r.ok)).toHaveLength(2);
+    const stored = new Map((await f.db.collection("posts").find({ tripId: f.trip }).toArray()).map((p) => [p._id.toHexString(), p.parentPostId?.toHexString() ?? null]));
+    for (const start of stored.keys()) {
+      const seen = new Set<string>(); let next: string | null | undefined = start;
+      while (next) { expect(seen.has(next)).toBe(false); seen.add(next); next = stored.get(next); }
+    }
+  });
+
+  it("rolls back a rejected cycle or conflict without partial writes and keeps associated content", async () => {
+    const { post: a } = await create(), { post: b } = await create({ parentPostId: a.id });
+    await f.db.collection("postPhotos").insertOne({ tripId: f.trip, postId: new ObjectId(a.id), value: "kept" });
+    const before = await f.snapshot();
+    expect(await f.api.updatePost!({ ...f.context(), postId: a.id, description: "No", parentPostId: b.id }))
+      .toMatchObject({ ok: false, error: { issues: [{ code: "cycle" }] } });
+    expect(await f.snapshot()).toEqual(before);
+    expect(await f.db.collection("postPhotos").findOne({ postId: new ObjectId(a.id) })).toMatchObject({ value: "kept" });
+  });
+
+  it("keeps the chain, publication and content when the root activity is deleted, and stops projecting it", async () => {
+    const activity = await f.api.createActivity!({ ...f.context(), dayId: domainId(f.day), title: "Cena", scheduledAt: f.occurrence });
+    if (!activity.ok) throw activity.error;
+    if (activity.value.outcome !== "created") throw new Error("Activity not created.");
+    const activityId = activity.value.activity.id;
+    const { post: root } = await create({ activityId, description: "Raiz" });
+    const { post: a } = await create({ parentPostId: root.id, description: "A" });
+    const { post: b } = await create({ parentPostId: a.id, description: "B" });
+    const { post: d } = await create({ parentPostId: a.id, description: "D" });
+    for (const post of [root, a, b, d]) {
+      for (const name of ["postPhotos", "postExpenses"])
+        await f.db.collection(name).insertOne({ tripId: f.trip, postId: new ObjectId(post.id), value: post.id });
+    }
+    const before = await f.db.collection("posts").find({ tripId: f.trip }).sort({ _id: 1 }).toArray();
+    const projected = await f.api.getPostChain!({ ...f.context(), postId: b.id });
+    expect(projected).toMatchObject({ ok: true, value: { rootActivityId: activityId } });
+    expect((await f.api.deleteActivity!({ ...f.context(), activityId })).ok).toBe(true);
+    const after = await f.db.collection("posts").find({ tripId: f.trip }).sort({ _id: 1 }).toArray();
+    expect(after).toEqual(before.map((p) => p._id.toHexString() === root.id ? { ...p, activityId: null } : p));
+    for (const post of [b, d]) {
+      expect(await f.api.getPostChain!({ ...f.context(), postId: post.id }))
+        .toMatchObject({ ok: true, value: { rootActivityId: null, parent: { id: a.id } } });
+    }
+    expect(await f.api.getPostChain!({ ...f.context(), postId: a.id }))
+      .toMatchObject({ ok: true, value: { parent: { id: root.id }, children: expect.any(Array) } });
+    for (const name of ["postPhotos", "postExpenses"])
+      expect(await f.db.collection(name).countDocuments({ tripId: f.trip })).toBe(4);
+  });
+
+  it("runs the exact listChildren query as an index scan without COLLSCAN", async () => {
+    const { post: root } = await create();
+    await create({ parentPostId: root.id });
+    const { filter, sort } = childPostsQuery(f.trip, new ObjectId(root.id));
+    const plan = await f.db.collection("posts").find(filter).sort(sort).explain("queryPlanner");
+    const winning = JSON.stringify(plan.queryPlanner.winningPlan);
+    expect(winning).toContain("IXSCAN");
+    expect(winning).not.toContain("COLLSCAN");
+    expect(winning).toContain('"stage":"IXSCAN","keyPattern":{"parentPostId":1},"indexName":"parentPostId"');
   });
 
   it("serializes joint creation with Trip deletion without orphaning either record", async () => {

@@ -21,6 +21,10 @@ const toPost = (value: PostDocument): Post => ({ id: domainId(value._id), tripId
   authorId: domainId(value.authorId), description: value.description, mapsUrl: value.mapsUrl, createdAt: value.createdAt,
   activityId: optionalId(value.activityId), parentPostId: optionalId(value.parentPostId), transportId: optionalId(value.transportId) });
 
+/** Exact filter and sort `listChildren` runs; shared with the index test so the plan checked is the real one. */
+export const childPostsQuery = (tripId: MongoObjectId, postId: MongoObjectId) =>
+  ({ filter: { tripId, parentPostId: postId }, sort: { createdAt: -1, _id: -1 } }) as const;
+
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripPostScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
   const posts = database.collection<PostDocument>("posts");
@@ -49,6 +53,11 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     },
     // The index serves the publication order; the use case applies the stable id-descending tie-break.
     list: async () => ok((await posts.find(query, options).sort({ createdAt: -1 }).toArray()).map(toPost)),
+    // Planner uses the parentPostId index (checked by explain in post-persistence tests); the tripId filter and the sort run on its results.
+    listChildren: async (postId) => {
+      const { filter, sort } = childPostsQuery(mongoTripId, new MongoObjectId(postId));
+      return ok((await posts.find(filter, options).sort(sort).toArray()).map(toPost));
+    },
     insert: async (post) => {
       if (post.tripId !== tripId) throw new TripNotFoundError();
       await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),

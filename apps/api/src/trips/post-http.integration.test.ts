@@ -36,15 +36,19 @@ describe("post HTTP API", () => {
     expect(response.statusCode).toBe(200);
     const edited = { ...post, description: null, mapsUrl: "Maps" };
     expect(JSON.parse(response.body)).toEqual({ post: edited });
-    expect(JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body)).toEqual({ post: edited });
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body))
+      .toEqual({ post: edited, parent: null, children: [], rootActivityId: null });
     expect(JSON.parse((await f.request("GET")).body)).toEqual({ posts: [edited] });
   });
 
-  it.each(Array.from({ length: 8 }, (_, i) => i))("creates combination %i and later links and unlinks independently", async (mask) => {
+  it.each(Array.from({ length: 8 }, (_, i) => i).filter((mask) => !(mask & 2) || !(mask & 5)))("creates combination %i and later links and unlinks independently", async (mask) => {
     const all = await links();
     const selected = { activityId: mask & 1 ? all.activityId : null, parentPostId: mask & 2 ? all.parentPostId : null, transportId: mask & 4 ? all.transportId : null };
     let post = await create(selected);
     expect(post).toMatchObject(selected);
+    // A parent excludes direct activity/transport: start every field cycle from an independent post.
+    const cleared = await f.request("PATCH", `${f.path()}/${post.id}`, { activityId: null, parentPostId: null, transportId: null });
+    expect(cleared.statusCode).toBe(200); post = { ...post, activityId: null, parentPostId: null, transportId: null };
     for (const [field, value] of Object.entries(all)) {
       let response = await f.request("PATCH", `${f.path()}/${post.id}`, { [field]: value });
       expect(response.statusCode).toBe(200); post = { ...post, [field]: value };
@@ -56,7 +60,7 @@ describe("post HTTP API", () => {
   });
 
   it.each(["activityId", "parentPostId", "transportId"])("invalid %s rejects the entire PATCH and POST without writes", async (field) => {
-    const post = await create(await links()), before = await f.snapshot();
+    const all = await links(), post = await create({ activityId: all.activityId, transportId: all.transportId }), before = await f.snapshot();
     const foreign = new ObjectId(), collection = { activityId: "activities", parentPostId: "posts", transportId: "transports" }[field]!;
     await f.db.collection(collection).insertOne({ _id: foreign, tripId: new ObjectId(), destinationId: new ObjectId(), direction: "outbound" });
     const baseline = await f.snapshot();
@@ -68,6 +72,61 @@ describe("post HTTP API", () => {
     }
     expect((await f.request("GET", `${f.path()}/${post.id}`)).statusCode).toBe(200);
     expect(baseline[0]).toEqual(before[0]);
+  });
+
+  it("rejects a parent together with activity or transport on POST and PATCH without writes", async () => {
+    const all = await links(), plain = await create({ activityId: all.activityId });
+    const transported = await create({ transportId: all.transportId }), before = await f.snapshot();
+    for (const fields of [{ parentPostId: all.parentPostId, activityId: all.activityId },
+      { parentPostId: all.parentPostId, transportId: all.transportId }, all]) {
+      const response = await f.request("POST", f.path(), { ...input(), ...fields });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "parentPostId", code: "conflict" }] } });
+      expect(await f.snapshot()).toEqual(before);
+    }
+    for (const target of [plain, transported]) {
+      const response = await f.request("PATCH", `${f.path()}/${target.id}`, { parentPostId: all.parentPostId });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "parentPostId", code: "conflict" }] } });
+      expect(await f.snapshot()).toEqual(before);
+    }
+    const moved = await f.request("PATCH", `${f.path()}/${plain.id}`, { parentPostId: all.parentPostId, activityId: null });
+    expect(moved.statusCode).toBe(200);
+    expect(JSON.parse(moved.body).post).toMatchObject({ parentPostId: all.parentPostId, activityId: null });
+  });
+
+  it("rejects indirect cycles and self-reference leaving Mongo untouched", async () => {
+    const a = await create(), b = await create({ parentPostId: a.id }), c = await create({ parentPostId: b.id });
+    const before = await f.snapshot();
+    for (const [target, parent, code] of [[a.id, c.id, "cycle"], [a.id, b.id, "cycle"], [b.id, c.id, "cycle"], [c.id, c.id, "self_reference"]]) {
+      const response = await f.request("PATCH", `${f.path()}/${target}`, { parentPostId: parent });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "parentPostId", code }] } });
+      expect(await f.snapshot()).toEqual(before);
+    }
+  });
+
+  it("returns parent, direct children and root activity in the post detail", async () => {
+    const all = await links(), root = await create({ activityId: all.activityId });
+    const a = await create({ parentPostId: root.id }), b = await create({ parentPostId: a.id }), d = await create({ parentPostId: a.id });
+    const detail = JSON.parse((await f.request("GET", `${f.path()}/${a.id}`)).body);
+    expect(detail.post).toEqual(a);
+    expect(detail.parent).toEqual({ id: root.id, authorId: root.authorId, createdAt: root.createdAt, description: root.description });
+    expect(detail.children.map((c: { id: string }) => c.id)).toEqual([d.id, b.id]);
+    expect(Object.keys(detail.children[0]).sort()).toEqual(["authorId", "createdAt", "description", "id"]);
+    expect(detail.rootActivityId).toBe(all.activityId);
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${b.id}`)).body)).toMatchObject({ rootActivityId: all.activityId, children: [] });
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${root.id}`)).body)).toMatchObject({ parent: null });
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${all.parentPostId}`)).body))
+      .toMatchObject({ parent: null, children: [], rootActivityId: null });
+  });
+
+  it("hides the chain of a post from another Trip", async () => {
+    const root = await create(), foreign = new ObjectId();
+    await f.db.collection("posts").insertOne({ _id: foreign, tripId: new ObjectId(), authorId: f.actor, createdAt: new Date(),
+      description: null, mapsUrl: null, activityId: null, parentPostId: new ObjectId(root.id), transportId: null });
+    expect((await f.request("GET", `${f.path()}/${foreign}`)).statusCode).toBe(404);
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${root.id}`)).body).children).toEqual([]);
   });
 
   it("rejects self-reference and malformed text without modifying the post", async () => {
@@ -220,15 +279,17 @@ describe("post HTTP API", () => {
 
   it("reflects transport and parent links and preserves post content when its activity is deleted", async () => {
     const transport = await f.configureTransports(), parent = await create();
-    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), transportId: transport.id, parentPostId: parent.id,
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), transportId: transport.id,
       newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
     expect(response.statusCode).toBe(201); const { post, activity } = JSON.parse(response.body);
+    const child = await create({ parentPostId: parent.id });
     const itinerary = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
     // Transitional (T56): the itinerary does not project posts without a day yet; links are visible through the post API.
     expect(itinerary.posts).toEqual([]);
-    expect(post).toMatchObject({ transportId: transport.id, parentPostId: parent.id, activityId: activity.id });
+    expect(post).toMatchObject({ transportId: transport.id, parentPostId: null, activityId: activity.id });
+    expect(child).toMatchObject({ parentPostId: parent.id, activityId: null, transportId: null });
     expect((await f.request("DELETE", `/trips/${f.trip}/activities/${activity.id}`)).statusCode).toBe(204);
-    expect(JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body)).toEqual({ post: { ...post, activityId: null } });
+    expect(JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body)).toMatchObject({ post: { ...post, activityId: null }, rootActivityId: null });
   });
 
   it("returns 503 for unavailable dependencies and generic 500 for persistence errors", async () => {

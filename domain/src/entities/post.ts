@@ -59,6 +59,10 @@ export const createPost = (input: CreatePostInput, context: CreatePostContext): 
       return invalid(field, "mismatch", `Post ${field} must reference the supplied entity in the same Trip.`);
     }
   }
+  // A child hangs only from its immediate parent; the root activity is projected by walking the chain.
+  if (input.parentPostId != null && (input.activityId != null || input.transportId != null)) {
+    return invalid("parentPostId", "conflict", "A post linked to a parent cannot also link directly to an activity or transport.");
+  }
   for (const field of ["description", "mapsUrl"] as const) {
     if (input[field] != null && typeof input[field] !== "string") {
       return invalid(field, "invalid", `Post ${field} must be text or null.`);
@@ -83,3 +87,29 @@ export const relinkPost = (post: Post, links: Partial<PostLinks>, context: Creat
     parentPostId: links.parentPostId === undefined ? post.parentPostId : links.parentPostId,
     transportId: links.transportId === undefined ? post.transportId : links.transportId,
   }, context);
+
+/** Technical anti-corruption bound; there is no functional maximum depth. */
+export const MAX_POST_CHAIN_DEPTH = 1000;
+
+export interface PostChain {
+  /** Nearest parent first, root last. */
+  ancestors: Post[];
+  rootPostId: ObjectId;
+  rootActivityId: ObjectId | null;
+}
+
+/** Walks immediate parents up to the root; tolerates corrupt data by reporting cycles instead of looping. */
+export const resolvePostChain = (post: Post, lookup: (postId: ObjectId) => Post | undefined): Result<PostChain, ValidationError> => {
+  const visited = new Set<ObjectId>([post.id]), ancestors: Post[] = [];
+  let current = post;
+  while (current.parentPostId != null) {
+    if (visited.has(current.parentPostId)) return invalid("parentPostId", "cycle", "Post chain contains a cycle.");
+    if (ancestors.length >= MAX_POST_CHAIN_DEPTH) return invalid("parentPostId", "too_deep", "Post chain exceeds the supported depth.");
+    const parent = lookup(current.parentPostId);
+    if (parent === undefined) return invalid("parentPostId", "not_found", "Post chain references a missing post.");
+    visited.add(parent.id);
+    ancestors.push(parent);
+    current = parent;
+  }
+  return ok({ ancestors, rootPostId: current.id, rootActivityId: current.activityId });
+};
