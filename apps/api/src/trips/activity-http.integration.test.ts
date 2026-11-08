@@ -317,4 +317,46 @@ describe("activity HTTP API", () => {
         expect(await db.collection("activities").countDocuments()).toBe(0);
       });
   });
+
+  describe("decisionRequired over HTTP (T53)", () => {
+    let other: ObjectId, editedId: ObjectId, planA: ObjectId;
+    const part = (activityId: ObjectId, userId: ObjectId, status = "going") => db.collection("activityParticipations").insertOne({
+      _id: new ObjectId(), tripId: trip, activityId, userId, status, updatedAt: new Date("2026-01-01T00:00:00Z"), decisionRequired: null });
+    const seed = (_id: ObjectId, start: string) => db.collection("activities").insertOne({ _id, tripId: trip, dayId: day, title: "Plan",
+      description: null, scheduledAt: new Date(start), durationMinutes: 60, mapsUrl: null, createdBy: actor, createdAt: new Date() });
+    const read = async (user: ObjectId) => JSON.parse((await request("GET", `${path}/${editedId}/participation`, undefined, user)).body).participation;
+    beforeEach(async () => {
+      other = new ObjectId(); editedId = new ObjectId(); planA = new ObjectId();
+      await db.collection("tripMembers").insertOne({ tripId: trip, userId: other, role: "participant", joinedAt: new Date() });
+      await seed(editedId, "2026-09-25T10:30:00Z"); await seed(planA, "2026-09-25T12:00:00Z");
+      await part(editedId, actor); await part(planA, actor); await part(editedId, other);
+    });
+
+    it("returns only the activity on PATCH and exposes the personal marker only to its owner through GET participation", async () => {
+      const response = await request("PATCH", `${path}/${editedId}`, { scheduledAt: "2026-09-25T12:30:00.000Z" });
+      expect(response.statusCode).toBe(200);
+      const body = JSON.parse(response.body);
+      expect(Object.keys(body)).toEqual(["activity"]);
+      expect(response.body).not.toContain("decisionRequired");
+      expect(response.body).not.toContain(other.toHexString());
+      const mine = await read(actor);
+      expect(mine).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict", changedFields: ["scheduledAt"] } });
+      expect(mine.decisionRequired.changedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      const theirs = await read(other);
+      expect(theirs).toMatchObject({ status: "going" });
+      expect(theirs.decisionRequired ?? null).toBeNull();
+    });
+
+    it("clears the marker with a later explicit PUT going/not_going", async () => {
+      await request("PATCH", `${path}/${editedId}`, { scheduledAt: "2026-09-25T12:30:00.000Z" });
+      expect((await request("PUT", `${path}/${editedId}/participation`, { status: "not_going" })).statusCode).toBe(200);
+      expect(await read(actor)).toMatchObject({ status: "not_going", decisionRequired: null });
+    });
+
+    it("leaves the participation untouched when only the title changes", async () => {
+      const before = await read(actor);
+      expect((await request("PATCH", `${path}/${editedId}`, { title: "Nuevo" })).statusCode).toBe(200);
+      expect(await read(actor)).toEqual(before);
+    });
+  });
 });
