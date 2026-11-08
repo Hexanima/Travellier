@@ -49,6 +49,9 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     },
     // The index serves the publication order; the use case applies the stable id-descending tie-break.
     list: async () => ok((await posts.find(query, options).sort({ createdAt: -1 }).toArray()).map(toPost)),
+    // Served by the parentPostId index (tripId filter keeps it inside the Trip); id descending breaks publication ties.
+    listChildren: async (postId) => ok((await posts.find({ ...query, parentPostId: new MongoObjectId(postId) }, options)
+      .sort({ createdAt: -1, _id: -1 }).toArray()).map(toPost)),
     insert: async (post) => {
       if (post.tripId !== tripId) throw new TripNotFoundError();
       await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),

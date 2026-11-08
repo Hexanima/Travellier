@@ -59,6 +59,7 @@ import {
   type UpdateTripPostPayload,
   type TripPostPayload,
   type PostDetailPayload,
+  type TripPostChainResult,
   type PostEditableFields,
   type Result,
   createObjectId,
@@ -121,6 +122,7 @@ export interface TripApi extends TripInvitationApi {
   createPost?: (payload: CreateTripPostPayload) => AsyncResult<CreateTripPostResult>;
   listPosts?: (payload: TripPostPayload) => AsyncResult<Post[]>;
   getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
+  getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
@@ -642,6 +644,10 @@ export const handleApiRequest = async (
     if (postId?.ok) {
       const detail = { ...context, postId: postId.value };
       if (request.method === "GET") {
+        if (trips?.getPostChain) {
+          const chain = await trips.getPostChain(detail);
+          return chain.ok ? jsonResponse(200, chain.value) : errorResponse(chain.error);
+        }
         if (!trips?.getPost) return unavailableResponse();
         const result = await trips.getPost(detail);
         return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);

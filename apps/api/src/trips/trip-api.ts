@@ -30,6 +30,7 @@ import {
   createTripPost,
   listTripPosts,
   getTripPost,
+  getTripPostChain,
   updateTripPost,
 } from "app-domain";
 
@@ -75,6 +76,7 @@ export const createTripApi = (database: Db): TripApi => {
     createPost: (payload) => createTripPost.execute(postDependencies, payload),
     listPosts: (payload) => listTripPosts.execute(postDependencies, payload),
     getPost: (payload) => getTripPost.execute(postDependencies, payload),
+    getPostChain: (payload) => getTripPostChain.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
     getActivityParticipation: (payload) => getTripActivityParticipation.execute(participationDependencies, payload),
     setActivityParticipation: (payload) => setTripActivityParticipation.execute(participationDependencies, payload),
