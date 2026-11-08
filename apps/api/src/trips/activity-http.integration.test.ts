@@ -183,4 +183,83 @@ describe("activity HTTP API", () => {
     expect(removed.days[0]!.items).toMatchObject([{ kind: "post", id: postId.toHexString() }]);
     expect(removed.posts[0]).toMatchObject({ dayId: day.toHexString(), activityId: null });
   });
+
+  describe("duration", () => {
+    const addNextDay = async () => {
+      const next = new ObjectId();
+      await db.collection("itineraryDays").updateOne({ _id: day }, { $set: { endsAt: new Date("2026-09-26T00:00:00Z") } });
+      await db.collection("itineraryDays").insertOne({ _id: next, tripId: trip, destinationId: destination, date: new Date("2026-09-26T00:00:00Z"),
+        type: "activity", order: 2, startsAt: new Date("2026-09-26T00:00:00Z"), endsAt: new Date("2026-09-26T18:00:00.789Z") });
+      return next;
+    };
+
+    it("creates with and without duration, returning null when absent and no derived end", async () => {
+      const withDuration = await request("POST", path, { ...input(), durationMinutes: 90 });
+      expect(withDuration.statusCode).toBe(201);
+      const created = JSON.parse(withDuration.body).activity;
+      expect(created).toMatchObject({ durationMinutes: 90, scheduledAt: "2026-09-25T12:00:00.456Z" });
+      expect(created).not.toHaveProperty("endsAt");
+      expect((await create())).toMatchObject({ durationMinutes: null });
+      const explicitNull = await request("POST", path, { ...input(), durationMinutes: null });
+      expect(JSON.parse(explicitNull.body).activity).toMatchObject({ durationMinutes: null });
+      expect(JSON.parse((await request("GET", `${path}/${created.id}`)).body).activity).toEqual(created);
+    });
+
+    it.each(["30", true, {}, [], 0, -15, 1.5])("rejects invalid duration %s on POST and PATCH without writing", async (durationMinutes) => {
+      const response = await request("POST", path, { ...input(), durationMinutes });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { code: "ValidationError", fields: [{ field: "durationMinutes" }] } });
+      expect(await db.collection("activities").countDocuments()).toBe(0);
+      const activity = await create(), before = await db.collection("activities").find().toArray();
+      expect((await request("PATCH", `${path}/${activity.id}`, { durationMinutes })).statusCode).toBe(422);
+      expect(await db.collection("activities").find().toArray()).toEqual(before);
+    });
+
+    it("edits only the duration, clears it with null and keeps start milliseconds when editing content", async () => {
+      const activity = await create();
+      const edited = await request("PATCH", `${path}/${activity.id}`, { durationMinutes: 45 });
+      expect(edited.statusCode).toBe(200);
+      expect(JSON.parse(edited.body).activity).toMatchObject({ durationMinutes: 45, scheduledAt: "2026-09-25T12:00:00.456Z" });
+      const content = await request("PATCH", `${path}/${activity.id}`, { title: "Museo" });
+      expect(JSON.parse(content.body).activity).toMatchObject({ title: "Museo", durationMinutes: 45, scheduledAt: "2026-09-25T12:00:00.456Z" });
+      const cleared = await request("PATCH", `${path}/${activity.id}`, { durationMinutes: null });
+      expect(cleared.statusCode).toBe(200);
+      expect(JSON.parse(cleared.body).activity).toMatchObject({ durationMinutes: null });
+      expect(await db.collection("activities").findOne({ _id: new ObjectId(activity.id) })).toMatchObject({ durationMinutes: null,
+        scheduledAt: new Date("2026-09-25T12:00:00.456Z") });
+    });
+
+    it("accepts an interval crossing midnight and an end exactly at the final departure", async () => {
+      const next = await addNextDay();
+      const crossing = await request("POST", path, { ...input(), scheduledAt: "2026-09-25T22:30:00.456Z", durationMinutes: 180 });
+      expect(crossing.statusCode).toBe(201);
+      const atDeparture = await request("POST", path, { ...input(), dayId: next.toHexString(), scheduledAt: "2026-09-26T17:00:00.789Z", durationMinutes: 60 });
+      expect(atDeparture.statusCode).toBe(201);
+      const activity = JSON.parse(atDeparture.body).activity;
+      expect((await request("PATCH", `${path}/${activity.id}`, { scheduledAt: "2026-09-26T16:00:00.789Z", durationMinutes: 120 })).statusCode).toBe(200);
+    });
+
+    it.each([
+      { scheduledAt: "2026-09-25T17:00:00.790Z", durationMinutes: 60 },
+      { scheduledAt: "2026-09-25T17:00:00.789Z", durationMinutes: 61 },
+    ])("rejects an end beyond the departure without writing: %s", async (patch) => {
+      const response = await request("POST", path, { ...input(), ...patch });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "durationMinutes" }] } });
+      expect(await db.collection("activities").countDocuments()).toBe(0);
+      const activity = await create();
+      const before = JSON.parse((await request("GET", `${path}/${activity.id}`)).body);
+      expect((await request("PATCH", `${path}/${activity.id}`, patch)).statusCode).toBe(422);
+      expect(JSON.parse((await request("GET", `${path}/${activity.id}`)).body)).toEqual(before);
+    });
+
+    it("rejects an exceeding duration on PATCH and keeps the stored activity", async () => {
+      const activity = await create();
+      expect((await request("PATCH", `${path}/${activity.id}`, { durationMinutes: 30 })).statusCode).toBe(200);
+      const before = JSON.parse((await request("GET", `${path}/${activity.id}`)).body);
+      expect((await request("PATCH", `${path}/${activity.id}`, { scheduledAt: "2026-09-25T17:45:00Z" })).statusCode).toBe(422);
+      expect((await request("PATCH", `${path}/${activity.id}`, { durationMinutes: 400 })).statusCode).toBe(422);
+      expect(JSON.parse((await request("GET", `${path}/${activity.id}`)).body)).toEqual(before);
+    });
+  });
 });
