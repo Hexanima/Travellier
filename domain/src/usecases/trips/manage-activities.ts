@@ -10,9 +10,10 @@ import type { ObjectId } from "../../value-objects/object-id.js";
 
 export interface TripActivityPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface ActivityDetailPayload extends TripActivityPayload { activityId: ObjectId }
-export type ActivityEditableFields = Pick<Activity, "dayId" | "title" | "scheduledAt" | "description" | "mapsUrl">;
-export type CreateTripActivityPayload = TripActivityPayload & Omit<ActivityEditableFields, "description" | "mapsUrl"> & {
-  description?: string | null; mapsUrl?: string | null;
+export type ActivityEditableFields = Pick<Activity, "dayId" | "title" | "scheduledAt" | "durationMinutes" | "description" | "mapsUrl">;
+export type CreateTripActivityPayload = TripActivityPayload &
+  Omit<ActivityEditableFields, "description" | "mapsUrl" | "durationMinutes"> & {
+  description?: string | null; mapsUrl?: string | null; durationMinutes?: number | null;
 };
 export type UpdateTripActivityPayload = ActivityDetailPayload & Partial<ActivityEditableFields>;
 interface Dependencies { activities: TripActivityPort }
@@ -41,7 +42,7 @@ export const createTripActivity: UseCase<CreationDependencies, CreateTripActivit
     if (!days.ok) return days;
     const activity = createActivity({ id: createId(), tripId: payload.tripId, createdBy: payload.authenticatedUserId,
       createdAt: now(), dayId: payload.dayId, title: payload.title, scheduledAt: payload.scheduledAt,
-      description: payload.description, mapsUrl: payload.mapsUrl }, { trip: trip.value, days: days.value });
+      durationMinutes: payload.durationMinutes, description: payload.description, mapsUrl: payload.mapsUrl }, { trip: trip.value, days: days.value });
     if (!activity.ok) return activity;
     const saved = await scope.insert(activity.value);
     return saved.ok ? activity : saved;
@@ -71,7 +72,7 @@ export const updateTripActivity: UseCase<Dependencies, UpdateTripActivityPayload
     if (!trip.ok) return trip;
     const current = await find(scope, payload);
     if (!current.ok) return current;
-    const fields = ["dayId", "title", "scheduledAt", "description", "mapsUrl"] as const;
+    const fields = ["dayId", "title", "scheduledAt", "durationMinutes", "description", "mapsUrl"] as const;
     if (!fields.some((field) => Object.hasOwn(payload, field))) {
       return err(new ValidationError([{ field: "activity", code: "required", message: "An editable field is required." }]));
     }

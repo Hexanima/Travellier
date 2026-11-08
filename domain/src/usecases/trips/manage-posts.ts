@@ -12,7 +12,8 @@ import type { ObjectId } from "../../value-objects/object-id.js";
 export interface TripPostPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface PostDetailPayload extends TripPostPayload { postId: ObjectId }
 export type PostEditableFields = Pick<Post, "dayId" | "description" | "mapsUrl" | keyof PostLinks>;
-export type NewPostActivity = Pick<Activity, "title" | "scheduledAt"> & Partial<Pick<Activity, "description" | "mapsUrl">>;
+export type NewPostActivity = Pick<Activity, "title" | "scheduledAt"> &
+  Partial<Pick<Activity, "description" | "mapsUrl" | "durationMinutes">>;
 export type CreateTripPostPayload = TripPostPayload & Pick<Post, "dayId"> & Partial<Omit<PostEditableFields, "dayId">> & {
   newActivity?: NewPostActivity;
 };
@@ -61,6 +62,7 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
       if (!days.ok) return days;
       const validated = createActivity({ id: createId(), tripId: payload.tripId, dayId: payload.dayId,
         title: payload.newActivity.title, scheduledAt: payload.newActivity.scheduledAt,
+        durationMinutes: payload.newActivity.durationMinutes,
         description: payload.newActivity.description, mapsUrl: payload.newActivity.mapsUrl,
         createdBy: payload.authenticatedUserId, createdAt }, { trip: trip.value, days: days.value });
       if (!validated.ok) return validated;

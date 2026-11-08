@@ -13,7 +13,7 @@ function fixture() {
   const day = { id: id(4), tripId, destinationId, date: time(0), type: "activity" as const, startsAt: time(10), endsAt: time(18), order: 2 };
   const transport = { id: id(5), tripId, destinationId, direction: "outbound" as const, type: "car" as const,
     departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, details: {} };
-  const activity = { id: id(6), tripId, dayId: day.id, title: "Paseo", description: null, scheduledAt: time(12), mapsUrl: null,
+  const activity = { id: id(6), tripId, dayId: day.id, title: "Paseo", description: null, scheduledAt: time(12), durationMinutes: null, mapsUrl: null,
     createdBy: actor, createdAt: time(17) };
   const post = { id: id(7), tripId, dayId: day.id, authorId: actor, description: null, mapsUrl: null,
     activityId: null, transportId: null, parentPostId: null, createdAt: time(13) };

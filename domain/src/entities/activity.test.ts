@@ -27,20 +27,20 @@ describe("createActivity", () => {
   it("creates an available planned activity without an approval status", () => {
     const payload = input();
     expect(domain.createActivity(payload, context)).toEqual({
-      ok: true, value: { ...payload, description: null, mapsUrl: null },
+      ok: true, value: { ...payload, description: null, mapsUrl: null, durationMinutes: null },
     });
   });
 
   it.each([false, true])("ignores legacy approval fields: voting=%s", (votingEnabled) => {
     expect(domain.createActivity({ ...input(), status: "voting", votingEnabled: !votingEnabled } as never,
       { ...context, trip: { ...context.trip, votingEnabled } } as never))
-      .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null } });
+      .toEqual({ ok: true, value: { ...input(), description: null, mapsUrl: null, durationMinutes: null } });
   });
 
   it("preserves description and Maps location", () => {
     const payload = { ...input(), description: "Recorrido por el centro", mapsUrl: "https://maps.app.goo.gl/example" };
     expect(domain.createActivity(payload, context))
-      .toEqual({ ok: true, value: payload });
+      .toEqual({ ok: true, value: { ...payload, durationMinutes: null } });
   });
 
   it("accepts explicit null optional fields", () => {
@@ -124,5 +124,37 @@ describe("createActivity", () => {
     expect({ payload, context }).toEqual(snapshot);
     expect(second.value.scheduledAt).toEqual(snapshot.payload.scheduledAt);
     expect(second.value.createdAt).toEqual(snapshot.payload.createdAt);
+  });
+});
+
+describe("createActivity duration", () => {
+  it("keeps a positive duration", () => {
+    expect(domain.createActivity({ ...input(), durationMinutes: 90 }, context))
+      .toMatchObject({ ok: true, value: { durationMinutes: 90, scheduledAt: new Date("2026-09-25T12:00:00.456Z") } });
+  });
+
+  it.each([undefined, null])("normalizes an absent duration to null without inventing an end: %s", (durationMinutes) => {
+    const result = domain.createActivity({ ...input(), durationMinutes }, context);
+    expect(result).toMatchObject({ ok: true, value: { durationMinutes: null } });
+    if (result.ok) expect(domain.activityEndsAt(result.value)).toBeNull();
+  });
+
+  it.each([0, -10, 2.5, Number.NaN])("rejects an invalid duration: %s", (durationMinutes) => {
+    expect(domain.createActivity({ ...input(), durationMinutes }, context)).toMatchObject(issue("durationMinutes", "invalid"));
+  });
+
+  it("rejects a duration that ends after the destination window", () => {
+    expect(domain.createActivity({ ...input(), durationMinutes: 6 * 60 + 1 }, context))
+      .toMatchObject(issue("durationMinutes", "outside_window"));
+  });
+
+  it("returns independent dates when a duration is supplied", () => {
+    const payload = Object.freeze({ ...input(), durationMinutes: 30 });
+    const result = domain.createActivity(payload, context);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    result.value.scheduledAt.setTime(0);
+    expect(payload.scheduledAt.toISOString()).toBe("2026-09-25T12:00:00.456Z");
+    expect(domain.activityEndsAt(payload)).toEqual(new Date("2026-09-25T12:30:00.456Z"));
   });
 });
