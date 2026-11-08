@@ -9,7 +9,7 @@ import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
-import { parseConfirmed, parseConfirmedActivity, sameSnapshot } from "./agenda-confirmation.js";
+import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
 
 export interface TripActivityPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface ActivityDetailPayload extends TripActivityPayload { activityId: ObjectId }
@@ -57,42 +57,21 @@ export const createTripActivity: UseCase<CreationDependencies, CreateTripActivit
       createdAt, dayId: payload.dayId, title: payload.title, scheduledAt: payload.scheduledAt,
       durationMinutes: payload.durationMinutes, description: payload.description, mapsUrl: payload.mapsUrl }, { trip: trip.value, days: days.value });
     if (!activity.ok) return activity;
-    const confirmed = parseConfirmed(payload.confirmedConflicts);
-    if (!confirmed.ok) return confirmed;
-    const confirmedActivity = parseConfirmedActivity(payload.confirmedActivity);
-    if (confirmedActivity === "invalid") {
-      return err(new ValidationError([{ field: "confirmedActivity", code: "invalid", message: "Confirmed activity must include scheduledAt and durationMinutes." }]));
-    }
     const userId = payload.authenticatedUserId;
     const existing = await scope.list();
     if (!existing.ok) return existing;
     const records = await scope.listUserParticipations(userId);
     if (!records.ok) return records;
-    const conflicts = findAgendaConflicts({ candidate: activity.value, userId, tripId: payload.tripId,
-      activities: existing.value, participations: records.value });
-    if (conflicts.length > 0) {
-      // The confirmation must match the conflict set and the schedule as they are right now; nothing is inserted before it.
-      const schedule = { scheduledAt: activity.value.scheduledAt.getTime(), durationMinutes: activity.value.durationMinutes ?? null };
-      if (confirmed.value === undefined || confirmedActivity === undefined || !sameSnapshot(confirmed.value, conflicts) ||
-        confirmedActivity.scheduledAt !== schedule.scheduledAt || confirmedActivity.durationMinutes !== schedule.durationMinutes) {
-        return ok({ outcome: "confirmation_required" as const, conflicts,
-          activity: { scheduledAt: activity.value.scheduledAt, durationMinutes: activity.value.durationMinutes ?? null } });
-      }
-    }
+    const plan = evaluatePlanChange({ candidate: activity.value, userId, tripId: payload.tripId, activities: existing.value,
+      participations: records.value, confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
+    if (!plan.ok) return plan;
+    // Nothing is inserted before a required confirmation.
+    if (plan.value.status === "confirmation_required") return ok({ outcome: "confirmation_required" as const,
+      conflicts: plan.value.conflicts, activity: plan.value.activity });
     const inserted = await scope.insert(activity.value);
     if (!inserted.ok) return inserted;
-    for (const conflict of conflicts) {
-      const previous = records.value.find((r) => r.activityId === conflict.activityId);
-      const declined = createActivityParticipation({ id: previous?.id ?? createId(), tripId: payload.tripId,
-        activityId: conflict.activityId, userId, status: "not_going", updatedAt: createdAt });
-      if (!declined.ok) return declined;
-      const saved = await scope.saveParticipation(declined.value);
-      if (!saved.ok) return saved;
-    }
-    const own = createActivityParticipation({ id: createId(), tripId: payload.tripId, activityId: activity.value.id,
-      userId, status: "going", updatedAt: createdAt });
-    if (!own.ok) return own;
-    const saved = await scope.saveParticipation(own.value);
+    const saved = await applyAuthorPlan(scope, { activity: activity.value, userId, tripId: payload.tripId,
+      conflicts: plan.value.conflicts, records: records.value, createId, updatedAt: createdAt });
     return saved.ok ? ok({ outcome: "created" as const, activity: activity.value, participation: saved.value }) : saved;
   }),
 };
