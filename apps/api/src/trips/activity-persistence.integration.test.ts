@@ -461,16 +461,53 @@ describe("activity persistence and transactions", () => {
       expect((await record(editedId, actor))!.status).toBe("pending");
     });
 
-    it("serializes an edit with a concurrent expulsion without leaving a marker on a former member", async () => {
-      const admin = await addMember(), member = await addMember();
-      await db.collection("tripMembers").updateOne({ tripId: trip, userId: admin }, { $set: { role: "admin" } });
-      await seedPart(editedId, member); await seedPart(planA, member);
-      const [edited, expelled] = await Promise.all([edit({ scheduledAt: at("2026-09-25T12:30:00Z") }),
-        api.expelMember!({ tripId: id(trip), actorUserId: id(admin), targetUserId: id(member) })]);
-      expect(edited.ok && expelled.ok).toBe(true);
-      expect(await db.collection("tripMembers").countDocuments({ tripId: trip, userId: member })).toBe(0);
-      expect(await db.collection("activityParticipations").countDocuments({ tripId: trip, userId: member, status: "going",
-        "decisionRequired.reason": { $exists: true } })).toBe(0);
+    describe("edit and expulsion of a participant", () => {
+      const conflicting = { scheduledAt: at("2026-09-25T12:30:00Z") };
+      let admin: ObjectId, member: ObjectId, stays: ObjectId;
+      const expel = () => api.expelMember!({ tripId: id(trip), actorUserId: id(admin), targetUserId: id(member) });
+      const marker = { reason: "schedule_conflict", changedFields: ["scheduledAt"] };
+      beforeEach(async () => {
+        admin = await addMember(); member = await addMember(); stays = await addMember();
+        await db.collection("tripMembers").updateOne({ tripId: trip, userId: admin }, { $set: { role: "admin" } });
+        for (const user of [member, stays]) { await seedPart(editedId, user); await seedPart(planA, user); }
+      });
+      const expectCommon = async () => {
+        expect(await db.collection("tripMembers").countDocuments({ tripId: trip, userId: member })).toBe(0);
+        expect(await record(editedId, stays)).toMatchObject({ status: "pending", decisionRequired: marker });
+        expect(await record(planA, member)).toMatchObject({ status: "going", decisionRequired: null });
+      };
+      const expectExpelledFirst = async () => {
+        await expectCommon();
+        // The edit never writes a marker on someone who is no longer a member; the started-activity record is kept as is.
+        expect(await record(editedId, member)).toMatchObject({ status: "going", decisionRequired: null });
+      };
+      const expectEditedFirst = async () => {
+        await expectCommon();
+        // The edit committed while the user was still a member; the record is kept (activity already started) with its marker.
+        expect(await record(editedId, member)).toMatchObject({ status: "pending", decisionRequired: marker });
+      };
+
+      it("expulsion first: the edit does not mark the former member", async () => {
+        expect(await expel()).toMatchObject({ ok: true });
+        expect(await edit(conflicting)).toMatchObject({ ok: true, value: { affected: [{ userId: id(stays) }] } });
+        await expectExpelledFirst();
+      });
+
+      it("edit first: the member is marked and the expulsion then keeps the started-activity record", async () => {
+        expect(await edit(conflicting)).toMatchObject({ ok: true });
+        expect(await expel()).toMatchObject({ ok: true });
+        await expectEditedFirst();
+      });
+
+      it("concurrent edit and expulsion end in exactly one of the two serialized orders", async () => {
+        const [edited, expelled] = await Promise.all([edit(conflicting), expel()]);
+        expect(edited.ok && expelled.ok).toBe(true);
+        if (!edited.ok) throw edited.error;
+        const marked = (await record(editedId, member))!.status === "pending";
+        // The affected set tells which order happened and must agree with the stored record.
+        expect(edited.value.affected.map((p) => p.userId).sort()).toEqual((marked ? [member, stays] : [stays]).map(id).sort());
+        if (marked) await expectEditedFirst(); else await expectExpelledFirst();
+      });
     });
   });
 });
