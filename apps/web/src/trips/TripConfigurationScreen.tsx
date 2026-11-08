@@ -4,11 +4,10 @@ import { Link, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, SelectField } from "../components/index.js";
 import type { MemberTripDetail, TripConfigurationUpdate, TripDetail, TripManagementApi } from "./trip-management-api.js";
 
-type ConfigValues = Required<Omit<TripConfigurationUpdate, "votingEnabled">> & Pick<TripConfigurationUpdate, "votingEnabled">;
+type ConfigValues = Required<TripConfigurationUpdate>;
 
 const valuesFromTrip = (trip: MemberTripDetail): ConfigValues => ({
   visibility: trip.visibility,
-  ...(trip.votingEnabled === undefined ? {} : { votingEnabled: trip.votingEnabled }),
   expenseMode: trip.expenseMode,
 });
 
@@ -101,15 +100,6 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
                   <option value="private">Privado</option>
                   <option value="public">Público</option>
                 </SelectField>
-                {detail.votingEnabled !== undefined ? <SelectField label="Votación de actividades" name="votingEnabled" value={values.votingEnabled ? "enabled" : "disabled"} loading={saving}
-                  helpText="Con la votación desactivada, las actividades nuevas se crean confirmadas. Cambiar el modo no modifica las existentes."
-                  onChange={(event) => { const votingEnabled = event.target.value === "enabled"; setValues((current) => current && { ...current, votingEnabled }); setSaved(false); }}>
-                  <option value="disabled">Desactivada</option>
-                  <option value="enabled">Activada</option>
-                </SelectField> : null}
-                {detail.votingEnabled && !values.votingEnabled ? (
-                  <Feedback>El cambio no modifica las actividades existentes. Revisá las propuestas y las que estén en votación.</Feedback>
-                ) : null}
                 <SelectField label="Modo de gastos" name="expenseMode" value={values.expenseMode} loading={saving}
                   helpText="Los gastos anteriores se conservan al cambiar de modo. En registro no se calculan deudas; en balance se calculan saldos."
                   onChange={(event) => { const expenseMode = event.target.value as ConfigValues["expenseMode"]; setValues((current) => current && { ...current, expenseMode }); setSaved(false); }}>

@@ -55,7 +55,7 @@ describe("App activity integration", () => {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     await field(container, "time", toLocalDateTime("2026-09-25T13:30:00.000Z", zone).slice(11)); await save(container);
     expect(container.textContent).toContain("Actividad nueva");
-    await click(container, "Actividad nueva"); expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Confirmada");
+    await click(container, "Actividad nueva"); expect(container.querySelector('[role="dialog"]')?.textContent).not.toContain("Confirmada");
     await click(container, "Editar actividad"); await field(container, "title", "Actividad editada"); await save(container);
     expect(container.querySelector('[role="dialog"]')).toBeNull(); expect(container.textContent).toContain("Actividad editada");
     const activityCalls = fetch.mock.calls.filter(([url]) => (url as string).includes("/activities") && !(url as string).endsWith("/participation"));

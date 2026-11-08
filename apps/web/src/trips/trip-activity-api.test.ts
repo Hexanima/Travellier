@@ -24,6 +24,11 @@ describe("activity HTTP adapter", () => {
     const { api } = setup({ activity: value });
     expect(await api.get(value.tripId, value.id)).toEqual({ ok: true, value });
   });
+  it.each([{ status: "done" }, { status: "proposed" }, { status: 4 }, {}])("ignores a legacy approval status: %j", async (legacy) => {
+    const value = { ...activity(), ...legacy };
+    const { api } = setup({ activity: value });
+    expect(await api.get(value.tripId, value.id)).toEqual({ ok: true, value });
+  });
   it.each(["create", "get", "update"] as const)("authenticates %s and accepts the single activity response without postIds", async (operation) => {
     const value = activity();
     const { api, fetch } = setup({ activity: value }, operation === "create" ? 201 : 200);
@@ -38,7 +43,7 @@ describe("activity HTTP adapter", () => {
   });
   it.each([
     { tripId: itineraryId(99) }, { id: "bad" }, { dayId: "bad" }, { title: " " }, { scheduledAt: null },
-    { scheduledAt: "2026-09-25T12:00:00+00:00" }, { createdAt: "bad" }, { status: "done" }, { mapsUrl: 4 },
+    { scheduledAt: "2026-09-25T12:00:00+00:00" }, { createdAt: "bad" }, { mapsUrl: 4 },
   ])("rejects an invalid response: %j", async (change) => {
     const { api } = setup({ activity: { ...activity(), ...change } });
     expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "server" } });

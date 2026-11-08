@@ -16,7 +16,7 @@ const second = { id: "507f1f77bcf86cd799439015", tripId, name: "Córdoba", order
 const third = { ...second, id: "507f1f77bcf86cd799439021", name: "Carlos Paz", order: 3 };
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null,
   primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2",
-  votingEnabled: false, expenseMode: "register" };
+  expenseMode: "register" };
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
   await act(async () => roots.splice(0).forEach((root) => root.unmount()));

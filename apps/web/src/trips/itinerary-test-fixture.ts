@@ -10,7 +10,7 @@ export const itineraryFixture = () => {
   });
   const activity = (id: number, hour: number, title: string) => ({
     id: itineraryId(id), tripId, dayId: itineraryId(4), title, description: null,
-    scheduledAt: time(hour), mapsUrl: null, status: "confirmed", createdBy: itineraryId(20),
+    scheduledAt: time(hour), mapsUrl: null, createdBy: itineraryId(20),
     createdAt: time(17), postIds: [] as string[],
   });
   const post = (id: number, hour: number, description: string) => ({
@@ -32,7 +32,7 @@ export const itineraryFixture = () => {
     totalAmount: 25.5, breakdown: "Almuerzo", paidBy: null, createdAt: time(13) };
   days[1].expenseSummary = { totalAmount: 25.5, expenseCount: 1 };
   return {
-    tripId, expenseMode: "register", votingEnabled: false,
+    tripId, expenseMode: "register",
     destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: time(0) }], days,
     transports: [
       { id: itineraryId(6), tripId, destinationId, direction: "outbound", type: "car", departurePlace: "Buenos Aires",
