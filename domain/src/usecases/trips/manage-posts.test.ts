@@ -168,6 +168,38 @@ describe("Trip post use cases", () => {
       expect(await update({ postId: c, parentPostId: a })).toMatchObject({ ok: true });
     });
 
+    describe("technical depth limit", () => {
+      const deep = (length: number) => Array.from({ length }, (_, i) =>
+        seedPost({ id: id(1000 + i), parentPostId: i === 0 ? null : id(999 + i) }));
+      const bottom = (length: number) => id(999 + length);
+
+      it("rejects instead of hiding a cycle beyond the limit, without writing", async () => {
+        records = deep(domain.MAX_POST_CHAIN_DEPTH + 5); const before = structuredClone(records); const calls = spy();
+        expect(await update({ postId: id(1000), parentPostId: bottom(domain.MAX_POST_CHAIN_DEPTH + 5) }))
+          .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "parentPostId", code: "too_deep" }] } });
+        expect(calls).toEqual({ replace: 0, insert: 0 });
+        expect(records).toEqual(before);
+      });
+
+      it("still detects the cycle when the chain has exactly the maximum depth", async () => {
+        records = deep(domain.MAX_POST_CHAIN_DEPTH);
+        expect(await update({ postId: id(1000), parentPostId: bottom(domain.MAX_POST_CHAIN_DEPTH) }))
+          .toMatchObject({ ok: false, error: { issues: [{ field: "parentPostId", code: "cycle" }] } });
+      });
+
+      it("accepts linking under a chain of exactly the maximum depth", async () => {
+        records = [...deep(domain.MAX_POST_CHAIN_DEPTH), seedPost({ id: id(5000) })];
+        expect(await update({ postId: id(5000), parentPostId: bottom(domain.MAX_POST_CHAIN_DEPTH) }))
+          .toMatchObject({ ok: true });
+      });
+
+      it("keeps reads tolerant with a null root beyond the limit", async () => {
+        records = deep(domain.MAX_POST_CHAIN_DEPTH + 5);
+        expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId: bottom(domain.MAX_POST_CHAIN_DEPTH + 5) }))
+          .toMatchObject({ ok: true, value: { rootActivityId: null } });
+      });
+    });
+
     it("returns parent, direct children newest first and the root activity", async () => {
       records = chain([seedPost({ id: d, parentPostId: a, createdAt: new Date("2026-10-04T12:00:09Z"), description: "rama" })]);
       expect(domain.getTripPostChain).toBeDefined();
