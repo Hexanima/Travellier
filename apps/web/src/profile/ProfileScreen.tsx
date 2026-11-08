@@ -119,7 +119,8 @@ export function ProfileScreen({ auth }: ProfileScreenProps) {
         {profile ? (
           <form className="auth-form" onSubmit={(event) => void submit(event)} noValidate>
             {avatarUrl ? <img className="profile-avatar" src={avatarUrl} alt="Foto de perfil" /> : <div className="profile-avatar profile-avatar--empty" aria-label="Sin foto de perfil">Sin foto</div>}
-            <TextField key={profile.name} label="Nombre" name="name" defaultValue={profile.name} autoComplete="name" error={nameError} loading={saving} />
+            <TextField key={profile.name ?? ""} label="Nombre" name="name" defaultValue={profile.name ?? ""} autoComplete="name" error={nameError} loading={saving} />
+            {(profile.name ?? "").trim() === "" ? <p>Todavía no cargaste tu nombre.</p> : null}
             <p>Email: {profile.email}</p>
             <div className="ui-field">
               <label className="ui-field__label" htmlFor="profile-avatar">Foto de perfil</label>

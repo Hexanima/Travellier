@@ -148,4 +148,26 @@ describe("ProfileScreen", () => {
     expect(updateProfile).not.toHaveBeenCalled();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos guardar");
   });
+
+  it("loads a profile without a name, leaves the field empty and allows saving a name", async () => {
+    const nameless = { ...profile, name: null };
+    const getProfile = vi.fn().mockResolvedValue({ ok: true, value: nameless });
+    const updateProfile = vi.fn().mockResolvedValue({ ok: true, value: profile });
+    const container = await render({ getProfile, updateProfile });
+    const input = container.querySelector('[name="name"]') as HTMLInputElement;
+
+    expect(input.value).toBe("");
+    expect(container.textContent).toContain("Todavía no cargaste tu nombre");
+    expect(container.textContent).toContain("nico@example.test");
+    await submit(container);
+    expect(updateProfile).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Ingresá tu nombre.");
+
+    await act(async () => {
+      input.value = "Nico";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await submit(container);
+    expect(updateProfile).toHaveBeenCalledWith({ name: "Nico" });
+  });
 });

@@ -190,4 +190,17 @@ describe("TripMembersScreen", () => {
     expect(container.textContent).not.toContain("VIAJE-X7K2");
     expect(findButton(container, "Expulsar")).toBeUndefined();
   });
+
+  it("shows a neutral label for members without a name and never exposes their email", async () => {
+    const nameless = { ...participant, name: null, email: "ana@example.test" };
+    const list = vi.fn().mockResolvedValue({ ok: true, value: { members: [{ ...admin, name: null }, nameless], currentUserId: adminId } });
+    const { container } = await render({ list });
+
+    expect(container.textContent).toContain("Integrante (vos)");
+    expect(container.textContent).not.toContain("null");
+    expect(container.textContent).not.toContain("ana@example.test");
+    expect(container.querySelector('[aria-label="Expulsar a Integrante"]')).not.toBeNull();
+    await act(async () => findButton(container, "Expulsar")?.click());
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("¿Querés expulsar a Integrante de este viaje?");
+  });
 });

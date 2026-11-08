@@ -235,6 +235,35 @@ describe("App authentication", () => {
     expect(getProfile).toHaveBeenCalled();
   });
 
+  it("renders the profile screen when the profile has no name", async () => {
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    mountedRoots.push(root);
+    const sessionStorage = createSessionStorage();
+    vi.mocked(sessionStorage.read).mockResolvedValue({
+      accessToken: "persisted-access-token", refreshToken: "persisted-refresh-token",
+    });
+    const getProfile = vi.fn().mockResolvedValue({ ok: true, value: {
+      name: null, email: "nico@example.test", avatar: null,
+    } });
+
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/profile"]}>
+        <App auth={{
+          refresh: vi.fn().mockResolvedValue({ ok: true, value: {
+            accessToken: "renewed-access-token", refreshToken: "renewed-refresh-token",
+          } }),
+          getProfile,
+        }} sessionStorage={sessionStorage} />
+      </MemoryRouter>,
+    ));
+
+    expect(container.textContent).toContain("Mi perfil");
+    expect(container.textContent).toContain("nico@example.test");
+    expect((container.querySelector('[name="name"]') as HTMLInputElement).value).toBe("");
+  });
+
   it("waits for native session restoration before requesting the profile", async () => {
     const container = document.createElement("div");
     document.body.append(container);

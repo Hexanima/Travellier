@@ -6,7 +6,7 @@ export type AuthenticatedSession = {
 };
 
 export type AuthenticatedProfile = {
-  name: string;
+  name: string | null;
   email: string;
   avatar: string | null;
 };
@@ -23,7 +23,7 @@ export type AuthResult<TValue> =
 export type AuthApi = {
   login: (payload: { email: string; password: string }) => Promise<AuthResult<AuthenticatedSession>>;
   refresh: (payload: { refreshToken: string }) => Promise<AuthResult<AuthenticatedSession>>;
-  register: (payload: { email: string; name: string; password: string }) => Promise<AuthResult<{ id: string }>>;
+  register: (payload: { email: string; password: string }) => Promise<AuthResult<{ id: string }>>;
   getProfile: () => Promise<AuthResult<AuthenticatedProfile>>;
   updateProfile: (payload: { name?: string; avatar?: string | null }) => Promise<AuthResult<AuthenticatedProfile>>;
   uploadAvatar: (file: File) => Promise<AuthResult<{ avatar: string }>>;
@@ -60,7 +60,7 @@ const isAuthenticatedProfile = (value: unknown): value is AuthenticatedProfile =
   typeof value === "object" &&
   value !== null &&
   "name" in value &&
-  typeof value.name === "string" &&
+  (typeof value.name === "string" || value.name === null) &&
   "email" in value &&
   typeof value.email === "string" &&
   "avatar" in value &&

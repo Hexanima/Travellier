@@ -36,4 +36,12 @@ describe("createTripMembersApi", () => {
 
     expect(await api.expel(tripId, userId)).toEqual({ ok: false, error: { kind: "forbidden" } });
   });
+
+  it("accepts members without a name", async () => {
+    const nameless = { ...member, name: null };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { members: [nameless], currentUserId: userId } });
+    const api = createTripMembersApi({ get, delete: vi.fn() } as never);
+
+    expect(await api.list(tripId)).toEqual({ ok: true, value: { members: [nameless], currentUserId: userId } });
+  });
 });

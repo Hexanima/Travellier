@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 import { Button, Feedback, PasswordField, TextField } from "../components/index.js";
@@ -14,7 +14,6 @@ type AuthScreenProps = {
 
 const validationMessages = {
   email: "Ingresá un email válido.",
-  name: "Ingresá tu nombre.",
   password: "Ingresá una contraseña.",
 };
 
@@ -29,22 +28,22 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
   const [formError, setFormError] = useState<string>();
   const [success, setSuccess] = useState<string>();
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
+    if (submitting.current) {
+      return;
+    }
+
     const values = new FormData(event.currentTarget);
     const email = String(values.get("email") ?? "");
-    const name = String(values.get("name") ?? "");
     const password = String(values.get("password") ?? "");
     const nextErrors: Record<string, string> = {};
 
     if (email.trim() === "" || !email.includes("@")) {
       nextErrors.email = validationMessages.email;
-    }
-
-    if (isRegister && name.trim() === "") {
-      nextErrors.name = validationMessages.name;
     }
 
     if (password.trim() === "") {
@@ -59,11 +58,12 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
       return;
     }
 
+    submitting.current = true;
     setLoading(true);
 
     try {
       if (isRegister) {
-        const result = await auth?.register?.({ email, name, password });
+        const result = await auth?.register?.({ email, password });
 
         if (result?.ok) {
           setSuccess("Tu cuenta fue creada. Ya podés iniciar sesión.");
@@ -89,6 +89,7 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
     } catch {
       setFormError(isRegister ? "No pudimos crear tu cuenta con esos datos." : "No pudimos iniciar sesión con esas credenciales.");
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
@@ -99,7 +100,6 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
         <p className="eyebrow">Travellier</p>
         <h1 id="auth-title">{title}</h1>
         <form className="auth-form" noValidate onSubmit={submit}>
-          {isRegister ? <TextField label="Nombre" name="name" autoComplete="name" error={errors.name} loading={loading} /> : null}
           <TextField label="Email" name="email" type="email" autoComplete="email" error={errors.email} loading={loading} />
           <PasswordField
             key={mode}

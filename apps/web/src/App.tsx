@@ -232,7 +232,6 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
         <Route path="/invite/:code" element={<InviteRoute sessionReady={sessionReady} hasSession={hasSession} trips={activeTrips} />} />
-        <Route path="/verify/:token" element={<VerificationScreen />} />
         <Route path="/trips" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <TripsListScreen trips={tripManagement} onLocalLogout={onLocalLogout} />
@@ -334,19 +333,6 @@ function InviteEntry({ sessionReady, hasSession, trips, code }: InviteEntryProps
                     ? <p role="alert">{result.error.kind === 'not-found' ? 'El código de invitación no es válido.' : 'No pudimos confirmar la unión. Intentá nuevamente.'}</p>
                     : null}
                 </>}
-      </section>
-    </main>
-  )
-}
-
-function VerificationScreen() {
-  return (
-    <main className="app-shell">
-      <section className="status-panel">
-        <p className="eyebrow">Cuenta</p>
-        <h1>Verificación de email</h1>
-        <p>El enlace de verificación abrió Travellier.</p>
-        <Link to="/login">Iniciar sesión</Link>
       </section>
     </main>
   )

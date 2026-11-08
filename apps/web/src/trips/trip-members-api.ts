@@ -3,7 +3,7 @@ import type { ApiErrorKind, HttpClient } from "../api/index.js";
 export type TripMemberSummary = {
   id: string;
   userId: string;
-  name: string;
+  name: string | null;
   role: "admin" | "participant";
   joinedAt: string;
 };
@@ -22,7 +22,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isMember = (value: unknown): value is TripMemberSummary =>
   isRecord(value) && typeof value.id === "string" && typeof value.userId === "string" &&
-  typeof value.name === "string" && (value.role === "admin" || value.role === "participant") &&
+  (typeof value.name === "string" || value.name === null) && (value.role === "admin" || value.role === "participant") &&
   typeof value.joinedAt === "string";
 
 const isMemberList = (value: unknown): value is { members: TripMemberSummary[]; currentUserId: string } =>

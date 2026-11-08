@@ -12,13 +12,12 @@ describe("createAuthApi", () => {
 
     const result = await auth.register({
       email: "nico@example.test",
-      name: "Nico",
       password: "secret-pass",
     });
 
     expect(post).toHaveBeenCalledWith(
       "/auth/register",
-      { email: "nico@example.test", name: "Nico", password: "secret-pass" },
+      { email: "nico@example.test", password: "secret-pass" },
       { authenticated: false },
     );
     expect(result).toEqual({ ok: true, value: { id: "507f1f77bcf86cd799439011" } });
@@ -178,5 +177,27 @@ describe("createAuthApi", () => {
 
     expect(await auth.getAvatarUrl()).toEqual({ ok: true, value: { url: "https://s3.example.test/view" } });
     expect(get).toHaveBeenCalledWith("/profile/avatar-url");
+  });
+
+  it("accepts a registration response and profiles without a name", async () => {
+    const post = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { user: { id: "507f1f77bcf86cd799439011", email: "nico@example.test", name: null } },
+    });
+    const registered = await createAuthApi({ post } as never).register({ email: "nico@example.test", password: "secret-pass" });
+    expect(registered.ok).toBe(true);
+
+    const profile = { name: null, email: "nico@example.test", avatar: null };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { profile } });
+    const patch = vi.fn().mockResolvedValue({ ok: true, value: { profile } });
+    const auth = createAuthApi({ get, patch } as never);
+    expect(await auth.getProfile()).toEqual({ ok: true, value: profile });
+    expect(await auth.updateProfile({ avatar: null })).toEqual({ ok: true, value: profile });
+  });
+
+  it.each([undefined, 7])("rejects a profile whose name is %s", async (name) => {
+    const profile = { ...(name === undefined ? {} : { name }), email: "nico@example.test", avatar: null };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { profile } });
+    expect(await createAuthApi({ get } as never).getProfile()).toEqual({ ok: false, error: { kind: "server" } });
   });
 });
