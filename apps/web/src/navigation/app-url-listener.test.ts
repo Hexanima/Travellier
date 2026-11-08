@@ -41,10 +41,10 @@ describe("initializeAppUrlListener", () => {
     const navigate = vi.fn();
     const stopListening = await initializeAppUrlListener(api, navigate);
 
-    emitUrl("com.travellier.app://verify/token-123");
+    emitUrl("com.travellier.app://other/token-123");
     await stopListening();
 
-    expect(navigate).toHaveBeenCalledWith("/verify/token-123");
+    expect(navigate).toHaveBeenCalledWith("/other/token-123");
     expect(remove).toHaveBeenCalledOnce();
   });
 
@@ -56,11 +56,11 @@ describe("initializeAppUrlListener", () => {
     const pending = initializeAppUrlListener(api, navigate);
 
     await vi.waitFor(() => expect(api.getLaunchUrl).toHaveBeenCalledOnce());
-    emitUrl("com.travellier.app://verify/new-token");
+    emitUrl("com.travellier.app://other/new-token");
     resolveLaunchUrl({ url: "com.travellier.app://invite/old-code" });
     await pending;
 
     expect(navigate).toHaveBeenCalledOnce();
-    expect(navigate).toHaveBeenCalledWith("/verify/new-token");
+    expect(navigate).toHaveBeenCalledWith("/other/new-token");
   });
 });

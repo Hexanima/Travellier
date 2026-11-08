@@ -102,15 +102,48 @@ describe("App deep links", () => {
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2?source=share");
   });
 
-  it("opens the verification screen when the running app receives a link", async () => {
+  it("no longer offers a verification screen for verify links", async () => {
     const { nativeApp, emit } = createNativeApp();
     const container = await renderApp(nativeApp);
 
     await act(async () => emit("com.travellier.app://verify/token-123"));
 
-    expect(container.textContent).toContain("Verificación de email");
+    expect(container.textContent).not.toContain("Verificación de email");
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/verify/token-123");
-    expect(container.textContent).not.toContain("Página no encontrada");
+    expect(container.textContent).toContain("Página no encontrada");
+  });
+
+  it("registers with email and password from an invitation and returns to it after login", async () => {
+    const { nativeApp } = createNativeApp("com.travellier.app://invite/VIAJE-X7K2");
+    const register = vi.fn().mockResolvedValue({ ok: true, value: { id: "507f1f77bcf86cd799439011" } });
+    const login = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "access", refreshToken: "refresh" } });
+    const container = await renderApp(nativeApp, createStorage(), { register, login });
+    const fill = async () => act(async () => {
+      const email = container.querySelector("[name=email]") as HTMLInputElement;
+      const password = container.querySelector("[name=password]") as HTMLInputElement;
+      email.value = "nico@example.test";
+      email.dispatchEvent(new Event("input", { bubbles: true }));
+      password.value = "secret-pass";
+      password.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const submitForm = async () => act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    const click = async (href: string) => act(async () => container.querySelector(`a[href="${href}"]`)?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+
+    await click("/login");
+    await click("/register");
+    expect(container.querySelector("[name=name]")).toBeNull();
+    await fill();
+    await submitForm();
+    expect(register).toHaveBeenCalledWith({ email: "nico@example.test", password: "secret-pass" });
+    expect(container.textContent).not.toMatch(/verific/i);
+
+    await click("/login");
+    await fill();
+    await submitForm();
+
+    expect(login).toHaveBeenCalledOnce();
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2");
+    expect(container.textContent).toContain("Unirse a un viaje");
   });
 
   it("returns to the invitation after login", async () => {
