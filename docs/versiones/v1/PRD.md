@@ -1,10 +1,12 @@
 # PRD — App de Viajes Grupales
 
-**Versión del producto:** v1 · **Estado:** aprobado y fijado como referencia de implementación · **Última actualización:** 2026-10-11
+**Versión del producto:** v1 · **Estado:** aprobado y fijado como referencia de implementación · **Última actualización:** 2026-11-08
 
 **Documento original:** [PRD-original.md](PRD-original.md), conservado sin cambios desde su primera incorporación al repositorio. Este es el único PRD vigente; los cambios autorizados se registran directamente aquí y se versionan mediante Git, sin crear archivos nuevos por cada conversación. Actualizarlo no modifica las tareas ni acredita implementación en el prototipo o la aplicación. Las decisiones pendientes están en §9.
 
 **Cierre de planificación · 2026-10-11:** el usuario fija este PRD y el diseño azul actual como referencia para implementar y comparar las tareas. No se reabren decisiones de alcance, reglas funcionales o diseño sin una solicitud o aprobación explícita del usuario. Las integraciones reales y la revisión de tareas siguen pendientes; esta aprobación no las da por realizadas.
+
+**Cambios aprobados · 2026-11-08:** el usuario define la actualización periódica de datos (§1), la salida de integrantes, la titularidad del Trip y la gestión de admins (§3.2), las fotos privadas con lectura autorizada (§3.7, §5), la conservación de gastos de ex integrantes y el costo de transportes con moneda en el resumen (§3.3, §3.8), y retira el tipo `arrival` de `itineraryDays` (§4). Estas decisiones no actualizan las tareas ni acreditan implementación.
 
 **Referencia de diseño aprobada:** [prototipo navegable](../../../design/prototype/README.md), conservado en `design/prototype/public/`. El usuario aprobó su identidad azul y los flujos explorables el 2026-10-11. La [evaluación contra este PRD](../../../design/prototype/PRD-AUDIT.md) distingue cobertura, diferencias observadas y servicios simulados; la aprobación visual no acredita cumplimiento total ni implementación productiva. Se mantiene este PRD y el original, sin nuevas copias de versión.
 
@@ -32,10 +34,12 @@
 
 ## 1. Visión general
 
-Aplicación **mobile** para **organizar viajes grupales**: planificar el transporte, armar el itinerario día a día, registrar actividades, publicar posts con fotos y gastos, y mantener a todos los participantes sincronizados en tiempo real.
+Aplicación **mobile** para **organizar viajes grupales**: planificar el transporte, armar el itinerario día a día, registrar actividades, publicar posts con fotos y gastos, y mantener a todos los participantes al tanto de los cambios del grupo.
 
 **Plataformas:** iOS y Android (mismo codebase con React JS + Capacitor).
 **Usuarios objetivo:** Grupos de amigos o familia que viajan juntos y quieren centralizar la organización en un solo lugar.
+
+**Actualización de datos:** no hay sincronización en tiempo real. La app vuelve a consultar los datos al volver a primer plano o a una pantalla, permite refrescar deslizando hacia abajo y, mientras una pantalla del Trip está abierta, actualiza periódicamente (cada 30–60 s). No consulta en segundo plano. Las notificaciones push avisan de los cambios relevantes.
 
 ---
 
@@ -115,15 +119,26 @@ JS intenta abrir → com.travellier.app://invite/:code
 
 | Rol | Permisos |
 |---|---|
-| Admin | Todo + puede expulsar participantes y eliminar el Trip/grupo |
-| Participante | Crear/editar actividades, posts, comentarios y gestionar su propia participación — igual que admin salvo expulsión y eliminación del Trip |
+| Titular | Admin que además nombra y quita admins, expulsa admins, transfiere la titularidad y elimina el Trip/grupo. Hay uno por Trip y siempre es admin |
+| Admin | Todo + puede expulsar participantes |
+| Participante | Crear/editar actividades, posts, comentarios y gestionar su propia participación — igual que admin salvo expulsión |
 
-- El creador del Trip es admin por defecto.
+- El creador del Trip es su titular y admin. El titular actual se guarda en `trips.ownerId`; `createdBy` conserva quién lo creó.
 - Puede haber múltiples admins.
+
+#### Titularidad, administradores y salida del Trip
+
+- Solo el titular nombra admin a otro integrante actual o le quita ese rol. Los admins no gestionan roles.
+- Los admins expulsan participantes. Solo el titular expulsa admins. Nadie puede expulsar al titular.
+- Cualquier integrante, admin o participante, puede salir del Trip previa confirmación.
+- El titular no puede salir sin antes transferir la titularidad a otro integrante actual, que pasa a ser admin y titular, o eliminar el Trip. La app le ofrece ambas opciones. Al transferirla, el titular anterior queda como admin.
+- Como el titular siempre es admin, un Trip con integrantes nunca queda sin admin.
+- Salir o ser expulsado retira la membresía y el acceso al Trip. Se conservan sus posts, fotos, comentarios, likes, pagos y partes del reparto, identificados como de un ex integrante (ver §3.8). Sus participaciones en actividades ya iniciadas al momento de salir se conservan como registro; las de actividades que todavía no empezaron se eliminan, sin reasignar a nadie.
+- Cambiar roles, transferir la titularidad, salir y expulsar se serializan con las demás mutaciones del Trip.
 
 #### Baja del Trip/grupo
 
-- Cualquier admin actual puede eliminar el Trip, previa confirmación explícita. Los integrantes y los registros existentes no bloquean esta operación.
+- Solo el titular puede eliminar el Trip, previa confirmación explícita. Los integrantes y los registros existentes no bloquean esta operación.
 - La baja elimina en cascada los datos del Trip en MongoDB: membresías, destinos, transportes, itinerario, actividades, participaciones, posts, referencias de fotos, gastos, likes y comentarios. No elimina cuentas de usuarios ni afecta otros Trips.
 - Los permisos, la baja y la cascada se ejecutan en una sola transacción, serializada con las mutaciones del viaje y las nuevas membresías. Las invitaciones dejan de ser válidas y no pueden crear membresías huérfanas.
 - Si hay referencias de fotos, sus claves S3 se conservan en trabajos durables `storageDeletionJobs` dentro de esa transacción. La limpieza física de S3 se completará con la integración de fotos (fase 6); todavía no hay un procesador de estos trabajos. Esto no bloquea la baja del grupo.
@@ -154,7 +169,7 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 - Terminal de destino.
 - Fecha y hora de llegada estimada.
 - Empresa (opcional).
-- Costo por persona (opcional).
+- Costo por persona (opcional), con su moneda: ARS, EUR o USD.
 
 **Avión**
 - Aeropuerto de origen.
@@ -162,7 +177,7 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 - Aeropuerto de destino.
 - Fecha y hora de llegada.
 - Número de vuelo (opcional).
-- Costo por persona (opcional).
+- Costo por persona (opcional), con su moneda: ARS, EUR o USD.
 
 **Auto / otro**
 - Punto de salida, hora de salida, destino, hora estimada de llegada.
@@ -429,7 +444,10 @@ El diario es la vista completa de publicaciones; el itinerario es una proyecció
 ### 3.7 Fotos
 
 - Las fotos se suben directamente a **S3 vía presigned URLs** (el cliente sube directo, sin pasar por Lambda).
-- Se sirven directamente desde S3 usando la URL del objeto.
+- El bucket es privado: las fotos no son accesibles por su URL directa.
+- Antes de publicar, el servidor reserva las claves de carga para ese usuario y Trip y firma las URLs de subida. El cliente sube directo a S3 y las referencias se confirman al guardar el post, verificando que los archivos existan. No se publica un post vacío para poder subir fotos ni se aceptan claves arbitrarias del cliente.
+- Para mostrar una foto, el backend verifica que quien la solicita sea integrante actual del Trip indicado por `postPhotos.tripId` y entrega una URL firmada de lectura con vencimiento corto. No se crea una entidad adicional para esto.
+- Las cargas abandonadas o fallidas no se publican y se limpian posteriormente.
 - Las fotos siempre están en el contexto de un post — no existe un álbum independiente.
 - La "galería grupal" es la vista agregada de todas las fotos de todos los posts del Trip.
 - En la vista de fotos del diario, las filas tienen altura común y cada elemento se alinea arriba, aunque sus títulos ocupen distintas líneas. Las fotos mantienen acceso al post de origen y el orden descendente de publicación del diario.
@@ -457,6 +475,14 @@ El editor propone inicialmente repartir el resto entre los integrantes; el usuar
 Los cálculos se realizan en centavos, redondeando a dos decimales. El resto en partes iguales distribuye los centavos sobrantes en el orden del listado. Cuando pagos o partes porcentuales cubren exactamente el total, se ajusta el residuo de redondeo en las últimas filas porcentuales para conservar todos los centavos. La interfaz indica que los porcentajes se recalculan sobre el monto total mostrado; los montos fijos no cambian al modificar ese total.
 
 Los balances y totales se muestran separados por moneda, sin conversión automática ni suma de monedas distintas. Cambiar de modo conserva los pagos y el reparto registrados, aunque el modo registro no calcule deudas. Los gastos siguen perteneciendo a posts; la actividad agrupa sus recuerdos y no se convierte en un segundo registro de gasto.
+
+#### Integrantes que ya no pertenecen al Trip
+
+Los pagos y partes de quien salió o fue expulsado se conservan a su nombre, identificados como de un **ex integrante**: el gasto ya ocurrió y sigue formando parte del registro y del balance. No se borran, no se reasignan automáticamente ni se crea un estado «sin asignar». Si el grupo lo decide, cualquier integrante actual puede editar el reparto del gasto para redistribuir esa parte.
+
+#### Costo de transportes
+
+El resumen del Trip muestra el costo por persona de cada transporte (`costPerPerson`) como referencia de planificación. No es un gasto de un post ni entra en el balance. Cada transporte indica la moneda de su costo (`costCurrency`); un mismo Trip puede combinar monedas distintas. El resumen totaliza por moneda, sin conversiones ni suma de monedas distintas. Los costos registrados antes sin moneda se muestran como «moneda sin indicar», sin inventarla ni sumarlos, hasta que se edite el transporte.
 
 #### Modos (configurables por Trip)
 
@@ -518,7 +544,8 @@ Todas las colecciones usan `_id: ObjectId` generado por MongoDB como identificad
   visibility: String,     // "private" | "public"
   inviteCode: String,     // único, index (ej: "VIAJE-X7K2")
   expenseMode: String,    // "register" | "balance"
-  createdBy: ObjectId,    // ref: users
+  createdBy: ObjectId,    // ref: users — quién creó el Trip (histórico)
+  ownerId: ObjectId,      // ref: users — titular actual; inicialmente igual a createdBy
   createdAt: Date
 }
 ```
@@ -572,6 +599,7 @@ Un transporte por segmento (ida o vuelta) por destino.
   arrivalPlace: String,
   arrivalAt: Date,
   costPerPerson: Number,    // null si no aplica
+  costCurrency: String,     // ARS | EUR | USD; obligatoria si hay costPerPerson
   details: Object           // estructura flexible según tipo:
   // bus_local:  { steps: [{ line, fromStop, toStop, estimatedAt: Date }] }
   // Lectura histórica: estimatedTime: "HH:mm"; no se acepta en nuevas escrituras.
@@ -593,7 +621,7 @@ Generados automáticamente al configurar los transportes. No se crean manualment
   tripId: ObjectId,         // ref: trips, index
   destinationId: ObjectId,  // ref: destinations
   date: Date,               // fecha calendario del día
-  type: String,             // "transit_out" | "activity" | "transit_return" | "arrival"
+  type: String,             // "transit_out" | "activity" | "transit_return"
   startsAt: Date,           // hora desde la que el día está "activo"
   endsAt: Date,             // hora hasta la que el día está "activo" (null si no aplica)
   order: Number             // orden dentro del itinerario del trip
@@ -807,9 +835,10 @@ Cliente ──► POST /auth/refresh  ──► Lambda (valida refresh token) �
 
 **Upload de fotos:**
 ```
-1. Cliente ──► GET /posts/:id/upload-url ──► Lambda ──► S3 presigned URL
-2. Cliente ──► PUT <presigned URL> ──────────────────► S3 (directo)
-3. Cliente ──► PATCH /posts/:id/photos ──► Lambda ──► MongoDB (guarda s3Key)
+1. Cliente ──► solicitar carga (Trip, cantidad) ──► Lambda valida membresía, reserva claves y firma PUT
+2. Cliente ──► PUT <presigned URL> ──────────────────► S3 (directo, bucket privado)
+3. Cliente ──► publicar/guardar post con las claves ──► Lambda verifica en S3 y registra postPhotos
+4. Cliente ──► ver foto ──► Lambda valida membresía por tripId ──► URL firmada GET con vencimiento
 ```
 
 ---
@@ -822,13 +851,18 @@ Cliente ──► POST /auth/refresh  ──► Lambda (valida refresh token) �
 3. Configura transporte de vuelta (tipo, salida, llegada).
 4. El sistema genera automáticamente los días del itinerario.
 5. Se genera código de invitación y deep link.
-6. El creador queda como admin.
+6. El creador queda como titular y admin.
 
 ### Unirse a un Trip
 1. Usuario recibe código corto o link de invitación.
 2. **Por código:** lo ingresa manualmente en la app → pantalla de confirmación de join.
 3. **Por link:** la API devuelve HTML que intenta abrir `com.travellier.app://invite/:code`. Si la app está instalada, Capacitor la intercepta y abre la pantalla de join. Si no está instalada, después de ~1500ms muestra el HTML de fallback con instrucciones de instalación.
 4. Usuario confirma unirse → queda como participante.
+
+### Salir de un Trip
+1. Desde Grupo, el integrante elige salir y confirma.
+2. Si es el titular, la app le pide transferir la titularidad a otro integrante o eliminar el Trip; no puede salir de otro modo.
+3. Al salir pierde el acceso. Sus recuerdos, comentarios, pagos y partes se conservan identificados como de un ex integrante.
 
 ### Crear una actividad
 1. Desde un día del itinerario se indica título, fecha y hora previstas y duración opcional, sin elegir un modo de actividad.
@@ -942,6 +976,12 @@ Un archivo `.ics` ya descargado es estático y no puede modificarse en el calend
 | FOTO-02 | La grid de Fotos alinea los elementos arriba y conserva filas de igual altura aun con títulos de varias líneas. |
 | EXP-01 | Pagos múltiples y reparto configurable son independientes; incompletos se conservan sin deudas inventadas y cambiar de modo no pierde datos. |
 | EXP-02 | Totales y balances se separan por ARS/EUR/USD, en centavos y sin conversiones; el gasto se atribuye a la actividad raíz o a publicación si no tiene actividad. |
+| MEM-01 | Cualquier integrante puede salir con confirmación. Solo el titular nombra o quita admins y expulsa admins; nadie expulsa al titular. |
+| MEM-02 | El titular no puede salir sin transferir la titularidad o eliminar el Trip; solo el titular elimina el Trip y un Trip con integrantes nunca queda sin admin. |
+| MEM-03 | Los gastos, pagos y partes de un ex integrante se conservan identificados como tales y siguen en el registro y el balance; el reparto puede editarse para redistribuirlos. |
+| MEM-04 | Al salir o ser expulsado se conservan sus participaciones en actividades ya iniciadas y se eliminan las de actividades futuras. |
+| FOTO-03 | Las fotos se guardan en un bucket privado; solo integrantes actuales del Trip obtienen una URL firmada de lectura con vencimiento. |
+| SYNC-01 | Los datos se actualizan al volver a la app o pantalla, al deslizar para refrescar y periódicamente mientras una pantalla del Trip está abierta; sin consultas en segundo plano. |
 
 Estos criterios describen el producto acordado, no pruebas ejecutadas ni tareas completadas. No implican que el prototipo o el código productivo ya cumplan este PRD.
 
