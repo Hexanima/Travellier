@@ -19,7 +19,7 @@ function fixture() {
   let nextId = 20;
   const state = { destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: new Date() }] as TripDestination[],
     transports: [] as Transport[], days: [] as ItineraryDay[],
-    activities: [] as { dayId: ObjectId; scheduledAt: Date }[], posts: [] as { dayId: ObjectId }[] };
+    activities: [] as { dayId: ObjectId; scheduledAt: Date; durationMinutes?: number | null }[], posts: [] as { dayId?: ObjectId | null }[] };
   const journeys = {
     withTransaction: async (_tripId: ObjectId, work: (port: TripJourneyPort) => Promise<{ ok: boolean }>) => {
       const previous = structuredClone(state);
@@ -44,7 +44,7 @@ function fixture() {
       return ok(state.destinations.find((item) => item.id === target));
     },
     listItineraryDays: async () => ok(state.days),
-    listItineraryReferences: async () => ok({ activities: state.activities, posts: state.posts }),
+    listItineraryReferences: async () => ok({ activities: state.activities.map((item) => ({ ...item, durationMinutes: item.durationMinutes ?? null })) }),
     replaceItineraryDays: async (_trip: ObjectId, days: ItineraryDay[]) => { state.days = days; return ok(undefined); },
   };
   const deps = { journeys: journeys as unknown as TripJourneyPort, createId: () => id(nextId++),
@@ -109,16 +109,79 @@ describe("transport itinerary persistence", () => {
     expect(state.days.map((day) => day.order)).toEqual([1, 2, 3, 4]);
   });
 
-  it.each(["activities", "posts"] as const)("rejects removal of a slice referenced by %s", async (collection) => {
+  it("rejects removal of a slice referenced by activities", async () => {
     const { state, configure, update } = fixture();
     await configure();
     expect(state.days).toHaveLength(4);
     const dayId = state.days[1]!.id;
-    if (collection === "activities") state.activities.push({ dayId, scheduledAt: new Date("2026-09-25T12:00:00Z") });
-    else state.posts.push({ dayId });
+    state.activities.push({ dayId, scheduledAt: new Date("2026-09-25T12:00:00Z") });
     const previous = structuredClone(state);
     expect(await update({ arrivalAt: new Date("2026-09-26T10:00:00Z") })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
     expect(state).toEqual(previous);
+  });
+
+  it("does not block removal of a slice carrying a legacy post dayId and leaves the post untouched", async () => {
+    const { state, configure, update } = fixture();
+    await configure();
+    const dayId = state.days[1]!.id;
+    state.posts.push({ dayId });
+    const post = structuredClone(state.posts[0]);
+    expect(await update({ arrivalAt: new Date("2026-09-26T10:00:00Z") })).toMatchObject({ ok: true });
+    expect(state.days.some((day) => day.id === dayId)).toBe(false);
+    expect(state.posts[0]).toEqual(post);
+  });
+
+  describe("activity end window", () => {
+    const HOUR = 60;
+    const withDuration = async (scheduledAt: Date, durationMinutes: number | undefined, dayIndex = 1) => {
+      const f = fixture();
+      await f.configure();
+      f.state.activities.push({ dayId: f.state.days[dayIndex]!.id, scheduledAt, durationMinutes });
+      return f;
+    };
+
+    it("rejects shortening the window so the end falls outside, preserving all state", async () => {
+      const { state, update } = await withDuration(new Date("2026-09-25T20:00:00Z"), 6 * HOUR);
+      state.posts.push({ dayId: null });
+      const returnTransport = state.transports.find((item) => item.direction === "return")!;
+      state.transports = state.transports.map((item) => item.id === returnTransport.id
+        ? { ...item, departureAt: new Date("2026-09-26T01:00:00Z"), arrivalAt: new Date("2026-09-26T03:00:00Z") } : item);
+      const snapshot = structuredClone(state);
+      expect(await update({ costPerPerson: 1 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(state).toEqual(snapshot);
+    });
+
+    it("accepts an end equal to the departure and rejects one millisecond later", async () => {
+      const departure = returning.departureAt;
+      const duration = 90;
+      const exact = await withDuration(new Date(departure.getTime() - duration * 60_000), duration, 2);
+      expect(await exact.update({ costPerPerson: 5 })).toMatchObject({ ok: true });
+      const late = await withDuration(new Date(departure.getTime() - duration * 60_000 + 1), duration, 2);
+      const previous = structuredClone(late.state);
+      expect(await late.update({ costPerPerson: 5 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(late.state).toEqual(previous);
+    });
+
+    it("keeps the previous behavior for activities without duration", async () => {
+      const { state, update } = await withDuration(new Date("2026-09-26T17:00:00Z"), undefined, 2);
+      expect(await update({ costPerPerson: 1 } as never)).toMatchObject({ ok: true });
+      expect(state.activities).toHaveLength(1);
+    });
+
+    it("accepts a duration crossing midnight UTC across contiguous activity slices", async () => {
+      const { state, update } = await withDuration(new Date("2026-09-25T23:00:00Z"), 2 * HOUR, 1);
+      expect(state.days.filter((day) => day.type === "activity")).toHaveLength(2);
+      expect(await update({ costPerPerson: 9 })).toMatchObject({ ok: true });
+    });
+
+    it("does not modify activities nor kept slice ids on success", async () => {
+      const { state, update } = await withDuration(new Date("2026-09-25T12:00:00Z"), HOUR, 1);
+      const activities = structuredClone(state.activities);
+      const ids = state.days.map((day) => day.id);
+      expect(await update({ costPerPerson: 11 })).toMatchObject({ ok: true });
+      expect(state.activities).toEqual(activities);
+      expect(state.days.map((day) => day.id)).toEqual(ids);
+    });
   });
 
   it.each([undefined, null])("does not conflict on posts without a legacy day (%s) during regeneration", async (dayId) => {

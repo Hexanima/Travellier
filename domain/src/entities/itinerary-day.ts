@@ -1,7 +1,6 @@
 import type { ObjectId } from "../value-objects/object-id.js";
 
-/** `arrival` is retained from the PRD schema; no generation rule is currently defined for it. */
-export type ItineraryDayType = "transit_out" | "activity" | "transit_return" | "arrival";
+export type ItineraryDayType = "transit_out" | "activity" | "transit_return";
 
 export interface ItineraryDay {
   id: ObjectId;
