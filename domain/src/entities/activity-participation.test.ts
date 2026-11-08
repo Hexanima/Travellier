@@ -31,3 +31,27 @@ describe("ActivityParticipation", () => {
     expect(result.value.updatedAt).toEqual(input.updatedAt);
   });
 });
+
+describe("ActivityParticipation decisionRequired (T53)", () => {
+  const changedAt = new Date("2026-11-08T10:00:00.123Z");
+  const mark = { reason: "schedule_conflict", changedFields: ["scheduledAt", "durationMinutes"], changedAt };
+  it("copies a valid marker on pending and clones changedAt", () => {
+    const result = create({ status: "pending", decisionRequired: { ...mark, changedAt: new Date(changedAt) } });
+    if (!result.ok) throw result.error;
+    expect(result.value.decisionRequired).toEqual(mark);
+    expect(result.value.decisionRequired!.changedAt).not.toBe(changedAt);
+  });
+  it.each(["going", "not_going"])("rejects a marker on %s", (status) => {
+    expect(create({ status, decisionRequired: mark })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "decisionRequired" }] } });
+  });
+  it("treats a null marker as absent", () => {
+    expect(create({ status: "going", decisionRequired: null })).toMatchObject({ ok: true });
+  });
+  it.each([
+    { ...mark, changedFields: [] }, { ...mark, changedFields: ["scheduledAt", "scheduledAt"] },
+    { ...mark, changedFields: ["title"] }, { ...mark, reason: "other" }, { ...mark, changedAt: new Date(NaN) },
+    { ...mark, changedAt: "2026-11-08" }, "x",
+  ])("rejects an invalid marker %j", (decisionRequired) => {
+    expect(create({ status: "pending", decisionRequired })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "decisionRequired" }] } });
+  });
+});

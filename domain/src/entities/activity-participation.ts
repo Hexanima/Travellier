@@ -22,7 +22,26 @@ export interface ActivityParticipation {
   decisionRequired?: ParticipationDecisionRequired | null;
 }
 
-export type CreateActivityParticipationInput = Omit<ActivityParticipation, "status"> & { status: unknown };
+export type CreateActivityParticipationInput = Omit<ActivityParticipation, "status" | "decisionRequired"> &
+  { status: unknown; decisionRequired?: unknown };
+
+const markerFields = ["scheduledAt", "durationMinutes"];
+const invalidMarker = (message: string) => err(new ValidationError([{ field: "decisionRequired", code: "invalid", message }]));
+const parseMarker = (value: unknown): Result<ParticipationDecisionRequired, ValidationError> => {
+  const marker = value as Partial<ParticipationDecisionRequired> | null;
+  if (typeof marker !== "object" || marker === null || marker.reason !== "schedule_conflict") {
+    return invalidMarker("decisionRequired reason must be schedule_conflict.");
+  }
+  const fields = marker.changedFields;
+  if (!Array.isArray(fields) || fields.length === 0 || new Set(fields).size !== fields.length ||
+    !fields.every((f) => markerFields.includes(f))) {
+    return invalidMarker("decisionRequired changedFields must be unique scheduledAt/durationMinutes values.");
+  }
+  if (!(marker.changedAt instanceof Date) || !Number.isFinite(marker.changedAt.getTime())) {
+    return invalidMarker("decisionRequired changedAt must be a valid UTC instant.");
+  }
+  return ok({ reason: "schedule_conflict", changedFields: [...fields], changedAt: new Date(marker.changedAt.getTime()) });
+};
 
 export const createActivityParticipation = (
   input: CreateActivityParticipationInput,
@@ -34,6 +53,10 @@ export const createActivityParticipation = (
   if (!(input.updatedAt instanceof Date) || !Number.isFinite(input.updatedAt.getTime())) {
     return err(new ValidationError([{ field: "updatedAt", code: "invalid", message: "Participation update time must be a valid UTC instant." }]));
   }
-  return ok({ id: input.id, tripId: input.tripId, activityId: input.activityId, userId: input.userId,
-    status: input.status, updatedAt: new Date(input.updatedAt.getTime()) });
+  const base = { id: input.id, tripId: input.tripId, activityId: input.activityId, userId: input.userId,
+    status: input.status as ActivityParticipationStatus, updatedAt: new Date(input.updatedAt.getTime()) };
+  if (input.decisionRequired == null) return ok(base);
+  if (input.status !== "pending") return invalidMarker("decisionRequired is only valid on a pending participation.");
+  const marker = parseMarker(input.decisionRequired);
+  return marker.ok ? ok({ ...base, decisionRequired: marker.value }) : marker;
 };
