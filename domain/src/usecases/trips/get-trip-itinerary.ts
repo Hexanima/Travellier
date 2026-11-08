@@ -3,7 +3,7 @@ import type { TripMemberManagementPort } from "../../ports/trip-member-managemen
 import type { TripItineraryQueryPort } from "../../ports/trip-itinerary-query-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok } from "../../types/result.js";
-import type { ItineraryItem, TripItinerary, TripItinerarySnapshot } from "../../types/trip-itinerary.js";
+import type { ItineraryItem, ItineraryPost, TripItinerary, TripItinerarySnapshot } from "../../types/trip-itinerary.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
 
@@ -41,7 +41,8 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
     .sort((a, b) => a.departureAt.getTime() - b.departureAt.getTime() || byId(a, b));
   const activityIds = new Set(activities.map((value) => value.id));
   const transportIds = new Set(transports.map((value) => value.id));
-  const posts = snapshot.posts.filter((value) => value.tripId === tripId && value.dayId != null && dayIds.has(value.dayId)).sort(byCreatedAt);
+  const posts = snapshot.posts.flatMap((value): ItineraryPost[] =>
+    value.tripId === tripId && value.dayId != null && dayIds.has(value.dayId) ? [{ ...value, dayId: value.dayId }] : []).sort(byCreatedAt);
   // Transitional (T56): only posts with a legacy day are projected by day.
   const postIds = new Set(posts.map((value) => value.id));
   const expenses = new Map(snapshot.expenses.filter((value) => value.tripId === tripId && postIds.has(value.postId)).map((value) => [value.postId, value]));
@@ -53,7 +54,7 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
   }));
   const postsByActivity = group(postViews, (post) => post.activityId);
   const postsByTransport = group(postViews, (post) => post.transportId);
-  const postsByDay = group(postViews, (post) => post.dayId ?? null);
+  const postsByDay = group(postViews, (post) => post.dayId);
   const activitiesByDay = group(activities, (activity) => activity.dayId);
   const transportsByDestination = group(transports, (transport) => transport.destinationId);
   const itemRank = { transport: 0, activity: 1, post: 2 };

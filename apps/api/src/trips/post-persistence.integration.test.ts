@@ -18,7 +18,8 @@ describe("post persistence and transactions", () => {
   it("persists BSON references and dates and preserves authorship during another member's edit", async () => {
     const { post } = await create();
     const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
-    expect(stored).toMatchObject({ tripId: f.trip, dayId: f.day, authorId: f.actor, activityId: null, parentPostId: null, transportId: null });
+    expect(stored).toMatchObject({ tripId: f.trip, authorId: f.actor, activityId: null, parentPostId: null, transportId: null });
+    expect(stored).not.toHaveProperty("dayId");
     expect(stored!.createdAt).toBeInstanceOf(Date);
     const editor = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: editor, role: "admin" });
     expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: domainId(editor), postId: post.id, description: "Editado" }))
@@ -28,7 +29,7 @@ describe("post persistence and transactions", () => {
 
   it.each([false, true])("stores joint creation with voting=%s and UTC milliseconds", async (votingEnabled) => {
     await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { votingEnabled } });
-    const { post, activity } = await create({ newActivity: { title: "Cena", scheduledAt: f.occurrence } });
+    const { post, activity } = await create({ dayId: domainId(f.day), newActivity: { title: "Cena", scheduledAt: f.occurrence } });
     expect(activity).toMatchObject({ scheduledAt: f.occurrence, createdBy: post.authorId });
     expect(activity).not.toHaveProperty("status");
     const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
@@ -41,7 +42,7 @@ describe("post persistence and transactions", () => {
     const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
     vi.spyOn(collection, "insertOne").mockRejectedValueOnce(new Error("forced failure"));
     vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
-    expect(await f.api.createPost!({ ...f.input(), newActivity: { title: "Cena", scheduledAt: f.occurrence } }))
+    expect(await f.api.createPost!({ ...f.input(), dayId: domainId(f.day), newActivity: { title: "Cena", scheduledAt: f.occurrence } }))
       .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
     expect(await f.snapshot()).toEqual(before);
   });
@@ -81,7 +82,7 @@ describe("post persistence and transactions", () => {
   it("serializes joint creation with Trip deletion without orphaning either record", async () => {
     expect(f.api.createPost).toBeTypeOf("function");
     await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
-    const [created, deleted] = await Promise.all([f.api.createPost!({ ...f.input(), newActivity: { title: "Cena", scheduledAt: f.occurrence } }), f.api.delete!(f.context())]);
+    const [created, deleted] = await Promise.all([f.api.createPost!({ ...f.input(), dayId: domainId(f.day), newActivity: { title: "Cena", scheduledAt: f.occurrence } }), f.api.delete!(f.context())]);
     expect(deleted.ok).toBe(true);
     if (!created.ok) expect(created.error.tag).toBe("TripNotFoundError");
     expect(await f.db.collection("posts").countDocuments({ tripId: f.trip })).toBe(0);
@@ -113,18 +114,50 @@ describe("post persistence and transactions", () => {
       .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
   });
 
-  it("serializes post creation with removal of its day by transport regeneration", async () => {
+  it("creates posts concurrently with transport regeneration without conflicts, leaving the itinerary untouched by them", async () => {
     const outbound = await f.configureTransports();
-    const transit = await f.db.collection("itineraryDays").findOne({ tripId: f.trip, type: "transit_out" });
-    expect(transit).not.toBeNull(); f.day = transit!._id;
     expect(f.api.createPost).toBeTypeOf("function");
     const [created, changed] = await Promise.all([f.api.createPost!(f.input()), f.api.updateTransport!({ ...f.context(), destinationId: domainId(f.destination),
       transportId: outbound.id, departureAt: new Date("2026-09-24T08:00:00Z"), arrivalAt: new Date("2026-09-24T10:00:00Z") })]);
-    expect(created.ok || changed.ok).toBe(true);
-    expect(created.ok && changed.ok).toBe(false);
-    if (!created.ok) expect(created.error.tag).toBe("ValidationError");
-    if (!changed.ok) expect(changed.error.tag).toBe("ItineraryConflictError");
-    for (const post of await f.db.collection("posts").find({ tripId: f.trip }).toArray())
-      expect(await f.db.collection("itineraryDays").findOne({ _id: post.dayId, tripId: f.trip })).not.toBeNull();
+    expect(created.ok).toBe(true); expect(changed.ok).toBe(true);
+    expect(await f.db.collection("posts").countDocuments({ tripId: f.trip })).toBe(1);
+  });
+
+  it.each([
+    ["before the Trip", "2020-01-01T00:00:00.001Z"], ["after the Trip", "2031-12-31T23:59:59.999Z"],
+  ])("stores and lists a post published %s without any itinerary", async (_name, iso) => {
+    await f.db.collection("itineraryDays").deleteMany({ tripId: f.trip });
+    const { post } = await create();
+    await f.db.collection("posts").updateOne({ _id: new ObjectId(post.id) }, { $set: { createdAt: new Date(iso) } });
+    const listed = await f.api.listPosts!(f.context());
+    expect(listed).toMatchObject({ ok: true, value: [{ id: post.id, createdAt: new Date(iso) }] });
+    const edited = await f.api.updatePost!({ ...f.context(), postId: post.id, description: "Editado" });
+    expect(edited).toMatchObject({ ok: true, value: { createdAt: new Date(iso), authorId: post.authorId } });
+    expect((await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) }))!.createdAt).toEqual(new Date(iso));
+  });
+
+  it.each(["existing", "missing"])("reads, edits and preserves a legacy dayId pointing to an %s day", async (kind) => {
+    const legacyDay = kind === "existing" ? f.day : new ObjectId(), legacy = new ObjectId();
+    const createdAt = new Date("2026-09-20T10:00:00.987Z");
+    await f.db.collection("posts").insertOne({ _id: legacy, tripId: f.trip, dayId: legacyDay, authorId: new ObjectId(), description: "Viejo",
+      mapsUrl: null, activityId: null, parentPostId: null, transportId: null, createdAt });
+    const id = domainId(legacy);
+    const read = await f.api.getPost!({ ...f.context(), postId: id });
+    expect(read).toMatchObject({ ok: true, value: { id, createdAt } });
+    if (read.ok) expect(read.value).not.toHaveProperty("dayId");
+    expect(await f.api.updatePost!({ ...f.context(), postId: id, description: "Nuevo" })).toMatchObject({ ok: true, value: { createdAt } });
+    expect(await f.db.collection("posts").findOne({ _id: legacy })).toMatchObject({ dayId: legacyDay, description: "Nuevo", createdAt });
+  });
+
+  it("lists with createdAt descending and id descending using the tripId_createdAt_desc index", async () => {
+    const at = new Date("2026-10-01T00:00:00.001Z");
+    const ids = [new ObjectId(), new ObjectId(), new ObjectId()].sort((a, b) => a.toHexString().localeCompare(b.toHexString()));
+    await f.db.collection("posts").insertMany(ids.map((_id) => ({ _id, tripId: f.trip, authorId: f.actor, createdAt: at,
+      description: null, mapsUrl: null, activityId: null, parentPostId: null, transportId: null })));
+    const listed = await f.api.listPosts!(f.context());
+    expect(listed.ok && listed.value.map((p) => p.id)).toEqual([...ids].reverse().map((id) => id.toHexString()));
+    const plan = await f.db.collection("posts").find({ tripId: f.trip }).sort({ createdAt: -1 }).explain("queryPlanner");
+    expect(JSON.stringify(plan.queryPlanner.winningPlan)).toContain("tripId_createdAt_desc");
+    expect(JSON.stringify(plan.queryPlanner.winningPlan)).not.toMatch(/COLLSCAN|"SORT"/);
   });
 });

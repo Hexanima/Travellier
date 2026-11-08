@@ -74,6 +74,19 @@ describe("Mongo itinerary query", () => {
       posts: [{ id: post.toHexString(), activityId: null, parentPostId: null, expense: null }], days: [{ expenseSummary: { totalAmount: 0, expenseCount: 0 } }] } });
   });
 
+  it("reads posts without a legacy day and keeps them out of the day projection", async () => {
+    const independent = new ObjectId();
+    await db.collection("posts").insertMany([
+      { _id: independent, tripId: trip, authorId: actor, description: "Sin día", mapsUrl: null, activityId: null, transportId: null, parentPostId: null, createdAt: arrival },
+      { _id: new ObjectId(), tripId: trip, dayId: null, authorId: actor, description: null, mapsUrl: null, createdAt: arrival },
+    ]);
+    const result = await query();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.posts.map((p) => p.id)).toEqual([post.toHexString()]);
+    expect(JSON.stringify(result.value.days)).not.toContain(independent.toHexString());
+  });
+
   it("uses a bounded number of queries as the number of days grows and does not write", async () => {
     commands.length = 0; expect((await query()).ok).toBe(true);
     const first = commands.filter((name) => name === "find" || name === "aggregate").length;

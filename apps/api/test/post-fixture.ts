@@ -40,7 +40,7 @@ export class PostFixture {
     this.api = createTripApi(this.db);
   }
   context() { return { tripId: domainId(this.trip), authenticatedUserId: domainId(this.actor) }; }
-  input() { return { ...this.context(), dayId: domainId(this.day), description: "Recuerdo" }; }
+  input() { return { ...this.context(), description: "Recuerdo" }; }
   path() { return `/trips/${this.trip}/posts`; }
   request(method: string, url = this.path(), body?: unknown, user = this.actor) {
     return handleApiRequest({ method, url, body, authenticatedUserId: domainId(user) }, { trips: this.api });

@@ -123,13 +123,13 @@ Todas las rutas requieren `Authorization: Bearer <accessToken>` y membresía act
 | Método | Ruta | Respuesta |
 |---|---|---|
 | POST | `/trips/:tripId/posts` | 201 `{ post }`, o `{ post, activity }` en creación conjunta |
-| GET | `/trips/:tripId/posts` | 200 `{ posts }`, ordenados por `createdAt` e ID |
+| GET | `/trips/:tripId/posts` | 200 `{ posts }`, por publicación descendente (`createdAt`) y, ante empate, ID descendente |
 | GET | `/trips/:tripId/posts/:postId` | 200 `{ post }` |
 | PATCH | `/trips/:tripId/posts/:postId` | 200 `{ post }` |
 
-POST requiere `dayId` y acepta `description`, `mapsUrl`, `activityId`, `parentPostId` y `transportId` opcionales. Un post puede combinar las tres vinculaciones o no tener ninguna. El día y todas las referencias deben existir en el mismo Trip; los vínculos pueden apuntar a contenido de otros días del viaje. Se rechaza la autorreferencia. Los posts pueden pertenecer a franjas de actividad, llegada o tránsito; su `createdAt` no restringe ni cambia la asociación al día.
+POST no requiere `dayId` ni itinerario: acepta `description`, `mapsUrl`, `activityId`, `parentPostId` y `transportId` opcionales. Un post puede combinar las tres vinculaciones o no tener ninguna. Las referencias deben existir en el mismo Trip; los vínculos pueden apuntar a contenido de otros días del viaje. Se rechaza la autorreferencia. Desde T54 el post no tiene día: el servidor asigna `createdAt` al publicar (con milisegundos), también antes o después del viaje o en un Trip sin transportes, y el cliente no lo elige. Un `dayId` o `createdAt` del body se ignora, aunque sea inválido o ajeno; solo con `newActivity` el `dayId` define el día de la actividad nueva (transitorio hasta T58). Los registros anteriores conservan su `dayId` en MongoDB, se leen y editan sin depender de él, y la API de posts no lo expone.
 
-PATCH permite únicamente esos seis campos: omitidos conservan su valor; `null` limpia texto/Maps o desvincula cada relación independientemente. `dayId` no admite `null`. El servidor controla ID, Trip, autor y `createdAt`; los campos protegidos o desconocidos del body se ignoran y un PATCH sin campos editables responde 400. La entidad resultante se valida completa, incluidas las referencias conservadas. Un vínculo inválido rechaza toda la edición, incluidos los cambios de texto o día.
+PATCH permite únicamente esos cinco campos: omitidos conservan su valor; `null` limpia texto/Maps o desvincula cada relación independientemente. `dayId` ya no es editable: se ignora y un PATCH que solo lo traiga responde 400. El servidor controla ID, Trip, autor y `createdAt`; los campos protegidos o desconocidos del body se ignoran y un PATCH sin campos editables responde 400. La entidad resultante se valida completa, incluidas las referencias conservadas. Un vínculo inválido rechaza toda la edición, incluidos los cambios de texto.
 
 Para crear una actividad espontánea y su primer post, enviar `newActivity` en el mismo POST:
 
@@ -150,7 +150,7 @@ Para crear una actividad espontánea y su primer post, enviar `newActivity` en e
 
 Membresía, configuración, día y relaciones se leen dentro de la misma transacción que las escrituras, coordinada por Trip con regeneración del itinerario, expulsiones y bajas de actividades/Trip. Cualquier error aborta todos los cambios; la creación conjunta nunca deja uno de los dos registros persistido parcialmente. GET usa snapshots sin escrituras. El itinerario refleja los cambios en su siguiente consulta, y eliminar una actividad sigue desvinculando sus posts sin alterar sus demás datos.
 
-Sin JWT válido devuelve 401; externos, expulsados o Trips inaccesibles reciben 404 `TripNotFoundError`. Un post ausente o de otro Trip recibe 404 `PostNotFoundError`. JSON/body o IDs de ruta malformados reciben 400; campos, día, horario o vínculos inválidos reciben 422 `ValidationError`, con detalles en `error.fields`. Dependencias sin configurar reciben 503 y fallos inesperados, 500 genérico.
+Sin JWT válido devuelve 401; externos, expulsados o Trips inaccesibles reciben 404 `TripNotFoundError`. Un post ausente o de otro Trip recibe 404 `PostNotFoundError`. JSON/body o IDs de ruta malformados reciben 400; campos, horario de la actividad nueva o vínculos inválidos reciben 422 `ValidationError`, con detalles en `error.fields`. Dependencias sin configurar reciben 503 y fallos inesperados, 500 genérico.
 
 IDs y referencias se almacenan como BSON `ObjectId`, y fechas como BSON `Date`. Se reutilizan la colección `posts` y los índices de T04; T43 no agrega migraciones. Fotos, gastos e interacciones permanecen en sus colecciones separadas; esta API no los crea ni modifica. Compositor y feed corresponden a T44/T45.
 
@@ -211,7 +211,7 @@ HTTP 200 devuelve `{ itinerary }`, con configuración, destinos, días, transpor
 | `days[].items` | Referencias `{ kind: "transport" \| "activity" \| "post", id, at }` ordenadas por instante; empate por tipo (transporte, actividad, post) y después por ID. |
 | `activities` | Campos del PRD, ordenados por `scheduledAt` e ID. `postIds` referencia sus publicaciones, por `createdAt` e ID. |
 | `transports` | Campos existentes, ordenados por `departureAt` e ID. `postIds` referencia publicaciones vinculadas, por `createdAt` e ID. |
-| `posts` | Cada publicación aparece una sola vez, por `createdAt` e ID. Conserva `dayId`, los vínculos independientes y `expense` (`null` cuando no tiene gasto). |
+| `posts` | Cada publicación aparece una sola vez, por `createdAt` e ID. Transitorio hasta T56: solo incluye posts con `dayId` heredado válido; los posts creados desde T54 (sin día) se consultan con `GET /trips/:id/posts` y aún no aparecen aquí, en `postIds` ni en `expenseSummary`. Conserva `dayId`, los vínculos independientes y `expense` (`null` cuando no tiene gasto). |
 
 Las referencias de `items` y `postIds` se resuelven contra las listas de la misma respuesta, sin requests por día o contexto. Un transporte se referencia en cada franja de tránsito correspondiente a su destino y dirección; `at` es el inicio del transporte dentro de esa franja. Las actividades usan `scheduledAt` y los posts independientes usan `createdAt`.
 

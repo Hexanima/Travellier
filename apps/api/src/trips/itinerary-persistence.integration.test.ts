@@ -151,6 +151,17 @@ describe("persisted itinerary transactions", () => {
     expect(await database.collection("transports").findOne({ _id: new ObjectId(outbound.id) })).toMatchObject({ departureAt: outbound.departureAt });
   });
 
+  it("does not let posts created without a day block regeneration, and keeps them untouched", async () => {
+    const { api, outbound } = await configure();
+    const independent = new ObjectId();
+    await database.collection("posts").insertOne({ _id: independent, tripId: trip, authorId: actor, description: "Recuerdo",
+      createdAt: new Date("2027-01-01T00:00:00.123Z") });
+    const before = await database.collection("posts").findOne({ _id: independent });
+    expect((await api.updateTransport!({ ...context(), transportId: outbound.id, arrivalAt: new Date("2026-09-25T11:00:00Z") })).ok).toBe(true);
+    expect((await api.updateTransport!({ ...context(), transportId: outbound.id, departureAt: new Date("2026-09-20T08:00:00Z"), arrivalAt: new Date("2026-09-20T10:00:00Z") })).ok).toBe(true);
+    expect(await database.collection("posts").findOne({ _id: independent })).toEqual(before);
+  });
+
   it("removes only obsolete unreferenced rows of the target Trip", async () => {
     const { api, outbound } = await configure();
     const before = await days();

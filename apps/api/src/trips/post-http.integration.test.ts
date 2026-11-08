@@ -11,7 +11,7 @@ describe("post HTTP API", () => {
   beforeAll(() => f.start("post_http"), 120_000);
   afterAll(() => f.stop());
   beforeEach(async () => { vi.restoreAllMocks(); await f.reset(); });
-  const input = () => ({ dayId: f.day.toHexString(), description: "Recuerdo" });
+  const input = () => ({ description: "Recuerdo" });
   const create = async (fields = {}) => {
     const response = await f.request("POST", f.path(), { ...input(), ...fields });
     expect(response.statusCode, response.body).toBe(201);
@@ -70,13 +70,59 @@ describe("post HTTP API", () => {
     expect(baseline[0]).toEqual(before[0]);
   });
 
-  it("rejects self-reference and foreign days without modifying the post", async () => {
-    const post = await create(), before = await f.snapshot(), foreign = new ObjectId();
-    await f.db.collection("itineraryDays").insertOne({ _id: foreign, tripId: new ObjectId() });
-    for (const patch of [{ parentPostId: post.id }, { dayId: foreign.toHexString() }, { dayId: null }, { dayId: new ObjectId().toHexString() }, { description: 42 }, { mapsUrl: [] }]) {
+  it("rejects self-reference and malformed text without modifying the post", async () => {
+    const post = await create(), before = await f.snapshot();
+    for (const patch of [{ parentPostId: post.id }, { description: 42 }, { mapsUrl: [] }]) {
       expect((await f.request("PATCH", `${f.path()}/${post.id}`, patch)).statusCode).toBe(422);
       expect(await f.snapshot()).toEqual(before);
     }
+  });
+
+  it("creates posts without dayId before, after or without a Trip itinerary and ignores client dayId and createdAt", async () => {
+    const foreign = new ObjectId();
+    await f.db.collection("itineraryDays").insertOne({ _id: foreign, tripId: new ObjectId() });
+    for (const fields of [{}, { dayId: foreign.toHexString() }, { dayId: "invalid" }, { dayId: null }, { dayId: 42 },
+      { createdAt: "2020-01-01T00:00:00.000Z" }, { createdAt: "2040-01-01T00:00:00.000Z", dayId: f.day.toHexString() }]) {
+      const post = await create(fields);
+      expect(post).not.toHaveProperty("dayId");
+      expect(Math.abs(Date.now() - Date.parse(post.createdAt))).toBeLessThan(60_000);
+      expect(await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) })).not.toHaveProperty("dayId");
+    }
+    await f.db.collection("itineraryDays").deleteMany({ tripId: f.trip });
+    await create();
+  });
+
+  it("does not make dayId editable: a dayId-only PATCH is 400 and other fields are edited ignoring it", async () => {
+    const post = await create(), before = await f.snapshot();
+    for (const dayId of [f.day.toHexString(), null, "invalid", new ObjectId().toHexString()]) {
+      expect((await f.request("PATCH", `${f.path()}/${post.id}`, { dayId })).statusCode).toBe(400);
+      expect(await f.snapshot()).toEqual(before);
+    }
+    const response = await f.request("PATCH", `${f.path()}/${post.id}`, { dayId: new ObjectId().toHexString(), description: "Nuevo" });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).post).toEqual({ ...post, description: "Nuevo" });
+  });
+
+  it("lists by publication descending, breaking ties by id descending", async () => {
+    const newer = new Date("2026-10-05T00:00:00.002Z"), tied = new Date("2026-10-04T00:00:00.001Z");
+    const ids = [new ObjectId(), new ObjectId(), new ObjectId(), new ObjectId()].sort((a, b) => a.toHexString().localeCompare(b.toHexString()));
+    await f.db.collection("posts").insertMany([
+      { _id: ids[0]!, tripId: f.trip, authorId: f.actor, createdAt: tied }, { _id: ids[2]!, tripId: f.trip, authorId: f.actor, createdAt: tied },
+      { _id: ids[1]!, tripId: f.trip, authorId: f.actor, createdAt: newer }, { _id: ids[3]!, tripId: f.trip, authorId: f.actor, createdAt: new Date(0) },
+    ].map((doc) => ({ ...doc, description: null, mapsUrl: null, activityId: null, parentPostId: null, transportId: null })));
+    const response = await f.request("GET");
+    expect(JSON.parse(response.body).posts.map((p: { id: string }) => p.id))
+      .toEqual([ids[1], ids[2], ids[0], ids[3]].map((id) => id!.toHexString()));
+  });
+
+  it("reads legacy posts with and without dayId, without exposing it", async () => {
+    const legacy = new ObjectId();
+    await f.db.collection("posts").insertOne({ _id: legacy, tripId: f.trip, dayId: new ObjectId(), authorId: f.actor, description: "Viejo",
+      mapsUrl: null, activityId: null, parentPostId: null, transportId: null, createdAt: new Date("2026-01-01T00:00:00.123Z") });
+    const response = await f.request("GET", `${f.path()}/${legacy}`);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).post).toEqual({ id: legacy.toHexString(), tripId: f.trip.toHexString(), authorId: f.actor.toHexString(),
+      description: "Viejo", mapsUrl: null, activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-01T00:00:00.123Z" });
   });
 
   it("returns 400 for malformed route IDs, JSON and empty or protected-only PATCH", async () => {
@@ -85,7 +131,7 @@ describe("post HTTP API", () => {
       expect((await f.request("PATCH", `${f.path()}/${post.id}`, payload)).statusCode).toBe(400);
     expect((await f.request("GET", "/trips/invalid/posts")).statusCode).toBe(400);
     expect((await f.request("GET", `${f.path()}/invalid`)).statusCode).toBe(400);
-    expect((await f.request("POST", f.path(), {})).statusCode).toBe(422);
+    expect((await f.request("POST", f.path(), "{")).statusCode).toBe(400);
   });
 
   it("hides absent or foreign posts and denies outsiders and revoked members in public Trips", async () => {
@@ -117,40 +163,40 @@ describe("post HTTP API", () => {
   });
 
   it("keeps creating a joint activity without the author's going until T58", async () => {
-    const response = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
     expect(response.statusCode, response.body).toBe(201);
     expect(Object.keys(JSON.parse(response.body)).sort()).toEqual(["activity", "post"]);
     expect(await f.db.collection("activityParticipations").countDocuments()).toBe(0);
   });
 
   it.each(["2026-09-25T09:00:00.456-03:00", "2026-09-25T12:00:00.456Z"])("creates joint activity at %s and exposes both in itinerary", async (scheduledAt) => {
-    const response = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt } });
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt } });
     expect(response.statusCode, response.body).toBe(201);
     const { post, activity } = JSON.parse(response.body);
     expect(post.activityId).toBe(activity.id); expect(activity.scheduledAt).toBe(f.occurrence.toISOString());
     const itinerary = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
-    expect(itinerary.posts).toMatchObject([post]); expect(itinerary.activities).toMatchObject([{ ...activity, postIds: [post.id] }]);
+    // Transitional (T56): posts created without a day are not yet projected into the itinerary.
+    expect(itinerary.posts).toEqual([]); expect(itinerary.activities).toMatchObject([{ ...activity, postIds: [] }]);
+    expect(JSON.parse((await f.request("GET")).body).posts).toMatchObject([{ id: post.id, activityId: activity.id }]);
     expect((await f.request("PATCH", `${f.path()}/${post.id}`, { activityId: null })).statusCode).toBe(200);
-    const detached = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
-    expect(detached.activities[0].postIds).toEqual([]); expect(detached.days[0].items).toContainEqual({ kind: "post", id: post.id, at: post.createdAt });
   });
 
   it.each([undefined, null, "", "invalid", "2026-09-25", "2026-09-25T12:00:00", "2026-02-30T12:00:00Z", "2026-09-25T24:00:00Z", "2026-09-25T12:00:00.4567Z", "2026-09-25T09:00:00Z"])("rejects invalid joint activity time %s without creating anything", async (scheduledAt) => {
     const before = await f.snapshot();
-    expect((await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt } })).statusCode).toBe(422);
+    expect((await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt } })).statusCode).toBe(422);
     expect(await f.snapshot()).toEqual(before);
   });
 
   it("rejects malformed or ambiguous newActivity payloads", async () => {
     const before = await f.snapshot();
     for (const newActivity of [null, [], "Cena", {}, { title: " " }, { title: "Cena", scheduledAt: f.occurrence.toISOString(), mapsUrl: 42 }])
-      expect((await f.request("POST", f.path(), { ...input(), newActivity })).statusCode).toBe(422);
-    expect((await f.request("POST", f.path(), { ...input(), activityId: new ObjectId().toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } })).statusCode).toBe(422);
+      expect((await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity })).statusCode).toBe(422);
+    expect((await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), activityId: new ObjectId().toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } })).statusCode).toBe(422);
     expect(await f.snapshot()).toEqual(before);
   });
 
   it("creates a spontaneous activity with duration preserving start, duration and milliseconds", async () => {
-    const response = await f.request("POST", f.path(), { ...input(),
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(),
       newActivity: { title: "Cena", scheduledAt: "2026-09-25T09:00:00.456-03:00", durationMinutes: 90 } });
     expect(response.statusCode, response.body).toBe(201);
     const { post, activity } = JSON.parse(response.body);
@@ -158,13 +204,13 @@ describe("post HTTP API", () => {
     expect(post.activityId).toBe(activity.id);
     expect(await f.db.collection("activities").findOne({ _id: new ObjectId(activity.id) }))
       .toMatchObject({ scheduledAt: new Date("2026-09-25T12:00:00.456Z"), durationMinutes: 90 });
-    const plain = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    const plain = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
     expect(JSON.parse(plain.body).activity).toMatchObject({ durationMinutes: null });
   });
 
   it.each(["90", true, {}, 0, -1, 2.5, 400])("rejects spontaneous duration %s without creating post or activity", async (durationMinutes) => {
     const before = await f.snapshot();
-    const response = await f.request("POST", f.path(), { ...input(),
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(),
       newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString(), durationMinutes } });
     expect(response.statusCode).toBe(422);
     expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "durationMinutes" }] } });
@@ -174,12 +220,13 @@ describe("post HTTP API", () => {
 
   it("reflects transport and parent links and preserves post content when its activity is deleted", async () => {
     const transport = await f.configureTransports(), parent = await create();
-    const response = await f.request("POST", f.path(), { ...input(), transportId: transport.id, parentPostId: parent.id,
+    const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), transportId: transport.id, parentPostId: parent.id,
       newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
     expect(response.statusCode).toBe(201); const { post, activity } = JSON.parse(response.body);
     const itinerary = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
-    expect(itinerary.transports.find((t: { id: string }) => t.id === transport.id).postIds).toContain(post.id);
-    expect(itinerary.posts.find((p: { id: string }) => p.id === post.id).parentPostId).toBe(parent.id);
+    // Transitional (T56): the itinerary does not project posts without a day yet; links are visible through the post API.
+    expect(itinerary.posts).toEqual([]);
+    expect(post).toMatchObject({ transportId: transport.id, parentPostId: parent.id, activityId: activity.id });
     expect((await f.request("DELETE", `/trips/${f.trip}/activities/${activity.id}`)).statusCode).toBe(204);
     expect(JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body)).toEqual({ post: { ...post, activityId: null } });
   });

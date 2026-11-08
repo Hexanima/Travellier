@@ -144,10 +144,10 @@ export const createMongoTripJourneyRepository = (database: Db, session?: ClientS
       const query = { tripId: new MongoObjectId(tripId) };
       const activities = await database.collection<{ dayId: MongoObjectId; scheduledAt: Date }>("activities")
         .find(query, { ...options, projection: { dayId: 1, scheduledAt: 1 } }).toArray();
-      const posts = await database.collection<{ dayId: MongoObjectId }>("posts")
+      const posts = await database.collection<{ dayId?: MongoObjectId | null }>("posts")
         .find(query, { ...options, projection: { dayId: 1 } }).toArray();
       return { activities: activities.map((item) => ({ dayId: domainId(item.dayId), scheduledAt: item.scheduledAt })),
-        posts: posts.map((item) => ({ dayId: domainId(item.dayId) })) };
+        posts: posts.map((item) => ({ dayId: item.dayId == null ? null : domainId(item.dayId) })) };
     }),
     replaceItineraryDays: async (tripId, days) => {
       if (!session) return repository.withTransaction(tripId, (scoped) => scoped.replaceItineraryDays(tripId, days));
