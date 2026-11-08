@@ -57,6 +57,29 @@ describe("activity HTTP adapter", () => {
     const { api } = setup({ error: { code: "ValidationError", message: "Invalid", fields } }, 400);
     expect(await api.create(itineraryId(1), input)).toMatchObject({ ok: false, error: { kind: "validation", fields: [{ field: "scheduledAt", message: "Outside window" }] } });
   });
+  it("keeps the field code so the form can tell a window rejection from an invalid duration", async () => {
+    const fields = [{ field: "durationMinutes", code: "outside_window", message: "Outside window" }];
+    const { api } = setup({ error: { code: "ValidationError", message: "Invalid", fields } }, 422);
+    expect(await api.update(itineraryId(1), itineraryId(8), { durationMinutes: 600 })).toEqual({ ok: false,
+      error: { kind: "validation", fields: [{ field: "durationMinutes", code: "outside_window", message: "Outside window" }] } });
+  });
+  it.each([[undefined], [null], [90]])("accepts durationMinutes %s in a response", async (durationMinutes) => {
+    const value = { ...activity(), ...(durationMinutes === undefined ? {} : { durationMinutes }) };
+    const { api } = setup({ activity: value });
+    expect(await api.get(value.tripId, value.id)).toEqual({ ok: true, value });
+  });
+  it.each([[0], [-30], [1.5], ["90"]])("rejects durationMinutes %j in a response", async (durationMinutes) => {
+    const { api } = setup({ activity: { ...activity(), durationMinutes } });
+    const value = activity();
+    expect(await api.get(value.tripId, value.id)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("sends durationMinutes null to remove the duration and a number to set it", async () => {
+    const { api, fetch } = setup({ activity: activity() });
+    await api.update(itineraryId(1), itineraryId(8), { durationMinutes: null });
+    await api.create(itineraryId(1), { ...input, durationMinutes: 90 });
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ durationMinutes: null });
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ ...input, durationMinutes: 90 });
+  });
   it.each([[401, "unauthorized"], [403, "forbidden"], [404, "not-found"], [500, "server"]])("propagates HTTP %s", async (status, kind) => {
     const { api, onUnauthorized } = setup({}, status as number);
     expect(await api.get(itineraryId(1), itineraryId(8))).toEqual({ ok: false, error: { kind } });
