@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
+import { childPostsQuery } from "../adapters/mongodb/trip-post-repository.js";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
 
 describe("post persistence and transactions", () => {
@@ -145,13 +146,15 @@ describe("post persistence and transactions", () => {
       expect(await f.db.collection(name).countDocuments({ tripId: f.trip })).toBe(4);
   });
 
-  it("lists direct children through the parentPostId index", async () => {
+  it("runs the exact listChildren query as an index scan without COLLSCAN", async () => {
     const { post: root } = await create();
     await create({ parentPostId: root.id });
-    const plan = await f.db.collection("posts").find({ tripId: f.trip, parentPostId: new ObjectId(root.id) })
-      .sort({ createdAt: -1 }).explain("queryPlanner");
-    expect(JSON.stringify(plan.queryPlanner.winningPlan)).toMatch(/parentPostId|tripId_createdAt_desc/);
-    expect(JSON.stringify(plan.queryPlanner.winningPlan)).not.toContain("COLLSCAN");
+    const { filter, sort } = childPostsQuery(f.trip, new ObjectId(root.id));
+    const plan = await f.db.collection("posts").find(filter).sort(sort).explain("queryPlanner");
+    const winning = JSON.stringify(plan.queryPlanner.winningPlan);
+    expect(winning).toContain("IXSCAN");
+    expect(winning).not.toContain("COLLSCAN");
+    expect(winning).toContain('"stage":"IXSCAN","keyPattern":{"parentPostId":1},"indexName":"parentPostId"');
   });
 
   it("serializes joint creation with Trip deletion without orphaning either record", async () => {
