@@ -12,7 +12,8 @@ Las reglas del proyecto, la fuente de verdad y las reglas funcionales están en 
 
 ## Proceso de tareas
 
-- Para desarrollar y auditar tareas pendientes en fila usar el skill `avanzar-tareas` (`/avanzar-tareas`), con los subagentes `planificador-tarea` y `auditor-tarea`.
+- Para desarrollar y auditar tareas pendientes en fila usar el skill `avanzar-tareas` (`/avanzar-tareas`), con los subagentes `planificador-tarea`, `implementador-tarea` y `auditor-tarea`.
+- Trabajar siempre en este directorio cambiando de rama con git; no crear worktrees, clones ni otras carpetas de trabajo.
 - Bloqueos y dudas para el usuario: `docs/REVISION_PENDIENTE.md`.
 
 ## Colaboración

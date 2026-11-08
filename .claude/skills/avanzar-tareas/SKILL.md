@@ -7,6 +7,19 @@ description: Desarrolla y audita en fila las tareas pendientes de Travellier (TA
 
 Proceso secuencial: una tarea por vez, una auditoría por vez, nada en paralelo. Respondé y comentá en español.
 
+## Directorio de trabajo
+
+Trabajá siempre en este mismo directorio, cambiando de rama con git. No crees worktrees, clones, copias del repositorio ni otras carpetas para las ramas, y no uses aislamiento de worktree al invocar subagentes.
+
+## Contexto y memoria
+
+La sesión es larga y el contexto se resume automáticamente; no confíes en lo que recordás de tareas anteriores.
+
+- Esta sesión solo orquesta. Planificar, implementar y auditar lo hacen subagentes nuevos (`planificador-tarea`, `implementador-tarea`, `auditor-tarea`), cada uno con contexto limpio. No implementes código en la sesión principal.
+- Al empezar cada tarea y después de cada resumen de contexto, releé el estado desde las fuentes: el bloque de la tarea en `TAREAS_PENDIENTES.md` (copiado textual, nunca de memoria), `git status`, `git log`, el PR (`gh pr view`), el CI y `docs/REVISION_PENDIENTE.md`.
+- Toda afirmación sobre el estado (tests, CI, auditoría, merge) se basa en la salida de un comando de esta misma tarea, no en un recuerdo.
+- Si notás contradicciones entre lo que creés y lo que muestran las fuentes, prevalecen las fuentes.
+
 ## Fuentes
 
 - Producto: `docs/versiones/v1/PRD.md` y `AGENTS.md` (ya cargado vía `CLAUDE.md`).
@@ -49,11 +62,9 @@ Revisá el plan contra el PRD y los criterios. Si «Requiere definición» no es
 
 ## 4. Implementar (TDD)
 
-1. Escribí primero los tests del plan, verificá que fallen, implementá hasta que pasen.
-2. Alcance estricto: solo lo que piden los criterios. No rehagas lo existente ni toques PRD, diseño aprobado, tareas o tarjetas ajenas.
-3. Verificación local acotada para no saturar la memoria de la PC: ejecutá lint, typecheck y tests solo de los workspaces afectados y sin paralelismo innecesario (por ejemplo `corepack yarn workspace api test --run <archivo>`, `corepack yarn workspace domain typecheck`). No corras `corepack yarn test` completo: lo hace el CI.
-4. Commits pequeños, mensaje en español con el código de tarea, como en el historial: `feat: <qué> (T49)`, `fix: …`, `test: …`, `docs: …`.
-5. Nunca incluyas secretos ni valores de `.env`. No despliegues, no ejecutes migraciones ni auditorías sobre bases reales, no borres datos dev.
+1. Invocá una instancia nueva del subagente `implementador-tarea` con el bloque textual de la tarea, la rama activa y el plan revisado.
+2. Revisá su reporte: commits, archivos y verificaciones ejecutadas. Confirmá con `git log` y `git diff --stat dev...HEAD` que los commits existen y que no incluyen archivos ajenos a la tarea.
+3. Reglas que debe cumplir (ya están en el subagente): TDD, alcance estricto, verificación acotada por workspace sin `corepack yarn test` completo, commits en español con el código de tarea (`feat: <qué> (T49)`), sin secretos ni `.env`, sin despliegues ni migraciones reales, sin borrar datos dev.
 
 ## 5. CI
 
@@ -86,7 +97,7 @@ Si hay observaciones, generá al final un bloque markdown listo para comentario 
 
 2. Si el veredicto es `APROBADO`, pasá al merge.
 3. Si hay observaciones: publicá el bloque como comentario del PR (`gh pr comment`). Evaluá cada punto contra PRD y criterios:
-   - Válido: corregilo con TDD, commit, push y esperá el CI en verde.
+   - Válido: invocá un `implementador-tarea` nuevo con la tarea y solo las observaciones válidas; después push y esperá el CI en verde.
    - Inválido (fuera de alcance, contradice el PRD o pide una regla inexistente): no lo implementes; respondé en el PR con la justificación. Si plantea una duda de producto real, anotala en `docs/REVISION_PENDIENTE.md`.
 4. Volvé al paso 1 con un auditor nuevo.
 5. Si tras 6 rondas no se llega a `APROBADO`, o se repiten observaciones que consideraste inválidas, registralo como bloqueo con el detalle y pasá a la siguiente tarea sin mergear.
