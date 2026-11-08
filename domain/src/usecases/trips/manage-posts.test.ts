@@ -33,6 +33,8 @@ describe("Trip post use cases", () => {
       findTransport: async (id) => domain.ok(targets.transportId?.id === id ? targets.transportId : undefined),
       find: async (id) => domain.ok(records.find((p) => p.id === id) ?? (targets.parentPostId?.id === id ? seedPost(targets.parentPostId) : undefined)),
       list: async () => domain.ok(records),
+      listChildren: async (id) => domain.ok(records.filter((p) => p.tripId === tripId && p.parentPostId === id)
+        .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))),
       insert: async (post) => { records.push(post); return domain.ok(undefined); },
       replace: async (post) => { records = records.map((p) => p.id === post.id ? post : p); return domain.ok(undefined); },
       insertActivity: async (activity) => { activities.push(activity); return domain.ok(undefined); },
@@ -57,7 +59,7 @@ describe("Trip post use cases", () => {
     return domain.updateTripPost.execute(dependencies(), { ...context, postId, ...fields });
   };
 
-  it.each(Array.from({ length: 8 }, (_, i) => i))("creates link combination %i with server metadata", async (mask) => {
+  it.each(Array.from({ length: 8 }, (_, i) => i).filter((mask) => !(mask & 2) || !(mask & 5)))("creates link combination %i with server metadata", async (mask) => {
     const selected = { activityId: mask & 1 ? links.activityId : null, parentPostId: mask & 2 ? links.parentPostId : null,
       transportId: mask & 4 ? links.transportId : null };
     expect(await create({ ...selected, authorId: id(99), id: id(99), createdAt: new Date(0), tripId }))
@@ -90,12 +92,116 @@ describe("Trip post use cases", () => {
   });
 
   it.each(Object.keys(links) as (keyof typeof links)[])("adds, replaces and removes %s independently", async (field) => {
-    records = [seedPost(links)];
+    const base = field === "parentPostId" ? { parentPostId: links.parentPostId }
+      : { activityId: links.activityId, transportId: links.transportId };
+    const full = { activityId: null, parentPostId: null, transportId: null, ...base };
+    records = [seedPost(full)];
     targets[field] = { id: id(10), tripId };
-    expect(await update({ [field]: id(10) })).toEqual(domain.ok(seedPost({ ...links, [field]: id(10) })));
-    expect(await update({ [field]: null })).toEqual(domain.ok(seedPost({ ...links, [field]: null })));
+    expect(await update({ [field]: id(10) })).toEqual(domain.ok(seedPost({ ...full, [field]: id(10) })));
+    expect(await update({ [field]: null })).toEqual(domain.ok(seedPost({ ...full, [field]: null })));
     targets[field] = { id: links[field], tripId };
-    expect(await update({ [field]: links[field] })).toEqual(domain.ok(seedPost(links)));
+    expect(await update({ [field]: links[field] })).toEqual(domain.ok(seedPost(full)));
+  });
+
+  it("rejects parent together with activity or transport on create without writing", async () => {
+    for (const fields of [{ parentPostId: links.parentPostId, activityId: links.activityId },
+      { parentPostId: links.parentPostId, transportId: links.transportId }, links]) {
+      expect(await create(fields)).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "parentPostId", code: "conflict" }] } });
+      expect(records).toEqual([]);
+    }
+  });
+
+  it("rejects adding a parent to a post with activity unless the same edit clears it", async () => {
+    records = [seedPost({ activityId: links.activityId })];
+    expect(await update({ parentPostId: links.parentPostId }))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "parentPostId", code: "conflict" }] } });
+    expect(records).toEqual([seedPost({ activityId: links.activityId })]);
+    expect(await update({ parentPostId: links.parentPostId, activityId: null }))
+      .toEqual(domain.ok(seedPost({ parentPostId: links.parentPostId })));
+  });
+
+  describe("post chains", () => {
+    const a = id(40), b = id(41), c = id(42), d = id(43), root = id(44);
+    const chain = (extra: Post[] = []) => [seedPost({ id: root, activityId: links.activityId }),
+      seedPost({ id: a, parentPostId: root, createdAt: new Date("2026-10-04T12:00:01Z") }),
+      seedPost({ id: b, parentPostId: a, createdAt: new Date("2026-10-04T12:00:02Z") }),
+      seedPost({ id: c, parentPostId: b, createdAt: new Date("2026-10-04T12:00:03Z") }), ...extra];
+    const spy = () => {
+      const calls = { replace: 0, insert: 0 };
+      const replace = scope.replace, insert = scope.insert;
+      scope.replace = async (post) => { calls.replace++; return replace(post); };
+      scope.insert = async (post) => { calls.insert++; return insert(post); };
+      return calls;
+    };
+
+    it.each([[root, c], [a, c], [a, b]])("rejects an indirect cycle when %# moves under a descendant", async (moved, parent) => {
+      records = chain(); const before = structuredClone(records); const calls = spy();
+      expect(await update({ postId: moved, parentPostId: parent, activityId: null }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "parentPostId", code: "cycle" }] } });
+      expect(calls).toEqual({ replace: 0, insert: 0 });
+      expect(records).toEqual(before);
+    });
+
+    it("keeps self-reference as its own error", async () => {
+      records = chain();
+      expect(await update({ postId: b, parentPostId: b }))
+        .toMatchObject({ ok: false, error: { issues: [{ field: "parentPostId", code: "self_reference" }] } });
+    });
+
+    it("accepts a branch under a non-descendant and unrelated moves", async () => {
+      records = chain([seedPost({ id: d, parentPostId: root })]);
+      expect(await update({ postId: d, parentPostId: c })).toMatchObject({ ok: true, value: { id: d, parentPostId: c } });
+      expect(await update({ postId: c, parentPostId: null })).toMatchObject({ ok: true, value: { parentPostId: null } });
+    });
+
+    it("rejects a parent from another Trip or missing without writing", async () => {
+      records = [...chain(), seedPost({ id: d, tripId: id(99) })]; const calls = spy();
+      expect(await update({ postId: a, parentPostId: d }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "parentPostId" }] } });
+      expect(await update({ postId: a, parentPostId: id(97) }))
+        .toMatchObject({ ok: false, error: { issues: [{ field: "parentPostId", code: "not_found" }] } });
+      expect(calls.replace).toBe(0);
+    });
+
+    it("does not hang on a pre-existing corrupt cycle outside the edited post", async () => {
+      records = [seedPost({ id: a, parentPostId: b }), seedPost({ id: b, parentPostId: a }), seedPost({ id: c })];
+      expect(await update({ postId: c, parentPostId: a })).toMatchObject({ ok: true });
+    });
+
+    it("returns parent, direct children newest first and the root activity", async () => {
+      records = chain([seedPost({ id: d, parentPostId: a, createdAt: new Date("2026-10-04T12:00:09Z"), description: "rama" })]);
+      expect(domain.getTripPostChain).toBeDefined();
+      const result = await domain.getTripPostChain.execute(dependencies(), { ...context, postId: a });
+      expect(result).toEqual(domain.ok({ post: records[1],
+        parent: { id: root, authorId: id(9), createdAt, description: "Recuerdo" },
+        children: [{ id: d, authorId: id(9), createdAt: new Date("2026-10-04T12:00:09Z"), description: "rama" },
+          { id: b, authorId: id(9), createdAt: new Date("2026-10-04T12:00:02Z"), description: "Recuerdo" }],
+        rootActivityId: links.activityId }));
+    });
+
+    it("returns null parent, no children and null root activity for an independent post", async () => {
+      records = [seedPost()];
+      expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId }))
+        .toEqual(domain.ok({ post: seedPost(), parent: null, children: [], rootActivityId: null }));
+    });
+
+    it("resolves the root through a branch and tolerates a corrupt cycle with a null root", async () => {
+      records = chain();
+      expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId: c }))
+        .toMatchObject({ ok: true, value: { rootActivityId: links.activityId, children: [] } });
+      records = [seedPost({ id: a, parentPostId: b }), seedPost({ id: b, parentPostId: a })];
+      expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId: a }))
+        .toMatchObject({ ok: true, value: { rootActivityId: null } });
+    });
+
+    it("hides posts from another Trip and denies outsiders", async () => {
+      records = [seedPost({ tripId: id(99) })];
+      expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId }))
+        .toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      records = [seedPost()]; role = undefined;
+      expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId }))
+        .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    });
   });
 
   it("removes all links and preserves omitted text", async () => {

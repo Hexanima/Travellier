@@ -16,6 +16,8 @@ export interface TripPostReadScope {
   findTransport: (transportId: ObjectId) => AsyncResult<Pick<Transport, "id" | "tripId"> | undefined>;
   find: (postId: ObjectId) => AsyncResult<Post | undefined>;
   list: () => AsyncResult<Post[]>;
+  /** Direct children of a post in this Trip, newest publication first (id descending on ties). */
+  listChildren: (postId: ObjectId) => AsyncResult<Post[]>;
 }
 
 export interface TripPostScope extends TripPostReadScope {

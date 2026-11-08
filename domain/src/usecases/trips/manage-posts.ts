@@ -1,5 +1,5 @@
 import { createActivity, type Activity } from "../../entities/activity.js";
-import { createPost, relinkPost, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
+import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
@@ -21,6 +21,14 @@ export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields
 };
 export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields>;
 export interface CreateTripPostResult { post: Post; activity?: Activity }
+export type PostSummary = Pick<Post, "id" | "authorId" | "createdAt" | "description">;
+export interface TripPostChainResult {
+  post: Post;
+  parent: PostSummary | null;
+  children: PostSummary[];
+  /** Activity of the highest ancestor; null when the root has none or stored data is inconsistent. */
+  rootActivityId: ObjectId | null;
+}
 interface Dependencies { posts: TripPostPort }
 interface CreationDependencies extends Dependencies { createId: () => ObjectId; now: () => Date }
 
@@ -47,6 +55,23 @@ const resolve = async (scope: TripPostReadScope, post: Pick<Post, "tripId"> & Pa
   if (!transport.ok) return transport;
   return ok({ trip: { id: post.tripId },
     activity: resolvedActivity.value, parentPost: parent.value, transport: transport.value });
+};
+
+const summarize = (post: Post): PostSummary =>
+  ({ id: post.id, authorId: post.authorId, createdAt: post.createdAt, description: post.description });
+/** Loads the ancestors of `startId` (inclusive) inside the scope; stops on a revisited post or the technical limit. */
+const loadAncestors = async (scope: TripPostReadScope, tripId: ObjectId, startId: ObjectId): AsyncResult<Post[]> => {
+  const visited = new Set<ObjectId>(), loaded: Post[] = [];
+  let next: ObjectId | null = startId;
+  while (next !== null && !visited.has(next) && loaded.length <= MAX_POST_CHAIN_DEPTH) {
+    visited.add(next);
+    const found = await scope.find(next);
+    if (!found.ok) return found;
+    if (found.value === undefined || found.value.tripId !== tripId) break;
+    loaded.push(found.value);
+    next = found.value.parentPostId;
+  }
+  return ok(loaded);
 };
 
 export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload, CreateTripPostResult, TaggedError> = {
@@ -101,6 +126,26 @@ export const getTripPost: UseCase<Dependencies, PostDetailPayload, Post, TaggedE
   }),
 };
 
+export const getTripPostChain: UseCase<Dependencies, PostDetailPayload, TripPostChainResult, TaggedError> = {
+  execute: ({ posts }, payload) => posts.withReadSnapshot(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const post = await find(scope, payload);
+    if (!post.ok) return post;
+    const children = await scope.listChildren(post.value.id);
+    if (!children.ok) return children;
+    const ancestors = post.value.parentPostId === null ? ok([] as Post[])
+      : await loadAncestors(scope, payload.tripId, post.value.parentPostId);
+    if (!ancestors.ok) return ancestors;
+    const byId = new Map(ancestors.value.map((ancestor) => [ancestor.id, ancestor]));
+    const chain = resolvePostChain(post.value, (id) => byId.get(id));
+    return ok({ post: post.value, parent: ancestors.value[0] !== undefined && ancestors.value[0].id === post.value.parentPostId
+      ? summarize(ancestors.value[0]) : null,
+    children: children.value.filter((child) => child.tripId === payload.tripId && child.parentPostId === post.value.id)
+      .map(summarize), rootActivityId: chain.ok ? chain.value.rootActivityId : null });
+  }),
+};
+
 export const updateTripPost: UseCase<Dependencies, UpdateTripPostPayload, Post, TaggedError> = {
   execute: ({ posts }, payload) => posts.withTransaction(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
@@ -115,6 +160,15 @@ export const updateTripPost: UseCase<Dependencies, UpdateTripPostPayload, Post, 
     if (!resolved.ok) return resolved;
     const post = relinkPost(merged, {}, resolved.value);
     if (!post.ok) return post;
+    const parentId = post.value.parentPostId;
+    if (parentId !== null && parentId !== current.value.parentPostId && parentId !== post.value.id) {
+      // Same scope as the write: the Trip lock serializes concurrent link edits.
+      const ancestors = await loadAncestors(scope, payload.tripId, parentId);
+      if (!ancestors.ok) return ancestors;
+      if (ancestors.value.some((ancestor) => ancestor.id === post.value.id)) {
+        return err(new ValidationError([{ field: "parentPostId", code: "cycle", message: "Post cannot become a descendant of itself." }]));
+      }
+    }
     const saved = await scope.replace(post.value);
     return saved.ok ? post : saved;
   }),
