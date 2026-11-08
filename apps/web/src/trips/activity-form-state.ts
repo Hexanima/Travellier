@@ -18,7 +18,7 @@ export const initialActivityValues = (context: ActivityFormContext, existing?: A
 
 /** Hydration stays in the client adapter; window ownership is decided by the domain. */
 const canonicalDays = (days: ItineraryDayResponse[]): ItineraryDay[] => days.map((day) => ({
-  ...day, id: day.id as ObjectId, tripId: day.tripId as ObjectId, destinationId: day.destinationId as ObjectId,
+  ...day, type: day.type as ItineraryDay["type"], id: day.id as ObjectId, tripId: day.tripId as ObjectId, destinationId: day.destinationId as ObjectId,
   date: new Date(day.date), startsAt: new Date(day.startsAt), endsAt: day.endsAt === null ? null : new Date(day.endsAt),
 }));
 

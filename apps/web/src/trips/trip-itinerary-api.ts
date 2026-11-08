@@ -9,7 +9,11 @@ type Serialized<T> = T extends Date ? string : T extends ObjectId ? string :
   T extends readonly (infer U)[] ? Serialized<U>[] : T extends object ? { [K in keyof T]: Serialized<T[K]> } : T;
 type ActiveItineraryResponse = Serialized<TripItinerary>;
 /** Optional legacy fields are confined to the client until T59. Never synthesize approval. */
-export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities"> & {
+/** Transitorio hasta T63: la API ya no emite `arrival` (retirado en T57); el cliente lo tolera por datos/tests previos. */
+type TransitionalDay = Omit<ActiveItineraryResponse["days"][number], "type"> &
+  { type: ActiveItineraryResponse["days"][number]["type"] | "arrival" };
+export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities" | "days"> & {
+  days: TransitionalDay[];
   votingEnabled?: boolean;
   // durationMinutes stays optional here until T61 adds it to the client forms and makes it required.
   activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
