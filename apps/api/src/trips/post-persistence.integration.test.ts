@@ -311,19 +311,69 @@ describe("post persistence and transactions", () => {
       for (const name of ["posts", "activities", "activityParticipations"]) expect(await f.db.collection(name).countDocuments({ tripId: f.trip })).toBe(0);
     });
 
-    it("never leaves a dangling reference when a relink races with the deletion of the activity it just created", async () => {
+    it("keeps the relink and the deletion of the previous activity consistent in either serialized order", async () => {
       const { post } = await create();
       const linked = await f.api.linkPostToNewActivity!({ ...f.context(), postId: post.id, newActivity: first() });
       if (!linked.ok || linked.value.outcome !== "linked") throw new Error("relink failed");
-      const activityId = linked.value.activity.id;
-      const [relinked, deleted] = await Promise.all([f.api.linkPostToNewActivity!({ ...f.context(), postId: post.id, newActivity: { ...first(), scheduledAt: new Date(f.occurrence.getTime() + 3 * 3_600_000) } }),
-        f.api.deleteActivity!({ ...f.context(), activityId })]);
-      expect(deleted.ok).toBe(true); expect(relinked.ok).toBe(true);
+      const previousId = linked.value.activity.id;
+      const farAway = { ...first(), title: "Lejos", scheduledAt: new Date(f.occurrence.getTime() + 3 * 3_600_000) };
+      const [relinked, deleted] = await Promise.all([f.api.linkPostToNewActivity!({ ...f.context(), postId: post.id, newActivity: farAway }),
+        f.api.deleteActivity!({ ...f.context(), activityId: previousId })]);
+      // The relink never touches the previous activity and the deletion only targets it: both orders end in the same exact state.
+      expect(deleted.ok).toBe(true);
+      if (!relinked.ok || relinked.value.outcome !== "linked") throw new Error("expected the relink to be linked in both orders");
+      const newId = relinked.value.activity.id;
+      expect(newId).not.toBe(previousId);
       const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
+      expect(stored!.activityId.toHexString()).toBe(newId);
       const activities = await f.db.collection("activities").find({ tripId: f.trip }).toArray();
-      expect(activities.map((a) => a._id.toHexString())).not.toContain(activityId);
-      expect(stored!.activityId === null || activities.some((a) => a._id.equals(stored!.activityId))).toBe(true);
-      expect(await f.db.collection("activityParticipations").countDocuments({ activityId: new ObjectId(activityId) })).toBe(0);
+      expect(activities.map((a) => a._id.toHexString())).toEqual([newId]);
+      const participations = await f.db.collection("activityParticipations").find({ tripId: f.trip }).toArray();
+      expect(participations).toMatchObject([{ status: "going", userId: f.actor }]);
+      expect(participations[0].activityId.toHexString()).toBe(newId);
+      expect(await f.db.collection("activityParticipations").countDocuments({ activityId: new ObjectId(previousId) })).toBe(0);
+    });
+
+    it("lets only one of two overlapping relinks of different posts by the same author become linked", async () => {
+      for (let round = 0; round < 3; round++) {
+        await f.reset();
+        const posts = [(await create()).post, (await create()).post];
+        const results = await Promise.all([f.api.linkPostToNewActivity!({ ...f.context(), postId: posts[0]!.id, newActivity: first() }),
+          f.api.linkPostToNewActivity!({ ...f.context(), postId: posts[1]!.id, newActivity: overlapping() })]);
+        expect(results.map((r) => r.ok ? r.value.outcome : r.error.tag).sort()).toEqual(["confirmation_required", "linked"]);
+        const winnerIndex = results.findIndex((r) => r.ok && r.value.outcome === "linked");
+        const winner = results[winnerIndex];
+        if (!winner || !winner.ok || winner.value.outcome !== "linked") throw new Error("no winner");
+        const stored = await Promise.all(posts.map((p) => f.db.collection("posts").findOne({ _id: new ObjectId(p.id) })));
+        expect(stored[winnerIndex]!.activityId.toHexString()).toBe(winner.value.activity.id);
+        expect(stored[1 - winnerIndex]!.activityId).toBeNull();
+        stored.forEach((doc, i) => expect(doc!.createdAt).toEqual(posts[i]!.createdAt));
+        const activities = await f.db.collection("activities").find({ tripId: f.trip }).toArray();
+        expect(activities.map((a) => a._id.toHexString())).toEqual([winner.value.activity.id]);
+        const participations = await f.db.collection("activityParticipations").find({ tripId: f.trip }).toArray();
+        expect(participations).toMatchObject([{ status: "going", userId: f.actor }]);
+        expect(participations[0].activityId.toHexString()).toBe(winner.value.activity.id);
+      }
+    });
+
+    it("lets only one of two overlapping relinks of the same post by the same author become linked", async () => {
+      for (let round = 0; round < 3; round++) {
+        await f.reset();
+        const { post } = await create();
+        const results = await Promise.all([f.api.linkPostToNewActivity!({ ...f.context(), postId: post.id, newActivity: first() }),
+          f.api.linkPostToNewActivity!({ ...f.context(), postId: post.id, newActivity: overlapping() })]);
+        expect(results.map((r) => r.ok ? r.value.outcome : r.error.tag).sort()).toEqual(["confirmation_required", "linked"]);
+        const winner = results.find((r) => r.ok && r.value.outcome === "linked");
+        if (!winner || !winner.ok || winner.value.outcome !== "linked") throw new Error("no winner");
+        const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
+        expect(stored!.activityId.toHexString()).toBe(winner.value.activity.id);
+        expect(stored!.createdAt).toEqual(post.createdAt);
+        const activities = await f.db.collection("activities").find({ tripId: f.trip }).toArray();
+        expect(activities.map((a) => a._id.toHexString())).toEqual([winner.value.activity.id]);
+        const participations = await f.db.collection("activityParticipations").find({ tripId: f.trip }).toArray();
+        expect(participations).toMatchObject([{ status: "going", userId: f.actor }]);
+        expect(participations[0].activityId.toHexString()).toBe(winner.value.activity.id);
+      }
     });
   });
 });
