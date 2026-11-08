@@ -301,8 +301,13 @@ const isString = (value: unknown): value is string => typeof value === "string";
 const registerPayload = (
   payload: Record<string, unknown>,
 ): RegisterUserPayload | undefined =>
-  isString(payload.email) && isString(payload.name) && isString(payload.password)
-    ? { email: payload.email, name: payload.name, password: payload.password }
+  isString(payload.email) && isString(payload.password) &&
+  (payload.name === undefined || isString(payload.name))
+    ? {
+        email: payload.email,
+        password: payload.password,
+        ...(isString(payload.name) ? { name: payload.name } : {}),
+      }
     : undefined;
 
 const loginPayload = (

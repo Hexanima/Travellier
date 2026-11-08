@@ -330,6 +330,41 @@ describe("api app", () => {
     });
   });
 
+  it("registers with only email and password and returns a null name", async () => {
+    const register = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { id: "507f1f77bcf86cd799439011", email: "nico@example.test", name: null },
+    });
+    const response = await handleApiRequest({
+      method: "POST",
+      url: "/auth/register",
+      body: JSON.stringify({ email: "nico@example.test", password: "secret-pass" }),
+    } as never, { auth: { register } } as never);
+
+    expect(register).toHaveBeenCalledWith({ email: "nico@example.test", password: "secret-pass" });
+    expect(response).toEqual({
+      statusCode: 201,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user: { id: "507f1f77bcf86cd799439011", email: "nico@example.test", name: null },
+      }),
+    });
+    expect(response.body).not.toContain("passwordHash");
+  });
+
+  it("rejects a registration whose optional name is not a string", async () => {
+    const register = vi.fn();
+    const response = await handleApiRequest({
+      method: "POST",
+      url: "/auth/register",
+      body: JSON.stringify({ email: "nico@example.test", name: 123, password: "secret-pass" }),
+    } as never, { auth: { register } } as never);
+
+    expect(response).toMatchObject({ statusCode: 400 });
+    expect(JSON.parse(response.body)).toMatchObject({ error: { code: "InvalidRequest" } });
+    expect(register).not.toHaveBeenCalled();
+  });
+
   it("returns an access and refresh token after login", async () => {
     const login = vi.fn().mockResolvedValue({
       ok: true,

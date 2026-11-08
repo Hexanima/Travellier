@@ -42,6 +42,44 @@ describe("Mongo trip member repository", () => {
     });
   });
 
+  it("lists members without a name as null and keeps the other names", async () => {
+    const tripId = new ObjectId();
+    const namedUser = new ObjectId(), missingNameUser = new ObjectId(), nullNameUser = new ObjectId();
+    const namedMember = new ObjectId(), missingNameMember = new ObjectId(), nullNameMember = new ObjectId();
+    await database.collection("users").insertMany([
+      { _id: namedUser, name: "Nico", email: "named@example.com", passwordHash: "secret" },
+      { _id: missingNameUser, email: "missing@example.com", passwordHash: "secret" },
+      { _id: nullNameUser, name: null, email: "null@example.com", passwordHash: "secret" },
+    ]);
+    await database.collection("tripMembers").insertMany([
+      { _id: namedMember, tripId, userId: namedUser, role: "admin", joinedAt: new Date("2026-09-24T12:00:00.000Z") },
+      { _id: missingNameMember, tripId, userId: missingNameUser, role: "participant", joinedAt: new Date("2026-09-24T12:01:00.000Z") },
+      { _id: nullNameMember, tripId, userId: nullNameUser, role: "participant", joinedAt: new Date("2026-09-24T12:02:00.000Z") },
+    ]);
+
+    const listed = await createMongoTripMemberRepository(database).listByTrip(tripId.toHexString() as never);
+
+    expect(listed).toMatchObject({
+      ok: true,
+      value: [
+        { id: namedMember.toHexString(), name: "Nico" },
+        { id: missingNameMember.toHexString(), name: null },
+        { id: nullNameMember.toHexString(), name: null },
+      ],
+    });
+    expect(JSON.stringify(listed)).not.toContain("@example.com");
+  });
+
+  it("still fails when a member's user no longer exists", async () => {
+    const tripId = new ObjectId();
+    await database.collection("tripMembers").insertOne({
+      _id: new ObjectId(), tripId, userId: new ObjectId(), role: "participant", joinedAt: new Date(),
+    });
+
+    expect(await createMongoTripMemberRepository(database).listByTrip(tripId.toHexString() as never))
+      .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+  });
+
   it("removes only a participant matching membership, trip and user", async () => {
     const tripId = new ObjectId();
     const otherTripId = new ObjectId();

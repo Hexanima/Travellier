@@ -8,7 +8,7 @@ import type { PasswordHasher, UserRepository } from "../../ports/authentication-
 
 export interface RegisterUserPayload {
   email: string;
-  name: string;
+  name?: string;
   password: string;
 }
 
@@ -35,14 +35,6 @@ const validate = (payload: RegisterUserPayload): ValidationError | undefined => 
     });
   }
 
-  if (payload.name.trim() === "") {
-    issues.push({
-      field: "name",
-      code: "required",
-      message: "Name is required.",
-    });
-  }
-
   if (payload.password.trim() === "") {
     issues.push({
       field: "password",
@@ -52,6 +44,10 @@ const validate = (payload: RegisterUserPayload): ValidationError | undefined => 
   }
 
   return issues.length === 0 ? undefined : new ValidationError(issues);
+};
+
+const normalizeName = (name: string | undefined): string | null => {
+  return name === undefined || name.trim() === "" ? null : name;
 };
 
 export const registerUser: UseCase<
@@ -85,7 +81,7 @@ export const registerUser: UseCase<
 
     const user = await dependencies.users.create({
       email: payload.email,
-      name: payload.name,
+      name: normalizeName(payload.name),
       passwordHash: passwordHash.value,
     });
 

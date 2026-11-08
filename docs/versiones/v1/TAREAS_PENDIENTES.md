@@ -229,6 +229,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 - Posts no se validan por dayId ni se borran/reubican al cambiar transportes; conservan vínculos y timestamps.
 - Rechazar eliminación de franja referenciada o inicio fuera de ella, y fin fuera de la ventana del destino.
 - Guardar transporte/proyección atómicamente, conservar ObjectId compatibles y probar rechazos concurrentes sin pérdida.
+- Retirar `arrival` del tipo de franja en dominio y contrato API; los registros dev existentes se leen sin borrarse ni romper la consulta.
 
 **Estimación:** M (4hs).
 **Dependencias:** T49, T54, T32.
@@ -321,6 +322,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 - Validar el DTO sin dayId de post, votingEnabled o estados de aprobación; admitir duración y datos personales de participación sin rechazar respuestas válidas.
 - Agrupar independientes por publicación solo en días existentes y descendientes por actividad raíz; los del transporte se consultan por contexto sin anclarlos al antiguo dayId.
 - Conservar UTC/milisegundos, días compartidos y publicaciones fuera del viaje; probar relink/baja, zona local y respuestas reales del backend.
+- Dejar de esperar o etiquetar franjas `arrival`, sin rechazar respuestas válidas.
 
 **Estimación:** L (6hs).
 **Dependencias:** T56, T59, T61.
@@ -459,7 +461,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 
 - Autorizar lote por usuario/Trip, firmar PUT en su prefijo y confirmar existencia antes de registrar s3Key/order.
 - Finalizar metadatos con el guardado del post y revalidar membresía/bajas; no publicar referencias de archivos fallidos.
-- Servir lecturas privadas autorizadas y reintentar sin duplicar fotos; probar acceso cruzado y confirmaciones inválidas.
+- Mantener el bucket privado: servir lecturas con URL firmada GET de vencimiento corto solo a integrantes actuales del Trip de `postPhotos.tripId`, sin entidad adicional; reintentar sin duplicar fotos y probar acceso cruzado y confirmaciones inválidas.
 
 **Estimación:** L (8hs).
 **Dependencias:** T06, T54, T55, T58.
@@ -581,10 +583,10 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 
 - Guardar pagos múltiples y partes monto/%/resto/exclusión validados junto al post/gasto.
 - Conservar datos al cambiar modo, total o membresía; montos fijos no se recalculan como porcentajes.
-- Señalar faltantes y distinguir borrador propuesto de persistencia; probar miembros nuevos y expulsados.
+- Señalar faltantes y distinguir borrador propuesto de persistencia; probar miembros nuevos, expulsados y que salieron del viaje, identificados como ex integrantes.
 
 - Adaptar paidBy legado conocido a un único payment de percent: 100, de forma idempotente; conservar importe, identidad y moneda conocida, sin inventar moneda ni shares faltantes ni duplicar el pago en lecturas/migraciones repetidas.
-- Probar paidBy nulo, usuario anterior/expulsado y gasto ya adaptado; sin datos completos queda por completar y fuera del balance.
+- Probar paidBy nulo, usuario anterior, expulsado o que salió y gasto ya adaptado; sin datos completos queda por completar y fuera del balance.
 
 **Estimación:** L (8hs).
 **Dependencias:** T79, T78.
@@ -614,7 +616,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 
 - Solo balance genera deudas; separar ARS/EUR/USD sin conversión o suma entre monedas.
 - Excluir incompletos con faltantes identificables, conservar suma cero y cada centavo resuelto.
-- Recalcular tras edición/modo sin alterar registros ni excluir identidades históricas silenciosamente.
+- Recalcular tras edición/modo sin alterar registros ni excluir identidades históricas silenciosamente; pagos y partes de ex integrantes siguen en el balance identificados como tales.
 
 **Estimación:** L (8hs).
 **Dependencias:** T80, T81.
@@ -659,7 +661,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 
 - Ocultar deudas en register y conservar acceso a gastos; separar monedas en balance.
 - Listar incompletos editables y refrescar saldos tras guardar sin perder origen.
-- No anunciar transferencias/cobros ejecutados; mostrar vacío/error y personas anteriores identificables.
+- No anunciar transferencias/cobros ejecutados; mostrar vacío/error y ex integrantes identificados como tales.
 
 **Estimación:** L (6hs).
 **Dependencias:** T82, T84.
@@ -942,9 +944,10 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 - Ejecutar CI/dev aislado con fixtures propios y limpieza controlada; nunca usar/borrar datos dev ajenos.
 
 - Ejecutar la publicación compuesta con actividad, agenda, fotos y gasto/pagos/reparto; fallos inyectados y reintentos conservan atomicidad y no duplican datos, incluyendo el fixture legado paidBy.
+- Probar titularidad, gestión de admins, salida/expulsión con participaciones futuras eliminadas y anteriores conservadas, baja solo del titular y moneda de transportes.
 
 **Estimación:** L (8hs).
-**Dependencias:** T48, T57, T87, T70, T73, T82, T92, T102, T100.
+**Dependencias:** T48, T57, T87, T70, T73, T82, T92, T102, T100, T116, T119.
 
 ### T104 — Probar los recorridos funcionales
 
@@ -960,9 +963,10 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 
 - Probar DEL-01/DEL-02 y NAV-01–NAV-04 sobre aplicación conectada antes del diseño; probar publicación completa y gasto atribuido por raíz/publicación con monedas separadas.
 - Probar Activos/Finalizados con API real, viajes sin transportes/configuración incompleta, límite temporal y refresco tras cambios; volver conserva el filtro sin implementar comportamiento nuevo en la fase visual.
+- Probar Grupo por rol (titular, admin, participante), salida y transferencia, moneda de transportes y refresco periódico o al reanudar sin perder borradores.
 
 **Estimación:** L (8hs).
-**Dependencias:** T103, T60, T71, T77, T85, T93, T94, T96, T63, T64, T86, T88, T98, T97, T99, T101.
+**Dependencias:** T103, T60, T71, T77, T85, T93, T94, T96, T63, T64, T86, T88, T98, T97, T99, T101, T118, T120, T121.
 
 ## 10. Aplicación visual final
 
@@ -1053,9 +1057,10 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 - Replicar presentación de descubrimiento/perfil y creación sin fechas manuales, conservando los flujos existentes.
 - Conservar Grupo, código/link, unión y permisos sin votación; configuración permanece conectada.
 - Adaptar bajas/expulsión y estados vacíos/carga/error; volver no mezcla viajes ni pierde contexto.
+- Aplicar el diseño de T117 a titular, admins, transferencia y salida, conservando permisos y confirmaciones de T118.
 
 **Estimación:** M (4hs).
-**Dependencias:** T106, T59, T27, T24, T101.
+**Dependencias:** T106, T59, T27, T24, T101, T117, T118.
 
 ### T111 — Adaptar gastos y balances al diseño
 
@@ -1102,6 +1107,130 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 **Estimación:** L (8hs).
 **Dependencias:** T107, T108, T109, T110, T111, T112.
 
+## 11. Ajustes aprobados el 2026-11-08
+
+Tareas derivadas de los cambios al PRD del 2026-11-08: titularidad y gestión de admins, salida del viaje, moneda del costo de transportes y actualización periódica. Algunas ajustan funcionalidades ya terminadas (T19–T30). Los IDs continúan la numeración y no indican orden de ejecución: las dependencias lo definen.
+
+### T114 — Incorporar la titularidad del viaje
+
+**Capa:** Backend.
+
+**Descripción:** Agregar `ownerId` a Trips para distinguir al titular actual de `createdBy`, que queda como dato histórico. Restringir la baja del viaje al titular alinea los permisos ya implementados con el PRD.
+
+**Criterios de aceptación:**
+
+- Crear viajes con ownerId igual al creador y migrar de forma idempotente los existentes desde createdBy, sin borrar ni reescribir otros datos dev; diagnosticar viajes cuyo creador ya no es miembro sin corregirlos silenciosamente.
+- Exponer el titular en el detalle y en los integrantes; el titular siempre conserva el rol admin.
+- Permitir eliminar el Trip solo al titular; otros admins y participantes reciben rechazo sin efectos, manteniendo la cascada y los storageDeletionJobs existentes.
+
+**Estimación:** M (5hs).
+**Dependencias:** T44, T19, T23.
+
+### T115 — Gestionar admins y transferir la titularidad
+
+**Capa:** Backend.
+
+**Descripción:** Agregar operaciones del titular para nombrar o quitar admins y transferir la titularidad, y ampliar la expulsión a admins. Serializar estos cambios con las demás mutaciones del Trip evita quedar sin titular o con permisos inconsistentes bajo concurrencia.
+
+**Criterios de aceptación:**
+
+- Solo el titular cambia el rol de integrantes actuales; nadie quita el rol admin al titular y repetir la operación es idempotente.
+- Transferir a otro integrante actual lo deja admin y titular y conserva admin al anterior, en una transacción.
+- Los admins expulsan participantes; solo el titular expulsa admins y nadie expulsa al titular. Probar rechazos sin escrituras y concurrencia con bajas y transferencias.
+
+**Estimación:** L (6hs).
+**Dependencias:** T114.
+
+### T116 — Permitir salir del viaje
+
+**Capa:** Backend.
+
+**Descripción:** Agregar la salida voluntaria y aplicar a salida y expulsión la misma limpieza de participaciones. Conservar el contenido y las participaciones ya iniciadas mantiene el registro del viaje sin dejar planes futuros con personas ausentes.
+
+**Criterios de aceptación:**
+
+- Cualquier integrante sale con confirmación; el titular recibe rechazo hasta transferir la titularidad o eliminar el Trip.
+- Al salir o ser expulsado se retira la membresía, se conservan las participaciones de actividades con inicio anterior a ese momento y se eliminan las futuras con sus marcas decisionRequired, sin reasignar a nadie.
+- Conservar posts, fotos, comentarios, likes, pagos y partes; serializar con participación, edición de actividades y bajas sin escrituras parciales, y probar el límite exacto de inicio.
+
+**Estimación:** L (6hs).
+**Dependencias:** T115, T53.
+
+### T117 — Diseñar salida, titularidad y moneda de transportes
+
+**Capa:** Diseño/prototipo.
+
+**Descripción:** Extender el prototipo azul aprobado con las pantallas y estados que agregó el PRD el 2026-11-08. Definir su diseño antes de implementarlos evita inventar interfaz en los PRs funcionales y visuales.
+
+**Criterios de aceptación:**
+
+- En Grupo: titular identificado, hacer/quitar admin, transferir titularidad, expulsar admin y salir, con confirmaciones; el titular que intenta salir elige transferir o eliminar.
+- Moneda en el costo de ómnibus/avión, «moneda sin indicar» para registros previos, costos de transporte por moneda en el resumen y ex integrantes identificados en gastos y balance.
+- Reutilizar tokens y componentes de DESIGN.md sin modificar flujos aprobados; actualizar PRD-AUDIT y README del prototipo y obtener aprobación del usuario.
+
+**Estimación:** M (4hs).
+**Dependencias:** Ninguna.
+
+### T118 — Conectar titularidad, admins y salida
+
+**Capa:** Frontend.
+
+**Descripción:** Agregar a Grupo las acciones del titular y la salida del viaje con los componentes actuales. Mostrar solo las acciones permitidas y refrescar ante cambios de rol evita operaciones rechazadas o menús desactualizados.
+
+**Criterios de aceptación:**
+
+- Mostrar titular y admins; el titular nombra/quita admins, transfiere y expulsa admins; los admins expulsan participantes; eliminar el viaje solo aparece al titular.
+- Salir con confirmación; el titular ve transferir o eliminar; tras salir se vuelve a Mis viajes sin conservar datos del Trip.
+- Manejar rechazos por permisos cambiados, errores y doble acción; probar cada rol sin aplicar todavía la estética final.
+
+**Estimación:** L (6hs).
+**Dependencias:** T115, T116, T117, T24.
+
+### T119 — Agregar moneda al costo de transportes
+
+**Capa:** Backend.
+
+**Descripción:** Extender transportes con costCurrency obligatoria cuando hay costo y exponer los totales por moneda del resumen del Trip. Separar monedas y no inventar la de registros previos mantiene la regla de gastos sin conversiones.
+
+**Criterios de aceptación:**
+
+- Aceptar ARS/EUR/USD y rechazar costo sin moneda en escrituras nuevas, sin modificar el resto del transporte.
+- Leer costos anteriores sin moneda como «sin indicar», sin migrarlos ni sumarlos; editarlos exige elegir moneda.
+- Totalizar el costo por persona por moneda, fuera del balance y de los gastos de posts; probar varios destinos y monedas mezcladas.
+
+**Estimación:** M (4hs).
+**Dependencias:** T44, T29.
+
+### T120 — Mostrar moneda y costo de transportes
+
+**Capa:** Frontend.
+
+**Descripción:** Agregar la moneda al formulario de transporte y mostrar los costos en el resumen del Trip. Reutilizar el formateo por moneda de los gastos evita sumar monedas distintas en el cliente.
+
+**Criterios de aceptación:**
+
+- Elegir moneda al cargar costo en ómnibus/avión; los registros previos muestran «moneda sin indicar» y piden elegirla al editar.
+- Mostrar costos por transporte y totales por moneda en el resumen, separados de gastos y balance.
+- Conservar borrador ante error y probar transporte sin costo, con costo y registro previo.
+
+**Estimación:** M (4hs).
+**Dependencias:** T119, T117, T30, T83.
+
+### T121 — Actualizar los datos periódicamente
+
+**Capa:** Frontend.
+
+**Descripción:** Refrescar los datos del Trip al volver a primer plano o a una pantalla, al deslizar hacia abajo y cada 30–60 s mientras la pantalla está visible. Centralizarlo en la carga de datos evita consultas en segundo plano y pérdida de borradores.
+
+**Criterios de aceptación:**
+
+- Refrescar al reanudar la app y al volver a una pantalla; deslizar para refrescar en los listados del Trip; intervalo solo con la app en primer plano y la pantalla visible.
+- No duplicar requests en curso ni interrumpir formularios o borradores; conservar scroll y selección; detenerse en segundo plano y al salir del Trip.
+- Ante acceso revocado o Trip eliminado volver a Mis viajes sin exponer datos; probar con reloj y ciclo de vida simulados.
+
+**Estimación:** M (4hs).
+**Dependencias:** T98, T09.
+
 ## Resumen
 
 | Fase | Tareas | Horas |
@@ -1116,8 +1245,10 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 | Navegación y listado funcional | 5 | 24 |
 | Protección y pruebas funcionales | 3 | 22 |
 | Aplicación visual final | 9 | 54 |
-| **Total pendiente** | **70** | **400** |
+| Ajustes aprobados el 2026-11-08 | 8 | 39 |
+| **Total del plan** | **78** | **439** |
 
+- **Estado al 2026-11-08:** T44–T47 terminadas (18 h estimadas). Quedan 74 tareas y 421 h estimadas: 66 del plan original (382 h) y 8 agregadas el 2026-11-08 (T114–T121, 39 h). Las cifras siguientes describen el plan original del 2026-10-11.
 - **Único plan pendiente: 70 tareas (T44–T113), 400 horas.** Sustituye las 18 tareas pendientes anteriores; no se ejecutan además de este listado.
 - **Funcionalidad, infraestructura y pruebas previas al diseño: 61 tareas, 346 horas.** La fase visual depende de T104 y suma 9 tareas, 54 horas; navegación, selección de destinos y Activos/Finalizados quedan conectados y probados antes.
 - **Máximo por tarea: 8 horas.** No quedan tareas XL; backend/frontend separados con sus pruebas y dependencias.

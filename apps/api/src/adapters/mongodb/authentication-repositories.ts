@@ -17,7 +17,7 @@ import {
 type UserDocument = {
   _id: MongoObjectId;
   email: string;
-  name: string;
+  name?: string | null;
   passwordHash: string;
   avatarS3Key: string | null;
   createdAt: Date;
@@ -40,7 +40,9 @@ const toUser = (document: UserDocument) => {
     ? ok({
         id: id.value,
         email: document.email,
-        name: document.name,
+        name: typeof document.name === "string" && document.name.trim() !== ""
+          ? document.name
+          : null,
         avatarS3Key: document.avatarS3Key,
         passwordHash: document.passwordHash,
         createdAt: document.createdAt,

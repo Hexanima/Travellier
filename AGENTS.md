@@ -18,7 +18,8 @@ Travellier es una aplicación mobile para iOS y Android que permite a grupos org
 - El cliente es React empaquetado con Capacitor. No hay plataforma web pública en alcance.
 - El backend objetivo es AWS Lambda + API Gateway con Node.js.
 - MongoDB Atlas almacena datos relacionales mediante colecciones y referencias.
-- Las fotos se cargan directo a S3 mediante presigned URLs.
+- Las fotos se cargan directo a S3 mediante presigned URLs. El bucket es privado: la lectura entrega URLs firmadas con vencimiento solo a integrantes actuales del Trip, validados por `postPhotos.tripId`.
+- No hay sincronización en tiempo real: la app refresca al volver a primer plano o a una pantalla, al deslizar hacia abajo y periódicamente (30–60 s) mientras una pantalla del Trip está abierta; nunca en segundo plano.
 - La autenticación usa JWT y refresh tokens manejados por el backend.
 
 ## Arquitectura
@@ -31,7 +32,7 @@ Travellier es una aplicación mobile para iOS y Android que permite a grupos org
 ## Reglas funcionales clave
 
 - Un Trip agrupa integrantes, destinos, transportes, itinerario, actividades, posts y gastos.
-- Las fechas de un Trip no se cargan manualmente: se derivan de `arrivalAt` y `departureAt` de los transportes. `itineraryDays` es una proyección visual del calendario.
+- Las fechas de un Trip no se cargan manualmente: se derivan de `arrivalAt` y `departureAt` de los transportes. `itineraryDays` es una proyección visual del calendario, con tipos `transit_out`, `activity` y `transit_return` (`arrival` fue retirado el 2026-11-08).
 - Un día puede incluir tránsito y actividad. Las actividades se habilitan desde la llegada y hasta la salida del destino.
 - Un Trip puede tener destinos secuenciales ordenados.
 - Las actividades tienen un único funcionamiento basado en participación individual, sin modo configurable ni aprobación colectiva. Distintas personas pueden hacer planes simultáneos; no hay exclusividad horaria global para el Trip.
@@ -53,7 +54,11 @@ Travellier es una aplicación mobile para iOS y Android que permite a grupos org
 - Registrarse solo requiere email y contraseña. La cuenta se habilita sin verificación obligatoria de correo; nombre y avatar pertenecen al perfil.
 - Fotos, comentarios, likes de posts y likes de comentarios son entidades separadas.
 - Los gastos pertenecen a posts. Cada Trip usa modo `register` o `balance`; estos modos de gastos no son modos de actividades.
-- Los roles del Trip son `admin` y `participant`; ambos pueden crear y editar actividades, posts y comentarios. Solo admin puede expulsar integrantes.
+- El costo por persona de un transporte (`costPerPerson`) lleva su moneda (`costCurrency`: ARS/EUR/USD); un Trip puede combinar monedas. Se muestra en el resumen del Trip totalizado por moneda, sin conversiones, y no es un gasto de post ni entra en el balance.
+- Los roles del Trip son `admin` y `participant`; ambos pueden crear y editar actividades, posts y comentarios. Los admins expulsan participantes.
+- El creador es el titular del Trip (`trips.ownerId`; `createdBy` es histórico) y siempre es admin. Solo el titular nombra o quita admins, expulsa admins y elimina el Trip; nadie expulsa al titular. Puede haber varios admins.
+- Cualquier integrante puede salir con confirmación. El titular no puede salir sin transferir la titularidad a otro integrante (que pasa a admin y titular; el anterior queda admin) o eliminar el Trip; un Trip con integrantes nunca queda sin admin.
+- Salir o ser expulsado retira membresía y acceso, pero conserva sus posts, fotos, comentarios, likes, pagos y partes del reparto, identificados como de un ex integrante. Sus participaciones en actividades ya iniciadas al momento de salir se conservan como registro; las de actividades que todavía no empezaron se eliminan, sin reasignar a nadie. Pagos y partes siguen en el registro y el balance; no se reasignan automáticamente ni existe un estado «sin asignar». El reparto puede editarse para redistribuirlos.
 
 ## Alcance
 

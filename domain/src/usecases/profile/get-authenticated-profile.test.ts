@@ -33,4 +33,30 @@ describe("getAuthenticatedProfile", () => {
     });
     expect(JSON.stringify(result)).not.toContain("bcrypt-hash");
   });
+
+  it("returns a profile without a name as null", async () => {
+    const result = await getAuthenticatedProfile.execute(
+      {
+        users: {
+          findById: async () => ({
+            ok: true,
+            value: {
+              id: "507f1f77bcf86cd799439011",
+              email: "nico@example.test",
+              name: null,
+              avatarS3Key: null,
+              passwordHash: "bcrypt-hash",
+              createdAt: new Date("2026-09-21T12:00:00.000Z"),
+            },
+          }),
+        },
+      } as never,
+      { authenticatedUserId: "507f1f77bcf86cd799439011" } as never,
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      value: { name: null, email: "nico@example.test", avatar: null },
+    });
+  });
 });
