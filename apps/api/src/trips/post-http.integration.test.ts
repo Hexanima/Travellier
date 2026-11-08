@@ -234,8 +234,10 @@ describe("post HTTP API", () => {
     const { post, activity } = JSON.parse(response.body);
     expect(post.activityId).toBe(activity.id); expect(activity.scheduledAt).toBe(f.occurrence.toISOString());
     const itinerary = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
-    // Transitional (T56): posts created without a day are not yet projected into the itinerary.
-    expect(itinerary.posts).toEqual([]); expect(itinerary.activities).toMatchObject([{ ...activity, postIds: [] }]);
+    expect(itinerary.activities).toMatchObject([{ ...activity, postIds: [post.id] }]);
+    expect(itinerary.posts).toMatchObject([{ id: post.id, dayId: activity.dayId, activityId: activity.id,
+      context: { placement: "activity", rootActivityId: activity.id, rootPostId: post.id } }]);
+    expect(itinerary.unplacedPosts).toEqual([]);
     expect(JSON.parse((await f.request("GET")).body).posts).toMatchObject([{ id: post.id, activityId: activity.id }]);
     expect((await f.request("PATCH", `${f.path()}/${post.id}`, { activityId: null })).statusCode).toBe(200);
   });
@@ -284,8 +286,13 @@ describe("post HTTP API", () => {
     expect(response.statusCode).toBe(201); const { post, activity } = JSON.parse(response.body);
     const child = await create({ parentPostId: parent.id });
     const itinerary = JSON.parse((await f.request("GET", `/trips/${f.trip}/itinerary`)).body).itinerary;
-    // Transitional (T56): the itinerary does not project posts without a day yet; links are visible through the post API.
-    expect(itinerary.posts).toEqual([]);
+    // parent and child were published now, outside the Trip dates: they are kept as unplaced posts, never lost.
+    expect(itinerary.posts.map((p: { id: string }) => p.id)).toEqual([post.id]);
+    expect(itinerary.unplacedPosts.map((p: { id: string }) => p.id).sort()).toEqual([parent.id, child.id].sort());
+    expect(itinerary.posts.find((p: { id: string }) => p.id === post.id)).toMatchObject({ dayId: activity.dayId, context: { placement: "activity", rootActivityId: activity.id, rootTransportId: transport.id } });
+    expect(itinerary.activities).toMatchObject([{ id: activity.id, postIds: [post.id] }]);
+    expect(itinerary.transports.find((t: { id: string }) => t.id === transport.id).postIds).toContain(post.id);
+    expect(itinerary.unplacedPosts.find((p: { id: string }) => p.id === child.id)).toMatchObject({ dayId: null, parentPostId: parent.id, context: { parentPostId: parent.id, rootPostId: parent.id } });
     expect(post).toMatchObject({ transportId: transport.id, parentPostId: null, activityId: activity.id });
     expect(child).toMatchObject({ parentPostId: parent.id, activityId: null, transportId: null });
     expect((await f.request("DELETE", `/trips/${f.trip}/activities/${activity.id}`)).statusCode).toBe(204);

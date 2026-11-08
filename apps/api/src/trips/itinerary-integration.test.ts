@@ -82,11 +82,40 @@ describe("aggregate itinerary HTTP API", () => {
     ]);
   });
 
+  it("projects posts without a day by context and returns unplaced posts with ISO milliseconds", async () => {
+    const trip = await createTrip();
+    const transportsPath = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
+    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, details: {} };
+    expect((await post(transportsPath, { ...input, direction: "outbound", departureAt: "2026-09-25T08:00:00.123Z", arrivalAt: "2026-09-25T10:00:00.456Z" })).status).toBe(201);
+    expect((await post(transportsPath, { ...input, direction: "return", departureAt: "2026-09-26T18:00:00.789Z", arrivalAt: "2026-09-26T20:00:00.123Z" })).status).toBe(201);
+    const tripId = new ObjectId(trip.id);
+    const days = await db.collection("itineraryDays").find({ tripId }).sort({ order: 1 }).toArray();
+    const activity = new ObjectId(), root = new ObjectId(), child = new ObjectId(), free = new ObjectId(), late = new ObjectId();
+    await db.collection("activities").insertOne({ _id: activity, tripId, dayId: days[1]!._id, title: "Paseo", description: null, mapsUrl: null, status: "confirmed",
+      createdBy: actor, createdAt: new Date("2026-09-25T11:00:00Z"), scheduledAt: new Date("2026-09-25T12:00:00Z") });
+    const base_ = { tripId, authorId: actor, description: null, mapsUrl: null, activityId: null, transportId: null, parentPostId: null };
+    await db.collection("posts").insertMany([
+      { ...base_, _id: root, activityId: activity, createdAt: new Date("2026-09-25T13:00:00.000Z") },
+      { ...base_, _id: child, parentPostId: root, createdAt: new Date("2026-12-01T13:00:00.123Z") },
+      { ...base_, _id: free, createdAt: new Date("2026-09-25T15:00:00.789Z") },
+      { ...base_, _id: late, createdAt: new Date("2027-01-01T00:00:00.001Z") },
+    ]);
+    const response = await fetch(`${base}/trips/${trip.id}/itinerary`, { headers });
+    expect(response.status).toBe(200);
+    const { itinerary } = await response.json() as { itinerary: { posts: { id: string; dayId: string; context: { placement: string; rootActivityId: string | null } }[];
+      unplacedPosts: { id: string; dayId: null; createdAt: string; context: { placement: string } }[]; activities: { postIds: string[] }[]; days: { items: { id: string }[] }[] } };
+    expect(itinerary.activities[0]!.postIds).toEqual([root.toHexString(), child.toHexString()]);
+    expect(itinerary.posts.map((p) => [p.id, p.dayId, p.context.placement])).toEqual([[root.toHexString(), days[1]!._id.toHexString(), "activity"],
+      [free.toHexString(), days[1]!._id.toHexString(), "independent"], [child.toHexString(), days[1]!._id.toHexString(), "activity"]]);
+    expect(itinerary.unplacedPosts).toMatchObject([{ id: late.toHexString(), dayId: null, createdAt: "2027-01-01T00:00:00.001Z", context: { placement: "independent" } }]);
+    expect(itinerary.days[1]!.items.map((i) => i.id)).toContain(free.toHexString());
+  });
+
   it("supports an empty Trip and enforces authentication and membership", async () => {
     const trip = await createTrip(), url = `${base}/trips/${trip.id}/itinerary`;
     const response = await fetch(url, { headers });
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ itinerary: { days: [], transports: [], activities: [], posts: [], expenseMode: "register" } });
+    expect(await response.json()).toMatchObject({ itinerary: { days: [], transports: [], activities: [], posts: [], unplacedPosts: [], expenseMode: "register" } });
     expect((await fetch(url)).status).toBe(401);
     expect((await fetch(url, { headers: { authorization: "Bearer invalid" } })).status).toBe(401);
     await db.collection("tripMembers").deleteOne({ tripId: new ObjectId(trip.id), userId: actor });

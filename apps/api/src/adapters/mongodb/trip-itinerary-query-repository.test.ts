@@ -74,17 +74,63 @@ describe("Mongo itinerary query", () => {
       posts: [{ id: post.toHexString(), activityId: null, parentPostId: null, expense: null }], days: [{ expenseSummary: { totalAmount: 0, expenseCount: 0 } }] } });
   });
 
-  it("reads posts without a legacy day and keeps them out of the day projection", async () => {
-    const independent = new ObjectId();
+  it("projects posts without a physical day by context and keeps late chains under their roots", async () => {
+    const independent = new ObjectId(), child = new ObjectId(), grandchild = new ObjectId(), transportChild = new ObjectId(), transportGrandchild = new ObjectId();
+    const base = { tripId: trip, authorId: actor, description: null, mapsUrl: null, activityId: null, transportId: null, parentPostId: null };
     await db.collection("posts").insertMany([
-      { _id: independent, tripId: trip, authorId: actor, description: "Sin día", mapsUrl: null, activityId: null, transportId: null, parentPostId: null, createdAt: arrival },
-      { _id: new ObjectId(), tripId: trip, dayId: null, authorId: actor, description: null, mapsUrl: null, createdAt: arrival },
+      { ...base, _id: independent, createdAt: new Date("2026-09-25T13:00:00.123Z") },
+      { ...base, _id: child, parentPostId: post, createdAt: new Date("2026-10-05T13:00:00.001Z") },
+      { ...base, _id: grandchild, parentPostId: child, createdAt: new Date("2026-10-06T13:00:00.002Z") },
+      { ...base, _id: transportChild, parentPostId: post, transportId: null, createdAt: new Date("2026-10-07T13:00:00.003Z") },
+      { ...base, _id: transportGrandchild, parentPostId: transportChild, createdAt: new Date("2026-10-08T13:00:00.004Z") },
+    ]);
+    await db.collection("posts").updateOne({ _id: post }, { $unset: { dayId: "" } });
+    const result = await query();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.activities[0]!.postIds).toEqual([post, child, grandchild, transportChild, transportGrandchild].map((v) => v.toHexString()));
+    expect(result.value.transports[0]!.postIds).toEqual(result.value.activities[0]!.postIds);
+    expect(result.value.posts.find((p) => p.id === grandchild.toHexString())).toMatchObject({ dayId: day.toHexString(), parentPostId: child.toHexString(),
+      createdAt: new Date("2026-10-06T13:00:00.002Z"), context: { rootPostId: post.toHexString(), rootActivityId: activity.toHexString(), placement: "activity" } });
+    expect(result.value.days[0]!.items.filter((i) => i.kind === "post").map((i) => i.id)).toEqual([independent.toHexString()]);
+    expect(result.value.unplacedPosts).toEqual([]);
+  });
+
+  it("projects a late chain rooted at a transport", async () => {
+    const root = new ObjectId(), child = new ObjectId(), grandchild = new ObjectId();
+    const base = { tripId: trip, authorId: actor, description: null, mapsUrl: null, activityId: null };
+    await db.collection("posts").insertMany([
+      { ...base, _id: root, transportId: transport, parentPostId: null, createdAt: new Date("2026-09-30T10:00:00.000Z") },
+      { ...base, _id: child, transportId: null, parentPostId: root, createdAt: new Date("2026-10-01T10:00:00.000Z") },
+      { ...base, _id: grandchild, transportId: null, parentPostId: child, createdAt: new Date("2026-10-02T10:00:00.000Z") },
     ]);
     const result = await query();
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.posts.map((p) => p.id)).toEqual([post.toHexString()]);
-    expect(JSON.stringify(result.value.days)).not.toContain(independent.toHexString());
+    expect(result.value.transports[0]!.postIds).toEqual([post, root, child, grandchild].map((v) => v.toHexString()));
+    expect(result.value.posts.find((p) => p.id === grandchild.toHexString())).toMatchObject({ context: { rootPostId: root.toHexString(),
+      rootTransportId: transport.toHexString(), placement: "transport" } });
+  });
+
+  it("returns every post as unplaced in a Trip without itinerary, with one read of posts and one of expenses", async () => {
+    for (const name of ["itineraryDays", "transports", "activities", "destinations"]) await db.collection(name).deleteMany({});
+    const independent = new ObjectId();
+    await db.collection("posts").insertOne({ _id: independent, tripId: trip, authorId: actor, description: "Libre", mapsUrl: null,
+      activityId: null, transportId: null, parentPostId: post, createdAt: new Date("2026-09-25T13:00:00.123Z") });
+    await db.collection("postExpenses").insertOne({ tripId: trip, postId: independent, totalAmount: 3, breakdown: null, paidBy: actor, createdAt: arrival });
+    const reads: string[] = [];
+    const listener = (event: { commandName: string; command: Record<string, unknown> }) => {
+      if (event.commandName === "find" && ["posts", "postExpenses"].includes(String(event.command.find))) reads.push(String(event.command.find));
+    };
+    client.on("commandStarted", listener);
+    const result = await query();
+    client.off("commandStarted", listener);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.posts).toEqual([]);
+    expect(result.value.unplacedPosts.map((p) => p.id)).toEqual([post.toHexString(), independent.toHexString()]);
+    expect(result.value.unplacedPosts[1]).toMatchObject({ dayId: null, parentPostId: post.toHexString(), createdAt: new Date("2026-09-25T13:00:00.123Z"), expense: { totalAmount: 3 } });
+    expect(reads.sort()).toEqual(["postExpenses", "posts"]);
   });
 
   it("uses a bounded number of queries as the number of days grows and does not write", async () => {
