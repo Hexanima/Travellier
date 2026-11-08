@@ -13,7 +13,7 @@ export interface TripMember {
 export interface TripMemberSummary {
   id: ObjectId;
   userId: ObjectId;
-  name: string;
+  name: string | null;
   role: TripRole;
   joinedAt: Date;
 }

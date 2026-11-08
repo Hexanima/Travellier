@@ -10,14 +10,14 @@ type AuthenticationDomain = typeof domain & {
           findByEmail: (email: string) => Promise<{ ok: true; value: undefined }>;
           create: (user: {
             email: string;
-            name: string;
+            name: string | null;
             passwordHash: string;
           }) => Promise<{
             ok: true;
             value: {
               id: string;
               email: string;
-              name: string;
+              name: string | null;
               passwordHash: string;
             };
           }>;
@@ -26,7 +26,7 @@ type AuthenticationDomain = typeof domain & {
           hash: (password: string) => Promise<{ ok: true; value: string }>;
         };
       },
-      payload: { email: string; name: string; password: string },
+      payload: { email: string; name?: string; password: string },
     ) => Promise<unknown>;
   };
 };
@@ -73,6 +73,39 @@ describe("registerUser", () => {
     });
   });
 
+  it.each([
+    ["without a name", {}],
+    ["with an empty name", { name: "" }],
+    ["with a whitespace-only name", { name: "   " }],
+  ])("registers %s and stores the name as null", async (_label, extra) => {
+    const findByEmail = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const create = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        id: "507f1f77bcf86cd799439011",
+        email: "nico@example.test",
+        name: null,
+        passwordHash: "bcrypt-hash",
+      },
+    });
+    const hash = vi.fn().mockResolvedValue({ ok: true, value: "bcrypt-hash" });
+
+    const result = await authDomain.registerUser.execute(
+      { users: { findByEmail, create }, passwordHasher: { hash } },
+      { email: "nico@example.test", password: "secret-pass", ...extra },
+    );
+
+    expect(create).toHaveBeenCalledWith({
+      email: "nico@example.test",
+      name: null,
+      passwordHash: "bcrypt-hash",
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: { id: "507f1f77bcf86cd799439011", email: "nico@example.test", name: null },
+    });
+  });
+
   it("rejects invalid credentials before reading or persisting a user", async () => {
     const findByEmail = vi.fn();
     const create = vi.fn();
@@ -83,18 +116,17 @@ describe("registerUser", () => {
         users: { findByEmail, create },
         passwordHasher: { hash },
       },
-      { email: "invalid-email", name: "", password: "" },
+      { email: "invalid-email", password: "" },
     );
 
     expect(result).toMatchObject({
       ok: false,
       error: {
         tag: "ValidationError",
-        issues: expect.arrayContaining([
+        issues: [
           expect.objectContaining({ field: "email" }),
-          expect.objectContaining({ field: "name" }),
           expect.objectContaining({ field: "password" }),
-        ]),
+        ],
       },
     });
     expect(findByEmail).not.toHaveBeenCalled();
