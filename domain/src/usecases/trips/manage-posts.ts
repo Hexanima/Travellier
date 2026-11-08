@@ -11,10 +11,12 @@ import type { ObjectId } from "../../value-objects/object-id.js";
 
 export interface TripPostPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface PostDetailPayload extends TripPostPayload { postId: ObjectId }
-export type PostEditableFields = Pick<Post, "dayId" | "description" | "mapsUrl" | keyof PostLinks>;
+export type PostEditableFields = Pick<Post, "description" | "mapsUrl" | keyof PostLinks>;
 export type NewPostActivity = Pick<Activity, "title" | "scheduledAt"> &
   Partial<Pick<Activity, "description" | "mapsUrl" | "durationMinutes">>;
-export type CreateTripPostPayload = TripPostPayload & Pick<Post, "dayId"> & Partial<Omit<PostEditableFields, "dayId">> & {
+/** `dayId` only feeds the new activity (transitional until T58); the post itself never stores or validates a day. */
+export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & {
+  dayId?: ObjectId;
   newActivity?: NewPostActivity;
 };
 export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields>;
@@ -35,17 +37,15 @@ const find = async (scope: TripPostReadScope, payload: PostDetailPayload): Async
   if (!post.ok) return post;
   return post.value?.id === payload.postId && post.value.tripId === payload.tripId ? ok(post.value) : err(new PostNotFoundError());
 };
-const resolve = async (scope: TripPostReadScope, post: Pick<Post, "tripId" | "dayId"> & Partial<PostLinks>,
+const resolve = async (scope: TripPostReadScope, post: Pick<Post, "tripId"> & Partial<PostLinks>,
   activity?: Activity): AsyncResult<CreatePostContext> => {
-  const days = await scope.listDays();
-  if (!days.ok) return days;
   const resolvedActivity = activity ? ok(activity) : post.activityId == null ? ok(undefined) : await scope.findActivity(post.activityId);
   if (!resolvedActivity.ok) return resolvedActivity;
   const parent = post.parentPostId == null ? ok(undefined) : await scope.find(post.parentPostId);
   if (!parent.ok) return parent;
   const transport = post.transportId == null ? ok(undefined) : await scope.findTransport(post.transportId);
   if (!transport.ok) return transport;
-  return ok({ trip: { id: post.tripId }, day: days.value.find((day) => day.id === post.dayId),
+  return ok({ trip: { id: post.tripId },
     activity: resolvedActivity.value, parentPost: parent.value, transport: transport.value });
 };
 
@@ -60,7 +60,7 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
         message: "Choose an existing activity or create a new one." }]));
       const days = await scope.listDays();
       if (!days.ok) return days;
-      const validated = createActivity({ id: createId(), tripId: payload.tripId, dayId: payload.dayId,
+      const validated = createActivity({ id: createId(), tripId: payload.tripId, dayId: payload.dayId as ObjectId,
         title: payload.newActivity.title, scheduledAt: payload.newActivity.scheduledAt,
         durationMinutes: payload.newActivity.durationMinutes,
         description: payload.newActivity.description, mapsUrl: payload.newActivity.mapsUrl,
@@ -68,7 +68,7 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
       if (!validated.ok) return validated;
       activity = validated.value;
     }
-    const input = { id: postId, tripId: payload.tripId, dayId: payload.dayId, authorId: payload.authenticatedUserId,
+    const input = { id: postId, tripId: payload.tripId, authorId: payload.authenticatedUserId,
       createdAt, description: payload.description, mapsUrl: payload.mapsUrl,
       activityId: activity?.id ?? payload.activityId, parentPostId: payload.parentPostId, transportId: payload.transportId };
     const resolved = await resolve(scope, input, activity);
@@ -90,7 +90,7 @@ export const listTripPosts: UseCase<Dependencies, TripPostPayload, Post[], Tagge
     if (!trip.ok) return trip;
     const result = await scope.list();
     return result.ok ? ok(result.value.filter((p) => p.tripId === payload.tripId)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id))) : result;
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))) : result;
   }),
 };
 
@@ -107,7 +107,7 @@ export const updateTripPost: UseCase<Dependencies, UpdateTripPostPayload, Post, 
     if (!trip.ok) return trip;
     const current = await find(scope, payload);
     if (!current.ok) return current;
-    const fields = ["dayId", "description", "mapsUrl", "activityId", "parentPostId", "transportId"] as const;
+    const fields = ["description", "mapsUrl", "activityId", "parentPostId", "transportId"] as const;
     const supplied = fields.filter((field) => Object.hasOwn(payload, field) && payload[field] !== undefined);
     if (supplied.length === 0) return err(new ValidationError([{ field: "post", code: "required", message: "An editable field is required." }]));
     const merged: Post = { ...current.value, ...Object.fromEntries(supplied.map((field) => [field, payload[field]])) };

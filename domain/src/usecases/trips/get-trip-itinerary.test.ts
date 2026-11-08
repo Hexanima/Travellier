@@ -128,6 +128,21 @@ describe("getTripItinerary", () => {
     }
   });
 
+  it.each([undefined, null])("does not break on a post without a legacy day (%s) and keeps it out of the days", async (dayId) => {
+    const f = fixture();
+    f.snapshot.posts.push({ ...f.post, id: id(10), dayId, createdAt: time(11) } as never);
+    if (dayId === undefined) delete (f.snapshot.posts[1] as { dayId?: unknown }).dayId;
+    f.snapshot.expenses = [{ id: id(21), tripId, postId: id(10), totalAmount: 5, breakdown: null, paidBy: null, createdAt: time(14) }];
+    const result = await f.execute();
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.posts.map((p) => p.id)).toEqual([f.post.id]);
+    for (const day of result.value.days) {
+      expect(day.items.some((item) => item.id === id(10))).toBe(false);
+      expect(day.expenseSummary.expenseCount).toBe(0);
+    }
+  });
+
   it("keeps multi-day transports in their own destination and direction", async () => {
     const f = fixture();
     f.snapshot.transports[0] = { ...f.transport, departureAt: new Date("2026-09-24T20:00:00.123Z") };

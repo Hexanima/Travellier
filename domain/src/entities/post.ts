@@ -1,5 +1,4 @@
 import type { Activity } from "./activity.js";
-import type { ItineraryDay } from "./itinerary-day.js";
 import type { Transport } from "./transport.js";
 import type { Trip } from "./trip.js";
 import { ValidationError } from "../errors/validation-error.js";
@@ -15,21 +14,21 @@ export interface PostLinks {
 export interface Post extends PostLinks {
   id: ObjectId;
   tripId: ObjectId;
-  dayId: ObjectId;
+  /** @deprecated Legacy read-only field of records created before T54; never required, written or edited. */
+  dayId?: ObjectId | null;
   authorId: ObjectId;
   description: string | null;
   mapsUrl: string | null;
   createdAt: Date;
 }
 
-export type CreatePostInput = Omit<Post, "description" | "mapsUrl" | keyof PostLinks> & Partial<PostLinks> & {
+export type CreatePostInput = Omit<Post, "dayId" | "description" | "mapsUrl" | keyof PostLinks> & Partial<PostLinks> & {
   description?: string | null;
   mapsUrl?: string | null;
 };
 
 export interface CreatePostContext {
   trip: Pick<Trip, "id">;
-  day: Pick<ItineraryDay, "id" | "tripId"> | null | undefined;
   activity?: Pick<Activity, "id" | "tripId"> | null;
   parentPost?: Pick<Post, "id" | "tripId"> | null;
   transport?: Pick<Transport, "id" | "tripId"> | null;
@@ -38,7 +37,7 @@ export interface CreatePostContext {
 const invalid = (field: string, code: string, message: string) =>
   err(new ValidationError([{ field, code, message }]));
 
-/** The caller resolves the day and requested links from a consistent persistence snapshot. */
+/** The post is independent of the itinerary; the caller resolves the requested links from a consistent persistence snapshot. */
 export const createPost = (input: CreatePostInput, context: CreatePostContext): Result<Post, ValidationError> => {
   if (input.tripId !== context.trip.id) {
     return invalid("tripId", "mismatch", "Post must belong to the supplied Trip.");
@@ -47,13 +46,12 @@ export const createPost = (input: CreatePostInput, context: CreatePostContext): 
     return invalid("parentPostId", "self_reference", "Post must link to another post, not itself.");
   }
   const references = [
-    ["dayId", input.dayId, context.day],
     ["activityId", input.activityId, context.activity],
     ["parentPostId", input.parentPostId, context.parentPost],
     ["transportId", input.transportId, context.transport],
   ] as const;
   for (const [field, referenceId, reference] of references) {
-    if (referenceId == null && field !== "dayId") continue;
+    if (referenceId == null) continue;
     if (reference == null) {
       return invalid(field, "not_found", `Post ${field} must reference an existing entity.`);
     }
@@ -70,7 +68,7 @@ export const createPost = (input: CreatePostInput, context: CreatePostContext): 
     return invalid("createdAt", "invalid", "Post creation time must be a valid UTC instant.");
   }
   return ok({
-    id: input.id, tripId: input.tripId, dayId: input.dayId, authorId: input.authorId,
+    id: input.id, tripId: input.tripId, authorId: input.authorId,
     description: input.description ?? null, mapsUrl: input.mapsUrl ?? null,
     activityId: input.activityId ?? null, parentPostId: input.parentPostId ?? null,
     transportId: input.transportId ?? null, createdAt: new Date(input.createdAt.getTime()),

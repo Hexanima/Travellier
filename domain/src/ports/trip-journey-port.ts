@@ -19,7 +19,8 @@ export interface TripJourneyPort<TError extends TaggedError = TaggedError> {
   listItineraryDays: (tripId: ObjectId) => AsyncResult<ItineraryDay[], TError>;
   listItineraryReferences: (tripId: ObjectId) => AsyncResult<{
     activities: { dayId: ObjectId; scheduledAt: Date }[];
-    posts: { dayId: ObjectId }[];
+    /** `dayId` is legacy; posts created since T54 have none and never block regeneration. */
+    posts: { dayId?: ObjectId | null }[];
   }, TError>;
   replaceItineraryDays: (tripId: ObjectId, days: ItineraryDay[]) => AsyncResult<void, TError>;
 }
