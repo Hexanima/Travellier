@@ -6,6 +6,7 @@ export * from "./trip-destination.js";
 export * from "./transport.js";
 export * from "./itinerary-day.js";
 export * from "./activity-schedule.js";
+export * from "./activity-conflict.js";
 export * from "./activity.js";
 export * from "./activity-participation.js";
 export * from "./post.js";
