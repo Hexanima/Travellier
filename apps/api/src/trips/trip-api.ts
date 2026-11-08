@@ -32,6 +32,7 @@ import {
   getTripPost,
   getTripPostChain,
   updateTripPost,
+  linkTripPostToNewActivity,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -78,6 +79,7 @@ export const createTripApi = (database: Db): TripApi => {
     getPost: (payload) => getTripPost.execute(postDependencies, payload),
     getPostChain: (payload) => getTripPostChain.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
+    linkPostToNewActivity: (payload) => linkTripPostToNewActivity.execute(postDependencies, payload),
     getActivityParticipation: (payload) => getTripActivityParticipation.execute(participationDependencies, payload),
     setActivityParticipation: (payload) => setTripActivityParticipation.execute(participationDependencies, payload),
     createActivity: (payload) => createTripActivity.execute(activityDependencies, payload),
