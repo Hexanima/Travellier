@@ -79,6 +79,7 @@ const expectedIndexes: Record<string, IndexDescription[]> = {
   posts: [
     { key: { tripId: 1 }, name: "tripId" },
     { key: { dayId: 1 }, name: "dayId" },
+    { key: { tripId: 1, createdAt: -1 }, name: "tripId_createdAt_desc" },
     { key: { activityId: 1 }, name: "activityId" },
     { key: { parentPostId: 1 }, name: "parentPostId" },
     { key: { transportId: 1 }, name: "transportId" },

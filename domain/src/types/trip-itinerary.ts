@@ -9,8 +9,8 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** Keep the read contract compatible while sharing the activity entity's fields. */
 export type ItineraryActivity = Activity;
 
-/** Keep the read contract compatible while sharing the post entity's fields. */
-export type ItineraryPost = Post;
+/** Transitional (T56): the itinerary only projects posts that still carry their legacy day. */
+export type ItineraryPost = Omit<Post, "dayId"> & { dayId: ObjectId };
 
 export interface ItineraryExpense {
   id: ObjectId;
@@ -28,7 +28,8 @@ export interface TripItinerarySnapshot {
   days: ItineraryDay[];
   transports: Transport[];
   activities: ItineraryActivity[];
-  posts: ItineraryPost[];
+  /** Includes posts created without a day; the read model drops them until T56. */
+  posts: Post[];
   expenses: ItineraryExpense[];
 }
 

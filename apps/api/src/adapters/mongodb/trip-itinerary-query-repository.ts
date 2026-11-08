@@ -14,6 +14,8 @@ const id = (value: MongoObjectId): ObjectId => {
   return result.value;
 };
 const optionalId = (value: MongoObjectId | null | undefined) => value == null ? null : id(value);
+/** Posts created since T54 have no day; legacy ones keep theirs for the transitional projection. */
+const legacyDayId = (value: { dayId?: unknown }) => optionalId(value.dayId as MongoObjectId | null | undefined);
 
 /** Independent of the mutation repository: a GET never acquires a Trip write lock. */
 export const createMongoTripItineraryQueryRepository = (database: Db): TripItineraryQueryPort => ({
@@ -45,7 +47,7 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
           activities: activities.map((value) => ({ id: id(value._id), tripId: id(value.tripId), dayId: id(value.dayId), title: value.title,
             description: value.description, scheduledAt: value.scheduledAt, durationMinutes: value.durationMinutes ?? null,
             mapsUrl: value.mapsUrl, createdBy: id(value.createdBy), createdAt: value.createdAt })),
-          posts: posts.map((value) => ({ id: id(value._id), tripId: id(value.tripId), dayId: id(value.dayId), authorId: id(value.authorId),
+          posts: posts.map((value) => ({ id: id(value._id), tripId: id(value.tripId), dayId: legacyDayId(value), authorId: id(value.authorId),
             description: value.description, mapsUrl: value.mapsUrl, activityId: optionalId(value.activityId), parentPostId: optionalId(value.parentPostId),
             transportId: optionalId(value.transportId), createdAt: value.createdAt })),
           expenses: expenses.map((value) => ({ id: id(value._id), tripId: id(value.tripId), postId: id(value.postId), totalAmount: value.totalAmount,

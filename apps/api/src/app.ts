@@ -490,15 +490,20 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
 };
 
 const postPayload = (payload: Record<string, unknown>, creating: boolean):
-  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity">, ValidationError> => {
+  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId">, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
   ]));
-  if (creating && (!Object.hasOwn(payload, "dayId") || payload.dayId == null)) return invalid("dayId", "required");
-  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity"> = {};
-  for (const field of ["dayId", "activityId", "parentPostId", "transportId"] as const) {
+  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId"> = {};
+  // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, until T58.
+  if (creating && Object.hasOwn(payload, "newActivity")) {
+    const dayId = createObjectId(isString(payload.dayId) ? payload.dayId : "");
+    if (!dayId.ok) return invalid("dayId", Object.hasOwn(payload, "dayId") && payload.dayId != null ? "invalid" : "required");
+    fields.dayId = dayId.value;
+  }
+  for (const field of ["activityId", "parentPostId", "transportId"] as const) {
     if (!Object.hasOwn(payload, field)) continue;
-    if (field !== "dayId" && payload[field] === null) { fields[field] = null; continue; }
+    if (payload[field] === null) { fields[field] = null; continue; }
     const id = createObjectId(isString(payload[field]) ? payload[field] : "");
     if (!id.ok) return invalid(field);
     fields[field] = id.value;

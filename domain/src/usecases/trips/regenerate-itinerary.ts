@@ -26,7 +26,7 @@ export const regenerateItinerary = async (journeys: TripJourneyPort, tripId: Obj
   const days = generated.value.map((day) => ({ ...day, id: existing.get(identity(day)) ?? createId() }));
   const byId = new Map(days.map((day) => [day.id, day]));
   for (const post of references.value.posts) {
-    if (!byId.has(post.dayId)) return err(new ItineraryConflictError());
+    if (post.dayId != null && !byId.has(post.dayId)) return err(new ItineraryConflictError());
   }
   for (const activity of references.value.activities) {
     const schedule = validateActivitySchedule({ ...activity, tripId }, days);

@@ -121,6 +121,13 @@ describe("transport itinerary persistence", () => {
     expect(state).toEqual(previous);
   });
 
+  it.each([undefined, null])("does not conflict on posts without a legacy day (%s) during regeneration", async (dayId) => {
+    const { state, configure, update } = fixture();
+    await configure();
+    state.posts.push({ dayId } as never, {} as never);
+    expect(await update({ arrivalAt: new Date("2026-09-26T10:00:00Z") })).toMatchObject({ ok: true });
+  });
+
   it("rejects narrowing an existing slice past an activity by one millisecond", async () => {
     const { state, configure, update } = fixture();
     await configure();

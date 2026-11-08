@@ -14,21 +14,21 @@ const day: ItineraryDay = { id: dayId, tripId, destinationId: id(8), type: "acti
   date: new Date("2026-09-25T00:00:00Z"), startsAt: new Date("2026-09-25T10:00:00.123Z"), endsAt: new Date("2026-09-25T18:00:00.789Z") };
 const context = { tripId, authenticatedUserId: actor };
 const newActivity = { title: "Cena", scheduledAt: new Date("2026-09-25T12:00:00.456Z") };
-const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, dayId, authorId: id(9), createdAt,
+const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, authorId: id(9), createdAt,
   description: "Recuerdo", mapsUrl: "maps", activityId: null, parentPostId: null, transportId: null, ...fields });
 
 describe("Trip post use cases", () => {
   let role: TripRole | undefined, votingEnabled: boolean, tripExists: boolean;
-  let days: ItineraryDay[], records: Post[], activities: Activity[];
+  let listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; tripExists = true; days = [day]; records = []; activities = []; sequence = 20;
+    role = "participant"; votingEnabled = false; tripExists = true; listDaysCalls = 0; days = [day]; records = []; activities = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
       findTrip: async () => domain.ok(tripExists ? { id: tripId, votingEnabled } : undefined),
-      listDays: async () => domain.ok(days),
+      listDays: async () => { listDaysCalls++; return domain.ok(days); },
       findActivity: async (id) => domain.ok(activities.find((a) => a.id === id) ?? (targets.activityId?.id === id ? targets.activityId : undefined)),
       findTransport: async (id) => domain.ok(targets.transportId?.id === id ? targets.transportId : undefined),
       find: async (id) => domain.ok(records.find((p) => p.id === id) ?? (targets.parentPostId?.id === id ? seedPost(targets.parentPostId) : undefined)),
@@ -61,14 +61,32 @@ describe("Trip post use cases", () => {
     const selected = { activityId: mask & 1 ? links.activityId : null, parentPostId: mask & 2 ? links.parentPostId : null,
       transportId: mask & 4 ? links.transportId : null };
     expect(await create({ ...selected, authorId: id(99), id: id(99), createdAt: new Date(0), tripId }))
-      .toMatchObject({ ok: true, value: { post: { id: id(20), tripId, dayId, authorId: actor, createdAt, description: null, mapsUrl: null, ...selected } } });
+      .toMatchObject({ ok: true, value: { post: { id: id(20), tripId, authorId: actor, createdAt, description: null, mapsUrl: null, ...selected } } });
     expect(records).toHaveLength(1);
+    expect(records[0]).not.toHaveProperty("dayId");
+    expect(records[0]!.createdAt.getMilliseconds()).toBe(789);
+    expect(listDaysCalls).toBe(0);
+  });
+
+  it("ignores a legacy dayId on create and keeps the server publication time", async () => {
+    days = [];
+    const result = await create({ dayId: id(99), createdAt: new Date(0) });
+    expect(result).toMatchObject({ ok: true, value: { post: { createdAt } } });
+    expect(records[0]).not.toHaveProperty("dayId");
   });
 
   it.each(["admin", "participant"] as const)("allows %s to edit another author's post and preserves ownership", async (memberRole) => {
     role = memberRole; records = [seedPost()];
     expect(await update({ description: "Editado", mapsUrl: null, authorId: actor, createdAt: new Date(0), id: id(99) }))
       .toEqual(domain.ok(seedPost({ description: "Editado", mapsUrl: null })));
+    expect(records[0]!.createdAt.getMilliseconds()).toBe(789);
+    expect(listDaysCalls).toBe(0);
+  });
+
+  it("does not make dayId editable and keeps a legacy day untouched", async () => {
+    records = [seedPost({ dayId })];
+    expect(await update({ dayId: id(99) })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "post", code: "required" }] } });
+    expect(await update({ description: "Editado", dayId: id(99) })).toMatchObject({ ok: true, value: { description: "Editado", createdAt } });
   });
 
   it.each(Object.keys(links) as (keyof typeof links)[])("adds, replaces and removes %s independently", async (field) => {
@@ -109,10 +127,18 @@ describe("Trip post use cases", () => {
     for (const missing of ["member", "trip"]) {
       role = missing === "member" ? undefined : "participant"; tripExists = missing !== "trip";
       expect(domain[operation]).toBeDefined();
-      expect(await domain[operation].execute(dependencies(), { ...context, dayId, postId, description: "No" }))
+      expect(await domain[operation].execute(dependencies(), { ...context, postId, description: "No" }))
         .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
       expect(records).toEqual([seedPost()]);
     }
+  });
+
+  it("lists by publication descending with a stable id-descending tie-break", async () => {
+    const later = new Date("2026-10-05T00:00:00.001Z");
+    records = [seedPost({ id: id(10) }), seedPost({ id: id(12) }), seedPost({ id: id(11), createdAt: later }),
+      seedPost({ id: id(13), createdAt: new Date(0) }), seedPost({ id: id(14), tripId: id(99) })];
+    const result = await domain.listTripPosts.execute(dependencies(), context);
+    expect(result.ok && result.value.map((p) => p.id)).toEqual([id(11), id(12), id(10), id(13)]);
   });
 
   it("hides foreign and missing posts, and scopes and orders the list", async () => {
@@ -121,28 +147,31 @@ describe("Trip post use cases", () => {
     expect(await domain.getTripPost.execute(dependencies(), { ...context, postId })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
     expect(await update({ description: "No" })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
     records.push(seedPost({ id: id(11) }), seedPost({ id: id(10) }), seedPost({ id: id(12), createdAt: new Date(0) }));
-    expect(await domain.listTripPosts.execute(dependencies(), context)).toEqual(domain.ok([records[3], records[2], records[1]]));
+    expect(await domain.listTripPosts.execute(dependencies(), context)).toEqual(domain.ok([records[1], records[2], records[3]]));
     expect(await domain.getTripPost.execute(dependencies(), { ...context, postId: id(98) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
   });
 
-  it.each(["activity", "transit_out", "transit_return", "arrival"] as const)("allows %s days regardless of publication time", async (type) => {
-    days = [{ ...day, type }]; expect(await create()).toMatchObject({ ok: true });
+  it.each([0, 1])("creates and edits without a matching itinerary day (%#)", async (variant) => {
+    days = variant === 0 ? [] : [{ ...day, tripId: id(99) }]; records = [seedPost()];
+    expect(await create()).toMatchObject({ ok: true });
+    expect(await update({ description: "Nuevo" })).toMatchObject({ ok: true });
+    expect(listDaysCalls).toBe(0);
   });
 
-  it("rejects absent or foreign days and empty edits", async () => {
+  it("rejects empty edits", async () => {
     records = [seedPost()];
     expect(await update()).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
-    for (const values of [[], [{ ...day, tripId: id(99) }]]) {
-      days = values;
-      expect(await create()).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
-      expect(await update({ description: "No" })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
-      expect(records).toEqual([seedPost()]);
-    }
+  });
+
+  it("keeps validating the new activity day and window until T58", async () => {
+    days = [];
+    expect(await create({ dayId, newActivity })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+    expect(records).toEqual([]); expect(activities).toEqual([]);
   });
 
   it.each([false, true])("creates an activity and its first post atomically with voting=%s", async (enabled) => {
     votingEnabled = enabled;
-    const result = await create({ newActivity });
+    const result = await create({ dayId, newActivity });
     expect(result).toMatchObject({ ok: true, value: { post: { activityId: id(21), authorId: actor },
       activity: { id: id(21), createdBy: actor, createdAt, scheduledAt: newActivity.scheduledAt } } });
     expect(records).toHaveLength(1); expect(activities).toHaveLength(1);

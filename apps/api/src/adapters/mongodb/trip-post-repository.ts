@@ -3,8 +3,9 @@ import { createObjectId, err, ok, PostNotFoundError, TaggedError, TripNotFoundEr
   type Activity, type AsyncResult, type ObjectId, type Post, type TripPostPort, type TripPostScope, type TripRole } from "app-domain";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
+/** `dayId` exists only in records created before T54; it is never required, read into a Post or written here. */
 type PostDocument = Omit<Post, "id" | "tripId" | "dayId" | "authorId" | "activityId" | "parentPostId" | "transportId"> & {
-  _id: MongoObjectId; tripId: MongoObjectId; dayId: MongoObjectId; authorId: MongoObjectId;
+  _id: MongoObjectId; tripId: MongoObjectId; dayId?: MongoObjectId | null; authorId: MongoObjectId;
   activityId: MongoObjectId | null; parentPostId: MongoObjectId | null; transportId: MongoObjectId | null;
 };
 const domainId = (value: MongoObjectId): ObjectId => {
@@ -14,9 +15,9 @@ const domainId = (value: MongoObjectId): ObjectId => {
 };
 const optionalId = (value: MongoObjectId | null | undefined) => value == null ? null : domainId(value);
 const mongoId = (value: ObjectId | null) => value === null ? null : new MongoObjectId(value);
-const editable = (post: Post) => ({ dayId: new MongoObjectId(post.dayId), description: post.description, mapsUrl: post.mapsUrl,
+const editable = (post: Post) => ({ description: post.description, mapsUrl: post.mapsUrl,
   activityId: mongoId(post.activityId), parentPostId: mongoId(post.parentPostId), transportId: mongoId(post.transportId) });
-const toPost = (value: PostDocument): Post => ({ id: domainId(value._id), tripId: domainId(value.tripId), dayId: domainId(value.dayId),
+const toPost = (value: PostDocument): Post => ({ id: domainId(value._id), tripId: domainId(value.tripId),
   authorId: domainId(value.authorId), description: value.description, mapsUrl: value.mapsUrl, createdAt: value.createdAt,
   activityId: optionalId(value.activityId), parentPostId: optionalId(value.parentPostId), transportId: optionalId(value.transportId) });
 
@@ -46,7 +47,8 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       const post = await posts.findOne({ ...query, _id: new MongoObjectId(postId) }, options);
       return ok(post === null ? undefined : toPost(post));
     },
-    list: async () => ok((await posts.find(query, options).sort({ createdAt: 1, _id: 1 }).toArray()).map(toPost)),
+    // The index serves the publication order; the use case applies the stable id-descending tie-break.
+    list: async () => ok((await posts.find(query, options).sort({ createdAt: -1 }).toArray()).map(toPost)),
     insert: async (post) => {
       if (post.tripId !== tripId) throw new TripNotFoundError();
       await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),

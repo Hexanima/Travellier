@@ -6,10 +6,10 @@ const id = (number: number) => {
   if (!parsed.ok) throw parsed.error;
   return parsed.value;
 };
-const tripId = id(1), dayId = id(2);
-const context = () => ({ trip: { id: tripId }, day: { id: dayId, tripId } });
+const tripId = id(1);
+const context = () => ({ trip: { id: tripId } });
 const input = () => ({
-  id: id(3), tripId, dayId, authorId: id(4), createdAt: new Date("2026-10-04T12:00:00.789Z"),
+  id: id(3), tripId, authorId: id(4), createdAt: new Date("2026-10-04T12:00:00.789Z"),
 });
 const issue = (field: string, code: string) => ({
   ok: false, error: { tag: "ValidationError", issues: [{ field, code }] },
@@ -70,18 +70,15 @@ describe("createPost", () => {
     expect(domain.createPost(input(), { ...context(), trip: { id: id(99) } })).toMatchObject(issue("tripId", "mismatch"));
   });
 
-  it.each([undefined, null])("rejects an unresolved day: %s", (day) => {
-    expect(domain.createPost(input(), { ...context(), day })).toMatchObject(issue("dayId", "not_found"));
+  it("does not require, validate or keep any itinerary day", () => {
+    const result = domain.createPost({ ...input(), dayId: id(2) } as never, { ...context(), day: undefined } as never);
+    expect(result).toMatchObject({ ok: true });
+    if (result.ok) expect(result.value).not.toHaveProperty("dayId");
   });
 
-  it("rejects a resolved day whose ID differs from dayId", () => {
-    expect(domain.createPost(input(), { ...context(), day: { id: id(99), tripId } }))
-      .toMatchObject(issue("dayId", "mismatch"));
-  });
-
-  it("rejects a day from another Trip", () => {
-    expect(domain.createPost(input(), { ...context(), day: { id: dayId, tripId: id(99) } }))
-      .toMatchObject(issue("dayId", "mismatch"));
+  it.each(["2020-01-01T00:00:00.001Z", "2031-01-01T00:00:00.999Z"])("accepts publication outside the Trip dates: %s", (iso) => {
+    expect(domain.createPost({ ...input(), createdAt: new Date(iso) }, context()))
+      .toMatchObject({ ok: true, value: { createdAt: new Date(iso) } });
   });
 
   it.each(references)("rejects unresolved %s while other links are valid", (field, key) => {
@@ -107,14 +104,6 @@ describe("createPost", () => {
 
   it.each(references)("ignores an unused resolution of %s", (_field, key) => {
     expect(domain.createPost(input(), { ...context(), [key]: { id: id(99), tripId: id(99) } })).toMatchObject({ ok: true });
-  });
-
-  it.each(["activity", "transit_out", "transit_return", "arrival"] as const)("accepts posts in %s slices regardless of publication time", (type) => {
-    const day = { ...context().day, type, destinationId: id(8), order: 1,
-      date: new Date("2026-09-25T00:00:00Z"), startsAt: new Date("2026-09-25T10:00:00Z"),
-      endsAt: new Date("2026-09-25T18:00:00Z") };
-    expect(domain.createPost(input(), { ...context(), day })).toMatchObject({ ok: true,
-      value: { dayId, createdAt: input().createdAt } });
   });
 
   it("accepts activity and parent post on other days and transport to another destination within the Trip", () => {
@@ -218,9 +207,10 @@ describe("relinkPost", () => {
       .toMatchObject(issue("tripId", "mismatch"));
   });
 
-  it("rejects a foreign day", () => {
-    expect(domain.relinkPost(post(), {}, { ...context(), day: { id: dayId, tripId: id(99) } }))
-      .toMatchObject(issue("dayId", "mismatch"));
+  it("keeps createdAt with milliseconds and drops any legacy day", () => {
+    const result = domain.relinkPost({ ...post(), dayId: id(2) }, links, linkedContext());
+    expect(result).toEqual({ ok: true, value: post(true) });
+    if (result.ok) expect(result.value.createdAt.getMilliseconds()).toBe(789);
   });
 
   it("ignores extra caller fields that attempt to change identity, ownership or content", () => {
