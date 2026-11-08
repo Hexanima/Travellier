@@ -1,26 +1,53 @@
 import { createActivity, type Activity } from "../../entities/activity.js";
+import type { ActivityConflict } from "../../entities/activity-conflict.js";
+import type { ActivityParticipation } from "../../entities/activity-participation.js";
+import { resolveActivityDayId } from "../../entities/activity-schedule.js";
 import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
-import type { TripPostPort, TripPostReadScope } from "../../ports/trip-post-port.js";
+import type { TripPostPort, TripPostReadScope, TripPostScope } from "../../ports/trip-post-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
+import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
 
 export interface TripPostPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface PostDetailPayload extends TripPostPayload { postId: ObjectId }
 export type PostEditableFields = Pick<Post, "description" | "mapsUrl" | keyof PostLinks>;
 export type NewPostActivity = Pick<Activity, "title" | "scheduledAt"> &
   Partial<Pick<Activity, "description" | "mapsUrl" | "durationMinutes">>;
-/** `dayId` only feeds the new activity (transitional until T58); the post itself never stores or validates a day. */
-export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & {
+/** Plan-change confirmation the author gave for the new activity (checked against the current agenda). */
+interface PlanConfirmation {
+  /** Conflicts the author saw when confirming. */ confirmedConflicts?: unknown;
+  /** Schedule of the new activity the author saw when confirming. */ confirmedActivity?: unknown;
+}
+/**
+ * `dayId` only feeds the new activity and is optional: when absent the slice is derived from `scheduledAt`.
+ * The post itself never stores or validates a day.
+ */
+export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & PlanConfirmation & {
   dayId?: ObjectId;
   newActivity?: NewPostActivity;
 };
 export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields>;
-export interface CreateTripPostResult { post: Post; activity?: Activity }
+export type LinkTripPostToNewActivityPayload = PostDetailPayload & Partial<PostEditableFields> & PlanConfirmation & {
+  dayId?: ObjectId;
+  newActivity: NewPostActivity;
+};
+/** The author's agenda has conflicts that were not confirmed (or the confirmation is stale): nothing was written. */
+export interface PostConfirmationRequired {
+  outcome: "confirmation_required";
+  conflicts: ActivityConflict[];
+  activity: { scheduledAt: Date; durationMinutes: number | null };
+}
+export type CreateTripPostResult =
+  | { outcome: "created"; post: Post; activity?: Activity; participation?: ActivityParticipation }
+  | PostConfirmationRequired;
+export type LinkTripPostToNewActivityResult =
+  | { outcome: "linked"; post: Post; activity: Activity; participation: ActivityParticipation }
+  | PostConfirmationRequired;
 export type PostSummary = Pick<Post, "id" | "authorId" | "createdAt" | "description">;
 export interface TripPostChainResult {
   post: Post;
@@ -31,6 +58,33 @@ export interface TripPostChainResult {
 }
 interface Dependencies { posts: TripPostPort }
 interface CreationDependencies extends Dependencies { createId: () => ObjectId; now: () => Date }
+
+/** Builds and validates the spontaneous activity (day derived when omitted, duration and window checked); never writes. */
+const buildNewActivity = async (scope: TripPostScope, trip: { id: ObjectId }, input: { tripId: ObjectId; authenticatedUserId: ObjectId;
+  dayId?: ObjectId | null; newActivity: NewPostActivity }, id: ObjectId, createdAt: Date): AsyncResult<Activity> => {
+  const days = await scope.listDays();
+  if (!days.ok) return days;
+  let dayId = input.dayId;
+  if (dayId == null) {
+    const resolved = resolveActivityDayId(days.value, input.tripId, input.newActivity.scheduledAt);
+    if (!resolved.ok) return resolved;
+    dayId = resolved.value;
+  }
+  return createActivity({ id, tripId: input.tripId, dayId, title: input.newActivity.title, scheduledAt: input.newActivity.scheduledAt,
+    durationMinutes: input.newActivity.durationMinutes, description: input.newActivity.description, mapsUrl: input.newActivity.mapsUrl,
+    createdBy: input.authenticatedUserId, createdAt }, { trip, days: days.value });
+};
+/** Reviews the author's agenda (same snapshot as the writes); the caller writes nothing until the plan is ready. */
+const planAuthorAgenda = async (scope: TripPostScope, payload: TripPostPayload & PlanConfirmation, activity: Activity) => {
+  const activities = await scope.listActivities();
+  if (!activities.ok) return activities;
+  const records = await scope.listUserParticipations(payload.authenticatedUserId);
+  if (!records.ok) return records;
+  const plan = evaluatePlanChange({ candidate: activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
+    activities: activities.value, participations: records.value, confirmedConflicts: payload.confirmedConflicts,
+    confirmedActivity: payload.confirmedActivity });
+  return plan.ok ? ok({ plan: plan.value, records: records.value }) : plan;
+};
 
 const authorize = async (scope: TripPostReadScope, payload: TripPostPayload) => {
   const member = await scope.findMemberRole(payload.authenticatedUserId);
@@ -76,24 +130,20 @@ const loadAncestors = async (scope: TripPostReadScope, tripId: ObjectId, startId
   return ok({ posts: loaded, truncated: false });
 };
 
+const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",
+  message: "Choose an existing activity or create a new one." }]));
+
 export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload, CreateTripPostResult, TaggedError> = {
-  execute: ({ posts, createId, now }, payload) => posts.withTransaction(payload.tripId, async (scope) => {
+  execute: ({ posts, createId, now }, payload) => posts.withTransaction<CreateTripPostResult>(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
     if (!trip.ok) return trip;
     const postId = createId(), createdAt = now();
     let activity: Activity | undefined;
     if (payload.newActivity !== undefined) {
-      if (payload.activityId != null) return err(new ValidationError([{ field: "activityId", code: "conflict",
-        message: "Choose an existing activity or create a new one." }]));
-      const days = await scope.listDays();
-      if (!days.ok) return days;
-      const validated = createActivity({ id: createId(), tripId: payload.tripId, dayId: payload.dayId as ObjectId,
-        title: payload.newActivity.title, scheduledAt: payload.newActivity.scheduledAt,
-        durationMinutes: payload.newActivity.durationMinutes,
-        description: payload.newActivity.description, mapsUrl: payload.newActivity.mapsUrl,
-        createdBy: payload.authenticatedUserId, createdAt }, { trip: trip.value, days: days.value });
-      if (!validated.ok) return validated;
-      activity = validated.value;
+      if (payload.activityId != null) return conflictingActivityLink();
+      const built = await buildNewActivity(scope, trip.value, { ...payload, newActivity: payload.newActivity }, createId(), createdAt);
+      if (!built.ok) return built;
+      activity = built.value;
     }
     const input = { id: postId, tripId: payload.tripId, authorId: payload.authenticatedUserId,
       createdAt, description: payload.description, mapsUrl: payload.mapsUrl,
@@ -102,12 +152,57 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     if (!resolved.ok) return resolved;
     const post = createPost(input, resolved.value);
     if (!post.ok) return post;
-    if (activity) {
-      const saved = await scope.insertActivity(activity);
-      if (!saved.ok) return saved;
+    if (!activity) {
+      const saved = await scope.insert(post.value);
+      return saved.ok ? ok({ outcome: "created" as const, post: post.value }) : saved;
     }
-    const saved = await scope.insert(post.value);
-    return saved.ok ? ok({ post: post.value, ...(activity ? { activity } : {}) }) : saved;
+    const reviewed = await planAuthorAgenda(scope, payload, activity);
+    if (!reviewed.ok) return reviewed;
+    const { plan, records } = reviewed.value;
+    // Nothing is written before a required confirmation: no activity, post or participation.
+    if (plan.status === "confirmation_required") return ok({ outcome: "confirmation_required" as const,
+      conflicts: plan.conflicts, activity: plan.activity });
+    const insertedActivity = await scope.insertActivity(activity);
+    if (!insertedActivity.ok) return insertedActivity;
+    const inserted = await scope.insert(post.value);
+    if (!inserted.ok) return inserted;
+    const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
+      conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
+    return participation.ok ? ok({ outcome: "created" as const, post: post.value, activity, participation: participation.value }) : participation;
+  }),
+};
+
+/** Creates a spontaneous activity for an existing post (T55 exclusive link applies); the post keeps its publication time. */
+export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPostToNewActivityPayload, LinkTripPostToNewActivityResult, TaggedError> = {
+  execute: ({ posts, createId, now }, payload) => posts.withTransaction<LinkTripPostToNewActivityResult>(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const current = await find(scope, payload);
+    if (!current.ok) return current;
+    if (payload.activityId != null) return conflictingActivityLink();
+    const createdAt = now();
+    const built = await buildNewActivity(scope, trip.value, payload, createId(), createdAt);
+    if (!built.ok) return built;
+    const activity = built.value;
+    const fields = ["description", "mapsUrl", "parentPostId", "transportId"] as const;
+    const supplied = fields.filter((field) => Object.hasOwn(payload, field) && payload[field] !== undefined);
+    const merged: Post = { ...current.value, ...Object.fromEntries(supplied.map((field) => [field, payload[field]])), activityId: activity.id };
+    const resolved = await resolve(scope, merged, activity);
+    if (!resolved.ok) return resolved;
+    const post = relinkPost(merged, {}, resolved.value);
+    if (!post.ok) return post;
+    const reviewed = await planAuthorAgenda(scope, payload, activity);
+    if (!reviewed.ok) return reviewed;
+    const { plan, records } = reviewed.value;
+    if (plan.status === "confirmation_required") return ok({ outcome: "confirmation_required" as const,
+      conflicts: plan.conflicts, activity: plan.activity });
+    const insertedActivity = await scope.insertActivity(activity);
+    if (!insertedActivity.ok) return insertedActivity;
+    const replaced = await scope.replace(post.value);
+    if (!replaced.ok) return replaced;
+    const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
+      conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
+    return participation.ok ? ok({ outcome: "linked" as const, post: post.value, activity, participation: participation.value }) : participation;
   }),
 };
 

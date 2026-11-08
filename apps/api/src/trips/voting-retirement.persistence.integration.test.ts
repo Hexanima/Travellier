@@ -85,8 +85,9 @@ describe("T47 active contracts and historical data", () => {
     const activity = await create();
     expect(activity).not.toHaveProperty("status");
     expect(await f.db.collection("activities").findOne({ _id: new ObjectId(activity.id) })).not.toHaveProperty("status");
+    // Another start: the author is already going to the planned activity at f.occurrence, so the same start would need a confirmation (T58).
     const response = await f.request("POST", f.path(), { dayId: f.day.toHexString(), description: "Recuerdo",
-      newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString(), status: "proposed" } });
+      newActivity: { title: "Cena", scheduledAt: "2026-09-25T15:00:00.000Z", status: "proposed" } });
     expect(response.statusCode).toBe(201);
     const joint = JSON.parse(response.body);
     expect(joint.post.activityId).toBe(joint.activity.id);

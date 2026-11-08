@@ -56,6 +56,9 @@ import {
   type Post,
   type CreateTripPostPayload,
   type CreateTripPostResult,
+  type LinkTripPostToNewActivityPayload,
+  type LinkTripPostToNewActivityResult,
+  type PostConfirmationRequired,
   type UpdateTripPostPayload,
   type TripPostPayload,
   type PostDetailPayload,
@@ -124,6 +127,7 @@ export interface TripApi extends TripInvitationApi {
   getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
   getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
+  linkPostToNewActivity?: (payload: LinkTripPostToNewActivityPayload) => AsyncResult<LinkTripPostToNewActivityResult>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<CreateTripActivityResult>;
@@ -442,7 +446,7 @@ const profileUpdatePayload = (
 };
 
 /** 409 shared by the participation endpoint and activity creation: the user must confirm switching plans. */
-const participationConflictResponse = ({ conflicts, activity }: Extract<CreateTripActivityResult, { outcome: "confirmation_required" }>) =>
+const participationConflictResponse = ({ conflicts, activity }: Pick<PostConfirmationRequired, "conflicts" | "activity">) =>
   jsonResponse(409, { error: { code: "ParticipationConflictError",
     message: "The activity overlaps with other activities in your agenda. Confirm to switch plans.",
     conflicts: conflicts.map((c) => ({ activityId: c.activityId, reason: c.reason, scheduledAt: c.scheduledAt.toISOString(),
@@ -491,16 +495,17 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
   return ok(fields);
 };
 
-const postPayload = (payload: Record<string, unknown>, creating: boolean):
+const postPayload = (payload: Record<string, unknown>):
   Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId">, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
   ]));
   const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId"> = {};
-  // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, until T58.
-  if (creating && Object.hasOwn(payload, "newActivity")) {
+  // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, and it is optional:
+  // when absent the domain derives the slice from scheduledAt.
+  if (Object.hasOwn(payload, "newActivity") && payload.dayId != null) {
     const dayId = createObjectId(isString(payload.dayId) ? payload.dayId : "");
-    if (!dayId.ok) return invalid("dayId", Object.hasOwn(payload, "dayId") && payload.dayId != null ? "invalid" : "required");
+    if (!dayId.ok) return invalid("dayId");
     fields.dayId = dayId.value;
   }
   for (const field of ["activityId", "parentPostId", "transportId"] as const) {
@@ -515,10 +520,11 @@ const postPayload = (payload: Record<string, unknown>, creating: boolean):
     if (!isString(payload[field]) && payload[field] !== null) return invalid(field);
     fields[field] = payload[field] as string | null;
   }
-  if (creating && Object.hasOwn(payload, "newActivity")) {
+  if (Object.hasOwn(payload, "newActivity")) {
     const value = payload.newActivity;
     if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid("newActivity");
-    const parsed = activityPayload({ ...value, dayId: fields.dayId }, true);
+    // activityPayload requires a dayId for standalone activities; here it is optional, so only the other fields are used.
+    const parsed = activityPayload({ ...value, dayId: fields.dayId ?? "0".repeat(24) }, true);
     if (!parsed.ok) return parsed;
     fields.newActivity = { title: parsed.value.title!, scheduledAt: parsed.value.scheduledAt!,
       description: parsed.value.description, mapsUrl: parsed.value.mapsUrl, durationMinutes: parsed.value.durationMinutes };
@@ -635,11 +641,15 @@ export const handleApiRequest = async (
     }
     if (postListMatch && request.method === "POST") {
       if (!payload) return invalidRequestResponse();
-      const parsed = postPayload(payload, true);
+      const parsed = postPayload(payload);
       if (!parsed.ok) return errorResponse(parsed.error);
       if (!trips?.createPost) return unavailableResponse();
-      const result = await trips.createPost({ ...context, ...parsed.value } as CreateTripPostPayload);
-      return result.ok ? jsonResponse(201, result.value) : errorResponse(result.error);
+      const result = await trips.createPost({ ...context, ...parsed.value,
+        confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity } as CreateTripPostPayload);
+      if (!result.ok) return errorResponse(result.error);
+      if (result.value.outcome === "confirmation_required") return participationConflictResponse(result.value);
+      const { post, activity, participation } = result.value;
+      return jsonResponse(201, activity ? { post, activity, participation } : { post });
     }
     if (postId?.ok) {
       const detail = { ...context, postId: postId.value };
@@ -654,9 +664,18 @@ export const handleApiRequest = async (
       }
       if (request.method === "PATCH") {
         if (!payload) return invalidRequestResponse();
-        const parsed = postPayload(payload, false);
+        const parsed = postPayload(payload);
         if (!parsed.ok) return errorResponse(parsed.error);
         if (Object.keys(parsed.value).length === 0) return invalidRequestResponse();
+        if (parsed.value.newActivity !== undefined) {
+          if (!trips?.linkPostToNewActivity) return unavailableResponse();
+          const linked = await trips.linkPostToNewActivity({ ...detail, ...parsed.value, newActivity: parsed.value.newActivity,
+            confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
+          if (!linked.ok) return errorResponse(linked.error);
+          if (linked.value.outcome === "confirmation_required") return participationConflictResponse(linked.value);
+          const { post, activity, participation } = linked.value;
+          return jsonResponse(200, { post, activity, participation });
+        }
         if (!trips?.updatePost) return unavailableResponse();
         const result = await trips.updatePost({ ...detail, ...parsed.value });
         return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);

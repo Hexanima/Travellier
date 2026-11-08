@@ -46,7 +46,7 @@ export class PostFixture {
     return handleApiRequest({ method, url, body, authenticatedUserId: domainId(user) }, { trips: this.api });
   }
   async snapshot() {
-    return Promise.all(["trips", "posts", "activities"].map((name) => this.db.collection(name).find().sort({ _id: 1 }).toArray()));
+    return Promise.all(["trips", "posts", "activities", "activityParticipations"].map((name) => this.db.collection(name).find().sort({ _id: 1 }).toArray()));
   }
   async configureTransports() {
     const base = { ...this.context(), destinationId: domainId(this.destination), type: "car" as const,

@@ -1,6 +1,8 @@
 import { ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
 import { createObjectId, err, ok, PostNotFoundError, TaggedError, TripNotFoundError, UnknownError,
   type Activity, type AsyncResult, type ObjectId, type Post, type TripPostPort, type TripPostScope, type TripRole } from "app-domain";
+import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
+import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
 /** `dayId` exists only in records created before T54; it is never required, read into a Post or written here. */
@@ -28,6 +30,7 @@ export const childPostsQuery = (tripId: MongoObjectId, postId: MongoObjectId) =>
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripPostScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
   const posts = database.collection<PostDocument>("posts");
+  const store = createParticipationStore(database.collection<ParticipationDocument>("activityParticipations"), tripId, session);
   const reference = async (name: "activities" | "transports", referenceId: ObjectId) => {
     const value = await database.collection(name).findOne({ ...query, _id: new MongoObjectId(referenceId) },
       { ...options, projection: { _id: 1, tripId: 1 } });
@@ -72,11 +75,13 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     },
     insertActivity: async (activity: Activity) => {
       if (activity.tripId !== tripId) throw new TripNotFoundError();
-      await database.collection("activities").insertOne({ _id: new MongoObjectId(activity.id), tripId: mongoTripId,
-        dayId: new MongoObjectId(activity.dayId), title: activity.title, description: activity.description, mapsUrl: activity.mapsUrl,
-        scheduledAt: activity.scheduledAt, durationMinutes: activity.durationMinutes, createdBy: new MongoObjectId(activity.createdBy), createdAt: activity.createdAt }, options);
+      await database.collection<ActivityDocument>("activities").insertOne(toActivityDocument(activity), options);
       return ok(undefined);
     },
+    listActivities: async () => ok((await database.collection<ActivityDocument>("activities").find(query, options)
+      .sort({ scheduledAt: 1, _id: 1 }).toArray()).map(toActivity)),
+    listUserParticipations: store.listUserParticipations,
+    saveParticipation: store.save,
   };
 };
 

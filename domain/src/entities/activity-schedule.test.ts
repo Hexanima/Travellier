@@ -173,3 +173,42 @@ describe("activity duration", () => {
       .toMatchObject(issue("scheduledAt", "outside_window"));
   });
 });
+
+describe("resolveActivityDayId", () => {
+  const at = (iso: string) => new Date(iso);
+  it("resolves the single slice containing the instant", () => {
+    expect(domain.resolveActivityDayId([day, next], tripId, at("2026-09-25T12:00:00Z"))).toEqual({ ok: true, value: dayId });
+    expect(domain.resolveActivityDayId([day, next], tripId, at("2026-09-26T05:00:00Z"))).toEqual({ ok: true, value: next.id });
+  });
+
+  it("assigns a contiguous boundary to the following slice and the final departure to the last one", () => {
+    expect(domain.resolveActivityDayId([day, next], tripId, next.startsAt)).toEqual({ ok: true, value: next.id });
+    expect(domain.resolveActivityDayId([day, next], tripId, next.endsAt!)).toEqual({ ok: true, value: next.id });
+  });
+
+  it("rejects an instant outside every activity slice", () => {
+    expect(domain.resolveActivityDayId([day, next], tripId, at("2026-09-24T00:00:00Z"))).toMatchObject(issue("scheduledAt", "outside_window"));
+    expect(domain.resolveActivityDayId([], tripId, at("2026-09-25T12:00:00Z"))).toMatchObject(issue("scheduledAt", "outside_window"));
+  });
+
+  it("ignores transit slices and slices of another Trip", () => {
+    expect(domain.resolveActivityDayId([{ ...day, type: "transit_out" }, { ...next, tripId: id(9) }], tripId, at("2026-09-25T12:00:00Z")))
+      .toMatchObject(issue("scheduledAt", "outside_window"));
+  });
+
+  it("reports overlapping slices of another destination as ambiguous", () => {
+    const other = { ...day, id: id(9), destinationId: id(8) };
+    expect(domain.resolveActivityDayId([day, other], tripId, at("2026-09-25T12:00:00Z"))).toMatchObject(issue("dayId", "ambiguous"));
+  });
+
+  it.each([undefined, null, new Date(Number.NaN)])("rejects a missing or invalid instant: %s", (value) => {
+    expect(domain.resolveActivityDayId([day], tripId, value as never)).toMatchObject({ ok: false, error: { issues: [{ field: "scheduledAt" }] } });
+  });
+
+  it("leaves the duration check to the resolved slice", () => {
+    const resolved = domain.resolveActivityDayId([day], tripId, at("2026-09-25T23:00:00Z"));
+    expect(resolved).toEqual({ ok: true, value: dayId });
+    expect(domain.validateActivitySchedule({ tripId, dayId, scheduledAt: at("2026-09-25T23:00:00Z"), durationMinutes: 120 }, [day]))
+      .toMatchObject(issue("durationMinutes", "outside_window"));
+  });
+});

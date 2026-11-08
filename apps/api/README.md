@@ -122,10 +122,10 @@ Todas las rutas requieren `Authorization: Bearer <accessToken>` y membresía act
 
 | Método | Ruta | Respuesta |
 |---|---|---|
-| POST | `/trips/:tripId/posts` | 201 `{ post }`, o `{ post, activity }` en creación conjunta |
+| POST | `/trips/:tripId/posts` | 201 `{ post }`, o `{ post, activity, participation }` en creación conjunta; 409 si hay conflictos de agenda sin confirmar (T58) |
 | GET | `/trips/:tripId/posts` | 200 `{ posts }`, por publicación descendente (`createdAt`) y, ante empate, ID descendente |
 | GET | `/trips/:tripId/posts/:postId` | 200 `{ post, parent, children, rootActivityId }` (T55) |
-| PATCH | `/trips/:tripId/posts/:postId` | 200 `{ post }` |
+| PATCH | `/trips/:tripId/posts/:postId` | 200 `{ post }`, o `{ post, activity, participation }` si trae `newActivity`; 409 igual que POST (T58) |
 
 POST no requiere `dayId` ni itinerario: acepta `description`, `mapsUrl`, `activityId`, `parentPostId` y `transportId` opcionales. Un post puede ser independiente, vincularse a una actividad, a un transporte o a ambos, o ser hijo de otro post (T55). Un padre excluye la relación directa con actividad y transporte: `parentPostId` junto con `activityId` o `transportId` no nulos responde 422 `ValidationError` con `field: "parentPostId"` y `code: "conflict"`, tanto en POST como en PATCH. Un PATCH que agrega `parentPostId` a un post que ya tiene actividad o transporte se rechaza: el cliente debe enviar `activityId: null` y/o `transportId: null` en el mismo cambio (no se limpian vínculos implícitamente). Las referencias deben existir en el mismo Trip; los vínculos pueden apuntar a contenido de otros días del viaje. Se rechaza la autorreferencia (`code: "self_reference"`), los ciclos indirectos (`code: "cycle"`, p. ej. mover un post bajo uno de sus descendientes) y los padres de otro Trip; el chequeo corre dentro de la misma transacción coordinada por Trip, por lo que dos ediciones simultáneas opuestas no pueden cerrar un ciclo (una gana y la otra recibe `cycle`) y un rechazo no escribe nada. Un hijo se vincula solo a su padre inmediato y admite ramificaciones; no hay profundidad máxima funcional (solo un tope técnico anti-corrupción de 1000 niveles). Desde T54 el post no tiene día: el servidor asigna `createdAt` al publicar (con milisegundos), también antes o después del viaje o en un Trip sin transportes, y el cliente no lo elige. Un `dayId` o `createdAt` del body se ignora, aunque sea inválido o ajeno; solo con `newActivity` el `dayId` define el día de la actividad nueva (transitorio hasta T58). Los registros anteriores conservan su `dayId` en MongoDB, se leen y editan sin depender de él, y la API de posts no lo expone.
 
@@ -137,18 +137,20 @@ Para crear una actividad espontánea y su primer post, enviar `newActivity` en e
 
 ```json
 {
-  "dayId": "507f1f77bcf86cd799439011",
   "description": "Fuimos a cenar",
   "newActivity": {
     "title": "Cena",
     "scheduledAt": "2026-09-25T09:00:00.456-03:00",
+    "durationMinutes": 90,
     "description": "Restaurante del centro",
     "mapsUrl": null
   }
 }
 ```
 
-`newActivity` requiere título y `scheduledAt`; acepta descripción y Maps opcionales. Usa el día del post, que debe ser una franja de actividad, y valida el horario dentro de la ventana exacta del destino. La fecha requiere zona explícita y admite hasta tres decimales, como en T36; la respuesta normaliza UTC y conserva milisegundos. La actividad resultante no contiene `status` ni genera votos, independientemente de la configuración histórica del Trip. No se admite combinar `newActivity` con un `activityId` no nulo. La creación conjunta solo está disponible en POST; PATCH no crea actividades.
+`newActivity` requiere título y `scheduledAt`; acepta descripción y Maps opcionales. `dayId` (raíz del body) es opcional: si viene debe ser una franja de actividad del Trip; si no viene, la franja se deriva del inicio (en un borde contiguo gana la siguiente; sin franja, 422 `scheduledAt`/`outside_window`; más de una franja posible, 422 `dayId`/`ambiguous`). `durationMinutes` es opcional y su fin debe caber en la ventana del destino (422 si la excede). El horario se valida dentro de la ventana exacta del destino. La fecha requiere zona explícita y admite hasta tres decimales, como en T36; la respuesta normaliza UTC y conserva milisegundos. La actividad resultante no contiene `status` ni genera votos, independientemente de la configuración histórica del Trip. No se admite combinar `newActivity` con un `activityId` no nulo. La creación conjunta guarda en una sola transacción la actividad, el post, la participación `going` del autor (`participation`) y, si hace falta, `not_going` en las actividades incompatibles de su agenda. El post conserva su `createdAt` automático aunque la actividad registre un momento anterior. Si la actividad se superpone con planes en los que el autor ya está «Voy», se responde 409 `ParticipationConflictError` con `conflicts` y `activity { scheduledAt, durationMinutes }` sin escribir nada; el cliente reenvía el mismo body con `confirmedConflicts` y `confirmedActivity` (raíz del body, como en `POST /activities`) y la confirmación se revalida contra la agenda actual (una confirmación obsoleta vuelve a dar 409; malformada, 422). Un error o la cancelación no dejan registros parciales ni retiran participaciones.
+
+`PATCH /trips/:tripId/posts/:postId` acepta el mismo `newActivity` para crear una espontánea sobre un post existente (el usuario autenticado es autor de la actividad y queda «Voy»; mismo contrato 200/409/confirmación y `dayId` opcional). El `createdAt` del post no cambia; `activityId` no nulo junto con `newActivity` y un post con `parentPostId` que el body no pone en `null` se rechazan con 422 (vínculo exclusivo, T55). Un PATCH que solo trae `dayId` sigue respondiendo 400.
 
 Membresía, configuración, día y relaciones se leen dentro de la misma transacción que las escrituras, coordinada por Trip con regeneración del itinerario, expulsiones y bajas de actividades/Trip. Cualquier error aborta todos los cambios; la creación conjunta nunca deja uno de los dos registros persistido parcialmente. GET usa snapshots sin escrituras. El itinerario refleja los cambios en su siguiente consulta, y eliminar una actividad sigue desvinculando sus posts sin alterar sus demás datos.
 

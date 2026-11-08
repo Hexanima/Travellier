@@ -68,3 +68,26 @@ export const validateActivitySchedule = (
   }
   return ok(undefined);
 };
+
+/**
+ * Derives the activity slice that owns an instant, for callers that do not send `dayId`.
+ * Only the start is evaluated (duration and window limits are validated afterwards with the resolved slice).
+ * A contiguous boundary belongs to the following slice; overlapping slices of different destinations are ambiguous.
+ */
+export const resolveActivityDayId = (
+  days: readonly ItineraryDay[],
+  tripId: ObjectId,
+  scheduledAt: Date,
+): Result<ObjectId, ValidationError> => {
+  if (scheduledAt == null) return invalid("scheduledAt", "required", "Activity date and time are required.");
+  if (!(scheduledAt instanceof Date) || !Number.isFinite(scheduledAt.getTime())) {
+    return invalid("scheduledAt", "invalid", "Activity date and time must be a valid UTC instant.");
+  }
+  const matches = days.filter((day) => day.tripId === tripId && day.type === "activity" &&
+    validateActivitySchedule({ tripId, dayId: day.id, scheduledAt }, days).ok);
+  if (matches.length === 0) {
+    return invalid("scheduledAt", "outside_window", "Activity date and time must belong to an enabled activity slice.");
+  }
+  if (matches.length > 1) return invalid("dayId", "ambiguous", "Activity date and time match more than one activity slice.");
+  return ok(matches[0]!.id);
+};

@@ -1,25 +1,9 @@
 import { ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
-import { ActivityNotFoundError, createObjectId, err, ok, TaggedError, TripNotFoundError, UnknownError,
-  type Activity, type AsyncResult, type ObjectId, type TripActivityPort, type TripActivityScope, type TripRole } from "app-domain";
+import { ActivityNotFoundError, err, ok, TaggedError, TripNotFoundError, UnknownError,
+  type AsyncResult, type ObjectId, type TripActivityPort, type TripActivityScope, type TripRole } from "app-domain";
+import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
 import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
-
-type ActivityDocument = Omit<Activity, "id" | "tripId" | "dayId" | "createdBy" | "durationMinutes"> & {
-  _id: MongoObjectId; tripId: MongoObjectId; dayId: MongoObjectId; createdBy: MongoObjectId;
-  /** Absent in documents written before durations existed. */
-  durationMinutes?: number | null;
-};
-const domainId = (value: MongoObjectId): ObjectId => {
-  const parsed = createObjectId(value.toHexString());
-  if (!parsed.ok) throw parsed.error;
-  return parsed.value;
-};
-const toActivity = (value: ActivityDocument): Activity => ({ id: domainId(value._id), tripId: domainId(value.tripId),
-  dayId: domainId(value.dayId), title: value.title, description: value.description, scheduledAt: value.scheduledAt,
-  durationMinutes: value.durationMinutes ?? null, mapsUrl: value.mapsUrl, createdBy: domainId(value.createdBy), createdAt: value.createdAt });
-const document = (value: Activity): ActivityDocument => ({ _id: new MongoObjectId(value.id), tripId: new MongoObjectId(value.tripId),
-  dayId: new MongoObjectId(value.dayId), title: value.title, description: value.description, scheduledAt: value.scheduledAt,
-  durationMinutes: value.durationMinutes, mapsUrl: value.mapsUrl, createdBy: new MongoObjectId(value.createdBy), createdAt: value.createdAt });
 
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripActivityScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
@@ -56,7 +40,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     saveParticipation: store.save,
     insert: async (activity) => {
       if (activity.tripId !== tripId) throw new TripNotFoundError();
-      await activities.insertOne(document(activity), options);
+      await activities.insertOne(toActivityDocument(activity), options);
       return ok(undefined);
     },
     replace: async (activity) => {

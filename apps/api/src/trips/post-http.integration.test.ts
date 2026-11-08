@@ -221,11 +221,128 @@ describe("post HTTP API", () => {
     expect(JSON.parse(response.body).post.authorId).toBe(f.actor.toHexString());
   });
 
-  it("keeps creating a joint activity without the author's going until T58", async () => {
+  it("creates a joint activity saving the author's going and exposing it with the post", async () => {
     const response = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
     expect(response.statusCode, response.body).toBe(201);
-    expect(Object.keys(JSON.parse(response.body)).sort()).toEqual(["activity", "post"]);
+    const body = JSON.parse(response.body);
+    expect(Object.keys(body).sort()).toEqual(["activity", "participation", "post"]);
+    expect(body.participation).toMatchObject({ activityId: body.activity.id, userId: f.actor.toHexString(), status: "going" });
+    expect(await f.db.collection("activityParticipations").find().toArray()).toMatchObject([
+      { tripId: f.trip, activityId: new ObjectId(body.activity.id), userId: f.actor, status: "going" }]);
+  });
+
+  it("keeps the 201 shape of posts without a new activity", async () => {
+    const response = await f.request("POST", f.path(), input());
+    expect(Object.keys(JSON.parse(response.body))).toEqual(["post"]);
     expect(await f.db.collection("activityParticipations").countDocuments()).toBe(0);
+  });
+
+  it("derives the slice without dayId and publishes now even when the activity records a past moment", async () => {
+    const response = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString(), durationMinutes: 60 } });
+    expect(response.statusCode, response.body).toBe(201);
+    const { post, activity } = JSON.parse(response.body);
+    expect(activity.dayId).toBe(f.day.toHexString()); expect(activity.scheduledAt).toBe(f.occurrence.toISOString());
+    expect(Date.parse(post.createdAt)).toBeGreaterThan(Date.parse(activity.scheduledAt));
+    const outside = await f.request("POST", f.path(), { ...input(), newActivity: { title: "Cena", scheduledAt: "2026-09-30T12:00:00Z" } });
+    expect(outside.statusCode).toBe(422);
+    expect(JSON.parse(outside.body)).toMatchObject({ error: { fields: [{ field: "scheduledAt", code: "outside_window" }] } });
+    const invalid = await f.request("POST", f.path(), { ...input(), dayId: "nope", newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    expect(invalid.statusCode).toBe(422);
+  });
+
+  describe("author's agenda conflicts", () => {
+    const withDuration = { title: "Cena", scheduledAt: f.occurrence.toISOString(), durationMinutes: 60 };
+    const seedConflicts = async () => {
+      const ids: string[] = [];
+      for (const [title, scheduledAt] of [["Plan A", "2026-09-25T12:30:00Z"], ["Plan B", "2026-09-25T11:30:00Z"]] as const) {
+        const created = await f.api.createActivity!({ ...f.context(), dayId: domainId(f.day), title, scheduledAt: new Date(scheduledAt), durationMinutes: 60 });
+        if (!created.ok || created.value.outcome !== "created") throw new Error("seed failed");
+        ids.push(created.value.activity.id);
+      }
+      return ids;
+    };
+    const confirmation = (body: { conflicts: unknown; activity: unknown }) => ({ confirmedConflicts: body.conflicts, confirmedActivity: body.activity });
+    // The Trip lock bumps destinationOrderRevision even when nothing is written; compare the data collections only.
+    const data = async () => (await f.snapshot()).slice(1);
+
+    it("answers 409 without writing and then publishes everything with the confirmation", async () => {
+      const [a, b] = await seedConflicts(); const before = await data();
+      const response = await f.request("POST", f.path(), { ...input(), newActivity: withDuration });
+      expect(response.statusCode, response.body).toBe(409);
+      const body = JSON.parse(response.body).error;
+      expect(body).toMatchObject({ code: "ParticipationConflictError",
+        conflicts: [{ activityId: b, durationMinutes: 60 }, { activityId: a, durationMinutes: 60 }],
+        activity: { scheduledAt: f.occurrence.toISOString(), durationMinutes: 60 } });
+      expect(await data()).toEqual(before);
+      const confirmed = await f.request("POST", f.path(), { ...input(), newActivity: withDuration, ...confirmation(body) });
+      expect(confirmed.statusCode, confirmed.body).toBe(201);
+      const created = JSON.parse(confirmed.body);
+      const statuses = Object.fromEntries((await f.db.collection("activityParticipations").find().toArray()).map((p) => [p.activityId.toHexString(), p.status]));
+      expect(statuses).toEqual({ [a!]: "not_going", [b!]: "not_going", [created.activity.id]: "going" });
+    });
+
+    it("rejects malformed confirmations with 422 and no writes", async () => {
+      await seedConflicts(); const before = await data();
+      for (const fields of [{ confirmedConflicts: "x" }, { confirmedConflicts: [{ activityId: "no" }] }, { confirmedActivity: "x" }]) {
+        expect((await f.request("POST", f.path(), { ...input(), newActivity: withDuration, ...fields })).statusCode).toBe(422);
+      }
+      expect(await data()).toEqual(before);
+    });
+
+    it("answers 422 (not 409) when the duration exceeds the window even with conflicts", async () => {
+      await seedConflicts(); const before = await data();
+      const response = await f.request("POST", f.path(), { ...input(), newActivity: { ...withDuration, durationMinutes: 600 } });
+      expect(response.statusCode).toBe(422);
+      expect(JSON.parse(response.body)).toMatchObject({ error: { fields: [{ field: "durationMinutes", code: "outside_window" }] } });
+      expect(await data()).toEqual(before);
+    });
+
+    describe("PATCH relink to a new activity", () => {
+      const patch = (postId: string, fields: object, user = f.actor) => f.request("PATCH", `${f.path()}/${postId}`, fields, user);
+
+      it("creates the activity for an existing post keeping its createdAt and the author's going", async () => {
+        const post = await create(); const before = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
+        const response = await patch(post.id, { newActivity: withDuration });
+        expect(response.statusCode, response.body).toBe(200);
+        const body = JSON.parse(response.body);
+        expect(Object.keys(body).sort()).toEqual(["activity", "participation", "post"]);
+        expect(body.post).toEqual({ ...post, activityId: body.activity.id });
+        expect(body.post.createdAt).toBe(post.createdAt);
+        expect(body.participation).toMatchObject({ activityId: body.activity.id, userId: f.actor.toHexString(), status: "going" });
+        expect(await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) })).toEqual({ ...before, activityId: new ObjectId(body.activity.id) });
+      });
+
+      it("answers 409 without writing and links with the confirmation", async () => {
+        await seedConflicts(); const post = await create(); const before = await data();
+        const response = await patch(post.id, { newActivity: withDuration });
+        expect(response.statusCode).toBe(409);
+        expect(await data()).toEqual(before);
+        const confirmed = await patch(post.id, { newActivity: withDuration, ...confirmation(JSON.parse(response.body).error) });
+        expect(confirmed.statusCode, confirmed.body).toBe(200);
+        expect(JSON.parse(confirmed.body).post.createdAt).toBe(post.createdAt);
+        expect(await f.db.collection("activityParticipations").countDocuments({ status: "not_going" })).toBe(2);
+      });
+
+      it("rejects a post with a parent, activityId with newActivity and keeps a dayId-only edit as 400", async () => {
+        const parent = await create(), child = await create({ parentPostId: parent.id }), independent = await create(); const before = await data();
+        expect((await patch(child.id, { newActivity: withDuration })).statusCode).toBe(422);
+        expect((await patch(independent.id, { newActivity: withDuration, activityId: new ObjectId().toHexString() })).statusCode).toBe(422);
+        expect((await patch(independent.id, { dayId: f.day.toHexString() })).statusCode).toBe(400);
+        expect(await data()).toEqual(before);
+        expect((await patch(child.id, { newActivity: withDuration, parentPostId: null })).statusCode).toBe(200);
+      });
+
+      it("leaves a third member without response and hides it from non-members", async () => {
+        const third = new ObjectId();
+        await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: third, role: "participant", joinedAt: new Date() });
+        const post = await create(), outsider = new ObjectId(), before = await data();
+        expect((await patch(post.id, { newActivity: withDuration }, outsider)).statusCode).toBe(404);
+        expect(await data()).toEqual(before);
+        const body = JSON.parse((await patch(post.id, { newActivity: withDuration })).body);
+        const seen = await f.request("GET", `/trips/${f.trip}/activities/${body.activity.id}/participation`, undefined, third);
+        expect(JSON.parse(seen.body)).toEqual({ participation: null });
+      });
+    });
   });
 
   it.each(["2026-09-25T09:00:00.456-03:00", "2026-09-25T12:00:00.456Z"])("creates joint activity at %s and exposes both in itinerary", async (scheduledAt) => {
@@ -265,7 +382,8 @@ describe("post HTTP API", () => {
     expect(post.activityId).toBe(activity.id);
     expect(await f.db.collection("activities").findOne({ _id: new ObjectId(activity.id) }))
       .toMatchObject({ scheduledAt: new Date("2026-09-25T12:00:00.456Z"), durationMinutes: 90 });
-    const plain = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt: f.occurrence.toISOString() } });
+    // A later start: the author is already going to the 90-minute activity above, so the same start would now need a confirmation.
+    const plain = await f.request("POST", f.path(), { ...input(), dayId: f.day.toHexString(), newActivity: { title: "Cena", scheduledAt: "2026-09-25T15:00:00.000Z" } });
     expect(JSON.parse(plain.body).activity).toMatchObject({ durationMinutes: null });
   });
 
