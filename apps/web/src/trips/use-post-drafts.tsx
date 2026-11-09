@@ -19,7 +19,9 @@ export function PostDraftsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ drafts, set, clear }), [drafts, set, clear]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
-export const usePostDraft = (key: string): PostDraftHandle => {
+// The provider and its hook belong together; the hook does not affect fast refresh of the provider component.
+// eslint-disable-next-line react-refresh/only-export-components
+export const usePostDraft =(key: string): PostDraftHandle => {
   const store = useContext(Context);
   if (!store) throw new Error("usePostDraft requires a PostDraftsProvider");
   const { drafts, set, clear } = store;

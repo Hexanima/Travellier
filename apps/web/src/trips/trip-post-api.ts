@@ -28,7 +28,7 @@ const parsePost = (value: unknown, tripId: string, postId?: string): PostRespons
     !optionalId(value.activityId) || !optionalId(value.parentPostId) || !optionalId(value.transportId)) return undefined;
   return { id: value.id, tripId, authorId: value.authorId, description: value.description as string | null, mapsUrl: value.mapsUrl as string | null,
     activityId: (value.activityId as string | null | undefined) ?? null, parentPostId: (value.parentPostId as string | null | undefined) ?? null,
-    transportId: (value.transportId as string | null | undefined) ?? null, createdAt: value.createdAt };
+    transportId: (value.transportId as string | null | undefined) ?? null, createdAt: value.createdAt as string };
 };
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
 const failure = (error: ApiClientError): TripResult<never> => ({ ok: false, error: { kind: error.kind,
