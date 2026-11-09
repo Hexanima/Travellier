@@ -22,7 +22,7 @@ const itineraryOf = () => ({ ok: true, value: { activities: [
   { id: activityB, title: "Visita al museo", scheduledAt: "2026-09-25T17:00:00.000Z", durationMinutes: null },
   { id: activityA, title: "Paseo por el centro", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: 60 }] } });
 const seeded = (link: PostDraft["extras"]["link"] = null, transport: string | null = null): PostDraft =>
-  ({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" }, extras: { link, transportId: transport } });
+  ({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" }, extras: { link, transportId: transport, newActivity: null } });
 let seed: PostDraft = seeded();
 function Probe() {
   const { postId } = useParams(); const handle = usePostDraft(postId ? `edit:${postId}` : "new");
@@ -99,7 +99,7 @@ describe("PostLinkPicker", () => {
     await click(radio(container, "Post")); await click(radio(container, "Otro recuerdo")); await click(button(container, "Aceptar"));
     const result = probe(container);
     expect(result.draft).toEqual({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" },
-      extras: { link: { kind: "post", id: otherId, label: "Otro recuerdo" }, transportId: null } });
+      extras: { link: { kind: "post", id: otherId, label: "Otro recuerdo" }, transportId: null, newActivity: null } });
     expect(result.state?.focus).toBe("link");
     expect(container.querySelector('[role="radiogroup"]')).toBeNull();
   });
@@ -116,12 +116,12 @@ describe("PostLinkPicker", () => {
     await click(radio(container, "Actividad"));
     expect(itineraryGet).toHaveBeenCalledExactlyOnceWith(tripId);
     await click(radio(container, "Visita al museo")); await click(button(container, "Aceptar"));
-    expect(probe(container).draft?.extras).toEqual({ link: { kind: "activity", id: activityB, label: expect.stringContaining("Visita al museo") }, transportId: null });
+    expect(probe(container).draft?.extras).toEqual({ link: { kind: "activity", id: activityB, label: expect.stringContaining("Visita al museo") }, transportId: null, newActivity: null });
   });
   it("removes the link with Sin vínculo", async () => {
     const { container } = await open(newPath, {}, seeded({ kind: "post", id: otherId }));
     await click(radio(container, "Sin vínculo")); await click(button(container, "Aceptar"));
-    expect(probe(container).draft?.extras).toEqual({ link: null, transportId: null });
+    expect(probe(container).draft?.extras).toEqual({ link: null, transportId: null, newActivity: null });
     expect(probe(container).draft?.values.description).toBe("Texto tipeado");
   });
   it("lists the activities by date with title and time, and keeps the transport when choosing an activity", async () => {
@@ -141,7 +141,7 @@ describe("PostLinkPicker", () => {
     expect(container.textContent).toContain("se quitará el transporte");
     await click(radio(container, "Otro recuerdo")); await click(button(container, "Aceptar"));
     const result = probe(container);
-    expect(result.draft?.extras).toEqual({ link: { kind: "post", id: otherId, label: "Otro recuerdo" }, transportId: null });
+    expect(result.draft?.extras).toEqual({ link: { kind: "post", id: otherId, label: "Otro recuerdo" }, transportId: null, newActivity: null });
     expect(result.state?.notice).toContain("Un recuerdo continuación no mantiene otro vínculo directo; se quitó el transporte.");
   });
   it("shows loading, then an empty message, for posts", async () => {

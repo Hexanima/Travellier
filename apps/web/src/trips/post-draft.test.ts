@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setTransport, type PostDraft, type PostLink } from "./post-draft.js";
+import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
-const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null): PostDraft =>
-  ({ values: { description, mapsUrl }, extras: { link, transportId } });
+const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
+  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity } });
 const post = (id = P): PostLink => ({ kind: "post", id });
 const activity = (id = A): PostLink => ({ kind: "activity", id });
 const saved = (extra: Partial<{ parentPostId: string | null; activityId: string | null; transportId: string | null }> = {}) =>
@@ -78,7 +78,7 @@ describe("post draft", () => {
   it("normalizes legacy data with parent and transport: the parent wins, the draft has no transport and the PATCH clears it", () => {
     const legacy = saved({ parentPostId: P, transportId: T });
     const fromSaved = draftFromPost(legacy);
-    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null });
+    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
     expect(prepareUpdate(fromSaved, legacy)).toEqual({ transportId: null });
   });
   it("normalizes legacy data with parent, activity and transport: the PATCH clears both", () => {
@@ -86,23 +86,23 @@ describe("post draft", () => {
     expect(prepareUpdate(draftFromPost(legacy), legacy)).toEqual({ activityId: null, transportId: null });
   });
   it("builds the link and transport from the saved post", () => {
-    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null });
-    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null });
-    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T });
-    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T });
+    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
+    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
+    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null });
+    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
   });
   it("setLink: a post drops the transport and the activity, an activity keeps the transport, null removes the link", () => {
-    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null });
-    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null });
-    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T });
-    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T });
+    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
+    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
+    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
+    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null });
   });
   it("setLink and setTransport keep the values and do not mutate the input", () => {
     const original = draft("x", "y", activity(), T);
     const next = setLink(original, post());
     expect(next.values).toEqual({ description: "x", mapsUrl: "y" });
-    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T });
-    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null });
+    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
+    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
     expect(setTransport(draft("x"), T).extras.transportId).toBe(T);
   });
   it("is dirty only when it differs from the base", () => {
@@ -118,5 +118,72 @@ describe("post draft", () => {
     expect(isDraftDirty(draft("Hola", "", post(P)), draft("Hola", "", post(A)))).toBe(true);
     expect(isDraftDirty(draft("Hola", "", null, T), draft("Hola"))).toBe(true);
     expect(isDraftDirty(draft("Hola", "", { kind: "post", id: P, label: "uno" }), draft("Hola", "", { kind: "post", id: P, label: "dos" }))).toBe(false);
+  });
+});
+
+describe("post draft with a new activity", () => {
+  const N: NewActivityDraft = { title: "  Cena  ", date: "2026-09-25", time: "12:00", durationHours: "1", durationMinutes: "30" };
+  const at = "2026-09-25T15:00:00.000Z";
+  const resolved = { scheduledAt: at, durationMinutes: 90 as number | null };
+  it("starts without a new activity, also when built from a saved post", () => {
+    expect(emptyDraft().extras.newActivity).toBeNull();
+    expect(draftFromPost(saved({ activityId: A })).extras.newActivity).toBeNull();
+  });
+  it("setNewActivity clears the link, keeps the transport and the values, and does not mutate the input", () => {
+    const original = draft("x", "y", activity(), T);
+    const next = setNewActivity(original, N);
+    expect(next).toEqual(draft("x", "y", null, T, N));
+    expect(original.extras.link).toEqual({ kind: "activity", id: A });
+    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N });
+    expect(setNewActivity(next, null).extras.newActivity).toBeNull();
+  });
+  it("choosing any link, or no link, discards the new activity and keeps the transport (except under a post)", () => {
+    const withNew = draft("x", "", null, T, N);
+    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
+    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
+    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null });
+  });
+  it("setTransport keeps the new activity", () => {
+    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N });
+  });
+  it("is dirty when the new activity appears, disappears or changes in any field", () => {
+    expect(isDraftDirty(draft("Hola", "", null, null, N), draft("Hola"))).toBe(true);
+    expect(isDraftDirty(draft("Hola"), draft("Hola", "", null, null, N))).toBe(true);
+    expect(isDraftDirty(draft("Hola", "", null, null, N), draft("Hola", "", null, null, { ...N }))).toBe(false);
+    for (const change of [{ title: "Otra" }, { date: "2026-09-26" }, { time: "13:00" }, { durationHours: "2" }, { durationMinutes: "5" }]) {
+      expect(isDraftDirty(draft("Hola", "", null, null, { ...N, ...change }), draft("Hola", "", null, null, N))).toBe(true);
+    }
+  });
+  it("prepares a create with newActivity: trimmed title, ISO instant, no description or maps, and no dayId, createdAt or activityId", () => {
+    const input = prepareCreate(draft("Hola", "", null, T, N), resolved);
+    expect(input).toEqual({ description: "Hola", transportId: T, newActivity: { title: "Cena", scheduledAt: at, durationMinutes: 90 } });
+    for (const key of ["dayId", "createdAt", "activityId", "parentPostId"]) expect(input).not.toHaveProperty(key);
+  });
+  it("omits a null duration from the new activity", () => {
+    const input = prepareCreate(draft("Hola", "", null, null, N), { scheduledAt: at, durationMinutes: null });
+    expect(input.newActivity).toEqual({ title: "Cena", scheduledAt: at });
+    expect(Object.keys(input.newActivity!)).toEqual(["title", "scheduledAt"]);
+  });
+  it("a create without a new activity ignores a resolved value", () => {
+    expect(prepareCreate(draft("Hola"), resolved)).toEqual({ description: "Hola" });
+  });
+  it("prepares an update with newActivity and never activityId, even when the post had an activity", () => {
+    const input = prepareUpdate(draft("Hola", "", null, null, N), saved({ activityId: A }), resolved);
+    expect(input).toEqual({ newActivity: { title: "Cena", scheduledAt: at, durationMinutes: 90 } });
+    expect(input).not.toHaveProperty("activityId");
+  });
+  it("sends parentPostId null only when the original had a parent", () => {
+    expect(prepareUpdate(draft("Hola", "", null, null, N), saved({ parentPostId: P }), resolved))
+      .toEqual({ parentPostId: null, newActivity: { title: "Cena", scheduledAt: at, durationMinutes: 90 } });
+    expect(prepareUpdate(draft("Hola", "", null, null, N), saved(), resolved)).not.toHaveProperty("parentPostId");
+  });
+  it("sends the changed text and keeps the transport logic next to newActivity", () => {
+    expect(prepareUpdate(draft("Chau", "", null, T, N), saved({ transportId: null }), resolved))
+      .toEqual({ description: "Chau", transportId: T, newActivity: { title: "Cena", scheduledAt: at, durationMinutes: 90 } });
+    expect(prepareUpdate(draft("Hola", "", null, T, N), saved({ transportId: T }), resolved)).not.toHaveProperty("transportId");
+  });
+  it("an update without a new activity behaves as before", () => {
+    expect(prepareUpdate(draft("Hola"), saved({ activityId: A }), resolved)).toEqual({ activityId: null });
+    expect(prepareUpdate(draft("Hola"), saved(), resolved)).toEqual({});
   });
 });
