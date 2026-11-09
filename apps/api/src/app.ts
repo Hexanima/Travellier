@@ -261,6 +261,9 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   if (error.tag === "ActivityNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Activity not found." } });
   }
+  if (error.tag === "CommentNotFoundError") {
+    return jsonResponse(404, { error: { code: error.tag, message: "Comment not found." } });
+  }
   if (error.tag === "PostNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Post not found." } });
   }
@@ -631,6 +634,32 @@ export const handleApiRequest = async (
     if (!result.ok) return errorResponse(result.error);
     if (result.value.outcome === "saved") return jsonResponse(200, { participation: result.value.participation });
     return participationConflictResponse(result.value);
+  }
+
+  const commentMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/comments(?:\/([^/?]+))?$/);
+  if (commentMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(commentMatch[1] ?? ""), postId = createObjectId(commentMatch[2] ?? "");
+    const commentId = commentMatch[3] === undefined ? undefined : createObjectId(commentMatch[3]);
+    if (!tripId.ok || !postId.ok || (commentId !== undefined && !commentId.ok)) return invalidRequestResponse();
+    const context = { tripId: tripId.value, postId: postId.value, authenticatedUserId: request.authenticatedUserId }, trips = dependencies.trips;
+    if (commentId === undefined && request.method === "GET") {
+      if (!trips?.listComments) return unavailableResponse();
+      const result = await trips.listComments(context);
+      return result.ok ? jsonResponse(200, { comments: result.value }) : errorResponse(result.error);
+    }
+    if (request.method === "POST" && commentId === undefined) {
+      if (!payload) return invalidRequestResponse();
+      if (!trips?.createComment) return unavailableResponse();
+      const result = await trips.createComment({ ...context, text: payload.text });
+      return result.ok ? jsonResponse(201, { comment: result.value }) : errorResponse(result.error);
+    }
+    if (request.method === "PATCH" && commentId?.ok) {
+      if (!payload) return invalidRequestResponse();
+      if (!trips?.updateComment) return unavailableResponse();
+      const result = await trips.updateComment({ ...context, commentId: commentId.value, text: payload.text });
+      return result.ok ? jsonResponse(200, { comment: result.value }) : errorResponse(result.error);
+    }
   }
 
   const postListMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts$/);
