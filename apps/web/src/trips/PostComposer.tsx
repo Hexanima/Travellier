@@ -5,7 +5,7 @@ import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from 
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
-import { readOrigin, originHref } from "./post-origin.js";
+import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
 import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
@@ -208,10 +208,10 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   // From the detail with app history, `-1` returns to that exact entry (its state and root origin intact); otherwise the entry is replaced so Back never reopens the composer.
   const leave = () => {
     handle.clear();
-    if (postId) { navigate(listing); return; }
     const origin = readOrigin(location.state, tripId ?? "");
-    if (origin.label === "recuerdo" && location.key !== "default") navigate(-1);
-    else navigate(originHref(origin), { replace: true });
+    if (postId && origin.label !== "recuerdo") { navigate(listing); return; }
+    if (origin.label === "recuerdo" && canGoBack(location)) navigate(-1);
+    else navigate(originHref(origin), { replace: true, state: withNoBack() });
   };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";

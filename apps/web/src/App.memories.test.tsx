@@ -305,7 +305,53 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("#post-link-summary")).toBeNull();
+  });
+  it("Volver on a detail opened by direct URL goes to the diary", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  const openEditFromDetail = async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Editar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+    return container;
+  };
+  it("cancelling an edit opened from the detail returns to that detail and Volver reaches the diary", async () => {
+    const container = await openEditFromDetail();
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
-    expect(container.textContent).not.toContain("Nuevo recuerdo");
+    expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al diario")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  it("discarding a dirty edit opened from the detail returns to that detail and Volver does not reopen the editor", async () => {
+    const container = await openEditFromDetail();
+    await type(container, "description", "Cambio");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Descartar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.textContent).not.toContain("Editar recuerdo");
+  });
+  it("cancelling an edit opened from the detail of an itinerary post keeps the itinerary as root origin", async () => {
+    const value = itineraryFixture();
+    const itineraryGet = vi.fn().mockResolvedValue({ ok: true, value });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ post: saved({ id: value.posts[0].id }) }) });
+    const container = await render(`/trips/${tripId}/itinerary`, { auth, sessionStorage: storage(true), itinerary: { get: itineraryGet }, posts: { get } });
+    await click(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Editar") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
   });
 });

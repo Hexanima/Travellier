@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
-import { buildOrigin, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
+import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostDetail, PostSummary, TripPostApi } from "./trip-post-api.js";
 import "./itinerary.css";
@@ -61,7 +61,7 @@ function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; pos
 
   const origin = readOrigin(location.state, tripId ?? "");
   // Back is the immediately previous level when the app has history; a deep link falls back to the origin (or the diary).
-  const goBack = () => { if (location.key !== "default") navigate(-1); else navigate(originHref(origin), { state: restoreOf(origin) }); };
+  const goBack = () => { if (canGoBack(location)) navigate(-1); else navigate(originHref(origin), { state: restoreOf(origin) }); };
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const here = `/trips/${tripId}/memories/${postId}`;
@@ -103,7 +103,7 @@ function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; pos
             <div className="memory-actions">
               <Link className="trips-settings-link" to={`/trips/${tripId}/memories/new?parentPostId=${post.id}`}
                 state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo"), ...(label ? { parentLabel: label } : {}) }}>Continuar recuerdo</Link>
-              <Link className="trips-settings-link" to={`${here}/edit`}>Editar</Link>
+              <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo") }}>Editar</Link>
             </div>
           </section>
           {parent || post.parentPostId ? <section className="activity-detail" aria-labelledby="memory-previous-title">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorSelector, buildOrigin, diaryOrigin, itineraryAnchor, memoryAnchor, originHref, originLabel, readOrigin, readRestore } from "./post-origin.js";
+import { anchorSelector, buildOrigin, canGoBack, withNoBack, diaryOrigin, itineraryAnchor, memoryAnchor, originHref, originLabel, readOrigin, readRestore } from "./post-origin.js";
 
 const tripId = "000000000000000000000001";
 const diary = { path: `/trips/${tripId}/memories`, label: "diario" };
@@ -56,6 +56,19 @@ describe("post origin", () => {
     expect(readRestore({ restore: { anchor, scrollY: "3" } })).toBeUndefined();
     expect(readRestore({ restore: { anchor, scrollY: -1 } })).toBeUndefined();
     expect(readRestore({ restore: { anchor, scrollY: Number.NaN } })).toBeUndefined();
+  });
+  it("can go back only with a non-initial entry that was not marked as first by a replace", () => {
+    expect(canGoBack({ key: "abc123", state: null })).toBe(true);
+    expect(canGoBack({ key: "abc123", state: { origin: {} } })).toBe(true);
+    expect(canGoBack({ key: "default", state: null })).toBe(false);
+    expect(canGoBack({ key: "abc123", state: { noBack: true } })).toBe(false);
+    expect(canGoBack({ key: "abc123", state: { noBack: "yes" } })).toBe(true);
+    expect(canGoBack({ key: "abc123", state: undefined })).toBe(true);
+  });
+  it("marks a replaced first entry so its state tells that nothing is behind it", () => {
+    expect(withNoBack({ restore: 1 })).toEqual({ restore: 1, noBack: true });
+    expect(withNoBack(undefined)).toEqual({ noBack: true });
+    expect(withNoBack("x")).toEqual({ noBack: true });
   });
   it("only turns known anchors into a selector", () => {
     expect(anchorSelector(memoryAnchor("000000000000000000000005"))).toBe('[data-memory="000000000000000000000005"]');

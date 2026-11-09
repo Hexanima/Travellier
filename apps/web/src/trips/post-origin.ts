@@ -44,7 +44,16 @@ export const readOrigin = (state: unknown, tripId: string): PostOrigin => {
     ...(anchor !== undefined ? { anchor: anchor as string } : {}), ...(scrollY !== undefined ? { scrollY: scrollY as number } : {}) };
 };
 
-export const readRestore = (state: unknown): RestoreState | undefined => {
+/**
+ * Whether there is an app entry behind the current one. `key === "default"` is the initial entry; an entry that replaced the initial one
+ * has a fresh key, so it carries `noBack` in its state (set with `withNoBack`). Works the same under BrowserRouter and MemoryRouter.
+ */
+export const canGoBack = (location: { key: string; state: unknown }): boolean =>
+  location.key !== "default" && !(record(location.state) && location.state.noBack === true);
+/** State for an entry that replaces the first one: nothing is behind it. */
+export const withNoBack = (state?: unknown): Record<string, unknown> => ({ ...(record(state) ? state : {}), noBack: true });
+
+export const readRestore =(state: unknown): RestoreState | undefined => {
   const restore = record(state) ? state.restore : undefined;
   if (!record(restore) || typeof restore.anchor !== "string" || !anchorPattern.test(restore.anchor) || !scroll(restore.scrollY)) return undefined;
   return { anchor: restore.anchor, scrollY: restore.scrollY, ...(restore.panel !== undefined ? { panel: restore.panel } : {}) };
