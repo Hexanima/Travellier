@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
@@ -17,7 +17,8 @@ const itineraryResult = { ok: true, value: { activities: [{ id: activityId, titl
 const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
-async function render(path = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list", ReturnType<typeof vi.fn>>> = {}) {
+function Back() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(-1)}>atras</button>; }
+async function render(path: string | string[] = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list", ReturnType<typeof vi.fn>>> = {}) {
   const list = overrides.list ?? vi.fn().mockResolvedValue({ ok: true, value: [saved(), saved({ id: otherPostId, description: "Otro recuerdo" })] });
   const picker = <PostLinkPicker posts={{ list, get: vi.fn() }} itinerary={{ get: vi.fn().mockResolvedValue(itineraryResult) }} timeZone="America/Argentina/Buenos_Aires" />;
   const create = overrides.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved() });
@@ -25,8 +26,8 @@ async function render(path = `/trips/${tripId}/memories/new`, overrides: Partial
   const get = overrides.get ?? vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
-    <nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
+  await act(async () => root.render(<MemoryRouter initialEntries={Array.isArray(path) ? path : [path]}>
+    <Back /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path="new" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
@@ -465,5 +466,37 @@ describe("PostComposer (link)", () => {
     await field(container, "description", "Hola"); await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
     expect(alerts(container)[0]?.textContent).toContain("No pudimos guardar el recuerdo");
     expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Otro recuerdo");
+  });
+});
+
+describe("PostComposer (legacy data, edit preload and history)", () => {
+  it("a legacy child with a transport does not show the transport and the PATCH clears it explicitly", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ parentPostId: otherPostId, transportId }), parent: null, children: [], rootActivityId: null } });
+    const { container, update } = await render(editPath, { get });
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Editado", transportId: null });
+  });
+  it("ignores ?transportId= when editing: no transport is shown and the PATCH does not send it", async () => {
+    const { container, update } = await render(`${editPath}?transportId=${transportId}`);
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await click(linkButton(container)); await click(button(container, "Cancelar"));
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Editado" });
+  });
+  it("after Aceptar, going back from the composer reaches the listing and not another composer", async () => {
+    const { container } = await render([`/trips/${tripId}/memories`, newPath]);
+    await chooseLink(container, "Post", "Otro recuerdo");
+    expect(container.querySelector('[name="description"]')).not.toBeNull();
+    await click(button(container, "atras"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("after Cancelar, going back from the composer reaches the listing and not another composer", async () => {
+    const { container } = await render([`/trips/${tripId}/memories`, newPath]);
+    await click(linkButton(container)); await click(button(container, "Cancelar"));
+    expect(document.activeElement).toBe(linkButton(container));
+    await click(button(container, "atras"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
   });
 });

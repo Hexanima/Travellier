@@ -27,7 +27,10 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   const location = useLocation();
   const handle = usePostDraft(postId ? `edit:${postId}` : "new");
   // Set by the selector when returning: where to put the focus and what to announce (read once).
-  const [entry] = useState(() => location.state as { focus?: string; notice?: string } | null);
+  // Back with `navigate(-1)` leaves it in the drafts context; a direct entry replaced by the composer leaves it in the location state.
+  const [entry] = useState(() => handle.returned ?? location.state as { focus?: string; notice?: string } | null);
+  const returnedPending = handle.returned !== undefined, clearReturned = handle.clearReturned;
+  useEffect(() => { if (returnedPending) clearReturned(); }, [returnedPending, clearReturned]);
   const [notice, setNotice] = useState(entry?.notice ?? "");
   const focusLink = useRef(entry?.focus === "link");
   const linkRef = useRef<HTMLButtonElement>(null);
@@ -78,8 +81,8 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   }, [loaded.kind]);
 
   const saved: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
-  // A transport preloaded from its detail is part of the base (it is not a change); a continuation memory keeps no transport.
-  const preloaded = transportParam(location.search);
+  // A transport preloaded from its detail (creation only) is part of the base (it is not a change); a continuation memory keeps no transport.
+  const preloaded = postId ? null : transportParam(location.search);
   const base: PostDraft = preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
@@ -122,7 +125,7 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   };
   const composerPath = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}`;
   // The draft is materialized first: in an edit it does not exist until something changes, and the selector needs it.
-  const openPicker = () => { handle.setDraft(draft); navigate(`${composerPath}/link${location.search}`); };
+  const openPicker = () => { handle.setDraft(draft); navigate(`${composerPath}/link${location.search}`, { state: { fromComposer: true } }); };
   const removeTransport = () => { handle.setDraft(setTransport(draft, null)); setNotice(""); };
   const leave = () => { handle.clear(); navigate(listing); };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
