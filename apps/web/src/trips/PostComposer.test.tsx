@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
+import { PostLinkPicker } from "./PostLinkPicker.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
 import type { PostResponse } from "./trip-post-api.js";
@@ -11,26 +12,32 @@ import type { PostResponse } from "./trip-post-api.js";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
-const tripId = itineraryId(1), otherTripId = itineraryId(2), postId = itineraryId(30);
+const tripId = itineraryId(1), otherTripId = itineraryId(2), postId = itineraryId(30), otherPostId = itineraryId(33), activityId = itineraryId(40), transportId = itineraryId(50);
+const itineraryResult = { ok: true, value: { activities: [{ id: activityId, title: "Paseo por el centro", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: null }] } };
 const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
-async function render(path = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get", ReturnType<typeof vi.fn>>> = {}) {
+function Back() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(-1)}>atras</button>; }
+async function render(path: string | string[] = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list", ReturnType<typeof vi.fn>>> = {}) {
+  const list = overrides.list ?? vi.fn().mockResolvedValue({ ok: true, value: [saved(), saved({ id: otherPostId, description: "Otro recuerdo" })] });
+  const picker = <PostLinkPicker posts={{ list, get: vi.fn() }} itinerary={{ get: vi.fn().mockResolvedValue(itineraryResult) }} timeZone="America/Argentina/Buenos_Aires" />;
   const create = overrides.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved() });
   const update = overrides.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved({ description: "Editado" }) });
   const get = overrides.get ?? vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
-    <nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
+  await act(async () => root.render(<MemoryRouter initialEntries={Array.isArray(path) ? path : [path]}>
+    <Back /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path="new" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
       <Route path=":postId/edit" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route path="new/link" element={picker} />
+      <Route path=":postId/edit/link" element={picker} />
     </Route>
     <Route path="/login" element={<p>LOGIN</p>} />
   </Routes></MemoryRouter>));
-  return { container, create, update, get };
+  return { container, create, update, get, list };
 }
 async function field(container: HTMLElement, name: string, value: string) {
   const element = container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLTextAreaElement;
@@ -273,5 +280,223 @@ describe("PostComposer (edit)", () => {
     await field(container, "description", "Cambio sin guardar");
     await click(link("nav-new")); await click(link("nav-edit"));
     expect(value(container, "description")).toBe("Cambio sin guardar");
+  });
+});
+
+const radio = (container: ParentNode, label: string) => Array.from(container.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector('input[type="radio"]') as HTMLInputElement | undefined;
+const alerts = (container: HTMLElement) => Array.from(container.querySelectorAll('[role="alert"]'));
+const linkButton = (container: HTMLElement) => button(container, "Vincular a")!;
+async function chooseLink(container: HTMLElement, kind: "Post" | "Actividad" | "Sin vínculo", option?: string) {
+  await click(linkButton(container)); await click(radio(container, kind));
+  if (option) await click(radio(container, option));
+  await click(button(container, "Aceptar"));
+}
+const editPath = `/trips/${tripId}/memories/${postId}/edit`, newPath = `/trips/${tripId}/memories/new`;
+
+describe("PostComposer (link)", () => {
+  it("shows the link summary, and the Vincular a button is described by it", async () => {
+    const { container } = await render();
+    const summary = container.querySelector("#post-link-summary")!;
+    expect(summary.textContent).toBe("Sin vínculo");
+    expect(linkButton(container).getAttribute("aria-describedby")).toContain(summary.id);
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+  });
+  it("keeps the typed text and location when going to the selector and coming back (create)", async () => {
+    const { container } = await render();
+    await field(container, "description", "Texto tipeado"); await field(container, "mapsUrl", "https://maps.example/x");
+    await click(linkButton(container));
+    expect(container.querySelector('[name="description"]')).toBeNull();
+    await click(button(container, "Cancelar"));
+    expect(value(container, "description")).toBe("Texto tipeado"); expect(value(container, "mapsUrl")).toBe("https://maps.example/x");
+  });
+  it("keeps the typed text and location when going to the selector and coming back (edit), materializing the draft", async () => {
+    const { container } = await render(editPath);
+    await field(container, "description", "Cambio nuevo"); await field(container, "mapsUrl", "https://maps.example/y");
+    await click(linkButton(container));
+    expect(container.querySelector('[role="radiogroup"][aria-label="Vincular a"]')).not.toBeNull();
+    await click(radio(container, "Sin vínculo")); await click(button(container, "Aceptar"));
+    expect(value(container, "description")).toBe("Cambio nuevo"); expect(value(container, "mapsUrl")).toBe("https://maps.example/y");
+  });
+  it("opens the selector from an edit without changes on the text (the draft does not exist yet)", async () => {
+    const { container } = await render(editPath);
+    await click(linkButton(container));
+    expect(container.querySelector('[role="radiogroup"][aria-label="Vincular a"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+  });
+  it("returns focusing the Vincular a button, announcing the result and showing the summary", async () => {
+    const { container } = await render();
+    await field(container, "description", "Hola");
+    await chooseLink(container, "Post", "Otro recuerdo");
+    expect(document.activeElement).toBe(linkButton(container));
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Otro recuerdo");
+    expect(Array.from(container.querySelectorAll('[role="status"]')).some((item) => item.textContent?.includes("Vínculo actualizado: Recuerdo: Otro recuerdo."))).toBe(true);
+  });
+  it("publishes a continuation memory with only parentPostId", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "Hola");
+    await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", parentPostId: otherPostId });
+  });
+  it("publishes linked to an activity", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "Hola");
+    await chooseLink(container, "Actividad", "Paseo por el centro"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", activityId });
+  });
+  it("preloads the transport from ?transportId=, shows it apart from the selector and publishes it", async () => {
+    const { container, create } = await render(`${newPath}?transportId=${transportId}`);
+    expect(container.textContent).toContain("Vinculado a un transporte");
+    expect(container.querySelector('button[type="submit"]')?.textContent).toContain("Publicar recuerdo");
+    await click(linkButton(container));
+    const group = container.querySelector('[role="radiogroup"][aria-label="Vincular a"]')!;
+    expect(Array.from(group.querySelectorAll("label")).map((item) => item.textContent?.trim())).toEqual(["Sin vínculo", "Post", "Actividad"]);
+    await click(button(container, "Cancelar"));
+    await field(container, "description", "En camino"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "En camino", transportId });
+  });
+  it("does not count the preloaded transport as a change and cancels without confirmation", async () => {
+    const { container } = await render(`${newPath}?transportId=${transportId}`);
+    await click(button(container, "Cancelar"));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("removes the preloaded transport with Quitar transporte", async () => {
+    const { container, create } = await render(`${newPath}?transportId=${transportId}`);
+    await click(button(container, "Quitar transporte"));
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("ignores an invalid transportId without breaking", async () => {
+    const { container, create } = await render(`${newPath}?transportId=nope`);
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("choosing Post with a preloaded transport drops the transport, announces it, and the POST has the parent and no transport", async () => {
+    const { container, create } = await render(`${newPath}?transportId=${transportId}`);
+    await field(container, "description", "Hola");
+    await chooseLink(container, "Post", "Otro recuerdo");
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    expect(Array.from(container.querySelectorAll('[role="status"]')).some((item) => item.textContent?.includes("Un recuerdo continuación no mantiene otro vínculo directo; se quitó el transporte."))).toBe(true);
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", parentPostId: otherPostId });
+  });
+  it("editing a post that has an activity and choosing a Post sends the parent and clears the activity explicitly", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ activityId }), parent: null, children: [], rootActivityId: activityId } });
+    const { container, update } = await render(editPath, { get });
+    expect(container.querySelector("#post-link-summary")?.textContent).toContain("Actividad");
+    await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { parentPostId: otherPostId, activityId: null });
+  });
+  it("editing a child and removing the link sends parentPostId null", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ parentPostId: otherPostId }), parent: null, children: [], rootActivityId: null } });
+    const { container, update } = await render(editPath, { get });
+    await chooseLink(container, "Sin vínculo"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { parentPostId: null });
+  });
+  it("allows relinking an existing memory without text or location, but not emptying its fields", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ description: null, mapsUrl: null }), parent: null, children: [], rootActivityId: null } });
+    const { container, update } = await render(editPath, { get });
+    await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { parentPostId: otherPostId });
+  });
+  it("still blocks creating with only a link, with the single missing-content notice", async () => {
+    const { container, create } = await render();
+    await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(alerts(container).filter((item) => item.textContent?.includes("Escribí un texto o agregá una ubicación."))).toHaveLength(1);
+    expect(alerts(container)).toHaveLength(1);
+  });
+  it("asks for confirmation when cancelling after changing only the link", async () => {
+    const { container } = await render();
+    await chooseLink(container, "Post", "Otro recuerdo");
+    await click(button(container, "Cancelar"));
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Descartar cambios");
+  });
+  it.each([
+    ["cycle", "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."],
+    ["self_reference", "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."],
+    ["conflict", "Un recuerdo continuación no puede tener otro vínculo directo."],
+    ["other", "No pudimos aplicar el vínculo. Elegí otro."],
+  ])("a 422 parentPostId/%s keeps the draft, shows one focused alert, does not navigate and allows retrying", async (code, message) => {
+    const create = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "parentPostId", code, message: "x" }] } })
+      .mockResolvedValueOnce({ ok: true, value: saved() });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await field(container, "mapsUrl", "https://maps.example/x");
+    await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toBe(message);
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    expect(value(container, "description")).toBe("Hola"); expect(value(container, "mapsUrl")).toBe("https://maps.example/x");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Otro recuerdo");
+    expect(document.activeElement).toBe(linkButton(container));
+    expect(linkButton(container).getAttribute("aria-describedby")).toContain(alerts(container)[0]!.id);
+    await submit(container);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenLastCalledWith(tripId, { description: "Hola", mapsUrl: "https://maps.example/x", parentPostId: otherPostId });
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("a 422 on activityId shows the generic link message once", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "activityId", code: "not_found", message: "x" }] } });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await chooseLink(container, "Actividad", "Paseo por el centro"); await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["No pudimos aplicar el vínculo. Elegí otro."]);
+  });
+  it("clears the link alert when the link changes", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "parentPostId", code: "cycle", message: "x" }] } });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    await chooseLink(container, "Sin vínculo");
+    expect(alerts(container)).toHaveLength(0);
+  });
+  it("a 403 on a linked save shows the T65 message and keeps the draft", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(container.textContent).toContain("Este recuerdo ya no está disponible para tu cuenta.");
+    const link = (label: string) => Array.from(container.querySelectorAll("a")).find((item) => item.textContent === label);
+    await click(link("nav-edit")); await click(link("nav-new"));
+    expect(value(container, "description")).toBe("Hola");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Otro recuerdo");
+  });
+  it("a network error on a linked save keeps the draft and the generic message", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await chooseLink(container, "Post", "Otro recuerdo"); await submit(container);
+    expect(alerts(container)[0]?.textContent).toContain("No pudimos guardar el recuerdo");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Otro recuerdo");
+  });
+});
+
+describe("PostComposer (legacy data, edit preload and history)", () => {
+  it("a legacy child with a transport does not show the transport and the PATCH clears it explicitly", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ parentPostId: otherPostId, transportId }), parent: null, children: [], rootActivityId: null } });
+    const { container, update } = await render(editPath, { get });
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Editado", transportId: null });
+  });
+  it("ignores ?transportId= when editing: no transport is shown and the PATCH does not send it", async () => {
+    const { container, update } = await render(`${editPath}?transportId=${transportId}`);
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await click(linkButton(container)); await click(button(container, "Cancelar"));
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    await field(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Editado" });
+  });
+  it("after Aceptar, going back from the composer reaches the listing and not another composer", async () => {
+    const { container } = await render([`/trips/${tripId}/memories`, newPath]);
+    await chooseLink(container, "Post", "Otro recuerdo");
+    expect(container.querySelector('[name="description"]')).not.toBeNull();
+    await click(button(container, "atras"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("after Cancelar, going back from the composer reaches the listing and not another composer", async () => {
+    const { container } = await render([`/trips/${tripId}/memories`, newPath]);
+    await click(linkButton(container)); await click(button(container, "Cancelar"));
+    expect(document.activeElement).toBe(linkButton(container));
+    await click(button(container, "atras"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
   });
 });

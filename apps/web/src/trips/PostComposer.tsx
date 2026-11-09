@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
-import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, type PostDraft } from "./post-draft.js";
+import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setTransport, type PostDraft } from "./post-draft.js";
+import { linkSummary } from "./post-link-options.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
 import { usePostDraft } from "./use-post-drafts.js";
@@ -11,6 +12,10 @@ export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" |
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse } | { kind: "error"; error: TripFailure };
 const missingContentMessage = "Escribí un texto o agregá una ubicación.";
 const fieldMessages: Record<string, string> = { description: "Revisá el texto del recuerdo.", mapsUrl: "Revisá el link de la ubicación." };
+const linkFields = ["parentPostId", "activityId", "transportId"];
+const linkMessage = (code: string) => code === "cycle" || code === "self_reference" ? "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."
+  : code === "conflict" ? "Un recuerdo continuación no puede tener otro vínculo directo." : "No pudimos aplicar el vínculo. Elegí otro.";
+const transportParam = (search: string) => { const value = new URLSearchParams(search).get("transportId"); return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : null; };
 
 export function PostComposer({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
@@ -19,7 +24,16 @@ export function PostComposer({ posts, timeZone = Intl.DateTimeFormat().resolvedO
 
 function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tripId?: string; postId?: string }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const handle = usePostDraft(postId ? `edit:${postId}` : "new");
+  // Set by the selector when returning: where to put the focus and what to announce (read once).
+  // Back with `navigate(-1)` leaves it in the drafts context; a direct entry replaced by the composer leaves it in the location state.
+  const [entry] = useState(() => handle.returned ?? location.state as { focus?: string; notice?: string } | null);
+  const returnedPending = handle.returned !== undefined, clearReturned = handle.clearReturned;
+  useEffect(() => { if (returnedPending) clearReturned(); }, [returnedPending, clearReturned]);
+  const [notice, setNotice] = useState(entry?.notice ?? "");
+  const focusLink = useRef(entry?.focus === "link");
+  const linkRef = useRef<HTMLButtonElement>(null);
   const [loaded, setLoaded] = useState<Loaded>(postId ? { kind: "loading" } : { kind: "ready" });
   const [attempt, setAttempt] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -56,12 +70,20 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   // The fields are disabled while saving: focus the first one with an error once the save has settled.
   useEffect(() => {
     if (!focusPending.current || saving) return;
-    const first = missingContent ? "description" : ["description", "mapsUrl"].find((name) => errors[name]);
+    const first = missingContent ? "description" : ["description", "mapsUrl", "link"].find((name) => errors[name]);
     if (first) formRef.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
     focusPending.current = false;
   }, [errors, saving, missingContent]);
+  // Back from the selector: the focus returns to the button that opened it.
+  useEffect(() => {
+    if (!focusLink.current || loaded.kind !== "ready") return;
+    linkRef.current?.focus(); focusLink.current = false;
+  }, [loaded.kind]);
 
-  const base: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
+  const saved: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
+  // A transport preloaded from its detail (creation only) is part of the base (it is not a change); a continuation memory keeps no transport.
+  const preloaded = postId ? null : transportParam(location.search);
+  const base: PostDraft = preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
   const dirty = isDraftDirty(draft, base);
@@ -73,15 +95,22 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   const fail = (error: TripFailure) => {
     setFailure(error);
     if (error.kind === "validation") {
-      const mapped = Object.fromEntries((error.fields ?? []).filter(({ field }) => field in fieldMessages).map(({ field }) => [field, fieldMessages[field]!]));
+      const mapped: Record<string, string> = {};
+      for (const { field, code } of error.fields ?? []) {
+        if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
+        else if (field in fieldMessages) mapped[field] = fieldMessages[field]!;
+      }
       setErrors(mapped); focusPending.current = Object.keys(mapped).length > 0;
     }
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current || !tripId) return;
-    setMessage(""); setFailure(undefined); setErrors({}); setMissingContent(false);
-    if (!hasContent(draft)) { setMissingContent(true); focusPending.current = true; return; }
+    setMessage(""); setFailure(undefined); setErrors({}); setMissingContent(false); setNotice("");
+    // Creating always needs text or a location; editing only when the text or the location changed and nothing is left
+    // (an existing memory can be relinked without them).
+    const textChanged = draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl;
+    if (!hasContent(draft) && (!existing || textChanged)) { setMissingContent(true); focusPending.current = true; return; }
     const input = existing ? prepareUpdate(draft, existing) : prepareCreate(draft);
     if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
     savingRef.current = true; setSaving(true);
@@ -94,6 +123,10 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
     } catch { fail({ kind: "network" }); }
     finally { savingRef.current = false; setSaving(false); }
   };
+  const composerPath = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}`;
+  // The draft is materialized first: in an edit it does not exist until something changes, and the selector needs it.
+  const openPicker = () => { handle.setDraft(draft); navigate(`${composerPath}/link${location.search}`, { state: { fromComposer: true } }); };
+  const removeTransport = () => { handle.setDraft(setTransport(draft, null)); setNotice(""); };
   const leave = () => { handle.clear(); navigate(listing); };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
@@ -125,9 +158,20 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
           onChange={(event) => update("description", event.target.value)} />
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
+        <section className="post-link-section" aria-label="Vínculo">
+          {draft.extras.transportId ? <div className="post-link-transport">
+            <p>Vinculado a un transporte</p>
+            <Button disabled={saving} onClick={removeTransport}>Quitar transporte</Button>
+          </div> : null}
+          <p id="post-link-summary">{linkSummary(draft.extras.link)}</p>
+          <button ref={linkRef} name="link" type="button" className="ui-button" disabled={saving} onClick={openPicker}
+            aria-describedby={errors.link ? "post-link-summary post-link-error" : "post-link-summary"}>Vincular a</button>
+          {errors.link ? <p className="ui-field__error" id="post-link-error" role="alert">{errors.link}</p> : null}
+          {notice ? <Feedback>{notice}</Feedback> : null}
+        </section>
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.</Feedback> : null}
-        {failure?.kind === "validation" ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
+        {failure?.kind === "validation" && !errors.link ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}
         </Button>

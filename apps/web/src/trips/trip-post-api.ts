@@ -4,7 +4,7 @@ import type { TripResult } from "./trip-management-api.js";
 export type PostResponse = { id: string; tripId: string; authorId: string; description: string | null; mapsUrl: string | null;
   activityId: string | null; parentPostId: string | null; transportId: string | null; createdAt: string };
 /** Only content fields: the publication date and the day are decided by the server and can never be sent. */
-export type PostInput = { description?: string | null; mapsUrl?: string | null };
+export type PostInput = { description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null };
 /** `parent` and `children` are tolerated without deep validation (used by later tasks). */
 export type PostDetail = { post: PostResponse; parent: unknown; children: unknown; rootActivityId: string | null };
 export type TripPostApi = {
@@ -39,10 +39,13 @@ const single = (result: Raw, tripId: string, postId?: string): TripResult<PostRe
   const parsed = record(result.value) ? parsePost(result.value.post, tripId, postId) : undefined;
   return parsed ? { ok: true, value: parsed } : server;
 };
-/** Only the content fields travel: anything else on `input` (e.g. a forced createdAt) is dropped. */
+/** Only content and link fields travel (null is meaningful: it clears a link): anything else on `input` (e.g. a forced createdAt) is dropped. */
 const body = (input: PostInput): PostInput => ({
   ...(input.description !== undefined ? { description: input.description } : {}),
   ...(input.mapsUrl !== undefined ? { mapsUrl: input.mapsUrl } : {}),
+  ...(input.parentPostId !== undefined ? { parentPostId: input.parentPostId } : {}),
+  ...(input.activityId !== undefined ? { activityId: input.activityId } : {}),
+  ...(input.transportId !== undefined ? { transportId: input.transportId } : {}),
 });
 export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripPostApi => ({
   list: async (tripId) => {

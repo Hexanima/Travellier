@@ -83,3 +83,7 @@
 .post-composer .itinerary-secondary { margin: 0; }
 .memories-list > .itinerary-nested-post { display: grid; gap: 6px; }
 .memories-list .trips-settings-link { min-height: 44px; display: inline-flex; align-items: center; }
+.post-link-section, .post-link-transport, .post-link-panel { display: grid; gap: 8px; }
+.post-link-section p, .post-link-transport p { margin: 0; }
+.post-link-options { display: grid; gap: 4px; }
+.post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }
