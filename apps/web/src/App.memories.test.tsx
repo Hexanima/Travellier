@@ -2,7 +2,7 @@
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
 import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
 import type { PostResponse } from "./trips/trip-post-api.js";
@@ -135,6 +135,13 @@ describe("App memories link routes", () => {
 });
 
 describe("App memories new activity routes", () => {
+  // La app usa la zona del dispositivo: se fija para que el test no dependa de la zona del equipo ni de CI.
+  const zone = "America/Argentina/Buenos_Aires";
+  beforeEach(() => {
+    const original = Intl.DateTimeFormat.prototype.resolvedOptions;
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (this: Intl.DateTimeFormat) { return { ...original.call(this), timeZone: zone }; });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
   const scheduledAt = "2026-09-25T15:00:00.000Z";
   const activity = { id: itineraryId(60), tripId, dayId: itineraryId(4), title: "Cena", description: null, mapsUrl: null, scheduledAt, durationMinutes: 90,
     createdAt: "2026-09-25T10:00:00.123Z", createdBy: itineraryId(20) };
