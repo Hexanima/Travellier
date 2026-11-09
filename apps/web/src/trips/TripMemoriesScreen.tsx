@@ -1,0 +1,115 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
+import type { TripFailure } from "./trip-management-api.js";
+import type { PostResponse, TripPostApi } from "./trip-post-api.js";
+import { PostDraftsProvider } from "./use-post-drafts.js";
+import "./itinerary.css";
+
+export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
+type LoadState = { kind: "loading" } | { kind: "ready"; posts: PostResponse[] } | { kind: "error"; error: TripFailure };
+type Saved = { post: PostResponse; notice: "created" | "updated" };
+
+/** Layout of `memories/*`: drafts live here, keyed by Trip, so they are shared by the child routes and dropped when leaving the Trip. */
+export function MemoriesLayout() {
+  const { tripId } = useParams();
+  return <PostDraftsProvider key={tripId}><Outlet /></PostDraftsProvider>;
+}
+
+/** Newest first; the id breaks ties so the order is stable. Repeated ids keep their first occurrence. */
+const arrange = (items: readonly PostResponse[]): PostResponse[] => {
+  const unique = [...new Map(items.slice().reverse().map((item) => [item.id, item])).values()].reverse();
+  return unique.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id));
+};
+/** Server data wins for known ids; a locally saved post missing from the server answer is kept. */
+const merge = (server: readonly PostResponse[], local: PostResponse | undefined) =>
+  arrange(local && !server.some((item) => item.id === local.id) ? [...server, local] : server);
+const savedFrom = (state: unknown, tripId: string | undefined): Saved | undefined => {
+  if (typeof state !== "object" || state === null) return undefined;
+  const { post, notice } = state as { post?: Partial<PostResponse>; notice?: unknown };
+  if (typeof post !== "object" || post === null || typeof post.id !== "string" || post.tripId !== tripId || typeof post.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(post.createdAt)) || (post.description !== null && typeof post.description !== "string") || (notice !== "created" && notice !== "updated")) return undefined;
+  return { post: post as PostResponse, notice };
+};
+
+export function TripMemoriesScreen({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripMemoriesScreenProps) {
+  const { tripId } = useParams();
+  return <MemoriesContent key={tripId} tripId={tripId} posts={posts} timeZone={timeZone} />;
+}
+
+function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & { tripId?: string }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Read once: the saved post is kept locally and the history entry is cleaned so going back does not repeat the notice.
+  const [saved] = useState(() => savedFrom(location.state, tripId));
+  const localPost = useRef(saved?.post);
+  const [state, setState] = useState<LoadState>(saved ? { kind: "ready", posts: [saved.post] } : { kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  useEffect(() => { if (saved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
+      setState((current) => current.kind === "ready" ? current : { kind: "loading" });
+      setRefreshing(true); setRefreshError(false);
+      try {
+        const result = await posts.list(tripId);
+        if (cancelled) return;
+        if (result.ok) setState({ kind: "ready", posts: merge(result.value, localPost.current) });
+        else if (["network", "server"].includes(result.error.kind)) {
+          setRefreshError(true);
+          setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
+        } else setState({ kind: "error", error: result.error });
+      } catch {
+        if (cancelled) return;
+        setRefreshError(true);
+        setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
+      } finally {
+        if (!cancelled) setRefreshing(false);
+      }
+    };
+    void load();
+    return () => { cancelled = true; };
+  }, [tripId, posts, attempt]);
+  const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
+  const create = `/trips/${tripId}/memories/new`;
+  return <main className="app-shell trips-shell itinerary-shell">
+    <div className="trips-panel">
+      <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
+      <header className="itinerary-header">
+        <h1>Recuerdos</h1>
+        <p>Lo que vive el grupo, del más reciente al más antiguo. Horarios en tu zona local.</p>
+        <Link className="trips-settings-link" to={create}>Nuevo recuerdo</Link>
+      </header>
+      {state.kind === "ready" && saved ? <Feedback variant="success">{saved.notice === "created" ? "Recuerdo publicado." : "Cambios guardados."}</Feedback> : null}
+      {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdos…" /> : null}
+      {state.kind === "ready" && refreshError ? <div className="activity-detail">
+        <Feedback variant="error">No pudimos actualizar los recuerdos. Los cambios guardados se conservan.</Feedback>
+        <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar recuerdos</Button>
+      </div> : null}
+      {state.kind === "loading" ? <LoadingState label="Cargando recuerdos…" /> : null}
+      {state.kind === "error" ? <div className="trips-state">
+        <Feedback variant="error">{unavailable ? "Los recuerdos de este viaje no están disponibles para tu cuenta."
+          : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
+          : "No pudimos cargar los recuerdos. Revisá tu conexión e intentá nuevamente."}</Feedback>
+        {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
+          : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
+      </div> : null}
+      {state.kind === "ready" && state.posts.length === 0 ? <section className="trips-empty">
+        <h2>Todavía no hay recuerdos.</h2>
+        <p>Publicá el primero para empezar el diario del viaje.</p>
+        <Link to={create}>Crear el primer recuerdo</Link>
+      </section> : null}
+      {state.kind === "ready" && state.posts.length > 0 ? <List className="itinerary-posts memories-list" aria-label="Recuerdos">
+        {state.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-memory={post.id}>
+          <p className="itinerary-post-description">{post.description ?? "Recuerdo sin texto."}</p>
+          <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
+          <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
+        </ListItem>)}
+      </List> : null}
+    </div>
+  </main>;
+}
