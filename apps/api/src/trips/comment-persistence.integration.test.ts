@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
-import { commentsQuery } from "../adapters/mongodb/trip-comment-repository.js";
+import { commentsQuery, createMongoTripCommentRepository } from "../adapters/mongodb/trip-comment-repository.js";
+import { ok } from "app-domain";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
 
 describe("comment persistence and transactions", () => {
@@ -159,6 +160,30 @@ describe("comment persistence and transactions", () => {
     expect(await f.api.updateComment!({ ...payload(post.id), commentId: inB.value.id, text: "x" })).toMatchObject({ ok: false, error: { tag: "CommentNotFoundError" } });
     expect(await snapshot()).toEqual(before);
     expect(created.tripId).toBe(domainId(f.trip));
+  });
+
+  it("takes the Trip lock once per create and per edit, and never on reads", async () => {
+    const post = await createPost();
+    const revision = async () => (await f.db.collection("trips").findOne({ _id: f.trip }))!.destinationOrderRevision ?? 0;
+    const start = await revision();
+    const created = await comment(post.id);
+    expect(await revision()).toBe(start + 1);
+    expect((await f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Nuevo" })).ok).toBe(true);
+    expect(await revision()).toBe(start + 2);
+    await f.api.listComments!(payload(post.id));
+    expect(await revision()).toBe(start + 2);
+  });
+
+  it("scopes the repository queries to the Trip even when stored data is inconsistent", async () => {
+    const post = await createPost(); const foreignTrip = new ObjectId(); const foreign = new ObjectId();
+    await f.db.collection("comments").insertOne({ _id: foreign, tripId: foreignTrip, postId: new ObjectId(post.id), authorId: f.actor, text: "ajeno", createdAt: new Date() });
+    const port = createMongoTripCommentRepository(f.db);
+    const seen = await port.withReadSnapshot(domainId(f.trip), async (scope) => {
+      const listed = await scope.listComments(domainId(new ObjectId(post.id)));
+      const found = await scope.findComment(domainId(foreign), domainId(new ObjectId(post.id)));
+      return ok({ listed, found });
+    });
+    expect(seen).toMatchObject({ ok: true, value: { listed: { ok: true, value: [] }, found: { ok: true, value: undefined } } });
   });
 
   it("is not affected by editing the post or deleting its activity, and never becomes a child post", async () => {
