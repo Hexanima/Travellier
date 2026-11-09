@@ -80,3 +80,6 @@
   .itinerary-items > .itinerary-item { gap: 12px; }
 }
 @media (max-width: 360px) { .activity-date-time { grid-template-columns: minmax(0, 1fr); } }
+.post-composer .itinerary-secondary { margin: 0; }
+.memories-list > .itinerary-nested-post { display: grid; gap: 6px; }
+.memories-list .trips-settings-link { min-height: 44px; display: inline-flex; align-items: center; }

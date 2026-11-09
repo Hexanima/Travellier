@@ -172,6 +172,10 @@ describe("itinerary screen", () => {
     expect(container.textContent).toContain("Todavía no hay itinerario");
     expect(container.querySelector(`a[href="/trips/${itineraryId(1)}/journey"]`)).not.toBeNull();
   });
+  it("links to the Trip memories from the header, also without an itinerary", async () => {
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));
+    expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/memories"]`)?.textContent).toBe("Recuerdos");
+  });
   it("shows loading until the aggregate resolves", async () => {
     let resolve: (value: unknown) => void = () => undefined;
     const { container } = await render(vi.fn(() => new Promise((done) => { resolve = done; })));
@@ -193,6 +197,7 @@ describe("itinerary screen", () => {
     expect(container.textContent).toContain("no está disponible");
     expect(container.querySelector('[data-itinerary-date]')).toBeNull();
     expect(container.querySelector('a[href$="/journey"]')).toBeNull();
+    expect(container.querySelector('a[href$="/memories"]')).toBeNull();
     expect(container.querySelector("button")).toBeNull();
   });
   it("clears the old Trip immediately and ignores a late response after navigation", async () => {

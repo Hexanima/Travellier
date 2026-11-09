@@ -25,6 +25,9 @@ import { TripMembersScreen } from './trips/TripMembersScreen.js'
 import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
 import { createTripManagementApi, type TripManagementApi } from './trips/trip-management-api.js'
 import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-api.js'
+import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
+import { PostComposer } from './trips/PostComposer.js'
+import { MemoriesLayout, TripMemoriesScreen } from './trips/TripMemoriesScreen.js'
 
 type AppProps = {
   auth?: Partial<AuthApi>
@@ -37,6 +40,7 @@ type AppProps = {
   itinerary?: Partial<TripItineraryApi>
   activities?: Partial<TripActivityApi>
   participations?: Partial<TripParticipationApi>
+  posts?: Partial<TripPostApi>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -59,7 +63,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -76,6 +80,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultItinerary = useRef<TripItineraryApi | undefined>(undefined)
   const defaultActivities = useRef<TripActivityApi | undefined>(undefined)
   const defaultParticipations = useRef<TripParticipationApi | undefined>(undefined)
+  const defaultPosts = useRef<TripPostApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -106,6 +111,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultItinerary.current = createTripItineraryApi(client)
     defaultActivities.current = createTripActivityApi(client)
     defaultParticipations.current = createTripParticipationApi(client)
+    defaultPosts.current = createTripPostApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -115,6 +121,13 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeItinerary = itinerary ?? defaultItinerary.current
   const activeActivities = activities ?? defaultActivities.current
   const activeParticipations = participations ?? defaultParticipations.current
+  const activePosts = posts ?? defaultPosts.current
+  const tripPosts = useMemo<TripPostApi>(() => ({
+    list: activePosts?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    get: activePosts?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    create: activePosts?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activePosts])
   const tripParticipations = useMemo<TripParticipationApi | undefined>(() => activeParticipations ? ({
     get: activeParticipations.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     set: activeParticipations.set ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -278,6 +291,15 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
             <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} />
           </TripRoute>
         } />
+        <Route path="/trips/:tripId/memories" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <MemoriesLayout />
+          </TripRoute>
+        }>
+          <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
+          <Route path="new" element={<PostComposer posts={tripPosts} />} />
+          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} />} />
+        </Route>
         <Route path="/profile" element={
           !sessionReady
             ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>

@@ -62,6 +62,11 @@ describe("Trip screens", () => {
     expect(container.querySelector(`a[href="/trips/${trip.id}/journey"]`)).not.toBeNull();
   });
 
+  it("links each Trip to its memories", async () => {
+    const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: true, value: [trip] }), create: vi.fn() });
+    expect(container.querySelector(`a[href="/trips/${trip.id}/memories"]`)?.textContent).toBe("Recuerdos");
+  });
+
   it("shows an empty state with a creation action", async () => {
     const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), create: vi.fn() });
 
