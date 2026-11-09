@@ -12,7 +12,8 @@ import type { ParticipationResponse, TripParticipationApi } from "./trip-partici
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { ActivityParticipationControls } from "./ActivityParticipationControls.js";
 import { useActivityParticipations } from "./use-activity-participations.js";
-import { PostLink, useRestorePosition } from "./post-navigation.js";
+import { PostLink } from "./post-navigation.js";
+import { useRestorePosition } from "./use-restore-position.js";
 import { itineraryAnchor } from "./post-origin.js";
 import "./itinerary.css";
 

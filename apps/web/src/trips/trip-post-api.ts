@@ -43,7 +43,7 @@ const parsePost = (value: unknown, tripId: string, postId?: string): PostRespons
 /** Strict: a present summary with an invalid id, timestamp or text is a server failure (no content is invented). */
 const parseSummary = (value: unknown): PostSummary | undefined => {
   if (!record(value) || !id(value.id) || !id(value.authorId) || !timestamp(value.createdAt) || !nullableText(value.description)) return undefined;
-  return { id: value.id, authorId: value.authorId, createdAt: value.createdAt, description: value.description as string | null };
+  return { id: value.id, authorId: value.authorId, createdAt: value.createdAt as string, description: value.description as string | null };
 };
 const newestFirst = (a: PostSummary, b: PostSummary) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id);
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };

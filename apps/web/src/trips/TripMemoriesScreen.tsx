@@ -3,7 +3,8 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
-import { PostLink, useRestorePosition } from "./post-navigation.js";
+import { PostLink } from "./post-navigation.js";
+import { useRestorePosition } from "./use-restore-position.js";
 import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
 import "./itinerary.css";
