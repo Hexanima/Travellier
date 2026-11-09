@@ -4,7 +4,7 @@ import type {
 } from "./trip-itinerary-api.js";
 
 export type ItineraryViewItem =
-  | { kind: "transport"; id: string; at: string; transport: ItineraryTransportResponse }
+  | { kind: "transport"; id: string; at: string; transport: ItineraryTransportResponse; posts: ItineraryPostResponse[] }
   | { kind: "activity"; id: string; at: string; activity: ItineraryActivityResponse; posts: ItineraryPostResponse[] }
   | { kind: "post"; id: string; at: string; post: ItineraryPostResponse };
 export type ItinerarySegment = {
@@ -41,9 +41,22 @@ const chronologicalSegments = (segments: ItinerarySegment[]): ItinerarySegment[]
   return groups;
 };
 
-/** Calendar-only projection. Canonical day IDs and instants are never modified. */
+export type ItineraryView = { days: LocalItineraryDay[]; outsidePosts: ItineraryPostResponse[] };
+
+const byPublication = (a: ItineraryPostResponse, b: ItineraryPostResponse) =>
+  Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id);
+
+/** Compatibility wrapper: the calendar days only. */
 export const projectTripItinerary = (itinerary: TripItineraryResponse,
-  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): LocalItineraryDay[] => {
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): LocalItineraryDay[] => projectItineraryView(itinerary, timeZone).days;
+
+/**
+ * Calendar-only projection. Canonical day IDs and instants are never modified.
+ * Posts are placed from their context (root activity or transport) or, if independent, by their local publication date;
+ * the legacy `dayId` of posts and the post entries of canonical days are ignored. Each post is placed exactly once.
+ */
+export const projectItineraryView = (itinerary: TripItineraryResponse,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): ItineraryView => {
   const calendar = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
   const dateKey = (instant: number) => {
     const parts = calendar.formatToParts(instant);
@@ -117,29 +130,47 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
       for (const segment of segmentsBySource.get(source.id) ?? []) {
         if (segment.items.some((item) => item.kind === "transport" && item.id === transport.id)) continue;
         segment.items.push({ kind: "transport", id: transport.id,
-          at: new Date(Math.max(Date.parse(segment.startsAt), Date.parse(transport.departureAt))).toISOString(), transport });
+          at: new Date(Math.max(Date.parse(segment.startsAt), Date.parse(transport.departureAt))).toISOString(), transport, posts: [] });
       }
     }
   }
   const result = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
-  const localDayBySegment = new Map(result.flatMap((day) => day.segments.map((segment) => [segment, day] as const)));
-  const expensePostsByDay = new Map(result.map((day) => [day, new Map<string, ItineraryPostResponse>()] as const));
-  for (const post of [...itinerary.posts].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))) {
-    const segments = segmentsBySource.get(post.dayId) ?? [];
-    // Allocation follows dayId, independently of the activity under which the post is displayed.
-    const segment = segments.find((s) => includesInstant(s, post.createdAt)) ?? segments[0];
-    if (segment && post.expense !== null) expensePostsByDay.get(localDayBySegment.get(segment)!)!.set(post.id, post);
-    const parent = post.activityId === null ? undefined : activityLocations.get(post.activityId);
-    if (parent) parent.posts.push(post);
-    else {
-      // Publication outside the band still belongs to dayId. Anchor it once in that day's first local slice.
-      if (segment) segment.items.push({ kind: "post", id: post.id, at: post.createdAt, post });
+  // A transport can cross midnight and appear in several slices: its posts hang from the first one only.
+  const transportLocations = new Map<string, Extract<ItineraryViewItem, { kind: "transport" }>>();
+  const activityDays = new Map<string, LocalItineraryDay>();
+  for (const day of result) {
+    for (const segment of day.segments) {
+      for (const item of segment.items) {
+        if (item.kind === "transport" && !transportLocations.has(item.id)) transportLocations.set(item.id, item);
+        if (item.kind === "activity") activityDays.set(item.id, day);
+      }
+    }
+  }
+  const expenses = new Map(result.map((day) => [day, [] as ItineraryPostResponse[]] as const));
+  const outsidePosts: ItineraryPostResponse[] = [];
+  for (const post of [...itinerary.posts, ...itinerary.unplacedPosts].sort(byPublication)) {
+    const { rootActivityId, rootTransportId, placement } = post.context;
+    const activity = placement === "activity" && rootActivityId !== null ? activityLocations.get(rootActivityId) : undefined;
+    const transport = activity || rootTransportId === null ? undefined : transportLocations.get(rootTransportId);
+    const publicationDay = days.get(dateKey(Date.parse(post.createdAt)));
+    if (activity) activity.posts.push(post);
+    else if (transport) transport.posts.push(post);
+    else if (publicationDay) {
+      // Independent (or with an unprojected container): one anchor in the local day of publication.
+      const segment = publicationDay.segments.find((s) => includesInstant(s, post.createdAt)) ??
+        [...publicationDay.segments].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
+      segment.items.push({ kind: "post", id: post.id, at: post.createdAt, post });
+    } else outsidePosts.push(post);
+    // Expenses follow the root activity's day; otherwise the local day of publication. Without a day they are not summed.
+    if (post.expense !== null) {
+      const day = activity ? activityDays.get(activity.id) : publicationDay;
+      if (day) expenses.get(day)!.push(post);
     }
   }
   for (const day of result) {
-    const expensePosts = expensePostsByDay.get(day)!;
+    const expensePosts = expenses.get(day)!;
     day.segments = chronologicalSegments(day.segments);
-    day.expenseSummary = { totalAmount: [...expensePosts.values()].reduce((sum, p) => sum + p.expense!.totalAmount, 0), expenseCount: expensePosts.size };
+    day.expenseSummary = { totalAmount: expensePosts.reduce((sum, p) => sum + p.expense!.totalAmount, 0), expenseCount: expensePosts.length };
   }
-  return result;
+  return { days: result, outsidePosts };
 };
