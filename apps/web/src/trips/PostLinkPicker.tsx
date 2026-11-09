@@ -72,6 +72,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
     if (fromComposer) { setReturned(result); navigate(-1); } else navigate(composer, { replace: true, state: result });
   };
   const accept = () => {
+    if (leaving.current) return;
     const link: PostLink | null = kind === "none" ? null : chosen;
     if (kind !== "none" && !link) return;
     commit(setLink(draft, link));

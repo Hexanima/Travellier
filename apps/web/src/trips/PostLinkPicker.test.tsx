@@ -228,6 +228,7 @@ describe("PostLinkPicker", () => {
       return <div>
         <p data-testid="where">{location.pathname}</p>
         <p data-testid="returned">{JSON.stringify(handle.returned ?? null)}</p>
+        <p data-testid="link">{JSON.stringify(handle.draft?.extras.link ?? null)}</p>
         <button type="button" onClick={() => handle.setDraft(seeded())}>sembrar</button>
         <button type="button" onClick={() => navigate(`${location.pathname}/link`, { state: { fromComposer: true } })}>ir</button>
       </div>;
@@ -261,6 +262,22 @@ describe("PostLinkPicker", () => {
       go.mockRestore();
       expect(where(container)).toBe(newPath);
       expect(JSON.parse(container.querySelector('[data-testid="returned"]')!.textContent!)).toMatchObject({ focus: "link" });
+    });
+    it("Cancel followed at once by Accept does not write the chosen link and goes back once", async () => {
+      const container = await mountBrowser();
+      await click(radio(container, "Post")); await click(radio(container, "Otro recuerdo"));
+      const cancel = button(container, "Cancelar")!, accept = button(container, "Aceptar")!;
+      const go = vi.spyOn(window.history, "go");
+      await act(async () => {
+        cancel.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        accept.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      expect(go).toHaveBeenCalledTimes(1);
+      go.mockRestore();
+      expect(where(container)).toBe(newPath);
+      expect(container.querySelector('[data-testid="link"]')?.textContent).toBe("null");
+      expect(JSON.parse(container.querySelector('[data-testid="returned"]')!.textContent!)).toEqual({ focus: "link" });
     });
     it("the selector can be used again in a later visit", async () => {
       const container = await mountBrowser();
