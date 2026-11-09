@@ -99,7 +99,8 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   /** The activity no longer exists: forget its state and ignore anything still in flight for it. */
   const remove = useCallback((activityId: string) => {
     removed.current.add(activityId);
-    const { [activityId]: _dropped, ...rest } = current.current;
+    const rest = { ...current.current };
+    delete rest[activityId];
     current.current = rest;
     setStates(rest);
   }, []);

@@ -32,6 +32,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; variant: "success" | "info" }>();
+  const noticeRef = useRef<HTMLDivElement>(null);
   const activityIds = useMemo(() => state.kind === "ready" ? state.value.activities.map((activity) => activity.id) : [], [state]);
   const participation = useActivityParticipations(tripId, activityIds, participations);
   const trigger = useRef<HTMLElement | null>(null);
@@ -50,6 +52,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     if (confirmingId === undefined && trigger.current?.isConnected) trigger.current.focus();
     if (confirmingId === undefined) trigger.current = null;
   }, [confirmingId]);
+  // The control that opened the dialog is gone after a removal: move focus to the announcement without scrolling.
+  useEffect(() => { if (notice) noticeRef.current?.focus({ preventScroll: true }); }, [notice]);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -92,8 +96,22 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
         ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id)) })),
       } };
     });
-    setSaved(true); setDialog(undefined); setAttempt((value) => value + 1);
+    setSaved(true); setNotice(undefined); setDialog(undefined); setAttempt((value) => value + 1);
   };
+  const onRemoved = (activityId: string, outcome: "removed" | "gone") => {
+    participation.remove(activityId);
+    const control = trigger.current;
+    if (control && (control.closest(".activity-dialog") || control.closest(`[data-itinerary-item="${activityId}"]`))) trigger.current = null;
+    // Retire only this activity; its memories are re-projected by the refresh that follows.
+    setState((current) => current.kind !== "ready" ? current : { kind: "ready", value: { ...current.value,
+      activities: current.value.activities.filter((a) => a.id !== activityId),
+      days: current.value.days.map((day) => ({ ...day, items: day.items.filter((item) => !(item.kind === "activity" && item.id === activityId)) })),
+    } });
+    setSaved(false);
+    setNotice(outcome === "removed" ? { text: "Actividad eliminada.", variant: "success" } : { text: "La actividad ya no existe.", variant: "info" });
+    setDialog(undefined); setAttempt((value) => value + 1);
+  };
+  const dialogParticipation = dialog?.kind === "detail" ? participation.states[dialog.activityId] : undefined;
   const { days, outsidePosts } = state.kind === "ready" ? projectItineraryView(state.value, timeZone) : { days: [], outsidePosts: [] };
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -107,6 +125,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
+      {state.kind === "ready" && notice ? <div ref={noticeRef} tabIndex={-1}><Feedback variant={notice.variant}>{notice.text}</Feedback></div> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando itinerario…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
         <Feedback variant="error">No pudimos actualizar el itinerario. Los cambios guardados se conservan.</Feedback>
@@ -140,7 +159,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
               </header>
               {activities && segment.type === "activity" && segment.endsAt !== null && Date.parse(segment.endsAt) > Date.parse(segment.startsAt) &&
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
-                ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
+                ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
                 {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
@@ -167,7 +186,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
         stale={confirming.confirming.stale} saving={!!confirming.saving}
         onCancel={() => participation.cancelConfirmation(confirmingId)} onConfirm={() => { void participation.confirmChange(confirmingId); }} /></div> : null}
       {state.kind === "ready" && activities && dialog ? <ActivityDialog key={dialog.kind === "detail" ? dialog.activityId : "new"}
-        request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved}
+        request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved} onRemoved={onRemoved}
+        busy={dialogParticipation?.kind === "ready" && !!(dialogParticipation.saving || dialogParticipation.confirming)}
         participation={dialog.kind === "detail" ? participationControls(dialog.activityId,
           state.value.activities.find((activity) => activity.id === dialog.activityId)?.title ?? "esta actividad") : null} /> : null}
     </div>
