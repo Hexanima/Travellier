@@ -157,13 +157,20 @@ describe("activity removal from the itinerary", () => {
     const { container } = await render();
     const section = container.querySelector("[data-itinerary-date]")!;
     const { confirm } = await openConfirm(container);
-    await confirmDelete(confirm);
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    let calls: unknown[][] = [], contexts: unknown[] = [];
+    try { await confirmDelete(confirm); } finally { calls = [...focus.mock.calls]; contexts = [...focus.mock.contexts]; focus.mockRestore(); }
     expect(container.querySelector("[data-itinerary-date]")).toBe(section);
     expect(container.textContent).not.toContain("Cargando itinerario…");
     expect(scrollTo).not.toHaveBeenCalled();
     expect(document.activeElement).not.toBe(document.body);
     expect(container.contains(document.activeElement)).toBe(true);
     expect(document.activeElement!.textContent).toContain("Actividad eliminada.");
+    // Focus moves to the announcement container without scrolling (the only scroll protection).
+    const notice = document.activeElement as HTMLElement;
+    expect(notice.getAttribute("tabindex")).toBe("-1");
+    const noticeCalls = calls.filter((_, i) => contexts[i] === notice);
+    expect(noticeCalls).toEqual([[{ preventScroll: true }]]);
   });
   it("disables the removal while a participation write is in flight or a conflict awaits confirmation", async () => {
     const write = deferred<TripResult<ParticipationResponse>>();
