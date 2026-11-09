@@ -26,7 +26,7 @@ async function render() {
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${value.tripId}/itinerary`]}>
     <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get: async () => ({ ok: true, value }) }}
-      activities={{ get: getActivity, create: async () => ({ ok: false, error: { kind: "server" } }), update: async () => ({ ok: false, error: { kind: "server" } }) }}
+      activities={{ get: getActivity, create: async () => ({ ok: false, error: { kind: "server" } }), update: async () => ({ ok: false, error: { kind: "server" } }), remove: async () => ({ ok: false, error: { kind: "server" } }) }}
       participations={{ get: async () => ({ ok: true, value: null }), set: async () => ({ ok: false, error: { kind: "server" } }) }}
       {...({ votes: { get: voteRequest, set: voteRequest } } as object)}
       timeZone="UTC" />} /></Routes>

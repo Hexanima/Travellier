@@ -50,8 +50,7 @@ function snapshot(): domain.TripItinerarySnapshot {
   };
 }
 
-const respond = async () => {
-  const f = snapshot();
+const respond = async (f: domain.TripItinerarySnapshot = snapshot()) => {
   const result = await domain.getTripItinerary.execute({
     members: { findByTripAndUser: async () => domain.ok({ id: id(70), tripId, userId: actor, role: "participant" as const, joinedAt: at(0) }) },
     itinerary: { read: async () => domain.ok(f) },
@@ -60,8 +59,8 @@ const respond = async () => {
   // What the client really receives: JSON over HTTP.
   return JSON.parse(JSON.stringify(result.value)) as TripItineraryResponse & { unplacedPosts: unknown[] };
 };
-const read = async () => {
-  const itinerary = await respond();
+const read = async (f?: domain.TripItinerarySnapshot) => {
+  const itinerary = await respond(f);
   const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
   return { itinerary, result: await createTripItineraryApi({ get }).get(itinerary.tripId) };
 };
@@ -113,5 +112,63 @@ describe("itinerary contract with the real read model", () => {
     expect(sum(view.days.map((day) => day.expenseSummary))).toEqual(server);
     expect(sum(view.days.map((day) => day.expenseSummary))).toEqual({ totalAmount: 27, expenseCount: 4 });
     expect(unplaced.map((post) => post.expense!.totalAmount)).toEqual([100]);
+  });
+});
+
+describe("itinerary contract after removing an activity (T55 persistence contract)", () => {
+  // The read model has no participations: only the activities and posts the server keeps after the DELETE are modelled here.
+  const second = (): domain.TripItinerarySnapshot["activities"][number] => ({ id: id(61), tripId, dayId: ids.activityDay, title: "Museo", description: null,
+    scheduledAt: at(15, 30), durationMinutes: null, mapsUrl: null, createdBy: actor, createdAt: at(11) });
+  const before = (): domain.TripItinerarySnapshot => { const f = snapshot(); return { ...f, activities: [...f.activities, second()] }; };
+  /** What the backend leaves after `deleteTripActivity`: the activity is gone, its posts keep their chain but lose the direct link. */
+  // The read model also normalises a dangling link to null by itself (getTripItinerary), so the stored state and the response agree either way.
+  const after = (): domain.TripItinerarySnapshot => { const f = before();
+    return { ...f, activities: f.activities.filter((activity) => activity.id !== ids.activity),
+      posts: f.posts.map((post) => post.activityId === ids.activity ? { ...post, activityId: null } : post) }; };
+  const view = (value: TripItineraryResponse) => projectItineraryView(value, "UTC");
+  const items = (value: TripItineraryResponse) => view(value).days.flatMap((day) => day.segments.flatMap((segment) => segment.items));
+
+  it("keeps the whole chain in posts[] as independent posts with their parent links, and no direct activity link", async () => {
+    const [kept, removed] = [await respond(before()), await respond(after())];
+    for (const n of [30, 31, 32]) expect(kept.posts.find((post) => post.id === id(n))?.context.placement).toBe("activity");
+    for (const n of [30, 31, 32]) {
+      const post = removed.posts.find((candidate) => candidate.id === id(n))!;
+      expect(post, `post ${n} kept`).toBeDefined();
+      expect(post.activityId).toBeNull();
+      expect(post.context).toMatchObject({ placement: "independent", rootActivityId: null, rootPostId: id(30) });
+    }
+    expect(removed.posts.find((post) => post.id === id(31))!.parentPostId).toBe(id(30));
+    expect(removed.posts.find((post) => post.id === id(32))!.parentPostId).toBe(id(31));
+    expect(removed.posts.map((post) => post.id).sort()).toEqual(kept.posts.map((post) => post.id).sort());
+  });
+  it("is accepted by the client validator and drops only the removed activity, leaving the other one identical", async () => {
+    const [kept, removed] = [await read(before()), await read(after())];
+    if (!kept.result.ok || !removed.result.ok) throw new Error("rejected");
+    expect(removed.result.value).toEqual(removed.itinerary);
+    expect(kept.result.value.activities.map((activity) => activity.id)).toEqual([ids.activity, id(61)]);
+    expect(removed.result.value.activities.map((activity) => activity.id)).toEqual([id(61)]);
+    expect(removed.result.value.activities[0]).toEqual(kept.result.value.activities[1]);
+  });
+  it("projects every post once: the chain moves from under the activity to the band, nothing is lost", async () => {
+    const [kept, removed] = [await read(before()), await read(after())];
+    if (!kept.result.ok || !removed.result.ok) throw new Error("rejected");
+    const nested = (value: TripItineraryResponse) => items(value).flatMap((item) => item.kind === "activity" || item.kind === "transport" ? item.posts.map((p) => p.id) : [item.id]);
+    const everywhere = (value: TripItineraryResponse) => [...nested(value), ...view(value).outsidePosts.map((post) => post.id)].sort();
+    expect(everywhere(removed.result.value)).toEqual(everywhere(kept.result.value));
+    expect(everywhere(removed.result.value)).toEqual([...removed.result.value.posts, ...removed.result.value.unplacedPosts].map((post) => post.id).sort());
+    const activity = (value: TripItineraryResponse) => items(value).find((item) => item.kind === "activity" && item.id === ids.activity);
+    expect(activity(kept.result.value)).toBeDefined();
+    expect(activity(removed.result.value)).toBeUndefined();
+    expect(items(removed.result.value).filter((item) => item.kind === "post").map((item) => item.id)).toEqual(expect.arrayContaining([id(30), id(31), id(32)]));
+    const museum = items(removed.result.value).find((item) => item.kind === "activity" && item.id === id(61));
+    expect(museum?.kind === "activity" ? museum.posts : null).toEqual([]);
+  });
+  it("keeps the expenses of the chain in the day totals", async () => {
+    const [kept, removed] = [await read(before()), await read(after())];
+    if (!kept.result.ok || !removed.result.ok) throw new Error("rejected");
+    const totals = (value: TripItineraryResponse) => view(value).days.map((day) => day.expenseSummary);
+    expect(totals(removed.result.value)).toEqual(totals(kept.result.value));
+    expect(totals(removed.result.value).reduce((sum, day) => sum + day.totalAmount, 0)).toBe(27);
+    expect(removed.result.value.posts.find((post) => post.id === id(32))!.expense).toMatchObject({ totalAmount: 12 });
   });
 });

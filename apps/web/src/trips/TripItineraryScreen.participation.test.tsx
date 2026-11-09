@@ -25,7 +25,7 @@ async function render(overrides: Partial<TripParticipationApi> = {}, strict = fa
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const screen = <TripItineraryScreen itinerary={{ get: getItinerary }} activities={{ get: getActivity,
-    create: async () => ({ ok: false, error: { kind: "server" } }), update: async () => ({ ok: false, error: { kind: "server" } }) }}
+    create: async () => ({ ok: false, error: { kind: "server" } }), update: async () => ({ ok: false, error: { kind: "server" } }), remove: async () => ({ ok: false, error: { kind: "server" } }) }}
     participations={{ get, set, ...overrides }} timeZone="UTC" />;
   const content = <MemoryRouter initialEntries={[`/trips/${fixture.tripId}/itinerary`]}>
     <Link to={`/trips/${itineraryId(99)}/itinerary`}>Otro viaje</Link>

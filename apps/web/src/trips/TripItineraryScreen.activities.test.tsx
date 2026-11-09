@@ -24,7 +24,7 @@ async function render(value = itineraryFixture() as TripItineraryResponse, timeZ
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${value.tripId}/itinerary`]}>
-    <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get: getItinerary }} activities={{ create, get, update }} timeZone={timeZone} />} /></Routes>
+    <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get: getItinerary }} activities={{ create, get, update, remove: async () => ({ ok: false, error: { kind: "server" } }) }} timeZone={timeZone} />} /></Routes>
   </MemoryRouter>));
   return { container, create, get, update, getItinerary, value };
 }

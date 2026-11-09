@@ -89,6 +89,42 @@ describe("activity HTTP adapter", () => {
     const { api, fetch } = setup({}); fetch.mockRejectedValue(new Error("Offline"));
     expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "network" } });
   });
+  describe("remove", () => {
+    const tripId = itineraryId(1), activityId = itineraryId(8);
+    const empty = (status: number) => { const fetch = vi.fn().mockResolvedValue(new Response(null, { status })); const onUnauthorized = vi.fn();
+      const client = createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized });
+      return { api: createTripActivityApi(client), fetch, onUnauthorized }; };
+    it("sends an authenticated DELETE without body or content-type and accepts a 204", async () => {
+      const { api, fetch } = empty(204);
+      expect(await api.remove(tripId, activityId)).toEqual({ ok: true, value: undefined });
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const [url, request] = fetch.mock.calls[0];
+      expect(url).toBe(`https://api.test/trips/${tripId}/activities/${activityId}`);
+      expect(request.method).toBe("DELETE"); expect(request.headers.Authorization).toBe("Bearer token");
+      expect(request.body).toBeUndefined(); expect(Object.keys(request.headers).map((h) => h.toLowerCase())).not.toContain("content-type");
+    });
+    it("encodes the path segments", async () => {
+      const { api, fetch } = empty(204);
+      await api.remove("a/b", "x y?#");
+      expect(fetch.mock.calls[0][0]).toBe("https://api.test/trips/a%2Fb/activities/x%20y%3F%23");
+    });
+    it.each([
+      [401, "UnauthorizedError", "unauthorized"], [403, "ForbiddenError", "forbidden"], [404, "TripNotFoundError", "not-found"],
+      [404, "ActivityNotFoundError", "not-found"], [500, "InternalError", "server"],
+    ])("maps HTTP %s %s to %s and never to ok", async (status, code, kind) => {
+      const { api, onUnauthorized } = setup({ error: { code, message: "x" } }, status);
+      expect(await api.remove(tripId, activityId)).toEqual({ ok: false, error: { kind } });
+      expect(onUnauthorized).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
+    });
+    it("maps a rejected fetch to network", async () => {
+      const { api, fetch } = empty(204); fetch.mockRejectedValue(new Error("Offline"));
+      expect(await api.remove(tripId, activityId)).toEqual({ ok: false, error: { kind: "network" } });
+    });
+    it("never produces a participation conflict from an unexpected 409 without valid details", async () => {
+      const { api } = setup({ error: { code: "ParticipationConflictError", message: "x" } }, 409);
+      expect(await api.remove(tripId, activityId)).toEqual({ ok: false, error: { kind: "server" } });
+    });
+  });
   describe("create with participation and confirmation", () => {
     const participation = (status = "going") => ({ id: itineraryId(50), tripId: itineraryId(1), activityId: itineraryId(8),
       userId: itineraryId(20), status, updatedAt: "2026-09-25T12:00:00.123Z" });

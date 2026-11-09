@@ -22,14 +22,17 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   const [states, setStates] = useState<States>({});
   const current = useRef<States>({});
   const generation = useRef(0);
+  // Activities deleted in this Trip: a late read or write must not bring their state (or a conflict modal) back.
+  const removed = useRef(new Set<string>());
   const publish = useCallback((id: string, state: ParticipationState) => {
+    if (removed.current.has(id)) return;
     current.current = { ...current.current, [id]: state };
     setStates(current.current);
   }, []);
 
   useEffect(() => {
     generation.current += 1;
-    current.current = {}; setStates({});
+    current.current = {}; removed.current = new Set(); setStates({});
     return () => { generation.current += 1; };
   }, [tripId, api]);
 
@@ -46,7 +49,7 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   }, [api, tripId, publish]);
 
   useEffect(() => {
-    for (const activityId of activityIds) if (!current.current[activityId]) void load(activityId);
+    for (const activityId of activityIds) if (!current.current[activityId] && !removed.current.has(activityId)) void load(activityId);
   }, [activityIds, load]);
 
   /** Sends one write and publishes its outcome; a failure never touches the answer or the mark. */
@@ -93,5 +96,14 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     else if (state?.kind === "ready" && state.failedStatus) void change(activityId, state.failedStatus);
   }, [load, change]);
 
-  return { states, change, confirmChange, cancelConfirmation, apply, retry };
+  /** The activity no longer exists: forget its state and ignore anything still in flight for it. */
+  const remove = useCallback((activityId: string) => {
+    removed.current.add(activityId);
+    const rest = { ...current.current };
+    delete rest[activityId];
+    current.current = rest;
+    setStates(rest);
+  }, []);
+
+  return { states, change, confirmChange, cancelConfirmation, apply, retry, remove };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Feedback, LoadingState, Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
@@ -12,7 +12,11 @@ import { projectTripItinerary } from "./trip-itinerary-view.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
 type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse; timeZone: string; activities: TripActivityApi;
-  onClose: () => void; onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void; participation?: ReactNode };
+  onClose: () => void; onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void;
+  /** "removed": the server deleted it; "gone": it was already missing (404/403), so nothing is claimed as an own deletion. */
+  onRemoved: (activityId: string, outcome: "removed" | "gone") => void;
+  /** A participation write or conflict confirmation for this activity is pending: removal waits. */
+  busy?: boolean; participation?: ReactNode };
 type DetailState = { kind: "loading" } | { kind: "error"; error: TripFailure } | { kind: "detail" | "edit"; value: ActivityResponse };
 
 const safeMapsUrl = (value: string | null) => {
@@ -21,10 +25,23 @@ const safeMapsUrl = (value: string | null) => {
   catch { return undefined; }
 };
 
-export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, participation }: Props) {
+export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, onRemoved, busy = false, participation }: Props) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [removal, setRemoval] = useState<"idle" | "confirming" | "deleting">("idle");
+  const [removalError, setRemovalError] = useState<string>();
+  // Synchronous guard: two clicks in the same tick must send a single DELETE (state would not be updated yet).
+  const removingRef = useRef(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const removeTrigger = useRef<HTMLElement | null>(null);
+  const wasConfirming = useRef(false);
+  useEffect(() => {
+    // Runs after Modal's own effect: initial focus on the safe action, and back to the trigger when cancelling.
+    if (removal === "confirming") cancelRef.current?.focus();
+    else if (removal === "idle" && wasConfirming.current && removeTrigger.current?.isConnected) removeTrigger.current.focus();
+    wasConfirming.current = removal !== "idle";
+  }, [removal]);
   useEffect(() => {
     if (request.kind !== "detail") return;
     let cancelled = false;
@@ -50,8 +67,22 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const maps = safeMapsUrl(existing?.mapsUrl ?? null);
   const range = state.kind === "detail" ? formatActivityRange(state.value, timeZone) : undefined;
   const timestamp = new Intl.DateTimeFormat("es-AR", { timeZone, dateStyle: "full", timeStyle: "short" });
-  return <div className="activity-dialog"><Modal isOpen title={request.kind === "create" ? "Nueva actividad" : state.kind === "edit" ? "Editar actividad" : "Detalle de actividad"}
-    loading={saving} onClose={onClose}>
+  const confirmRemoval = async () => {
+    if (removingRef.current || !existing) return;
+    removingRef.current = true; setRemoval("deleting"); setRemovalError(undefined);
+    try {
+      let result: Awaited<ReturnType<TripActivityApi["remove"]>>;
+      try { result = await activities.remove(itinerary.tripId, existing.id); } catch { result = { ok: false, error: { kind: "network" } }; }
+      if (result.ok) { onRemoved(existing.id, "removed"); return; }
+      if (result.error.kind === "not-found" || result.error.kind === "forbidden") { onRemoved(existing.id, "gone"); return; }
+      setRemovalError(result.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
+        : "No pudimos eliminar la actividad. Revisá tu conexión e intentá nuevamente.");
+      setRemoval("confirming");
+    } finally { removingRef.current = false; }
+  };
+  const cancelRemoval = () => { if (!removingRef.current) { setRemoval("idle"); setRemovalError(undefined); } };
+  return <><div className="activity-dialog"><Modal isOpen title={request.kind === "create" ? "Nueva actividad" : state.kind === "edit" ? "Editar actividad" : "Detalle de actividad"}
+    loading={saving || removal === "deleting"} onClose={onClose}>
     {request.kind === "create" && context ? <ActivityForm context={context} activities={activities} knownActivities={itinerary.activities} onSaved={onSaved} onBusyChange={setSaving} /> : null}
     {request.kind === "detail" ? <>
       {state.kind === "loading" ? <LoadingState label="Cargando actividad…" /> : null}
@@ -72,8 +103,20 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
           : state.value.mapsUrl ? <p className="activity-context">Vínculo de Maps no válido.</p> : null}
         {context ? <Button onClick={() => setState({ kind: "edit", value: state.value })}>Editar actividad</Button>
           : <Feedback variant="error">El día de esta actividad cambió. Cerrá el detalle y volvé a cargar el itinerario.</Feedback>}
+        <Button error disabled={busy} onClick={(event) => { removeTrigger.current = event.currentTarget; setRemoval("confirming"); setRemovalError(undefined); }}>Eliminar actividad</Button>
       </div> : null}
       {state.kind === "edit" && context ? <ActivityForm context={context} activities={activities} existing={state.value} onSaved={onSaved} onBusyChange={setSaving} /> : null}
     </> : null}
-  </Modal></div>;
+  </Modal></div>
+  {removal !== "idle" && existing ? <div className="activity-confirm-layer"><Modal isOpen closeOnEscape title="Eliminar actividad"
+    loading={removal === "deleting"} error={removalError} onClose={cancelRemoval}>
+    <div className="activity-detail">
+      <p>¿Querés eliminar «{existing.title}»? Se quitarán las participaciones de esta actividad. Los recuerdos asociados se conservan. Esta acción no se puede deshacer.</p>
+      <div className="activity-confirm-actions">
+        <button ref={cancelRef} className="ui-button" type="button" onClick={cancelRemoval}>Cancelar</button>
+        <Button error loading={removal === "deleting"} loadingLabel="Eliminando…" onClick={() => { void confirmRemoval(); }}>Eliminar definitivamente</Button>
+      </div>
+    </div>
+  </Modal></div> : null}
+  </>;
 }
