@@ -65,3 +65,10 @@ export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: Reso
     ...(!withActivity && links.activityId !== (original.activityId ?? null) ? { activityId: links.activityId } : {}),
     ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved) };
 };
+
+/** Key of the shared draft: one per edited post, one per continuation parent (valid `?parentPostId=`), and a generic one for the rest of creations. */
+export const draftKeyFor = ({ postId, search }: { postId?: string; search: string }): string => {
+  if (postId) return `edit:${postId}`;
+  const parent = new URLSearchParams(search).get("parentPostId");
+  return parent !== null && /^[0-9a-f]{24}$/.test(parent) ? `new:parent:${parent}` : "new";
+};

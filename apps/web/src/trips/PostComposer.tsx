@@ -6,7 +6,7 @@ import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
-import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -42,7 +42,7 @@ export function PostComposer({ posts, itinerary, timeZone = Intl.DateTimeFormat(
 function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostComposerProps, "timeZone"> & { timeZone: string; tripId?: string; postId?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const handle = usePostDraft(postId ? `edit:${postId}` : "new");
+  const handle = usePostDraft(draftKeyFor({ postId, search: location.search }));
   // Set by the selector when returning: where to put the focus and what to announce (read once).
   // Back with `navigate(-1)` leaves it in the drafts context; a direct entry replaced by the composer leaves it in the location state.
   const [entry] = useState(() => handle.returned ?? location.state as { focus?: string; notice?: string } | null);

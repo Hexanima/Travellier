@@ -20,6 +20,7 @@ const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
 function Detail() { const location = useLocation(); return <p data-testid="detail">DETALLE {location.pathname} {JSON.stringify(location.state)}</p>; }
 function Back() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(-1)}>atras</button>; }
+function Forward() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(1)}>adelante</button>; }
 type Entry = string | { pathname: string; search?: string; state?: unknown };
 async function render(path: Entry | Entry[] = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list" | "itineraryGet", ReturnType<typeof vi.fn>>> = {}) {
   // Slice 10:00-18:00Z (07:00-15:00 in Buenos Aires) and the activities Paseo por el centro (12Z) and Visita al museo (14Z).
@@ -34,7 +35,7 @@ async function render(path: Entry | Entry[] = `/trips/${tripId}/memories/new`, o
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={Array.isArray(path) ? path : [path]}>
-    <Back /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
+    <Back /><Forward /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path=":postId" element={<Detail />} />
@@ -929,6 +930,36 @@ describe("PostComposer (continuation from a memory detail)", () => {
     await field(container, "description", "Borrador"); await click(button(container, "Cancelar"));
     await click(button(container.querySelector('[role="dialog"]') as HTMLElement, "Descartar"));
     expect(stateOf(container, "detail")).toContain(detailPath);
+  });
+  describe("with drafts left by other creations", () => {
+    const parentB = itineraryId(34);
+    const entryFor = (id: string, label: string) => ({ pathname: newPath, search: `?parentPostId=${id}`, state: { origin: { path: `/trips/${tripId}/memories/${id}`, label: "recuerdo" }, parentLabel: label } });
+    const detailOf = (id: string) => `/trips/${tripId}/memories/${id}`;
+    it("gives each continuation its own draft: a leftover draft of A does not override B", async () => {
+      const { container, create } = await render([entryFor(parentB, "Recuerdo B"), detailOf(parentB), entryFor(otherPostId, "Otro recuerdo")]);
+      await field(container, "description", "texto de A");
+      await click(button(document.body, "atras")); await click(button(document.body, "atras"));
+      expect(summary(container)).toBe("Recuerdo: Recuerdo B");
+      expect(value(container, "description")).toBe("");
+      await field(container, "description", "texto de B"); await submit(container);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "texto de B", parentPostId: parentB });
+    });
+    it("keeps the draft of A in its own key when coming back to it", async () => {
+      const { container } = await render([entryFor(parentB, "Recuerdo B"), detailOf(parentB), entryFor(otherPostId, "Otro recuerdo")]);
+      await field(container, "description", "texto de A");
+      await click(button(document.body, "atras")); await click(button(document.body, "atras"));
+      await click(button(document.body, "adelante")); await click(button(document.body, "adelante"));
+      expect(summary(container)).toBe("Recuerdo: Otro recuerdo");
+      expect(value(container, "description")).toBe("texto de A");
+    });
+    it("a leftover linkless draft does not drop the parent of a continuation", async () => {
+      const { container, create } = await render([entryFor(parentB, "Recuerdo B"), detailOf(parentB), newPath]);
+      await field(container, "description", "genérico");
+      await click(button(document.body, "atras")); await click(button(document.body, "atras"));
+      expect(summary(container)).toBe("Recuerdo: Recuerdo B");
+      await field(container, "description", "continuación"); await submit(container);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "continuación", parentPostId: parentB });
+    });
   });
   it.each([["another trip", `/trips/${otherTripId}/memories/${otherPostId}`], ["an external url", "https://evil.test/x"], ["a protocol-relative url", "//evil.test/x"]])(
     "cancels to the diary when the origin points to %s", async (_name, path) => {
