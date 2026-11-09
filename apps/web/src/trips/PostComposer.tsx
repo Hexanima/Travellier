@@ -205,7 +205,14 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   };
   const removeTransport = () => { handle.setDraft(setTransport(draft, null)); setNotice(""); };
   // Leaving a continuation goes back to the detail it came from when that origin is valid for this Trip; otherwise to the diary.
-  const leave = () => { handle.clear(); navigate(postId ? listing : originHref(readOrigin(location.state, tripId ?? ""))); };
+  // From the detail with app history, `-1` returns to that exact entry (its state and root origin intact); otherwise the entry is replaced so Back never reopens the composer.
+  const leave = () => {
+    handle.clear();
+    if (postId) { navigate(listing); return; }
+    const origin = readOrigin(location.state, tripId ?? "");
+    if (origin.label === "recuerdo" && location.key !== "default") navigate(-1);
+    else navigate(originHref(origin), { replace: true });
+  };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;
