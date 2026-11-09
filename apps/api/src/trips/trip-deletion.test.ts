@@ -86,6 +86,28 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     expect(await database.collection("refreshTokens").countDocuments({ userId })).toBe(1);
   });
 
+  it("deletes only the real comments of the deleted Trip, created through the comments API", async () => {
+    await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
+    const otherTripId = new ObjectId(), otherUser = new ObjectId();
+    await database.collection("trips").insertOne({ _id: otherTripId, inviteCode: "VIAJE-OTHER" });
+    await database.collection("tripMembers").insertOne({ tripId: otherTripId, userId: otherUser, role: "participant", joinedAt: new Date() });
+    const api = createTripApi(database), seeded: Record<string, string> = {};
+    for (const [trip, user] of [[tripId, userId], [otherTripId, otherUser]] as const) {
+      const post = await api.createPost!({ tripId: domainId(trip), authenticatedUserId: domainId(user), description: "Recuerdo" });
+      if (!post.ok || post.value.outcome !== "created") throw new Error("Post not created.");
+      const comment = await api.createComment!({ tripId: domainId(trip), authenticatedUserId: domainId(user), postId: post.value.post.id, text: "Hola" });
+      if (!comment.ok) throw comment.error;
+      seeded[trip.toHexString()] = comment.value.id;
+    }
+    expect(await database.collection("comments").countDocuments({})).toBe(2);
+    expect((await deleteTripRequest()).statusCode).toBe(204);
+    expect(await database.collection("comments").countDocuments({ tripId })).toBe(0);
+    const remaining = await database.collection("comments").find({}).toArray();
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]!._id.toHexString()).toBe(seeded[otherTripId.toHexString()]);
+    expect(remaining[0]!.tripId).toEqual(otherTripId);
+  });
+
   it("does not allow a participant or an outsider to delete the group", async () => {
     expect((await deleteTripRequest()).statusCode).toBe(403);
     expect((await deleteTripRequest(new ObjectId())).statusCode).toBe(404);
