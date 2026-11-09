@@ -10,3 +10,4 @@ export * from "./activity-conflict.js";
 export * from "./activity.js";
 export * from "./activity-participation.js";
 export * from "./post.js";
+export * from "./comment.js";
