@@ -2,9 +2,9 @@
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
-import { itineraryId } from "./trips/itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
 import type { PostResponse } from "./trips/trip-post-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -131,5 +131,67 @@ describe("App memories link routes", () => {
     const container = await render(`/trips/${tripId}/memories/new/link`, { auth: {}, sessionStorage: storage(false), itinerary: api, posts: { list } });
     expect(container.textContent).toContain("Iniciar sesión");
     expect(list).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("App memories new activity routes", () => {
+  // La app usa la zona del dispositivo: se fija para que el test no dependa de la zona del equipo ni de CI.
+  const zone = "America/Argentina/Buenos_Aires";
+  beforeEach(() => {
+    const original = Intl.DateTimeFormat.prototype.resolvedOptions;
+    vi.spyOn(Intl.DateTimeFormat.prototype, "resolvedOptions").mockImplementation(function (this: Intl.DateTimeFormat) { return { ...original.call(this), timeZone: zone }; });
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+  const scheduledAt = "2026-09-25T15:00:00.000Z";
+  const activity = { id: itineraryId(60), tripId, dayId: itineraryId(4), title: "Cena", description: null, mapsUrl: null, scheduledAt, durationMinutes: 90,
+    createdAt: "2026-09-25T10:00:00.123Z", createdBy: itineraryId(20) };
+  const participation = { id: itineraryId(61), tripId, activityId: activity.id, userId: itineraryId(20), status: "going", updatedAt: "2026-09-25T12:00:00.123Z" };
+  const buttonOf = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) ?? null;
+  const radioOf = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector("input") ?? null;
+  const itinerary = () => ({ get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) });
+  async function createActivity(container: HTMLElement) {
+    await click(buttonOf(container, "Vincular a")); await click(radioOf(container, "Actividad")); await click(buttonOf(container, "Crear actividad espontánea"));
+    expect(container.querySelector("h1")?.textContent).toBe("Crear actividad espontánea");
+    await type(container, "title", "Cena"); await type(container, "date", "2026-09-25"); await type(container, "time", "12:00");
+    await type(container, "durationHours", "1"); await type(container, "durationMinutes", "30");
+    await click(buttonOf(container, "Aceptar"));
+  }
+  it("creates a memory with a new activity through the routes: one create call, the draft survives the subform", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: { ...saved(), activity, participation } });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const api = itinerary();
+    const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), itinerary: api, posts: { create, list } });
+    await type(container, "description", "Atardecer");
+    await createActivity(container);
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Atardecer");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Atardecer", newActivity: { title: "Cena", scheduledAt, durationMinutes: 90 } });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.textContent).toContain("Recuerdo publicado y actividad creada. Vas a ir.");
+  });
+  it("relinks an existing memory to a new activity through the edit routes", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: true, value: { ...saved(), activity, participation } });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const container = await render(`/trips/${tripId}/memories/${postId}/edit`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: { update, get, list } });
+    await createActivity(container);
+    expect(container.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { newActivity: { title: "Cena", scheduledAt, durationMinutes: 90 } });
+    expect(container.textContent).toContain("Cambios guardados y actividad creada. Vas a ir.");
+  });
+  it("opened by URL without a draft the subform routes go back to the composer", async () => {
+    const container = await render(`/trips/${tripId}/memories/new/activity`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: {} });
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    const edit = await render(`/trips/${tripId}/memories/${postId}/edit/activity`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: { get: vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } }) } });
+    expect(edit.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+  });
+  it("without a session the subform route redirects to login and requests nothing", async () => {
+    const api = itinerary();
+    const container = await render(`/trips/${tripId}/memories/new/activity`, { auth: {}, sessionStorage: storage(false), itinerary: api, posts: {} });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(api.get).not.toHaveBeenCalled();
   });
 });

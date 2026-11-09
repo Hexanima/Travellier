@@ -5,8 +5,9 @@ import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
+import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
-import { itineraryId } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
 import type { PostResponse } from "./trip-post-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,9 +19,13 @@ const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
 function Back() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(-1)}>atras</button>; }
-async function render(path: string | string[] = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list", ReturnType<typeof vi.fn>>> = {}) {
+async function render(path: string | string[] = `/trips/${tripId}/memories/new`, overrides: Partial<Record<"create" | "update" | "get" | "list" | "itineraryGet", ReturnType<typeof vi.fn>>> = {}) {
+  // Slice 10:00-18:00Z (07:00-15:00 in Buenos Aires) and the activities Paseo por el centro (12Z) and Visita al museo (14Z).
+  const itineraryGet = overrides.itineraryGet ?? vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() });
+  const itinerary = { get: itineraryGet };
   const list = overrides.list ?? vi.fn().mockResolvedValue({ ok: true, value: [saved(), saved({ id: otherPostId, description: "Otro recuerdo" })] });
-  const picker = <PostLinkPicker posts={{ list, get: vi.fn() }} itinerary={{ get: vi.fn().mockResolvedValue(itineraryResult) }} timeZone="America/Argentina/Buenos_Aires" />;
+  const picker = <PostLinkPicker posts={{ list, get: vi.fn() }} itinerary={{ get: vi.fn().mockResolvedValue(itineraryResult) }} timeZone="America/Argentina/Buenos_Aires" spontaneousActivity />;
+  const subform = <SpontaneousActivityForm itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />;
   const create = overrides.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved() });
   const update = overrides.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved({ description: "Editado" }) });
   const get = overrides.get ?? vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
@@ -30,14 +35,16 @@ async function render(path: string | string[] = `/trips/${tripId}/memories/new`,
     <Back /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
-      <Route path="new" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
-      <Route path=":postId/edit" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route path="new" element={<PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route path=":postId/edit" element={<PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
       <Route path="new/link" element={picker} />
       <Route path=":postId/edit/link" element={picker} />
+      <Route path="new/activity" element={subform} />
+      <Route path=":postId/edit/activity" element={subform} />
     </Route>
     <Route path="/login" element={<p>LOGIN</p>} />
   </Routes></MemoryRouter>));
-  return { container, create, update, get, list };
+  return { container, create, update, get, list, itineraryGet };
 }
 async function field(container: HTMLElement, name: string, value: string) {
   const element = container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLTextAreaElement;
@@ -171,9 +178,9 @@ describe("PostComposer (create)", () => {
     expect(container.querySelector('a[href="/login"]')).not.toBeNull();
   });
   it("does not depend on the itinerary: it publishes without loading anything else", async () => {
-    const { container, create, get } = await render();
+    const { container, create, get, itineraryGet } = await render();
     await field(container, "description", "Sin itinerario"); await submit(container);
-    expect(create).toHaveBeenCalledTimes(1); expect(get).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1); expect(get).not.toHaveBeenCalled(); expect(itineraryGet).not.toHaveBeenCalled();
   });
 });
 
@@ -498,5 +505,348 @@ describe("PostComposer (legacy data, edit preload and history)", () => {
     expect(document.activeElement).toBe(linkButton(container));
     await click(button(container, "atras"));
     expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+});
+
+const scheduledAt = "2026-09-25T15:00:00.000Z";
+const newActivityBody = { title: "Cena", scheduledAt, durationMinutes: 90 };
+const activityResponse = { id: itineraryId(60), tripId, dayId: itineraryId(4), title: "Cena", description: null, mapsUrl: null, scheduledAt, durationMinutes: 90,
+  createdAt: "2026-09-25T10:00:00.123Z", createdBy: itineraryId(20) };
+const participation = { id: itineraryId(61), tripId, activityId: itineraryId(60), userId: itineraryId(20), status: "going", updatedAt: "2026-09-25T12:00:00.123Z" };
+const withActivity = (extra: Partial<PostResponse> = {}) => ({ ...saved(extra), activity: activityResponse, participation });
+const confirmation = { confirmedConflicts: [{ activityId: itineraryId(8), reason: "overlap" as const, scheduledAt: "2026-09-25T14:30:00.000Z", durationMinutes: 60 }],
+  confirmedActivity: { scheduledAt, durationMinutes: 90 } };
+const conflict = { ok: false, error: { kind: "participation-conflict", confirmation } };
+const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+const summary = (container: HTMLElement) => container.querySelector("#post-link-summary")?.textContent;
+/** Opens the picker, then the subform from «Crear actividad espontánea», fills it and accepts: back at the composer. */
+async function addActivity(container: HTMLElement, values: { title?: string; time?: string; date?: string; hours?: string; minutes?: string } = {}) {
+  await click(linkButton(container)); await click(radio(container, "Actividad")); await click(button(container, "Crear actividad espontánea"));
+  await field(container, "title", values.title ?? "Cena"); await field(container, "date", values.date ?? "2026-09-25"); await field(container, "time", values.time ?? "12:00");
+  await field(container, "durationHours", values.hours ?? "1"); await field(container, "durationMinutes", values.minutes ?? "30");
+  await click(button(container, "Aceptar"));
+}
+
+describe("PostComposer (new activity)", () => {
+  it("creates the activity from the link area with no mode selector, and shows it in the summary with edit and remove", async () => {
+    const { container } = await render();
+    await field(container, "description", "Hola");
+    await addActivity(container);
+    expect(container.querySelector('[name="description"]')).not.toBeNull();
+    expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    expect(button(container, "Editar actividad nueva")).toBeDefined(); expect(button(container, "Quitar actividad nueva")).toBeDefined();
+    expect(document.activeElement).toBe(linkButton(container));
+    expect(Array.from(container.querySelectorAll('[role="status"]')).some((item) => item.textContent?.includes("Actividad nueva: Cena, 25/09/2026 12:00. Se creará al publicar."))).toBe(true);
+    expect(container.querySelector('[type="radio"]')).toBeNull();
+  });
+  it("publishes memory, activity and participation in a single create without dayId, and confirms both", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await addActivity(container); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: newActivityBody });
+    const listing = container.querySelector('[data-testid="listing"]')?.textContent ?? "";
+    expect(listing).toContain('"notice":"created-activity"'); expect(listing).toContain('"going":true'); expect(listing).toContain(postId);
+    expect(listing).not.toContain("dayId");
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "nav-new"));
+    expect(value(container, "description")).toBe("");
+    expect(summary(container)).toBe("Sin vínculo");
+  });
+  it("omits the duration when none was typed and keeps the preloaded transport next to the activity", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity({ transportId }) });
+    const { container } = await render(`${newPath}?transportId=${transportId}`, { create });
+    await field(container, "description", "Hola"); await addActivity(container, { hours: "", minutes: "" }); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", transportId, newActivity: { title: "Cena", scheduledAt } });
+  });
+  it("keeps the content rule: creating still needs text or a location even with a new activity", async () => {
+    const { container, create } = await render();
+    await addActivity(container); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toBe("Escribí un texto o agregá una ubicación.");
+  });
+  it("asks for confirmation when cancelling after adding only a new activity", async () => {
+    const { container } = await render();
+    await addActivity(container); await click(button(container, "Cancelar"));
+    expect(dialog()?.textContent).toContain("Descartar cambios");
+  });
+  it("Quitar actividad nueva goes back to Sin vínculo and publishes without it", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "Hola"); await addActivity(container);
+    await click(button(container, "Quitar actividad nueva"));
+    expect(summary(container)).toBe("Sin vínculo");
+    expect(button(container, "Quitar actividad nueva")).toBeUndefined();
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("Editar actividad nueva reopens the subform with the loaded activity and the changes come back", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Hola"); await addActivity(container);
+    await click(button(container, "Editar actividad nueva"));
+    expect(value(container, "title")).toBe("Cena"); expect(value(container, "time")).toBe("12:00"); expect(value(container, "durationHours")).toBe("1");
+    await field(container, "title", "Cena larga"); await click(button(container, "Aceptar"));
+    expect(summary(container)).toBe("Actividad nueva: Cena larga · 25/09/2026 12:00 · 1 h 30 min");
+    expect(value(container, "description")).toBe("Hola");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: { ...newActivityBody, title: "Cena larga" } });
+  });
+  it("cancelling the subform keeps the memory draft untouched", async () => {
+    const { container } = await render();
+    await field(container, "description", "Hola");
+    await click(linkButton(container)); await click(radio(container, "Actividad")); await click(button(container, "Crear actividad espontánea"));
+    await field(container, "title", "No guardar"); await click(button(container, "Cancelar"));
+    expect(value(container, "description")).toBe("Hola"); expect(summary(container)).toBe("Sin vínculo");
+  });
+  it.each([["Post", "Otro recuerdo", "Recuerdo: Otro recuerdo", { parentPostId: otherPostId }], ["Actividad", "Paseo por el centro", "Actividad: Paseo por el centro — 25 sept, 12:00", { activityId }]])(
+    "choosing an existing %s discards the new activity with a notice and publishes only the link", async (kind, option, label, body) => {
+      const { container, create } = await render();
+      await field(container, "description", "Hola"); await addActivity(container);
+      await chooseLink(container, kind as "Post" | "Actividad", option);
+      expect(summary(container)).toBe(label);
+      expect(button(container, "Quitar actividad nueva")).toBeUndefined();
+      expect(Array.from(container.querySelectorAll('[role="status"]')).some((item) => item.textContent?.includes("Se descartó la actividad nueva."))).toBe(true);
+      await submit(container);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", ...body });
+    });
+  it("opening the picker and accepting without choosing anything keeps the new activity", async () => {
+    const { container } = await render();
+    await field(container, "description", "Hola"); await addActivity(container);
+    await click(linkButton(container)); await click(button(container, "Aceptar"));
+    expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+  });
+  it("creating the activity replaces the link chosen before and says so", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "Hola"); await chooseLink(container, "Post", "Otro recuerdo"); await addActivity(container);
+    expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    expect(Array.from(container.querySelectorAll('[role="status"]')).some((item) => item.textContent?.includes("Se quitó el vínculo anterior."))).toBe(true);
+    create.mockResolvedValue({ ok: true, value: withActivity() });
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: newActivityBody });
+  });
+
+  describe("conflict confirmation", () => {
+    const publish = async (create: ReturnType<typeof vi.fn>) => {
+      const view = await render(undefined, { create });
+      await field(view.container, "description", "Hola"); await addActivity(view.container); await submit(view.container);
+      return view;
+    };
+    it("opens the modal with the titles from the itinerary, publishing and navigating nothing yet", async () => {
+      const create = vi.fn().mockResolvedValue(conflict);
+      const { container } = await publish(create);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: newActivityBody });
+      expect(dialog()?.textContent).toContain("Cambiar de plan");
+      expect(dialog()?.textContent).toContain("Paseo por el centro");
+      expect(dialog()?.textContent).toContain("Se superpone");
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(alerts(container)).toHaveLength(0);
+    });
+    it("falls back to a generic name when the itinerary has no such activity", async () => {
+      const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "participation-conflict",
+        confirmation: { ...confirmation, confirmedConflicts: [{ ...confirmation.confirmedConflicts[0]!, activityId: itineraryId(99) }] } } });
+      await publish(create);
+      expect(dialog()?.textContent).toContain("Otra actividad");
+    });
+    it("Conservar mi participación actual closes the modal, keeps the draft, does not publish or navigate, and returns the focus to the publish button", async () => {
+      const create = vi.fn().mockResolvedValue(conflict);
+      const { container } = await publish(create);
+      await click(button(dialog()!, "Conservar mi participación actual"));
+      expect(dialog()).toBeNull();
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(value(container, "description")).toBe("Hola");
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+      expect(document.activeElement).toBe(container.querySelector('button[type="submit"]'));
+      expect(alerts(container)).toHaveLength(0);
+    });
+    it("Escape behaves as cancelling", async () => {
+      const create = vi.fn().mockResolvedValue(conflict);
+      const { container } = await publish(create);
+      await act(async () => dialog()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+      expect(dialog()).toBeNull(); expect(create).toHaveBeenCalledTimes(1); expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    });
+    it("a later publish after cancelling asks again, and confirming resends the same entry with the confirmation and then navigates", async () => {
+      const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: true, value: withActivity() });
+      const { container } = await publish(create);
+      await click(button(dialog()!, "Conservar mi participación actual"));
+      await submit(container);
+      expect(create).toHaveBeenCalledTimes(2); expect(dialog()).not.toBeNull();
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(create).toHaveBeenCalledTimes(3);
+      expect(create).toHaveBeenNthCalledWith(3, tripId, { description: "Hola", newActivity: newActivityBody }, confirmation);
+      expect(create.mock.calls[2]![1]).toEqual(create.mock.calls[0]![1]);
+      expect(dialog()).toBeNull();
+      expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("created-activity");
+    });
+    it("a second 409 after confirming shows the stale notice in the same modal", async () => {
+      const create = vi.fn().mockResolvedValue(conflict);
+      await publish(create);
+      expect(dialog()?.textContent).not.toContain("Los datos cambiaron");
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(dialog()?.querySelector('[role="alert"]')?.textContent).toContain("Los datos cambiaron");
+    });
+    it.each([
+      ["activity", { field: "durationMinutes", code: "outside_window" }, "Editar actividad nueva"],
+      ["link", { field: "transportId", code: "not_found" }, "Vincular a"],
+    ])("a 422 on the %s after confirming closes the modal and leaves the focus on the error, not on the publish button", async (_kind, item, focused) => {
+      const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ ...item, message: "x" }] } });
+      const { container } = await publish(create);
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(dialog()).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(document.activeElement).toBe(button(container, focused));
+    });
+    it("a double click on Cambiar de plan sends once", async () => {
+      const pending = deferred<unknown>();
+      const create = vi.fn().mockResolvedValueOnce(conflict).mockReturnValueOnce(pending.promise);
+      await publish(create);
+      const confirm = button(dialog()!, "Cambiar de plan")!;
+      await act(async () => {
+        confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        confirm.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      expect(create).toHaveBeenCalledTimes(2);
+      await act(async () => pending.resolve({ ok: true, value: withActivity() }));
+    });
+    it("a failure while confirming closes the modal, keeps the draft and shows the error without navigating", async () => {
+      const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+      const { container } = await publish(create);
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(dialog()).toBeNull();
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toContain("Revisá tus recuerdos antes de reintentar por si ya se publicó.");
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    });
+  });
+
+  describe("errors", () => {
+    const failWith = async (error: unknown, view?: { create: ReturnType<typeof vi.fn> }) => {
+      const create = view?.create ?? vi.fn().mockResolvedValue({ ok: false, error });
+      const rendered = await render(undefined, { create });
+      await field(rendered.container, "description", "Hola"); await addActivity(rendered.container); await submit(rendered.container);
+      return rendered;
+    };
+    it.each([
+      [{ field: "scheduledAt", code: "outside_window" }, "Elegí un horario dentro de la franja de actividad del destino."],
+      [{ field: "dayId", code: "ambiguous" }, "Elegí un horario dentro de la franja de actividad del destino."],
+      [{ field: "durationMinutes", code: "outside_window" }, "La actividad terminaría después de la salida del destino. Acortá la duración o elegí otro horario."],
+      [{ field: "durationMinutes", code: "invalid" }, "Revisá la duración estimada."],
+      [{ field: "title", code: "required" }, "Ingresá un título para la actividad."],
+    ])("a 422 on %j keeps the draft, shows one focused alert with an edit action and does not navigate", async (item, message) => {
+      const { container, create } = await failWith({ kind: "validation", fields: [{ ...item, message: "x" }] });
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toBe(message);
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(document.activeElement).toBe(button(container, "Editar actividad nueva"));
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+      expect(value(container, "description")).toBe("Hola");
+      expect(container.textContent).not.toContain("Recuerdo publicado");
+    });
+    it("a 422 with several activity fields still shows a single alert", async () => {
+      const { container } = await failWith({ kind: "validation", fields: [{ field: "title", code: "required", message: "x" }, { field: "durationMinutes", code: "invalid", message: "y" }] });
+      expect(alerts(container)).toHaveLength(1);
+    });
+    it("a link error with a new activity keeps using the link message", async () => {
+      const { container } = await failWith({ kind: "validation", fields: [{ field: "transportId", code: "not_found", message: "x" }] });
+      expect(alerts(container).map((item) => item.textContent)).toEqual(["No pudimos aplicar el vínculo. Elegí otro."]);
+    });
+    it.each([["network"], ["server"]])("a %s error keeps the draft and suggests checking the memories before retrying", async (kind) => {
+      const { container } = await failWith({ kind });
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Revisá tus recuerdos antes de reintentar por si ya se publicó.");
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    });
+    it("without a new activity the network message has no suggestion", async () => {
+      const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+      const { container } = await render(undefined, { create });
+      await field(container, "description", "Hola"); await submit(container);
+      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    });
+    it("a rejected request is treated as a network error with the suggestion", async () => {
+      const { container } = await failWith(undefined, { create: vi.fn().mockRejectedValue(new Error("down")) });
+      expect(alerts(container)[0]!.textContent).toContain("Revisá tus recuerdos antes de reintentar");
+    });
+    it("a success response without the activity is not announced and does not navigate", async () => {
+      const { container } = await failWith(undefined, { create: vi.fn().mockResolvedValue({ ok: true, value: saved() }) });
+      expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    });
+    it("the composer revalidates an accepted draft against the itinerary it loads: nothing is sent, one alert, focus on the edit action and the draft stays", async () => {
+      // The subform accepts the draft with the full slice; the composer then loads a shorter one (the exit moved up) and must not publish.
+      const shorter = itineraryFixture(); shorter.days[1]!.endsAt = "2026-09-25T16:00:00.123Z";
+      const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: true, value: itineraryFixture() }).mockResolvedValue({ ok: true, value: shorter });
+      const { container, create, update } = await render(undefined, { itineraryGet });
+      await field(container, "description", "Hola"); await addActivity(container);
+      await submit(container);
+      expect(create).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toBe("La actividad terminaría después de la salida del destino. Acortá la duración o elegí otro horario.");
+      expect(document.activeElement).toBe(button(container, "Editar actividad nueva"));
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+      expect(value(container, "description")).toBe("Hola");
+    });
+    it("the subform blocks a start outside the slice before the draft reaches the composer", async () => {
+      const { container, create } = await render();
+      await field(container, "description", "Hola"); await addActivity(container);
+      // The draft is valid when accepted; here it is made invalid through the edit flow with the slice already known.
+      await click(button(container, "Editar actividad nueva"));
+      await field(container, "time", "22:00");
+      await click(button(container, "Aceptar"));
+      expect(alerts(container)[0]?.textContent).toBe("Elegí un horario dentro de la franja de actividad del destino.");
+      expect(create).not.toHaveBeenCalled();
+    });
+    it("lets the server decide when the itinerary could not be loaded in the composer", async () => {
+      const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: true, value: itineraryFixture() }).mockResolvedValue({ ok: false, error: { kind: "network" } });
+      const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+      const { container } = await render(undefined, { create, itineraryGet });
+      await field(container, "description", "Hola"); await addActivity(container); await submit(container);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: newActivityBody });
+    });
+  });
+
+  describe("relink of an existing memory", () => {
+    const withPost = (extra: Partial<PostResponse> = {}) => vi.fn().mockResolvedValue({ ok: true, value: { post: saved(extra), parent: null, children: [], rootActivityId: null } });
+    it("sends newActivity in the PATCH, without activityId and without touching the text", async () => {
+      const update = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+      const { container } = await render(editPath, { update });
+      await addActivity(container); await submit(container);
+      expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { newActivity: newActivityBody });
+      expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("linked-activity");
+    });
+    it("sends parentPostId null when the memory was a continuation", async () => {
+      const update = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+      const { container } = await render(editPath, { update, get: withPost({ parentPostId: otherPostId }) });
+      await addActivity(container); await submit(container);
+      expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { parentPostId: null, newActivity: newActivityBody });
+    });
+    it("tells that it replaces the current activity without deleting it, and never sends activityId", async () => {
+      const update = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+      const { container } = await render(editPath, { update, get: withPost({ activityId }) });
+      expect(container.textContent).not.toContain("Reemplaza el vínculo con la actividad actual");
+      await addActivity(container);
+      expect(container.textContent).toContain("Reemplaza el vínculo con la actividad actual");
+      await submit(container);
+      expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { newActivity: newActivityBody });
+    });
+    it("relinks a memory without text or location (existing rule) and confirms conflicts", async () => {
+      const update = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: true, value: withActivity({ description: null }) });
+      const { container } = await render(editPath, { update, get: withPost({ description: null, mapsUrl: null }) });
+      await addActivity(container); await submit(container);
+      expect(dialog()?.textContent).toContain("Paseo por el centro");
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(update).toHaveBeenNthCalledWith(2, tripId, postId, { newActivity: newActivityBody }, confirmation);
+    });
+    it("Cancel in the modal keeps the edit draft and the memory in place", async () => {
+      const update = vi.fn().mockResolvedValue(conflict);
+      const { container } = await render(editPath, { update });
+      await addActivity(container); await submit(container);
+      await click(button(dialog()!, "Conservar mi participación actual"));
+      expect(update).toHaveBeenCalledTimes(1); expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    });
   });
 });
