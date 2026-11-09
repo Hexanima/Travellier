@@ -173,6 +173,20 @@ describe("itinerary activity flows", () => {
     expect(container.querySelector('[role="dialog"]')!.textContent).not.toContain("Duración");
     expect(container.querySelector('[role="dialog"]')!.textContent).not.toContain("Hasta");
   });
+  it("does not leave blank lines in the detail time paragraph with or without duration", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse; fixture.activities[0].durationMinutes = 90;
+    const { container } = await render(fixture);
+    const paragraph = () => container.querySelector('[role="dialog"] .activity-detail time')!.parentElement!;
+    const brCount = () => paragraph().querySelectorAll("br").length;
+    const consecutiveBr = () => [...paragraph().querySelectorAll("br")].some((br) => br.nextSibling?.nodeName === "BR");
+    await click(container, "Paseo por el centro");
+    expect(brCount()).toBe(3); expect(consecutiveBr()).toBe(false);
+    expect(paragraph().querySelector("time")!.nextSibling?.nodeName).toBe("BR");
+    await click(container, "Cerrar"); await click(container, "Visita al museo");
+    expect(brCount()).toBe(1); expect(consecutiveBr()).toBe(false);
+    expect(paragraph().querySelector("time")!.nextSibling?.nodeName).toBe("BR");
+    expect(paragraph().querySelector("time")!.nextSibling!.nextSibling).toBe(paragraph().querySelector(".activity-context"));
+  });
   it("updates the agenda and the detail after saving a new duration without resending the instant", async () => {
     const { container, update } = await render();
     await click(container, "Paseo por el centro"); await click(container, "Editar actividad");

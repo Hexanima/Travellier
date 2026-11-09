@@ -64,8 +64,8 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       {state.kind === "detail" ? <div className="activity-detail">
         <h3>{state.value.title}</h3>
         {participation}
-        <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br />{range?.endIso ? <><br />Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
-          <br />Duración: {formatDuration(state.value.durationMinutes!)}</> : null}<br /><span className="activity-context">Horarios en {timeZone}</span></p>
+        <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br />{range?.endIso ? <>Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
+          <br />Duración: {formatDuration(state.value.durationMinutes!)}<br /></> : null}<span className="activity-context">Horarios en {timeZone}</span></p>
         {state.value.description ? <p className="activity-description">{state.value.description}</p> : null}
         {maps ? <a className="activity-maps-link" href={maps} target="_blank" rel="noopener noreferrer">Ver vínculo de Maps</a>
           : state.value.mapsUrl ? <p className="activity-context">Vínculo de Maps no válido.</p> : null}
