@@ -13,8 +13,10 @@ export type PostInput = { description?: string | null; mapsUrl?: string | null; 
   newActivity?: NewActivityInput };
 /** `activity` and `participation` are present only when a new activity was sent. */
 export type SavedPost = PostResponse & { activity?: ActivityResponse; participation?: ParticipationResponse | null };
-/** `parent` and `children` are tolerated without deep validation (used by later tasks). */
-export type PostDetail = { post: PostResponse; parent: unknown; children: unknown; rootActivityId: string | null };
+/** Summary of a chained post: the server sends only these fields for the immediate parent and the direct children. */
+export type PostSummary = { id: string; authorId: string; createdAt: string; description: string | null };
+/** `parent` is the immediate parent (null when absent or not visible); `children` are only the direct children, newest first. */
+export type PostDetail = { post: PostResponse; parent: PostSummary | null; children: PostSummary[]; rootActivityId: string | null };
 export type TripPostApi = {
   list: (tripId: string) => Promise<TripResult<PostResponse[]>>;
   get: (tripId: string, postId: string) => Promise<TripResult<PostDetail>>;
@@ -38,6 +40,12 @@ const parsePost = (value: unknown, tripId: string, postId?: string): PostRespons
     activityId: (value.activityId as string | null | undefined) ?? null, parentPostId: (value.parentPostId as string | null | undefined) ?? null,
     transportId: (value.transportId as string | null | undefined) ?? null, createdAt: value.createdAt as string };
 };
+/** Strict: a present summary with an invalid id, timestamp or text is a server failure (no content is invented). */
+const parseSummary = (value: unknown): PostSummary | undefined => {
+  if (!record(value) || !id(value.id) || !id(value.authorId) || !timestamp(value.createdAt) || !nullableText(value.description)) return undefined;
+  return { id: value.id, authorId: value.authorId, createdAt: value.createdAt, description: value.description as string | null };
+};
+const newestFirst = (a: PostSummary, b: PostSummary) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id);
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
 const failure = (error: ApiClientError): TripResult<never> => {
   if (error.status === 409 && error.code === "ParticipationConflictError") {
@@ -87,8 +95,13 @@ export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "pat
     const post = record(result.value) ? parsePost(result.value.post, tripId, postId) : undefined;
     if (!post || !record(result.value)) return server;
     const rootActivityId = result.value.rootActivityId;
-    return { ok: true, value: { post, parent: result.value.parent ?? null, children: result.value.children ?? [],
-      rootActivityId: id(rootActivityId) ? rootActivityId : null } };
+    const rawParent = result.value.parent;
+    const parent = rawParent === undefined || rawParent === null ? null : parseSummary(rawParent);
+    const rawChildren = result.value.children ?? [];
+    if (parent === undefined || !Array.isArray(rawChildren)) return server;
+    const children = rawChildren.map(parseSummary);
+    if (!children.every((child) => child !== undefined)) return server;
+    return { ok: true, value: { post, parent, children: children.sort(newestFirst), rootActivityId: id(rootActivityId) ? rootActivityId : null } };
   },
   create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation)), tripId, undefined, input.newActivity !== undefined),
   update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation)),

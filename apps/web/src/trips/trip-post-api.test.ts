@@ -94,12 +94,34 @@ describe("post HTTP adapter", () => {
     const noId = { ...post(6) } as Record<string, unknown>; delete noId.id;
     expect(await setup({ posts: [noId] }).api.list(tripId)).toEqual({ ok: false, error: { kind: "server" } });
   });
-  it("gets a post, validates it and tolerates parent and children", async () => {
-    const detail = { post: post(), parent: null, children: [{ anything: true }], rootActivityId: null };
+  const summary = (n: number, extra: Record<string, unknown> = {}) => ({ id: itineraryId(n), authorId: itineraryId(20), createdAt: "2026-09-26T10:00:00.000Z", description: `Texto ${n}`, ...extra });
+  it("gets a post, validates it and keeps parent null and no children", async () => {
+    const detail = { post: post(), parent: null, children: [], rootActivityId: null };
     const { api, fetch } = setup(detail);
     expect(await api.get(tripId, itineraryId(5))).toEqual({ ok: true, value: detail });
     expect(sent(fetch).url).toBe(`https://api.test/trips/${tripId}/posts/${itineraryId(5)}`);
     expect(await setup({ ...detail, post: post(5, { createdAt: 1 }) }).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("parses the immediate parent and the direct children, ignoring extra fields", async () => {
+    const detail = { post: post(), parent: summary(3, { likes: 4 }), children: [summary(6, { description: null })], rootActivityId: itineraryId(8) };
+    expect(await setup(detail).api.get(tripId, itineraryId(5))).toEqual({ ok: true, value: { post: post(), parent: summary(3), children: [summary(6, { description: null })], rootActivityId: itineraryId(8) } });
+  });
+  it("treats an absent children as empty and an absent parent as null", async () => {
+    expect(await setup({ post: post(), rootActivityId: null }).api.get(tripId, itineraryId(5))).toEqual({ ok: true, value: { post: post(), parent: null, children: [], rootActivityId: null } });
+  });
+  it("orders the children newest first and by id descending on ties", async () => {
+    const children = [summary(6, { createdAt: "2026-09-26T10:00:00.000Z" }), summary(7, { createdAt: "2026-09-27T10:00:00.000Z" }),
+      summary(9, { createdAt: "2026-09-26T10:00:00.000Z" }), summary(8, { createdAt: "2026-09-25T10:00:00.000Z" })];
+    const result = await setup({ post: post(), parent: null, children, rootActivityId: null }).api.get(tripId, itineraryId(5));
+    expect(result.ok && result.value.children.map((child) => child.id)).toEqual([itineraryId(7), itineraryId(9), itineraryId(6), itineraryId(8)]);
+  });
+  it.each([
+    ["a parent without a valid id", { parent: summary(3, { id: "x" }) }], ["a parent with a malformed createdAt", { parent: summary(3, { createdAt: "ayer" }) }],
+    ["a parent with a numeric description", { parent: summary(3, { description: 4 }) }], ["a parent that is not an object", { parent: "x" }],
+    ["a child with a malformed createdAt", { children: [summary(6, { createdAt: "ayer" })] }], ["a child without an id", { children: [summary(6, { id: undefined })] }],
+    ["children that is not a list", { children: {} }], ["a child with a numeric description", { children: [summary(6, { description: 4 })] }],
+  ])("rejects %s as a server failure without inventing content", async (_name, override) => {
+    expect(await setup({ post: post(), parent: null, children: [], rootActivityId: null, ...override }).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
   });
   it("rejects a fetched post whose id differs from the requested one", async () => {
     expect(await setup({ post: post(6), parent: null, children: [], rootActivityId: null }).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
