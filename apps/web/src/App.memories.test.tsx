@@ -195,3 +195,42 @@ describe("App memories new activity routes", () => {
     expect(api.get).not.toHaveBeenCalled();
   });
 });
+
+describe("App memories detail route", () => {
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+  const detail = (extra: Record<string, unknown> = {}) => ({ post: saved(), parent: null, children: [], rootActivityId: null, ...extra });
+  it("renders the detail with a session and requests only that post", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() }), list = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get, list } });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.textContent).toContain("Atardecer");
+    expect(get).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    expect(list).not.toHaveBeenCalled();
+  });
+  it("redirects to login without a session and requests nothing", async () => {
+    const get = vi.fn(), list = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth: {}, sessionStorage: storage(false), posts: { get, list } });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(container.querySelector("h1")?.textContent).not.toBe("Recuerdo");
+    expect(get).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
+  });
+  it("keeps static routes ahead of :postId so new is the composer and not a detail", async () => {
+    const get = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), posts: { get } });
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("opens the detail from the diary, shows its chain and goes back to the diary", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const parentId = itineraryId(31), childId = itineraryId(32);
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ parent: { id: parentId, authorId: itineraryId(20), createdAt: "2026-01-01T10:00:00.000Z", description: "Antes" },
+      children: [{ id: childId, authorId: itineraryId(20), createdAt: "2026-01-03T10:00:00.000Z", description: "Después" }], post: saved({ parentPostId: parentId }) }) });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/${parentId}"]`)?.textContent).toBe("Antes");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/${childId}"]`)?.textContent).toBe("Después");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+});
