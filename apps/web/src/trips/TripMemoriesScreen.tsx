@@ -3,6 +3,8 @@ import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
+import { PostLink, useRestorePosition } from "./post-navigation.js";
+import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
 import "./itinerary.css";
 
@@ -78,6 +80,7 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
     void load();
     return () => { cancelled = true; };
   }, [tripId, posts, attempt]);
+  useRestorePosition(state.kind === "ready");
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
@@ -109,8 +112,9 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
         <Link to={create}>Crear el primer recuerdo</Link>
       </section> : null}
       {state.kind === "ready" && state.posts.length > 0 ? <List className="itinerary-posts memories-list" aria-label="Recuerdos">
-        {state.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-memory={post.id}>
-          <p className="itinerary-post-description">{post.description ?? "Recuerdo sin texto."}</p>
+        {state.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-memory={post.id} tabIndex={-1}>
+          <p className="itinerary-post-description"><PostLink tripId={tripId ?? ""} postId={post.id} anchor={memoryAnchor(post.id)} label="diario">
+            {post.description ?? "Recuerdo sin texto."}</PostLink></p>
           <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
           <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
         </ListItem>)}

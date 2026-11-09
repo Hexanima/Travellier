@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoriesLayout, TripMemoriesScreen } from "./TripMemoriesScreen.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
 import type { PostResponse } from "./trip-post-api.js";
@@ -124,5 +124,92 @@ describe("TripMemoriesScreen", () => {
   it("ignores an unknown notice", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }), { post: post(20, "2026-01-05T10:00:00.000Z"), notice: "other" });
     expect(container.textContent).toContain("Todavía no hay recuerdos.");
+  });
+});
+
+describe("TripMemoriesScreen detail links and restoration", () => {
+  type Entry = { pathname: string; search: string; state: unknown };
+  const seen: Entry[] = [];
+  function Spy() { const location = useLocation(); seen.push({ pathname: location.pathname, search: location.search, state: location.state }); return null; }
+  function Detail() { const navigate = useNavigate(); return <button onClick={() => navigate(-1)}>atrás</button>; }
+  const scrollIntoView = vi.fn(); const scrollTo = vi.fn();
+  const setScroll = (value: number) => Object.defineProperty(window, "scrollY", { value, configurable: true });
+  beforeEach(() => {
+    seen.length = 0; scrollIntoView.mockReset(); scrollTo.mockReset(); setScroll(0);
+    Element.prototype.scrollIntoView = scrollIntoView; window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+  });
+  async function open(list: ReturnType<typeof vi.fn>, state?: unknown) {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/trips/${tripId}/memories`, state }]}><Spy /><Routes>
+      <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
+        <Route index element={<TripMemoriesScreen posts={{ list }} timeZone="America/Argentina/Buenos_Aires" />} />
+        <Route path=":postId" element={<Detail />} />
+      </Route>
+    </Routes></MemoryRouter>));
+    return container;
+  }
+  const anchor = (n: number) => `data-memory=${itineraryId(n)}`;
+  const listOf = (...posts: PostResponse[]) => vi.fn().mockResolvedValue({ ok: true, value: posts });
+  const last = () => seen[seen.length - 1];
+
+  it("links each excerpt to the detail and keeps Editar and Nuevo recuerdo", async () => {
+    const container = await open(listOf(post(11, "2026-01-02T10:00:00.000Z"), post(12, "2026-01-03T10:00:00.000Z", null)));
+    expect(texts(container)).toEqual(["Recuerdo sin texto.", "Recuerdo 11"]);
+    expect(container.querySelector(`li[data-memory="${itineraryId(11)}"] a[href="/trips/${tripId}/memories/${itineraryId(11)}"]`)?.textContent).toBe("Recuerdo 11");
+    expect(container.querySelector(`li[data-memory="${itineraryId(12)}"] a[href="/trips/${tripId}/memories/${itineraryId(12)}"]`)?.textContent).toBe("Recuerdo sin texto.");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/${itineraryId(11)}/edit"]`)?.textContent).toBe("Editar");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/new"]`)?.textContent).toBe("Nuevo recuerdo");
+  });
+  it("shows posts dated outside the trip, newest first and unfiltered", async () => {
+    const container = await open(listOf(post(11, "2020-01-02T10:00:00.000Z"), post(12, "2030-01-03T10:00:00.000Z"), post(13, "2026-06-01T10:00:00.000Z")));
+    expect(texts(container)).toEqual(["Recuerdo 12", "Recuerdo 13", "Recuerdo 11"]);
+  });
+  it("saves the anchor and scroll in the current entry and then opens the detail with the origin", async () => {
+    setScroll(480);
+    const container = await open(listOf(post(11, "2026-01-02T10:00:00.000Z")));
+    await click(container.querySelector(`li[data-memory="${itineraryId(11)}"] a`));
+    const entries = seen.map((entry) => entry.pathname);
+    expect(entries.slice(-2)).toEqual([`/trips/${tripId}/memories`, `/trips/${tripId}/memories/${itineraryId(11)}`]);
+    expect(last().state).toEqual({ origin: { path: `/trips/${tripId}/memories`, label: "diario", anchor: anchor(11), scrollY: 480 } });
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "atrás"));
+    expect(seen.some((entry) => entry.pathname === `/trips/${tripId}/memories` && JSON.stringify(entry.state) === JSON.stringify({ restore: { anchor: anchor(11), scrollY: 480 } }))).toBe(true);
+    expect(last().state).toBeNull();
+  });
+  it("restores the anchor when coming back, only after the list is ready, once, and cleans the state", async () => {
+    const pending = deferred<unknown>();
+    const list = vi.fn().mockReturnValue(pending.promise);
+    const container = await open(list, { restore: { anchor: anchor(11), scrollY: 300 } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(last().state).toEqual({ restore: { anchor: anchor(11), scrollY: 300 } });
+    await act(async () => pending.resolve({ ok: true, value: [post(11, "2026-01-02T10:00:00.000Z"), post(12, "2026-01-01T10:00:00.000Z")] }));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(container.querySelector(`[data-memory="${itineraryId(11)}"]`));
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(document.activeElement).toBe(container.querySelector(`[data-memory="${itineraryId(11)}"]`));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(last().state).toBeNull();
+  });
+  it("falls back to the saved scroll when the anchor no longer exists, without errors or messages", async () => {
+    const container = await open(listOf(post(12, "2026-01-01T10:00:00.000Z")), { restore: { anchor: anchor(11), scrollY: 300 } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith(0, 300);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(last().state).toBeNull();
+  });
+  it("does not restore anything for a malformed restore state", async () => {
+    await open(listOf(post(11, "2026-01-02T10:00:00.000Z")), { restore: { anchor: "[data-memory]", scrollY: 3 } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+  it("restores the place after opening a detail and going back", async () => {
+    setScroll(200);
+    const container = await open(listOf(post(11, "2026-01-02T10:00:00.000Z")));
+    await click(container.querySelector(`li[data-memory="${itineraryId(11)}"] a`));
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "atrás"));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(last().pathname).toBe(`/trips/${tripId}/memories`);
   });
 });
