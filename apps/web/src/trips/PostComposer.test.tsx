@@ -685,6 +685,17 @@ describe("PostComposer (new activity)", () => {
       expect(create).toHaveBeenCalledTimes(2);
       expect(dialog()?.querySelector('[role="alert"]')?.textContent).toContain("Los datos cambiaron");
     });
+    it.each([
+      ["activity", { field: "durationMinutes", code: "outside_window" }, "Editar actividad nueva"],
+      ["link", { field: "transportId", code: "not_found" }, "Vincular a"],
+    ])("a 422 on the %s after confirming closes the modal and leaves the focus on the error, not on the publish button", async (_kind, item, focused) => {
+      const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ ...item, message: "x" }] } });
+      const { container } = await publish(create);
+      await click(button(dialog()!, "Cambiar de plan"));
+      expect(dialog()).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(document.activeElement).toBe(button(container, focused));
+    });
     it("a double click on Cambiar de plan sends once", async () => {
       const pending = deferred<unknown>();
       const create = vi.fn().mockResolvedValueOnce(conflict).mockReturnValueOnce(pending.promise);
@@ -764,7 +775,21 @@ describe("PostComposer (new activity)", () => {
       expect(alerts(container)).toHaveLength(1);
       expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
     });
-    it("blocks a start outside the slice before calling the server when the itinerary is loaded", async () => {
+    it("the composer revalidates an accepted draft against the itinerary it loads: nothing is sent, one alert, focus on the edit action and the draft stays", async () => {
+      // The subform accepts the draft with the full slice; the composer then loads a shorter one (the exit moved up) and must not publish.
+      const shorter = itineraryFixture(); shorter.days[1]!.endsAt = "2026-09-25T16:00:00.123Z";
+      const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: true, value: itineraryFixture() }).mockResolvedValue({ ok: true, value: shorter });
+      const { container, create, update } = await render(undefined, { itineraryGet });
+      await field(container, "description", "Hola"); await addActivity(container);
+      await submit(container);
+      expect(create).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toBe("La actividad terminaría después de la salida del destino. Acortá la duración o elegí otro horario.");
+      expect(document.activeElement).toBe(button(container, "Editar actividad nueva"));
+      expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+      expect(value(container, "description")).toBe("Hola");
+    });
+    it("the subform blocks a start outside the slice before the draft reaches the composer", async () => {
       const { container, create } = await render();
       await field(container, "description", "Hola"); await addActivity(container);
       // The draft is valid when accepted; here it is made invalid through the edit flow with the slice already known.

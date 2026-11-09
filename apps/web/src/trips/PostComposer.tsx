@@ -83,6 +83,15 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   }, [tripId, postId, posts, attempt]);
   // Runs after Modal's own effect: the initial focus goes to the safe action.
   useEffect(() => { if (confirmingDiscard) keepRef.current?.focus(); }, [confirmingDiscard]);
+  // Once the conflict modal closes and the save settles, the focus returns to the publish button (the busy modal had left it on <body>).
+  // It must be declared before the next effect: both can run in the same commit (a 422 after confirming) and the error focus has to win.
+  useEffect(() => {
+    if (pending) { hadPending.current = true; return; }
+    if (hadPending.current && !saving) {
+      hadPending.current = false;
+      formRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
+    }
+  }, [pending, saving]);
   // The fields are disabled while saving: focus the first one with an error once the save has settled.
   useEffect(() => {
     if (!focusPending.current || saving) return;
@@ -114,14 +123,6 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   };
   const wantsItinerary = newActivity !== null;
   useEffect(() => { if (wantsItinerary && tripId) void loadItinerary(); }, [wantsItinerary, tripId]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Once the conflict modal closes and the save settles, the focus returns to the publish button (the busy modal had left it on <body>).
-  useEffect(() => {
-    if (pending) { hadPending.current = true; return; }
-    if (hadPending.current && !saving) {
-      hadPending.current = false;
-      formRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
-    }
-  }, [pending, saving]);
   const update = (field: "description" | "mapsUrl", value: string) => {
     handle.setDraft({ ...draft, values: { ...draft.values, [field]: value } });
     setErrors((current) => { const next = { ...current }; delete next[field]; return next; });
