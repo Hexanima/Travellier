@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
 
@@ -58,38 +58,95 @@ describe("itinerary screen", () => {
     expect(JSON.stringify(value)).toBe(before);
   });
   it("shows activity posts in context once with their own UTC publication instant and expense", async () => {
-    const value = fixture(); value.posts[0].activityId = itineraryId(8); value.posts[0].transportId = itineraryId(6);
+    const value = fixture(); linkPost(value.posts[0], { activityId: itineraryId(8), transportId: itineraryId(6) });
     value.activities[0].postIds = [itineraryId(10)]; value.transports[0].postIds.push(itineraryId(10));
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(10)}"]`)).toHaveLength(1);
     expect(container.querySelector(`[data-itinerary-item="${itineraryId(8)}"]`)?.textContent).toContain("Almuerzo junto al río");
     expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] time`)?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
   });
-  it.each(["UTC", "America/Argentina/Buenos_Aires"])("renders a daily chronological agenda while preserving a late transit post's band in %s", async (timeZone) => {
+  it.each(["UTC", "America/Argentina/Buenos_Aires"])("renders a daily chronological agenda with transport posts nested under their transport in %s", async (timeZone) => {
     const value = fixture(); value.posts[1].createdAt = value.posts[0].createdAt;
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }), timeZone);
     const day = container.querySelector('[data-itinerary-date="2026-09-25"]');
     expect(Array.from(day!.querySelectorAll('[data-itinerary-item]')).map((item) => item.getAttribute("data-itinerary-item")))
-      .toEqual([6, 8, 10, 11, 9, 7].map(itineraryId));
+      .toEqual([6, 8, 10, 9, 7].map(itineraryId));
     const post = day?.querySelector(`[data-itinerary-post="${itineraryId(11)}"]`);
     expect(post?.closest('[data-itinerary-kind]')?.getAttribute("data-itinerary-kind")).toBe("transit_out");
+    expect(post?.closest(`[data-itinerary-item="${itineraryId(6)}"]`)).not.toBeNull();
+    expect(day?.querySelector(`[data-itinerary-item="${itineraryId(6)}"] [aria-label="Recuerdos de Auto"]`)).not.toBeNull();
     expect(post?.textContent).toContain("Vinculado a transporte");
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(11)}"]`)).toHaveLength(1);
     const labels = Array.from(day!.querySelectorAll('[aria-labelledby]')).map((node) => node.getAttribute("aria-labelledby"));
     expect(labels.every((label) => container.querySelectorAll(`[id="${label}"]`).length === 1)).toBe(true);
   });
-  it("shows a late post and its expense once when its canonical day splits across local dates", async () => {
+  it("shows a descendant of an activity under it once, with its relation, and not as a loose post of the day", async () => {
+    const value = fixture();
+    linkPost(value.posts[0], { activityId: itineraryId(8) });
+    const child = linkPost({ ...fixture().posts[0], id: itineraryId(41), description: "Respuesta al almuerzo", expense: null, createdAt: "2026-09-25T15:00:00.000Z" },
+      { parentPostId: itineraryId(10), rootActivityId: itineraryId(8) });
+    value.posts.push(child); value.activities[0].postIds = [itineraryId(10), child.id];
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    expect(container.querySelectorAll(`[data-itinerary-post="${child.id}"]`)).toHaveLength(1);
+    expect(container.querySelector(`[data-itinerary-item="${itineraryId(8)}"] [data-itinerary-post="${child.id}"]`)?.textContent).toContain("Relacionado con otro post");
+    expect(container.querySelector(`[data-itinerary-item="${child.id}"]`)).toBeNull();
+  });
+  it("labels relations from the context, even when the post's own links are empty", async () => {
+    const value = fixture();
+    // The parent is not in posts[] (it is unplaced): the top-level parentPostId is null but the context keeps the real parent.
+    const parent = { ...fixture().posts[0], id: itineraryId(60), createdAt: "2025-01-01T00:00:00.000Z", expense: null };
+    value.unplacedPosts = [parent];
+    const descendant = linkPost({ ...fixture().posts[0], id: itineraryId(61), description: "Nieto del transporte", expense: null }, { rootTransportId: itineraryId(6) });
+    descendant.context = { ...descendant.context, parentPostId: parent.id, rootPostId: parent.id };
+    value.posts.push(descendant);
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    const node = container.querySelector(`[data-itinerary-item="${itineraryId(6)}"] [data-itinerary-post="${descendant.id}"]`);
+    expect(descendant.transportId).toBeNull(); expect(descendant.parentPostId).toBeNull();
+    expect(node?.textContent).toContain("Vinculado a transporte");
+    expect(node?.textContent).toContain("Relacionado con otro post");
+  });
+  it("lists posts outside the itinerary in their own section, with their expense, without adding it to any day", async () => {
+    const value = fixture();
+    value.unplacedPosts = [{ ...fixture().posts[0], id: itineraryId(50), description: "Foto previa al viaje", createdAt: "2026-08-01T12:00:00.000Z",
+      expense: { ...fixture().posts[0].expense!, id: itineraryId(51), postId: itineraryId(50), totalAmount: 99 } }];
+    value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    const section = container.querySelector('section[aria-labelledby="itinerary-outside-posts"]');
+    expect(section?.querySelector("h2")?.textContent).toBe("Publicaciones fuera del itinerario");
+    expect(Array.from(section!.querySelectorAll("[data-itinerary-post]")).map((n) => n.getAttribute("data-itinerary-post")))
+      .toEqual([itineraryId(50), itineraryId(10)]);
+    expect(section?.textContent).toContain("Gasto: 99");
+    expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
+    expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(50)}"]`)).toHaveLength(1);
+  });
+  it("shows the outside section even when the trip has no itinerary days", async () => {
+    const value: TripItineraryResponse = { ...fixture(), days: [], activities: [], transports: [], posts: [],
+      unplacedPosts: [{ ...fixture().posts[0], id: itineraryId(50), description: "Sin viaje aún" }] };
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
+    expect(container.textContent).toContain("Todavía no hay itinerario");
+    expect(container.querySelector('[data-itinerary-post]')?.textContent).toContain("Sin viaje aún");
+    expect(container.textContent).toContain("Publicaciones fuera del itinerario");
+  });
+  it("does not show the section when every post is placed, and never labels a band as arrival", async () => {
+    const { container } = await render();
+    expect(container.textContent).not.toContain("Publicaciones fuera del itinerario");
+    expect(Array.from(container.querySelectorAll("h3")).map((h) => h.textContent)).toEqual(["Tránsito de ida", "Actividades", "Tránsito de vuelta"]);
+    expect(container.querySelector('[data-itinerary-kind="arrival"]')).toBeNull();
+  });
+  it("shows a post published outside the trip dates once, outside the itinerary and without adding its expense to a day", async () => {
     const value = fixture();
     value.days = [{ ...value.days[1], startsAt: "2026-09-25T00:00:00.123Z", endsAt: "2026-09-25T08:00:00.456Z", items: [] }];
     value.activities = []; value.transports = []; value.posts = [value.posts[0]];
     value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
     expect(container.querySelectorAll(`[data-itinerary-post="${value.posts[0].id}"]`)).toHaveLength(1);
-    const day = container.querySelector('[data-itinerary-date="2026-09-24"]');
-    expect(day?.textContent).toContain("Almuerzo junto al río");
-    expect(day?.querySelector('[data-itinerary-expenses]')?.textContent).toContain("25,5");
-    expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
-    expect(day?.querySelector(`[data-itinerary-post="${value.posts[0].id}"] time`)?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
+    const post = container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`);
+    expect(post?.closest("section")?.getAttribute("aria-labelledby")).toBe("itinerary-outside-posts");
+    expect(container.querySelector('[data-itinerary-date] [data-itinerary-post]')).toBeNull();
+    expect(post?.textContent).toContain("Gasto: 25,5");
+    for (const date of ["2026-09-24", "2026-09-25"])
+      expect(container.querySelector(`[data-itinerary-date="${date}"] [data-itinerary-expenses]`)?.textContent).toContain("Sin gastos registrados.");
+    expect(post?.querySelector("time")?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
   });
   it.each(["UTC", "America/Argentina/Buenos_Aires"])("shows a linked post under its activity across canonical days in %s", async (timeZone) => {
     const value = fixture();
@@ -99,14 +156,15 @@ describe("itinerary screen", () => {
     ];
     value.transports = []; value.activities = [value.activities[0]]; value.posts = [value.posts[0]];
     value.activities[0].scheduledAt = "2026-09-24T23:00:00.000Z"; value.activities[0].postIds = [value.posts[0].id];
-    value.posts[0].dayId = itineraryId(30); value.posts[0].activityId = value.activities[0].id;
+    linkPost(value.posts[0], { activityId: value.activities[0].id });
     value.posts[0].createdAt = "2026-09-25T01:00:00.000Z";
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }), timeZone);
     const postSelector = `[data-itinerary-post="${value.posts[0].id}"]`;
     expect(container.querySelectorAll(postSelector)).toHaveLength(1);
     expect(container.querySelector(`[data-itinerary-item="${value.activities[0].id}"] ${postSelector}`)).not.toBeNull();
-    expect(container.querySelector(`[data-itinerary-date="${timeZone === "UTC" ? "2026-09-25" : "2026-09-24"}"] [data-itinerary-expenses]`)?.textContent).toContain("25,5");
-    if (timeZone === "UTC") expect(container.querySelector('[data-itinerary-date="2026-09-24"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
+    // The expense follows the root activity's local day, not the publication day.
+    expect(container.querySelector('[data-itinerary-date="2026-09-24"] [data-itinerary-expenses]')?.textContent).toContain("25,5");
+    if (timeZone === "UTC") expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
   });
   it("shows the empty state and a link to configuring transport", async () => {
     const value = { ...fixture(), days: [], activities: [], posts: [], transports: [] };

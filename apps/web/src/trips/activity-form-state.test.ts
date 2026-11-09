@@ -111,7 +111,7 @@ describe("activity form state", () => {
     ctx.days.push({ ...ctx.days[1], id: "000000000000000000000099", date: endsAt, startsAt: endsAt, endsAt: "2026-09-26T10:00:00.000Z" });
     expect(prepareActivityInput({ ...values(), date: "2026-09-26", time: "00:00" }, ctx).ok).toBe(false);
   });
-  it.each(["transit_out", "transit_return", "arrival"] as const)("rejects %s as a creation day", (type) => {
+  it.each(["transit_out", "transit_return"] as const)("rejects %s as a creation day", (type) => {
     const ctx = context(); ctx.days[1].type = type;
     expect(prepareActivityInput(values(), ctx).ok).toBe(false);
   });
