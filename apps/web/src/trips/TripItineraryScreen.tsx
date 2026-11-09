@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
-import { projectTripItinerary, type ItineraryViewItem } from "./trip-itinerary-view.js";
+import { projectItineraryView, type ItineraryViewItem } from "./trip-itinerary-view.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityClock, formatActivityRange } from "./activity-time-format.js";
 import { ActivityDialog, type ActivityDialogRequest } from "./ActivityDialog.js";
@@ -16,7 +16,7 @@ import "./itinerary.css";
 
 type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; timeZone?: string };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
-const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta", arrival: "Llegada" };
+const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
 const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 
@@ -84,7 +84,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
       if (current.kind !== "ready") return current;
       return { kind: "ready", value: { ...current.value,
         activities: [...current.value.activities.filter((a) => a.id !== activity.id), { ...activity,
-          postIds: current.value.posts.filter((post) => post.activityId === activity.id).map((post) => post.id) }],
+          // Keep the known memories (the server decides membership); an edit never changes them and a new activity has none.
+          postIds: current.value.activities.find((a) => a.id === activity.id)?.postIds ?? [] }],
         days: current.value.days.map((day) => ({ ...day, items: [
           ...day.items.filter((item) => !(item.kind === "activity" && item.id === activity.id)),
           ...(day.id === activity.dayId ? [{ kind: "activity" as const, id: activity.id, at: activity.scheduledAt }] : []),
@@ -93,7 +94,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     });
     setSaved(true); setDialog(undefined); setAttempt((value) => value + 1);
   };
-  const days = state.kind === "ready" ? projectTripItinerary(state.value, timeZone) : [];
+  const { days, outsidePosts } = state.kind === "ready" ? projectItineraryView(state.value, timeZone) : { days: [], outsidePosts: [] };
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -155,6 +156,12 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
           </div>
         </section>)}
       </div> : null}
+      {state.kind === "ready" && outsidePosts.length > 0 ? <section className="itinerary-outside-posts" aria-labelledby="itinerary-outside-posts">
+        <h2 id="itinerary-outside-posts">Publicaciones fuera del itinerario</h2>
+        <List className="itinerary-posts">
+          {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}
+        </List>
+      </section> : null}
       {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <div className="participation-conflict-layer"><ParticipationConflictModal
         conflicts={confirming.confirming.confirmation.confirmedConflicts} activities={state.value.activities} timeZone={timeZone}
         stale={confirming.confirming.stale} saving={!!confirming.saving}
@@ -178,6 +185,9 @@ function AgendaItem({ item, publication, timeZone, onActivity, disabled, partici
         <p>{item.transport.departurePlace} → {item.transport.arrivalPlace}</p>
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
+        {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Recuerdos de ${transportLabels[item.transport.type]}`}>
+          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}
+        </List> : null}
       </> : item.kind === "activity" ? <>
         <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
         {item.activity.description ? <p>{item.activity.description}</p> : null}
@@ -196,8 +206,8 @@ function PostSummary({ post, publication }: { post: ItineraryPostResponse; publi
   return <div data-itinerary-post={post.id}>
     <p className="itinerary-post-description">{post.description ?? "Post sin descripción."}</p>
     <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
-    {post.transportId !== null ? <p className="itinerary-secondary">Vinculado a transporte</p> : null}
-    {post.parentPostId !== null ? <p className="itinerary-secondary">Relacionado con otro post</p> : null}
+    {post.context.rootTransportId !== null ? <p className="itinerary-secondary">Vinculado a transporte</p> : null}
+    {post.context.parentPostId !== null ? <p className="itinerary-secondary">Relacionado con otro post</p> : null}
     {post.expense !== null ? <p className="itinerary-post-expense"><strong>Gasto: {amount(post.expense.totalAmount)}</strong>
       {post.expense.breakdown ? <span>{post.expense.breakdown}</span> : null}</p> : null}
   </div>;

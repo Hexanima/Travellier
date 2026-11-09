@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { ActivityInput } from "./trip-activity-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
@@ -115,7 +115,7 @@ describe("itinerary activity flows", () => {
   });
   it("opens detail, edits, and reorders without duplicating associated posts", async () => {
     const fixture = itineraryFixture() as TripItineraryResponse; fixture.activities[0].mapsUrl = "https://maps.app.goo.gl/example";
-    fixture.posts[0].activityId = fixture.activities[0].id; fixture.activities[0].postIds = [fixture.posts[0].id];
+    linkPost(fixture.posts[0], { activityId: fixture.activities[0].id }); fixture.activities[0].postIds = [fixture.posts[0].id];
     const { container, get, update } = await render(fixture);
     await click(container, "Paseo por el centro");
     expect(get).toHaveBeenCalledWith(fixture.tripId, itineraryId(8));
@@ -126,14 +126,21 @@ describe("itinerary activity flows", () => {
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(10)}"]`)).toHaveLength(1);
     expect(Array.from(container.querySelectorAll('[data-itinerary-kind="activity"] [data-itinerary-item]')).map((i) => i.getAttribute("data-itinerary-item"))).toEqual([itineraryId(9), itineraryId(8)]);
   });
-  it("reschedules to another local date of the same destination and moves the activity with its linked posts", async () => {
+  const withDescendant = () => {
     const fixture = itineraryFixture() as TripItineraryResponse;
     const next = { ...fixture.days[1], id: itineraryId(40), date: "2026-09-26T00:00:00.000Z",
       startsAt: "2026-09-26T00:00:00.000Z", endsAt: "2026-09-26T18:00:00.000Z", items: [] };
     fixture.days.push(next);
-    fixture.posts[0].activityId = fixture.activities[0].id;
-    fixture.activities[0].postIds = [fixture.posts[0].id];
-    const originalPostDayId = fixture.posts[0].dayId;
+    linkPost(fixture.posts[0], { activityId: fixture.activities[0].id });
+    // A descendant carries no own activityId: only its context points to the root activity.
+    const child = linkPost({ ...fixture.posts[0], id: itineraryId(41), description: "Respuesta", expense: null, createdAt: "2026-09-25T15:00:00.000Z" },
+      { parentPostId: fixture.posts[0].id, rootActivityId: fixture.activities[0].id });
+    fixture.posts.push(child);
+    fixture.activities[0].postIds = [fixture.posts[0].id, child.id];
+    return { fixture, next, child };
+  };
+  it("reschedules to another local date of the same destination and moves the activity with its linked posts and descendants", async () => {
+    const { fixture, next, child } = withDescendant();
     const { container, update, getItinerary } = await render(fixture);
     await click(container, "Paseo por el centro"); await click(container, "Editar actividad");
     await field(container, "date", "2026-09-26"); await save(container);
@@ -142,9 +149,23 @@ describe("itinerary activity flows", () => {
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(container.querySelector('[data-itinerary-date="2026-09-25"]')?.textContent).not.toContain("Paseo por el centro");
     expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).toContain("Paseo por el centro");
-    expect(container.querySelector('[data-itinerary-date="2026-09-26"] [data-itinerary-post]')?.getAttribute("data-itinerary-post")).toBe(fixture.posts[0].id);
-    expect(container.querySelectorAll(`[data-itinerary-post="${fixture.posts[0].id}"]`)).toHaveLength(1);
-    expect(fixture.posts[0].dayId).toBe(originalPostDayId);
+    const moved = Array.from(container.querySelectorAll('[data-itinerary-date="2026-09-26"] [data-itinerary-post]')).map((n) => n.getAttribute("data-itinerary-post"));
+    expect(moved).toEqual([fixture.posts[0].id, child.id]);
+    for (const post of fixture.posts.slice(0, 1).concat(child)) expect(container.querySelectorAll(`[data-itinerary-post="${post.id}"]`)).toHaveLength(1);
+  });
+  it("keeps the descendants under the edited activity before the refresh arrives", async () => {
+    const { fixture, child } = withDescendant();
+    const { container, update, getItinerary } = await render(fixture);
+    await click(container, "Paseo por el centro"); await click(container, "Editar actividad");
+    let resolve!: (value: unknown) => void;
+    getItinerary.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await field(container, "time", "14:00"); await save(container);
+    expect(update).toHaveBeenCalledOnce();
+    const nested = () => container.querySelector(`[data-itinerary-item="${itineraryId(8)}"] [data-itinerary-post="${child.id}"]`);
+    expect(nested()).not.toBeNull();
+    expect(container.querySelectorAll(`[data-itinerary-post="${child.id}"]`)).toHaveLength(1);
+    await act(async () => resolve({ ok: true, value: structuredClone(fixture) }));
+    expect(nested()).not.toBeNull();
   });
   const row = (container: HTMLElement, n: number) => container.querySelector<HTMLElement>(`[data-itinerary-item="${itineraryId(n)}"]`)!;
   it("shows the derived end and duration in the agenda only when a duration exists", async () => {
