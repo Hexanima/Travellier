@@ -32,10 +32,10 @@ describe("post HTTP adapter", () => {
     await api.update(tripId, itineraryId(5), { description: "x", createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4) } as PostInput);
     expect(sent(fetch).body).toEqual({ description: "x" });
   });
-  it("creates with the link fields and still drops createdAt, dayId and newActivity", async () => {
+  it("creates with the link fields and still drops createdAt and dayId", async () => {
     const { api, fetch } = setup({ post: post() }, 201);
     const forced = { description: "Texto", parentPostId: itineraryId(8), activityId: itineraryId(9), transportId: itineraryId(10),
-      createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4), newActivity: { title: "x" } } as PostInput;
+      createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4) } as PostInput;
     await api.create(tripId, forced);
     expect(sent(fetch)).toEqual({ url: `https://api.test/trips/${tripId}/posts`, method: "POST",
       body: { description: "Texto", parentPostId: itineraryId(8), activityId: itineraryId(9), transportId: itineraryId(10) } });
@@ -103,5 +103,64 @@ describe("post HTTP adapter", () => {
   });
   it("rejects a fetched post whose id differs from the requested one", async () => {
     expect(await setup({ post: post(6), parent: null, children: [], rootActivityId: null }).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
+  });
+});
+
+describe("post HTTP adapter with a new activity", () => {
+  const scheduledAt = "2026-09-25T15:00:00.000Z";
+  const newActivity = { title: "Cena", scheduledAt, durationMinutes: 90 };
+  const activity = (extra: Record<string, unknown> = {}) => ({ id: itineraryId(8), tripId, dayId: itineraryId(4), title: "Cena", description: null, mapsUrl: null,
+    scheduledAt, durationMinutes: 90, createdAt: "2026-09-25T10:00:00.123Z", createdBy: itineraryId(20), ...extra });
+  const participation = { id: itineraryId(50), tripId, activityId: itineraryId(8), userId: itineraryId(20), status: "going", updatedAt: "2026-09-25T12:00:00.123Z" };
+  const confirmation = { confirmedConflicts: [{ activityId: itineraryId(9), reason: "overlap" as const, scheduledAt: "2026-09-25T14:30:00.000Z", durationMinutes: 60 }],
+    confirmedActivity: { scheduledAt, durationMinutes: 90 } };
+  const conflictBody = { error: { code: "ParticipationConflictError", message: "x", conflicts: confirmation.confirmedConflicts, activity: confirmation.confirmedActivity } };
+  it("creates sending newActivity and the confirmation at the root, and returns activity and participation", async () => {
+    const { api, fetch } = setup({ post: post(), activity: activity(), participation }, 201);
+    const result = await api.create(tripId, { description: "Texto", newActivity }, confirmation);
+    expect(result).toEqual({ ok: true, value: { ...post(), activity: activity(), participation } });
+    expect(sent(fetch)).toEqual({ url: `https://api.test/trips/${tripId}/posts`, method: "POST",
+      body: { description: "Texto", newActivity, confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } });
+  });
+  it("never sends dayId inside newActivity or at the root, even when forced", async () => {
+    const { api, fetch } = setup({ post: post(), activity: activity(), participation }, 201);
+    await api.create(tripId, { description: "Texto", dayId: itineraryId(4), newActivity: { ...newActivity, dayId: itineraryId(4) } } as PostInput);
+    expect(sent(fetch).body).toEqual({ description: "Texto", newActivity });
+  });
+  it("updates sending newActivity with an explicit null parent and the confirmation", async () => {
+    const { api, fetch } = setup({ post: post(), activity: activity(), participation });
+    const result = await api.update(tripId, itineraryId(5), { parentPostId: null, newActivity }, confirmation);
+    expect(result).toEqual({ ok: true, value: { ...post(), activity: activity(), participation } });
+    expect(sent(fetch)).toEqual({ url: `https://api.test/trips/${tripId}/posts/${itineraryId(5)}`, method: "PATCH",
+      body: { parentPostId: null, newActivity, confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } });
+  });
+  it("keeps a saved activity with participation null when the participation is invalid", async () => {
+    const { api } = setup({ post: post(), activity: activity(), participation: { ...participation, status: "confirmed" } }, 201);
+    expect(await api.create(tripId, { description: "Texto", newActivity })).toEqual({ ok: true, value: { ...post(), activity: activity(), participation: null } });
+  });
+  it.each([["missing", undefined], ["from another trip", activity({ tripId: itineraryId(2) })], ["without a title", activity({ title: "" })]])(
+    "is a server failure when newActivity was sent and the response activity is %s", async (_name, value) => {
+      expect(await setup({ post: post(), activity: value }, 201).api.create(tripId, { description: "Texto", newActivity })).toEqual({ ok: false, error: { kind: "server" } });
+      expect(await setup({ post: post(), activity: value }).api.update(tripId, itineraryId(5), { newActivity })).toEqual({ ok: false, error: { kind: "server" } });
+    });
+  it("returns only the post when no newActivity was sent, ignoring any activity in the response", async () => {
+    const result = await setup({ post: post(), activity: activity(), participation }, 201).api.create(tripId, { description: "Texto" });
+    expect(result).toStrictEqual({ ok: true, value: post() });
+  });
+  it("maps a valid 409 to participation-conflict on create and update", async () => {
+    expect(await setup(conflictBody, 409).api.create(tripId, { newActivity })).toEqual({ ok: false, error: { kind: "participation-conflict", confirmation } });
+    expect(await setup(conflictBody, 409).api.update(tripId, itineraryId(5), { newActivity })).toEqual({ ok: false, error: { kind: "participation-conflict", confirmation } });
+  });
+  it("treats a malformed 409 as a server failure", async () => {
+    expect(await setup({ error: { code: "ParticipationConflictError", message: "x", conflicts: [] } }, 409).api.create(tripId, { newActivity })).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it.each([["scheduledAt"], ["durationMinutes"]])("keeps the %s validation field with its code from a 422", async (field) => {
+    const { api } = setup({ error: { code: "ValidationError", message: "x", fields: [{ field, code: "outside_window", message: "Fuera" }] } }, 422);
+    expect(await api.create(tripId, { newActivity })).toEqual({ ok: false, error: { kind: "validation", fields: [{ field, code: "outside_window", message: "Fuera" }] } });
+  });
+  it("does not change the request without newActivity or confirmation", async () => {
+    const { api, fetch } = setup({ post: post() }, 201);
+    await api.create(tripId, { description: "Texto" });
+    expect(sent(fetch).body).toEqual({ description: "Texto" });
   });
 });

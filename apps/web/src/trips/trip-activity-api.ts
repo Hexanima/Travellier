@@ -23,7 +23,7 @@ const timestamp = (value: unknown) => typeof value === "string" &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 /** Absent is tolerated; when present it is null or a positive whole number of minutes. */
 const validDuration = (value: unknown) => value === undefined || value === null || (Number.isSafeInteger(value) && (value as number) > 0);
-const validActivity = (value: unknown, tripId: string, activityId?: string): value is ActivityResponse => record(value) &&
+export const validActivity = (value: unknown, tripId: string, activityId?: string): value is ActivityResponse => record(value) &&
   id(value.id) && (activityId === undefined || value.id === activityId) && value.tripId === tripId && id(value.tripId) &&
   id(value.dayId) && typeof value.title === "string" && value.title.trim() !== "" && nullableText(value.description) &&
   nullableText(value.mapsUrl) && validDuration(value.durationMinutes) && timestamp(value.scheduledAt) && timestamp(value.createdAt) && id(value.createdBy);
