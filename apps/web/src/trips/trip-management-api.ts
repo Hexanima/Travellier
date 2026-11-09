@@ -1,3 +1,4 @@
+import type { ParticipationConfirmation } from "./participation-conflict.js";
 import type { ApiClientError, HttpClient, ApiErrorKind } from "../api/index.js";
 
 export type TripSummary = {
@@ -23,7 +24,8 @@ export type MemberTripDetail = TripSummary & {
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
 export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type PublicTripJoinResult = { tripId: string; joined: boolean };
-export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination"; fields?: readonly { field: string; message: string; code?: string }[] };
+export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination" | "participation-conflict";
+  fields?: readonly { field: string; message: string; code?: string }[]; confirmation?: ParticipationConfirmation };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;
