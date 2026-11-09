@@ -14,7 +14,7 @@ export interface Comment {
   createdAt: Date;
 }
 
-export type CreateCommentInput = Comment;
+export type CreateCommentInput = Omit<Comment, "text"> & { text: unknown };
 
 export interface CreateCommentContext {
   /** Post resolved in the same Trip snapshot. */
