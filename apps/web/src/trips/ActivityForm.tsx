@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { Button, Feedback, TextAreaField, TextField } from "../components/index.js";
 import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues } from "./activity-form-state.js";
@@ -24,6 +24,17 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
   const [saving, setSaving] = useState(false);
   const [pending, setPending] = useState<PendingConfirmation>();
   const savingRef = useRef(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const hadPending = useRef(false);
+  // While saving, the submit button is disabled and the focus drops to <body>, which is what the conflict modal would restore.
+  // Once the modal closes and the save settles (the dialog is no longer inert), return focus to the submit button.
+  useEffect(() => {
+    if (pending) { hadPending.current = true; return; }
+    if (hadPending.current && !saving) {
+      hadPending.current = false;
+      formRef.current?.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus();
+    }
+  }, [pending, saving]);
   const update = (field: keyof ActivityFormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
     setErrors((current) => { const next = { ...current }; delete next[field]; if (field.startsWith("duration")) { delete next.durationHours; delete next.durationMinutes; } delete next.scheduledAt; delete next.dayId; return next; });
@@ -83,7 +94,7 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
     second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" });
   const exactScheduledAt = values.originalScheduledAt && toLocalDateTime(values.originalScheduledAt, timeZone) === `${values.date}T${values.time}`
     ? values.originalScheduledAt : undefined;
-  return <form className="activity-form" onSubmit={(event) => void submit(event)} noValidate>
+  return <form ref={formRef} className="activity-form" onSubmit={(event) => void submit(event)} noValidate>
     <p className="activity-context">{existing ? <>Horarios en {timeZone}<br />
       Podés reprogramar dentro de las franjas de actividad de este destino.</> : <>
       {context.selection.date.split("-").reverse().join("/")} · Horarios en {timeZone}<br />
@@ -116,8 +127,8 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
       : failure.kind === "not-found" || failure.kind === "forbidden" ? "La actividad o el día ya no están disponibles. Volvé a cargar el itinerario."
       : "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback> : null}
     <Button type="submit" loading={saving}>{existing ? "Guardar cambios" : "Guardar actividad"}</Button>
-    {pending ? createPortal(<ParticipationConflictModal conflicts={pending.confirmation.confirmedConflicts} activities={knownActivities}
+    {pending ? createPortal(<div className="participation-conflict-layer"><ParticipationConflictModal conflicts={pending.confirmation.confirmedConflicts} activities={knownActivities}
       timeZone={timeZone} stale={pending.stale} saving={saving}
-      onCancel={() => setPending(undefined)} onConfirm={() => { if (!savingRef.current) void send(pending.changes, pending.confirmation); }} />, document.body) : null}
+      onCancel={() => setPending(undefined)} onConfirm={() => { if (!savingRef.current) void send(pending.changes, pending.confirmation); }} /></div>, document.body) : null}
   </form>;
 }

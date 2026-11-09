@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
 import type { ActivityResponse } from "./trip-activity-api.js";
@@ -195,6 +196,7 @@ describe("ActivityForm", () => {
       create.mockResolvedValue(conflict());
       await draft(container);
       expect(dialogs()).toHaveLength(1);
+      expect(dialogs()[0]!.closest(".participation-conflict-layer"), "stacking proxy: modal mounted in its own layer").not.toBeNull();
       expect(document.querySelectorAll("ul.participation-conflict-list li")).toHaveLength(2);
       expect(document.body.textContent).toContain("Paseo por el centro"); expect(document.body.textContent).toContain("Visita al museo");
       await press("Conservar mi participación actual");
@@ -236,6 +238,40 @@ describe("ActivityForm", () => {
       create.mockResolvedValueOnce(conflict()).mockRejectedValueOnce(new Error("Offline"));
       await draft(container); await press("Cambiar de plan");
       expect(dialogs()).toHaveLength(0); expect(onSaved).not.toHaveBeenCalled(); expect(container.querySelector('[name="title"]')).toHaveProperty("value", "Museo");
+    });
+    it("returns focus to the save button when the conflict modal is cancelled", async () => {
+      const { container, create } = await render();
+      create.mockResolvedValue(conflict());
+      await draft(container);
+      await press("Conservar mi participación actual");
+      expect(dialogs()).toHaveLength(0);
+      expect(document.activeElement).toBe(container.querySelector('button[type="submit"]'));
+    });
+    it("returns focus to the save button when confirming fails", async () => {
+      const { container, create } = await render();
+      create.mockResolvedValueOnce(conflict()).mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+      await draft(container); await press("Cambiar de plan");
+      expect(dialogs()).toHaveLength(0);
+      expect(document.activeElement).toBe(container.querySelector('button[type="submit"]'));
+    });
+    it("keeps Tab inside the conflict modal when stacked over the activity dialog", async () => {
+      const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
+      const context: ActivityFormContext = { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
+        selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
+      const create = vi.fn().mockResolvedValue(conflict());
+      const container = document.createElement("div"); document.body.append(container);
+      const root = createRoot(container); roots.push(root);
+      await act(async () => root.render(<Modal isOpen title="Nueva actividad" onClose={() => undefined}>
+        <ActivityForm context={context} activities={{ create, update: vi.fn() }} knownActivities={itinerary.activities} onSaved={vi.fn()} onBusyChange={vi.fn()} /></Modal>));
+      await draft(container);
+      const inner = dialogs()[0]!.closest('[role="dialog"]') as HTMLElement;
+      const controls = Array.from(inner.querySelectorAll<HTMLButtonElement>("button:not([disabled])"));
+      const first = controls[0]!, last = controls[controls.length - 1]!; // first is the modal's own close button
+      const tab = async (shiftKey: boolean) => act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })); });
+      expect(inner.contains(document.activeElement)).toBe(true);
+      last.focus(); await tab(false); expect(document.activeElement).toBe(first);
+      first.focus(); await tab(true); expect(document.activeElement).toBe(last);
+      expect(document.activeElement?.closest('[role="dialog"]')).toBe(inner);
     });
     it("editing never asks for a confirmation and does not forward a participation", async () => {
       const existing = itineraryFixture().activities[0] as ActivityResponse;
