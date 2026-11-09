@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
@@ -210,5 +210,79 @@ describe("itinerary screen", () => {
     expect(get).toHaveBeenLastCalledWith(itineraryId(99));
     expect(container.textContent).not.toContain("Paseo por el centro");
     expect(container.textContent).toContain("no está disponible");
+  });
+});
+
+describe("itinerary posts as links to the memory detail", () => {
+  type Entry = { pathname: string; state: unknown };
+  const seen: Entry[] = [];
+  function Spy() { const location = useLocation(); seen.push({ pathname: location.pathname, state: location.state }); return null; }
+  function Detail() { const navigate = useNavigate(); return <button onClick={() => navigate(-1)}>atrás</button>; }
+  const scrollIntoView = vi.fn(); const scrollTo = vi.fn();
+  beforeEach(() => {
+    seen.length = 0; scrollIntoView.mockReset(); scrollTo.mockReset();
+    Object.defineProperty(window, "scrollY", { value: 360, configurable: true });
+    Element.prototype.scrollIntoView = scrollIntoView; window.scrollTo = scrollTo as unknown as typeof window.scrollTo;
+  });
+  const timeZone = "America/Argentina/Buenos_Aires";
+  async function open(get: ReturnType<typeof vi.fn>, state?: unknown) {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/trips/${itineraryId(1)}/itinerary`, state }]}><Spy /><Routes>
+      <Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get } as TripItineraryApi} timeZone={timeZone} />} />
+      <Route path="/trips/:tripId/memories/:postId" element={<Detail />} />
+    </Routes></MemoryRouter>));
+    return container;
+  }
+  const ok = (value: TripItineraryResponse) => vi.fn().mockResolvedValue({ ok: true, value });
+  const click = async (element: Element | null) => { expect(element).not.toBeNull(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
+  const anchor = (n: number) => `data-itinerary-post=${itineraryId(n)}`;
+  const detailPath = (n: number) => `/trips/${itineraryId(1)}/memories/${itineraryId(n)}`;
+  const link = (container: HTMLElement, n: number) => container.querySelector(`[data-itinerary-post="${itineraryId(n)}"] a`);
+  const withActivityPost = () => { const value = fixture(); linkPost(value.posts[0], { activityId: itineraryId(8) }); value.activities[0].postIds = [itineraryId(10)]; return value; };
+  const withOutsidePost = () => { const value = fixture(); value.unplacedPosts = [{ ...fixture().posts[0], id: itineraryId(50), description: "Foto previa", createdAt: "2026-08-01T12:00:00.000Z", expense: null }]; return value; };
+
+  it.each([
+    ["an activity", withActivityPost, 10, `[data-itinerary-item="${itineraryId(8)}"] `],
+    ["a transport", fixture, 11, `[data-itinerary-item="${itineraryId(6)}"] `],
+    ["an independent post of the day", fixture, 10, '[data-itinerary-date] '],
+    ["the section of posts outside the itinerary", withOutsidePost, 50, 'section[aria-labelledby="itinerary-outside-posts"] '],
+  ])("links the post of %s to its detail", async (_name, build, n, scope) => {
+    const container = await open(ok(build() as TripItineraryResponse));
+    const element = container.querySelector(`${scope}[data-itinerary-post="${itineraryId(n)}"] a`);
+    expect(element?.getAttribute("href")).toBe(detailPath(n));
+    expect(element?.textContent).toBe(container.querySelector(`${scope}[data-itinerary-post="${itineraryId(n)}"] .itinerary-post-description`)?.textContent);
+    expect(element?.textContent).not.toBe("");
+  });
+  it("opens the detail with the itinerary as origin, anchored to the post, and restores it when coming back", async () => {
+    const container = await open(ok(fixture()));
+    await click(link(container, 11));
+    expect(seen[seen.length - 1].pathname).toBe(detailPath(11));
+    expect(seen[seen.length - 1].state).toEqual({ origin: { path: `/trips/${itineraryId(1)}/itinerary`, label: "itinerario", anchor: anchor(11), scrollY: 360 } });
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "atrás") ?? null);
+    expect(seen.some((entry) => JSON.stringify(entry.state) === JSON.stringify({ restore: { anchor: anchor(11), scrollY: 360 } }))).toBe(true);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(container.querySelector(`[data-itinerary-post="${itineraryId(11)}"]`));
+    expect(seen[seen.length - 1].state).toBeNull();
+  });
+  it("restores only once the itinerary is ready, focuses the post and cleans the state", async () => {
+    let resolve!: (value: unknown) => void;
+    const get = vi.fn().mockReturnValue(new Promise((r) => { resolve = r; }));
+    const container = await open(get, { restore: { anchor: anchor(11), scrollY: 200 } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+    await act(async () => resolve({ ok: true, value: fixture() }));
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(document.activeElement).toBe(container.querySelector(`[data-itinerary-post="${itineraryId(11)}"]`));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(seen[seen.length - 1].state).toBeNull();
+  });
+  it("falls back to the saved scroll when the anchor is gone, with no errors or messages", async () => {
+    const container = await open(ok(fixture()), { restore: { anchor: anchor(99), scrollY: 200 } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith(0, 200);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
 });

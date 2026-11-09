@@ -12,6 +12,8 @@ import type { ParticipationResponse, TripParticipationApi } from "./trip-partici
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { ActivityParticipationControls } from "./ActivityParticipationControls.js";
 import { useActivityParticipations } from "./use-activity-participations.js";
+import { PostLink, useRestorePosition } from "./post-navigation.js";
+import { itineraryAnchor } from "./post-origin.js";
 import "./itinerary.css";
 
 type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; timeZone?: string };
@@ -112,6 +114,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     setDialog(undefined); setAttempt((value) => value + 1);
   };
   const dialogParticipation = dialog?.kind === "detail" ? participation.states[dialog.activityId] : undefined;
+  useRestorePosition(state.kind === "ready");
   const { days, outsidePosts } = state.kind === "ready" ? projectItineraryView(state.value, timeZone) : { days: [], outsidePosts: [] };
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -162,7 +165,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
                 ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone}
+                {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
                   disabled={refreshing} onActivity={activities ? (activityId) => setDialog({ kind: "detail", activityId }) : undefined} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
@@ -179,7 +182,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
       {state.kind === "ready" && outsidePosts.length > 0 ? <section className="itinerary-outside-posts" aria-labelledby="itinerary-outside-posts">
         <h2 id="itinerary-outside-posts">Publicaciones fuera del itinerario</h2>
         <List className="itinerary-posts">
-          {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}
+          {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId ?? ""} post={post} publication={publication} /></ListItem>)}
         </List>
       </section> : null}
       {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <div className="participation-conflict-layer"><ParticipationConflictModal
@@ -195,7 +198,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
   </main>;
 }
 
-function AgendaItem({ item, publication, timeZone, onActivity, disabled, participation }: { item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+function AgendaItem({ tripId, item, publication, timeZone, onActivity, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
   onActivity?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
   const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
   return <ListItem className="itinerary-item" data-itinerary-item={item.id}>
@@ -207,7 +210,7 @@ function AgendaItem({ item, publication, timeZone, onActivity, disabled, partici
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Recuerdos de ${transportLabels[item.transport.type]}`}>
-          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}
+          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} /></ListItem>)}
         </List> : null}
       </> : item.kind === "activity" ? <>
         <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
@@ -216,16 +219,17 @@ function AgendaItem({ item, publication, timeZone, onActivity, disabled, partici
           {" · "}Duración {formatDuration(item.activity.durationMinutes!)}</p> : null}
         {participation}
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Posts de ${item.activity.title}`}>
-          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}
+          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} /></ListItem>)}
         </List> : null}
-      </> : <PostSummary post={item.post} publication={publication} />}
+      </> : <PostSummary tripId={tripId} post={item.post} publication={publication} />}
     </div>
   </ListItem>;
 }
 
-function PostSummary({ post, publication }: { post: ItineraryPostResponse; publication: Intl.DateTimeFormat }) {
-  return <div data-itinerary-post={post.id}>
-    <p className="itinerary-post-description">{post.description ?? "Post sin descripción."}</p>
+function PostSummary({ tripId, post, publication }: { tripId: string; post: ItineraryPostResponse; publication: Intl.DateTimeFormat }) {
+  return <div data-itinerary-post={post.id} tabIndex={-1}>
+    <p className="itinerary-post-description"><PostLink tripId={tripId} postId={post.id} anchor={itineraryAnchor(post.id)} label="itinerario">
+      {post.description ?? "Post sin descripción."}</PostLink></p>
     <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
     {post.context.rootTransportId !== null ? <p className="itinerary-secondary">Vinculado a transporte</p> : null}
     {post.context.parentPostId !== null ? <p className="itinerary-secondary">Relacionado con otro post</p> : null}
