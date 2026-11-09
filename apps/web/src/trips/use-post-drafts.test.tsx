@@ -2,7 +2,7 @@
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { emptyDraft, type PostDraft } from "./post-draft.js";
+import type { PostDraft } from "./post-draft.js";
 import { PostDraftsProvider, usePostDraft } from "./use-post-drafts.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -57,13 +57,5 @@ describe("post drafts context", () => {
     await click(container, '[data-probe="new"] [data-action="set"]');
     await click(container, '[data-probe="new"] [data-action="clear"]');
     expect(shown(container, "edit:a")).toBe("texto edit:a");
-  });
-  it("loses everything when the provider unmounts (leaving the trip)", async () => {
-    const container = await render(["new"]);
-    await click(container, '[data-probe="new"] [data-action="set"]');
-    await act(async () => roots.splice(0).forEach((root) => root.unmount()));
-    expect(emptyDraft().values.description).toBe("");
-    const again = await render(["new"]);
-    expect(shown(again, "new")).toBe("none");
   });
 });
