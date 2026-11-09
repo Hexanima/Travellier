@@ -50,6 +50,8 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [kind, setKind] = useState<Kind>(draft.extras.link?.kind ?? "none");
   const [selected, setSelected] = useState<PostLink | null>(draft.extras.link);
+  // With a new activity in the draft «Sin vínculo» is the initial state: accepting it untouched must not discard the activity.
+  const [touched, setTouched] = useState(false);
   const [postList, retryPosts] = useLazy<PostResponse[]>(kind === "post", () => posts.list(tripId ?? ""));
   const [activityList, retryActivities] = useLazy<Activity[]>(kind === "activity", async () => {
     const result = await itinerary.get(tripId ?? "");
@@ -78,8 +80,9 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
     if (leaving.current) return;
     const link: PostLink | null = kind === "none" ? null : chosen;
     if (kind !== "none" && !link) return;
+    if (draft.extras.newActivity && !touched) { back(); return; }
     commit(setLink(draft, link));
-    back(`Vínculo actualizado: ${linkSummary(link)}.${dropsTransport ? ` ${transportDroppedNotice}` : ""}`);
+    back(`Vínculo actualizado: ${linkSummary(link)}.${dropsTransport ? ` ${transportDroppedNotice}` : ""}${draft.extras.newActivity ? " Se descartó la actividad nueva." : ""}`);
   };
   // The subform replaces this entry (the composer stays right behind) and the pending choice is not saved: choosing a link and creating an activity exclude each other.
   const openSpontaneous = () => {
@@ -88,7 +91,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
     navigate(`/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}/activity${search}`, { replace: true, state: { fromComposer } });
   };
   const spontaneous = onCreateSpontaneous ?? (spontaneousActivity ? openSpontaneous : undefined);
-  const choose = (kindValue: Exclude<Kind, "none">, id: string, label: string) => setSelected({ kind: kindValue, id, label });
+  const choose = (kindValue: Exclude<Kind, "none">, id: string, label: string) => { setSelected({ kind: kindValue, id, label }); setTouched(true); };
   const kinds: [Kind, string][] = [["none", "Sin vínculo"], ["post", "Post"], ["activity", "Actividad"]];
 
   return <main className="app-shell trips-shell itinerary-shell">
@@ -99,7 +102,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
       </header>
       <div role="radiogroup" aria-label="Vincular a" className="post-link-options">
         {kinds.map(([value, label]) => <label key={value} className="post-link-option">
-          <input type="radio" name="link-kind" checked={kind === value} onChange={() => setKind(value)} /> {label}
+          <input type="radio" name="link-kind" checked={kind === value} onChange={() => { setKind(value); setTouched(true); }} /> {label}
         </label>)}
       </div>
       {kind === "post" ? <section className="post-link-panel">

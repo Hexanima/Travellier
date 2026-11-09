@@ -28,6 +28,7 @@ import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
 import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
+import { SpontaneousActivityForm } from './trips/SpontaneousActivityForm.js'
 import { MemoriesLayout, TripMemoriesScreen } from './trips/TripMemoriesScreen.js'
 
 type AppProps = {
@@ -298,10 +299,12 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           </TripRoute>
         }>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
-          <Route path="new" element={<PostComposer posts={tripPosts} />} />
-          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} />} />
-          <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} />} />
-          <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
+          <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
+          <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
+          <Route path=":postId/edit/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
         </Route>
         <Route path="/profile" element={
           !sessionReady
