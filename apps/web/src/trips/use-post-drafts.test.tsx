@@ -8,7 +8,7 @@ import { PostDraftsProvider, usePostDraft } from "./use-post-drafts.js";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
-const draft = (description: string): PostDraft => ({ values: { description, mapsUrl: "" }, extras: {} });
+const draft = (description: string): PostDraft => ({ values: { description, mapsUrl: "" }, extras: { link: null, transportId: null } });
 function Probe({ name }: { name: string }) {
   const handle = usePostDraft(name);
   return <div data-probe={name}>

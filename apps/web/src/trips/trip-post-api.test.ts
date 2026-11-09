@@ -32,6 +32,26 @@ describe("post HTTP adapter", () => {
     await api.update(tripId, itineraryId(5), { description: "x", createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4) } as PostInput);
     expect(sent(fetch).body).toEqual({ description: "x" });
   });
+  it("creates with the link fields and still drops createdAt, dayId and newActivity", async () => {
+    const { api, fetch } = setup({ post: post() }, 201);
+    const forced = { description: "Texto", parentPostId: itineraryId(8), activityId: itineraryId(9), transportId: itineraryId(10),
+      createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4), newActivity: { title: "x" } } as PostInput;
+    await api.create(tripId, forced);
+    expect(sent(fetch)).toEqual({ url: `https://api.test/trips/${tripId}/posts`, method: "POST",
+      body: { description: "Texto", parentPostId: itineraryId(8), activityId: itineraryId(9), transportId: itineraryId(10) } });
+  });
+  it("updates sending explicit null links, never createdAt or dayId", async () => {
+    const { api, fetch } = setup({ post: post() });
+    const forced = { parentPostId: itineraryId(8), activityId: null, transportId: null, createdAt: "2020-01-01T00:00:00.000Z", dayId: itineraryId(4) } as PostInput;
+    await api.update(tripId, itineraryId(5), forced);
+    expect(sent(fetch)).toEqual({ url: `https://api.test/trips/${tripId}/posts/${itineraryId(5)}`, method: "PATCH",
+      body: { parentPostId: itineraryId(8), activityId: null, transportId: null } });
+  });
+  it("omits undefined link fields but keeps null ones", async () => {
+    const { api, fetch } = setup({ post: post() });
+    await api.update(tripId, itineraryId(5), { parentPostId: null, activityId: undefined, transportId: undefined, description: undefined });
+    expect(sent(fetch).body).toEqual({ parentPostId: null });
+  });
   it("accepts a valid response with extra fields and a legacy dayId", async () => {
     const value = post(5, { dayId: itineraryId(4), likes: 3, context: {} });
     const { api } = setup({ post: value });
