@@ -9,6 +9,7 @@ import "./itinerary.css";
 
 export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; timeZone?: string };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse } | { kind: "error"; error: TripFailure };
+const missingContentMessage = "Escribí un texto o agregá una ubicación.";
 const fieldMessages: Record<string, string> = { description: "Revisá el texto del recuerdo.", mapsUrl: "Revisá el link de la ubicación." };
 
 export function PostComposer({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
@@ -24,6 +25,7 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<TripFailure>();
   const [message, setMessage] = useState("");
+  const [missingContent, setMissingContent] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const savingRef = useRef(false);
@@ -54,10 +56,10 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   // The fields are disabled while saving: focus the first one with an error once the save has settled.
   useEffect(() => {
     if (!focusPending.current || saving) return;
-    const first = ["description", "mapsUrl"].find((name) => errors[name]);
+    const first = missingContent ? "description" : ["description", "mapsUrl"].find((name) => errors[name]);
     if (first) formRef.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
     focusPending.current = false;
-  }, [errors, saving]);
+  }, [errors, saving, missingContent]);
 
   const base: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
   // An existing draft (for example after a subform or an error) always wins over the saved values.
@@ -66,7 +68,7 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   const update = (field: "description" | "mapsUrl", value: string) => {
     handle.setDraft({ ...draft, values: { ...draft.values, [field]: value } });
     setErrors((current) => { const next = { ...current }; delete next[field]; return next; });
-    setFailure(undefined); setMessage("");
+    setFailure(undefined); setMessage(""); setMissingContent(false);
   };
   const fail = (error: TripFailure) => {
     setFailure(error);
@@ -78,8 +80,8 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current || !tripId) return;
-    setMessage(""); setFailure(undefined); setErrors({});
-    if (!hasContent(draft)) { setMessage("Escribí un texto o agregá una ubicación."); return; }
+    setMessage(""); setFailure(undefined); setErrors({}); setMissingContent(false);
+    if (!hasContent(draft)) { setMissingContent(true); focusPending.current = true; return; }
     const input = existing ? prepareUpdate(draft, existing) : prepareCreate(draft);
     if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
     savingRef.current = true; setSaving(true);
@@ -119,14 +121,15 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
       </div> : null}
       {loaded.kind === "ready" && !blocked ? <form ref={formRef} className="auth-form post-composer" onSubmit={(event) => void submit(event)} noValidate>
         {existing && published ? <p className="itinerary-secondary">Publicado el <time dateTime={existing.createdAt}>{published.format(new Date(existing.createdAt))}</time></p> : null}
-        <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={errors.description}
+        <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={missingContent ? missingContentMessage : errors.description}
           onChange={(event) => update("description", event.target.value)} />
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
+        {missingContent ? <Feedback variant="error">{missingContentMessage}</Feedback> : null}
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.</Feedback> : null}
         {failure?.kind === "validation" ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
-        <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"} disabled={!hasContent(draft)}>
+        <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}
         </Button>
         <Button disabled={saving} onClick={cancel}>Cancelar</Button>

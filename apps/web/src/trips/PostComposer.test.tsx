@@ -11,7 +11,7 @@ import type { PostResponse } from "./trip-post-api.js";
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
-const tripId = itineraryId(1), postId = itineraryId(30);
+const tripId = itineraryId(1), otherTripId = itineraryId(2), postId = itineraryId(30);
 const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
@@ -22,7 +22,7 @@ async function render(path = `/trips/${tripId}/memories/new`, overrides: Partial
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
-    <nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link></nav><Routes>
+    <nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path="new" element={<PostComposer posts={{ create, update, get }} timeZone="America/Argentina/Buenos_Aires" />} />
@@ -54,12 +54,27 @@ describe("PostComposer (create)", () => {
     expect(container.querySelector('button[type="submit"]')?.textContent).toContain("Publicar recuerdo");
     expect(container.textContent).not.toContain("Publicado el");
   });
-  it("does not publish without content and publishes with only text or only a location", async () => {
+  it("publishes with only text", async () => {
     const { container, create } = await render();
-    await field(container, "description", "   "); await submit(container);
-    expect(create).not.toHaveBeenCalled();
     await field(container, "description", "  Hola  "); await submit(container);
     expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("keeps the submit enabled without content; clicking it does not publish and shows an associated, focused message that clears on typing", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "   ");
+    const submitButton = container.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(submitButton.disabled).toBe(false);
+    await click(submitButton);
+    expect(create).not.toHaveBeenCalled();
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("Escribí un texto o agregá una ubicación.");
+    const input = container.querySelector('[name="description"]') as HTMLTextAreaElement;
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toContain("Escribí un texto o agregá una ubicación.");
+    expect(document.activeElement).toBe(input);
+    await field(container, "mapsUrl", "https://maps.example/x");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBe("false");
   });
   it("publishes with only a location", async () => {
     const { container, create } = await render();
@@ -184,6 +199,17 @@ describe("PostComposer (discard)", () => {
     await field(container, "description", "Borrador"); await click(button(container, "Cancelar"));
     await click(button(container.querySelector('[role="dialog"]') as HTMLElement, "Descartar"));
     expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "nav-new"));
+    expect(value(container, "description")).toBe(""); expect(value(container, "mapsUrl")).toBe("");
+  });
+  it("discards the draft when switching to another trip, and it is not back when returning", async () => {
+    const { container } = await render();
+    const link = (label: string) => Array.from(container.querySelectorAll("a")).find((item) => item.textContent === label);
+    await field(container, "description", "Borrador de A");
+    await click(link("nav-other"));
+    expect(value(container, "description")).toBe("");
+    await click(link("nav-new"));
+    expect(value(container, "description")).toBe("");
   });
 });
 
@@ -223,10 +249,19 @@ describe("PostComposer (edit)", () => {
     expect(update).not.toHaveBeenCalled();
     expect(container.textContent).toContain("No hay cambios para guardar.");
   });
-  it("does not allow emptying both text and location", async () => {
+  it("does not allow emptying both: the save stays enabled, does not call update and shows an associated message that clears on typing", async () => {
     const { container, update } = await render(editPath);
-    await field(container, "description", ""); await submit(container);
+    await field(container, "description", "");
+    const saveButton = container.querySelector('button[type="submit"]') as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    await click(saveButton);
     expect(update).not.toHaveBeenCalled();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Escribí un texto o agregá una ubicación.");
+    const input = container.querySelector('[name="description"]') as HTMLTextAreaElement;
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toContain("Escribí un texto");
+    expect(document.activeElement).toBe(input);
+    await field(container, "description", "Nuevo");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
   it("keeps an existing edit draft instead of overwriting it when the screen is mounted again", async () => {
     const { container } = await render(editPath);
