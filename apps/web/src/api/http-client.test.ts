@@ -287,4 +287,32 @@ describe("createHttpClient", () => {
     });
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
+
+  describe("participation conflict details", () => {
+    const conflicts = [{ activityId: "a".repeat(24), reason: "overlap", scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: 60 }];
+    const activity = { scheduledAt: "2026-09-25T12:30:00.000Z", durationMinutes: null };
+    const run = async (status: number, error: Record<string, unknown>) => {
+      const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error }), { status }));
+      const client = createHttpClient({ baseUrl: "https://api.example.test", fetch, getAccessToken: async () => "t", onUnauthorized: vi.fn() });
+      const result = await client.put("/x", { status: "going" });
+      if (result.ok) throw new Error("expected failure");
+      return result.error;
+    };
+    it("exposes conflicts and activity of a 409 ParticipationConflictError and keeps the server kind", async () => {
+      const error = await run(409, { code: "ParticipationConflictError", message: "Conflicto", conflicts, activity });
+      expect(error.kind).toBe("server");
+      expect(error.details).toEqual({ conflicts, activity });
+    });
+    it("does not copy the server message nor unknown fields into details", async () => {
+      const error = await run(409, { code: "ParticipationConflictError", message: "Secreto de otro usuario", conflicts, activity, other: 1 });
+      expect(Object.keys(error.details ?? {}).sort()).toEqual(["activity", "conflicts"]);
+      expect(JSON.stringify(error.details)).not.toContain("Secreto");
+    });
+    it("leaves details undefined for another 409 code", async () => {
+      expect((await run(409, { code: "Conflict", conflicts, activity })).details).toBeUndefined();
+    });
+    it("leaves details undefined for a 500 even with conflicts in the body", async () => {
+      expect((await run(500, { code: "ParticipationConflictError", conflicts, activity })).details).toBeUndefined();
+    });
+  });
 });

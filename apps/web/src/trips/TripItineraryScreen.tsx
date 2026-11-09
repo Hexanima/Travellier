@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -8,7 +8,8 @@ import { formatDuration } from "./activity-duration.js";
 import { formatActivityClock, formatActivityRange } from "./activity-time-format.js";
 import { ActivityDialog, type ActivityDialogRequest } from "./ActivityDialog.js";
 import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
-import type { TripParticipationApi } from "./trip-participation-api.js";
+import type { ParticipationResponse, TripParticipationApi } from "./trip-participation-api.js";
+import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { ActivityParticipationControls } from "./ActivityParticipationControls.js";
 import { useActivityParticipations } from "./use-activity-participations.js";
 import "./itinerary.css";
@@ -33,9 +34,22 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
   const [saved, setSaved] = useState(false);
   const activityIds = useMemo(() => state.kind === "ready" ? state.value.activities.map((activity) => activity.id) : [], [state]);
   const participation = useActivityParticipations(tripId, activityIds, participations);
+  const trigger = useRef<HTMLElement | null>(null);
   const participationControls = (activityId: string, title: string) => participations ? <ActivityParticipationControls
-    title={title} state={participation.states[activityId]} onChange={(status) => { void participation.change(activityId, status); }}
+    title={title} state={participation.states[activityId]} timeZone={timeZone}
+    onChange={(status, element) => { trigger.current = element; void participation.change(activityId, status); }}
     onRetry={() => participation.retry(activityId)} /> : null;
+  // A single modal serves agenda and detail: the first activity awaiting confirmation.
+  const confirmingId = Object.keys(participation.states).find((id) => {
+    const entry = participation.states[id];
+    return entry?.kind === "ready" && entry.confirming;
+  });
+  const confirming = confirmingId ? participation.states[confirmingId] : undefined;
+  useEffect(() => {
+    // After the modal closes, return focus to the control that started the change (if it is still mounted).
+    if (confirmingId === undefined && trigger.current?.isConnected) trigger.current.focus();
+    if (confirmingId === undefined) trigger.current = null;
+  }, [confirmingId]);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -63,7 +77,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     void load();
     return () => { cancelled = true; };
   }, [tripId, itinerary, attempt]);
-  const onSaved = (activity: ActivityResponse) => {
+  const onSaved = (activity: ActivityResponse, created: ParticipationResponse | null = null) => {
+    if (created) participation.apply(activity.id, created);
     // Reflect only a successful server write; retain posts and expenses until the aggregate refreshes.
     setState((current) => {
       if (current.kind !== "ready") return current;
@@ -140,6 +155,10 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
           </div>
         </section>)}
       </div> : null}
+      {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <div className="participation-conflict-layer"><ParticipationConflictModal
+        conflicts={confirming.confirming.confirmation.confirmedConflicts} activities={state.value.activities} timeZone={timeZone}
+        stale={confirming.confirming.stale} saving={!!confirming.saving}
+        onCancel={() => participation.cancelConfirmation(confirmingId)} onConfirm={() => { void participation.confirmChange(confirmingId); }} /></div> : null}
       {state.kind === "ready" && activities && dialog ? <ActivityDialog key={dialog.kind === "detail" ? dialog.activityId : "new"}
         request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved}
         participation={dialog.kind === "detail" ? participationControls(dialog.activityId,

@@ -5,13 +5,14 @@ import type { ActivityFormContext } from "./activity-form-state.js";
 import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
+import type { ParticipationResponse } from "./trip-participation-api.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityRange } from "./activity-time-format.js";
 import { projectTripItinerary } from "./trip-itinerary-view.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
 type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse; timeZone: string; activities: TripActivityApi;
-  onClose: () => void; onSaved: (activity: ActivityResponse) => void; participation?: ReactNode };
+  onClose: () => void; onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void; participation?: ReactNode };
 type DetailState = { kind: "loading" } | { kind: "error"; error: TripFailure } | { kind: "detail" | "edit"; value: ActivityResponse };
 
 const safeMapsUrl = (value: string | null) => {
@@ -51,7 +52,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const timestamp = new Intl.DateTimeFormat("es-AR", { timeZone, dateStyle: "full", timeStyle: "short" });
   return <div className="activity-dialog"><Modal isOpen title={request.kind === "create" ? "Nueva actividad" : state.kind === "edit" ? "Editar actividad" : "Detalle de actividad"}
     loading={saving} onClose={onClose}>
-    {request.kind === "create" && context ? <ActivityForm context={context} activities={activities} onSaved={onSaved} onBusyChange={setSaving} /> : null}
+    {request.kind === "create" && context ? <ActivityForm context={context} activities={activities} knownActivities={itinerary.activities} onSaved={onSaved} onBusyChange={setSaving} /> : null}
     {request.kind === "detail" ? <>
       {state.kind === "loading" ? <LoadingState label="Cargando actividad…" /> : null}
       {state.kind === "error" ? <div className="activity-detail">

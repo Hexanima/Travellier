@@ -20,6 +20,8 @@ export class ApiClientError extends TaggedError<"ApiClientError"> {
   readonly code: string;
   readonly status: number | undefined;
   readonly fields: readonly ApiFieldError[] | undefined;
+  /** Only for 409 ParticipationConflictError: the raw `conflicts` and `activity`, unvalidated. */
+  details?: Readonly<Record<string, unknown>>;
 
   constructor(
     kind: ApiErrorKind,
@@ -128,7 +130,13 @@ const toApiClientError = (status: number, payload: unknown): ApiClientError => {
     genericRequestError;
   const fields = apiError ? parseFields(apiError.fields) : undefined;
 
-  return new ApiClientError(getErrorKind(status), code, message, status, fields);
+  const error = new ApiClientError(getErrorKind(status), code, message, status, fields);
+
+  if (status === 409 && code === "ParticipationConflictError" && apiError) {
+    error.details = { conflicts: apiError.conflicts, activity: apiError.activity };
+  }
+
+  return error;
 };
 
 const toInvalidResponseError = (status: number): ApiClientError =>

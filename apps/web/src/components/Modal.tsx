@@ -18,6 +18,8 @@ function getFocusableElements(container: HTMLElement) {
 
 export interface ModalProps {
   children: ReactNode;
+  /** Opt-in: Escape calls `onClose` (unless loading or there is no `onClose`). */
+  closeOnEscape?: boolean;
   disabled?: boolean;
   error?: string;
   isOpen: boolean;
@@ -28,6 +30,7 @@ export interface ModalProps {
 
 export function Modal({
   children,
+  closeOnEscape = false,
   disabled = false,
   error,
   isOpen,
@@ -55,9 +58,20 @@ export function Modal({
   }, [isOpen]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      if (closeOnEscape && !cannotClose) {
+        event.stopPropagation();
+        onClose?.();
+      }
+      return;
+    }
+
     if (event.key !== "Tab") {
       return;
     }
+
+    // React events cross portals: keep a stacked modal's Tab from reaching the modal underneath.
+    event.stopPropagation();
 
     const dialog = dialogRef.current;
     if (!dialog) {
