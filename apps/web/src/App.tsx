@@ -123,6 +123,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     create: activeActivities?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     get: activeActivities?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     update: activeActivities?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    remove: activeActivities?.remove ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeActivities])
   const tripItinerary = useMemo<TripItineraryApi>(() => ({
     get: activeItinerary?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),

@@ -125,4 +125,75 @@ describe("useActivityParticipations conflicts", () => {
     await act(async () => hook().apply(A, answered("going")));
     expect(state().status).toBe("going"); expect(api.get).toHaveBeenCalledTimes(1);
   });
+  describe("remove", () => {
+    const B = itineraryId(9);
+    async function setupMany(api: TripParticipationApi, ids: string[] = [A, B]) {
+      const ref: { current?: Hook } = {};
+      function Harness({ tripId }: { tripId: string }) { ref.current = useActivityParticipations(tripId, ids, api); return null; }
+      const root = createRoot(document.body.appendChild(document.createElement("div"))); roots.push(root);
+      await act(async () => root.render(<Harness tripId={itineraryId(1)} />));
+      return { hook: () => ref.current!, switchTrip: (id: string) => act(async () => root.render(<Harness tripId={id} />)) };
+    }
+    it("drops only the removed activity's state, without touching others or the API", async () => {
+      const api = makeApi(async () => conflict());
+      const { hook } = await setupMany(api);
+      const other = hook().states[B];
+      await act(async () => hook().remove(A));
+      expect(hook().states[A]).toBeUndefined();
+      expect(hook().states[B]).toBe(other);
+      expect(api.set).not.toHaveBeenCalled(); expect(api.get).toHaveBeenCalledTimes(2);
+    });
+    it("does not reload a removed activity while its id is still requested", async () => {
+      const api = makeApi(async () => conflict());
+      const { hook } = await setupMany(api);
+      await act(async () => hook().remove(A));
+      await act(async () => hook().apply(B, answered("going")));
+      expect(hook().states[A]).toBeUndefined(); expect(api.get).toHaveBeenCalledTimes(2);
+    });
+    it("clears an open confirmation", async () => {
+      const api = makeApi(async () => conflict());
+      const { hook } = await setupMany(api);
+      await act(async () => hook().change(A, "going"));
+      expect(Object.values(hook().states).some((s) => s.kind === "ready" && s.confirming)).toBe(true);
+      await act(async () => hook().remove(A));
+      expect(Object.values(hook().states).some((s) => s.kind === "ready" && s.confirming)).toBe(false);
+      expect(hook().states[A]).toBeUndefined();
+    });
+    it("does not republish a write that resolves after removal", async () => {
+      const write = deferred<TripResult<ParticipationResponse>>();
+      const api = makeApi(() => write.promise);
+      const { hook } = await setupMany(api);
+      await act(async () => { void hook().change(A, "going"); });
+      await act(async () => hook().remove(A));
+      await act(async () => write.resolve(conflict()));
+      expect(hook().states[A]).toBeUndefined();
+      await act(async () => write.resolve({ ok: true, value: answered("going") }));
+      expect(hook().states[A]).toBeUndefined();
+    });
+    it("does not republish a successful write that resolves after removal", async () => {
+      const write = deferred<TripResult<ParticipationResponse>>();
+      const api = makeApi(() => write.promise);
+      const { hook } = await setupMany(api);
+      await act(async () => { void hook().change(A, "going"); });
+      await act(async () => hook().remove(A));
+      await act(async () => write.resolve({ ok: true, value: answered("going") }));
+      expect(hook().states[A]).toBeUndefined();
+    });
+    it("does not republish a read that resolves after removal", async () => {
+      const read = deferred<TripResult<ParticipationResponse | null>>();
+      const api = { get: vi.fn(() => read.promise), set: vi.fn(async () => conflict()) } as unknown as TripParticipationApi;
+      const { hook } = await setupMany(api, [A]);
+      await act(async () => hook().remove(A));
+      await act(async () => read.resolve({ ok: true, value: pending() }));
+      expect(hook().states[A]).toBeUndefined();
+    });
+    it("forgets removals when the Trip changes, so the same id loads again", async () => {
+      const api = makeApi(async () => conflict());
+      const { hook, switchTrip } = await setupMany(api, [A]);
+      await act(async () => hook().remove(A));
+      expect(hook().states[A]).toBeUndefined();
+      await switchTrip(itineraryId(99));
+      expect(hook().states[A]?.kind).toBe("ready"); expect(api.get).toHaveBeenCalledTimes(2);
+    });
+  });
 });

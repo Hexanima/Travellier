@@ -11,6 +11,8 @@ export type TripActivityApi = {
   create: (tripId: string, input: ActivityInput, confirmation?: ParticipationConfirmation) => Promise<TripResult<CreatedActivity>>;
   get: (tripId: string, activityId: string) => Promise<TripResult<ActivityResponse>>;
   update: (tripId: string, activityId: string, input: Partial<ActivityInput>) => Promise<TripResult<ActivityResponse>>;
+  /** DELETE answers 204 with no body; any successful response is accepted without validating one. */
+  remove: (tripId: string, activityId: string) => Promise<TripResult<void>>;
 };
 
 const path = (tripId: string) => `/trips/${encodeURIComponent(tripId)}/activities`;
@@ -46,8 +48,12 @@ const created = (result: Raw, tripId: string): TripResult<CreatedActivity> => {
   const participation = (result.value as Record<string, unknown>).participation;
   return { ok: true, value: { activity: saved.value, participation: validParticipation(participation, tripId, saved.value.id) ? participation : null } };
 };
-export const createTripActivityApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripActivityApi => ({
+export const createTripActivityApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripActivityApi => ({
   create: async (tripId, input, confirmation) => created(await client.post<unknown>(path(tripId), { ...input, ...confirmation }), tripId),
   get: async (tripId, activityId) => response(await client.get<unknown>(`${path(tripId)}/${encodeURIComponent(activityId)}`), tripId, activityId),
   update: async (tripId, activityId, input) => response(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(activityId)}`, input), tripId, activityId),
+  remove: async (tripId, activityId) => {
+    const result = await client.delete<void>(`${path(tripId)}/${encodeURIComponent(activityId)}`);
+    return result.ok ? { ok: true, value: undefined } : failure(result.error);
+  },
 });
