@@ -75,6 +75,16 @@ describe("post draft", () => {
     expect(fromSaved.extras.link).toEqual({ kind: "post", id: P });
     expect(prepareUpdate(fromSaved, legacy)).toEqual({ activityId: null });
   });
+  it("normalizes legacy data with parent and transport: the parent wins, the draft has no transport and the PATCH clears it", () => {
+    const legacy = saved({ parentPostId: P, transportId: T });
+    const fromSaved = draftFromPost(legacy);
+    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null });
+    expect(prepareUpdate(fromSaved, legacy)).toEqual({ transportId: null });
+  });
+  it("normalizes legacy data with parent, activity and transport: the PATCH clears both", () => {
+    const legacy = saved({ parentPostId: P, activityId: A, transportId: T });
+    expect(prepareUpdate(draftFromPost(legacy), legacy)).toEqual({ activityId: null, transportId: null });
+  });
   it("builds the link and transport from the saved post", () => {
     expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null });
     expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null });

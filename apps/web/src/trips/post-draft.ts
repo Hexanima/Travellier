@@ -7,10 +7,10 @@ export type PostDraft = { values: { description: string; mapsUrl: string };
   extras: { link: PostLink | null; transportId: string | null } };
 type Saved = Pick<PostResponse, "description" | "mapsUrl"> & Partial<Pick<PostResponse, "parentPostId" | "activityId" | "transportId">>;
 export const emptyDraft = (): PostDraft => ({ values: { description: "", mapsUrl: "" }, extras: { link: null, transportId: null } });
-/** A parent wins over an activity (legacy data may carry both): the next PATCH normalizes it. */
+/** A parent wins over an activity and a transport (legacy data may carry them): the next PATCH normalizes it. */
 export const draftFromPost = (post: Saved): PostDraft => ({ values: { description: post.description ?? "", mapsUrl: post.mapsUrl ?? "" },
   extras: { link: post.parentPostId ? { kind: "post", id: post.parentPostId } : post.activityId ? { kind: "activity", id: post.activityId } : null,
-    transportId: post.transportId ?? null } });
+    transportId: post.parentPostId ? null : post.transportId ?? null } });
 /** A child keeps no other direct relation: choosing a post drops the transport (the activity is the link itself). */
 export const setLink = (draft: PostDraft, link: PostLink | null): PostDraft =>
   ({ ...draft, extras: { link, transportId: link?.kind === "post" ? null : draft.extras.transportId } });
