@@ -5,7 +5,8 @@ import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from 
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
-import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { readOrigin, originHref } from "./post-origin.js";
+import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -27,7 +28,11 @@ const activityMessage = (field: string, code: string) => field === "title" ? "In
 const retryHint = "Revisá tus recuerdos antes de reintentar por si ya se publicó.";
 const linkMessage = (code: string) => code === "cycle" || code === "self_reference" ? "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."
   : code === "conflict" ? "Un recuerdo continuación no puede tener otro vínculo directo." : "No pudimos aplicar el vínculo. Elegí otro.";
-const transportParam = (search: string) => { const value = new URLSearchParams(search).get("transportId"); return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : null; };
+const queryId = (search: string, name: string) => { const value = new URLSearchParams(search).get(name); return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : null; };
+const transportParam = (search: string) => queryId(search, "transportId");
+const parentParam = (search: string) => queryId(search, "parentPostId");
+/** Presentation only: the excerpt of the parent sent by its detail (the id is what travels). */
+const parentLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { parentLabel?: unknown }).parentLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
 
 export function PostComposer({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
@@ -108,7 +113,10 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   const saved: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
   // A transport preloaded from its detail (creation only) is part of the base (it is not a change); a continuation memory keeps no transport.
   const preloaded = postId ? null : transportParam(location.search);
-  const base: PostDraft = preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
+  // A continuation opened from a detail preloads its parent (creation only); the parent wins over a transport and is not a change either.
+  const preloadedParent = postId ? null : parentParam(location.search);
+  const base: PostDraft = preloadedParent ? setLink(saved, { kind: "post", id: preloadedParent, label: parentLabelOf(location.state) })
+    : preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
   const dirty = isDraftDirty(draft, base);
@@ -196,7 +204,8 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
     linkRef.current?.focus();
   };
   const removeTransport = () => { handle.setDraft(setTransport(draft, null)); setNotice(""); };
-  const leave = () => { handle.clear(); navigate(listing); };
+  // Leaving a continuation goes back to the detail it came from when that origin is valid for this Trip; otherwise to the diary.
+  const leave = () => { handle.clear(); navigate(postId ? listing : originHref(readOrigin(location.state, tripId ?? ""))); };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;

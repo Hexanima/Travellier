@@ -233,4 +233,31 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
   });
+  it("flows from the diary to the detail, continues the memory and publishes it with only its parent", async () => {
+    const childId = itineraryId(35);
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const create = vi.fn().mockResolvedValue({ ok: true, value: saved({ id: childId, description: "Continuación", parentPostId: postId }) });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get, create } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    const next = Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo");
+    expect(next?.getAttribute("href")).toBe(`/trips/${tripId}/memories/new?parentPostId=${postId}`);
+    await click(next ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Atardecer");
+    await type(container, "description", "Continuación"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Continuación", parentPostId: postId });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.textContent).toContain("Recuerdo publicado.");
+  });
+  it("cancels a continuation back to the detail it started from", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.textContent).toContain("Atardecer");
+  });
 });
