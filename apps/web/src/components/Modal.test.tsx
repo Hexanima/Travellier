@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Modal } from "./Modal.js";
 
@@ -132,5 +132,42 @@ describe("Modal", () => {
     });
 
     expect(document.activeElement).toBe(trigger);
+  });
+
+  describe("Escape", () => {
+    const mount = async (modal: React.ReactElement) => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      mountedRoots.push(root);
+      await act(async () => { root.render(modal); });
+      return container;
+    };
+    const press = async (container: HTMLElement) => act(async () => {
+      container.querySelector("[role=dialog]")!.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }));
+    });
+    it("calls onClose when closeOnEscape is enabled", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen closeOnEscape title="Cambiar" onClose={onClose}><button>Ok</button></Modal>);
+      await press(container);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+    it("does not close while loading", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen closeOnEscape loading title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await press(container);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+    it("does nothing without onClose", async () => {
+      const container = await mount(<Modal isOpen closeOnEscape title="Cambiar">Ok</Modal>);
+      await expect(press(container)).resolves.toBeUndefined();
+      expect(container.querySelector("[role=dialog]")).not.toBeNull();
+    });
+    it("is opt-in: existing modals ignore Escape", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await press(container);
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 });

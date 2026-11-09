@@ -51,12 +51,14 @@ describe("itinerary without voting", () => {
     expect(participation?.textContent).toContain("Voy");
     expect(participation?.textContent).toContain("No voy");
     expect(participation?.textContent).toContain("Sin responder");
+    expect(Array.from(participation!.querySelectorAll("button")).map((b) => b.textContent)).toEqual(["Voy", "No voy"]);
     expect(voteRequest).not.toHaveBeenCalled();
   });
   it("keeps an activity without participants visible", async () => {
     const { container } = await render();
     expect(card(container)).not.toBeNull();
-    expect(card(container).querySelector('fieldset[aria-label^="Tu participación"] [aria-pressed="true"]')?.textContent).toBe("Sin responder");
+    expect(card(container).querySelector('fieldset[aria-label^="Tu participación"] [aria-pressed="true"]')).toBeNull();
+    expect(card(container).querySelector(".activity-participation-status")?.textContent).toBe("Sin responder");
   });
   it("shows no approval labels or vote controls in the detail and keeps participation", async () => {
     const { container, voteRequest } = await render();

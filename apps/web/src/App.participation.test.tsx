@@ -69,4 +69,52 @@ describe("App participation integration", () => {
     const { fetch } = setup(); const { container } = await render(fetch, false);
     expect(container.textContent).toContain("Iniciar sesión"); expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("handles a participation 409 end to end over HTTP: modal, conservar sends nothing, confirming resends the exact snapshot", async () => {
+    const snapshot = { conflicts: [
+      { activityId: itineraryId(9), reason: "overlap", scheduledAt: "2026-09-25T14:00:00.123Z", durationMinutes: 60 },
+      { activityId: itineraryId(77), reason: "same_start", scheduledAt: "2026-09-25T12:00:00.123Z", durationMinutes: null }],
+    activity: { scheduledAt: "2026-09-25T12:00:00.123Z", durationMinutes: null } };
+    let puts = 0;
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "refresh" }));
+      if (url.endsWith("/itinerary")) return new Response(JSON.stringify({ itinerary: itineraryFixture() }));
+      if (url.endsWith("/participation") && request.method === "PUT") {
+        puts += 1;
+        const body = JSON.parse(request.body as string);
+        if (body.confirmedConflicts === undefined || puts === 3) return new Response(JSON.stringify({ error: { code: "ParticipationConflictError", message: "Conflicto", ...snapshot } }), { status: 409 });
+        return new Response(JSON.stringify({ participation: { id: itineraryId(50), tripId: itineraryId(1), activityId: url.split("/").at(-2), userId: itineraryId(20),
+          status: body.status, updatedAt: "2026-09-25T12:00:00.000Z" } }));
+      }
+      if (url.endsWith("/participation")) return new Response(JSON.stringify({ participation: null }));
+      throw new Error(`Unexpected request: ${request.method} ${url}`);
+    });
+    const { container } = await render(fetch);
+    await click(card(container), "Voy");
+    expect(Array.from(document.querySelectorAll("ul.participation-conflict-list li"))).toHaveLength(2);
+    await click(document.body, "Conservar mi participación actual");
+    expect(fetch.mock.calls.filter(([url, request]) => url.endsWith("/participation") && request.method === "PUT")).toHaveLength(1);
+    await click(card(container), "Voy"); await click(document.body, "Cambiar de plan");
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain("Los datos cambiaron");
+    await click(document.body, "Cambiar de plan");
+    const writes = fetch.mock.calls.filter(([url, request]) => url.endsWith("/participation") && request.method === "PUT").map(([, request]) => JSON.parse(request.body));
+    expect(writes).toHaveLength(4); expect(writes[3]).toEqual({ status: "going", confirmedConflicts: snapshot.conflicts, confirmedActivity: snapshot.activity });
+    expect(card(container).querySelector('[aria-pressed="true"]')?.textContent).toBe("Voy");
+    expect(document.querySelector("ul.participation-conflict-list")).toBeNull();
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith("/itinerary"))).toHaveLength(1);
+  });
+  it("shows Modificado from the server mark and clears it after a saved answer", async () => {
+    const mark = { reason: "schedule_conflict", changedFields: ["scheduledAt", "durationMinutes"], changedAt: "2026-09-26T10:00:00.000Z" };
+    const base = { id: itineraryId(50), tripId: itineraryId(1), activityId: itineraryId(8), userId: itineraryId(20), updatedAt: "2026-09-25T12:00:00.000Z" };
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "refresh" }));
+      if (url.endsWith("/itinerary")) return new Response(JSON.stringify({ itinerary: itineraryFixture() }));
+      if (request.method === "PUT") return new Response(JSON.stringify({ participation: { ...base, status: "going" } }));
+      return new Response(JSON.stringify({ participation: url.includes(itineraryId(8)) ? { ...base, status: "pending", decisionRequired: mark } : null }));
+    });
+    const { container } = await render(fetch);
+    expect(card(container).textContent).toContain("Modificado");
+    await click(card(container), "Voy");
+    expect(card(container).textContent).not.toContain("Modificado");
+  });
 });
