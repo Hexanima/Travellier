@@ -12,7 +12,7 @@ type TransitionalDay = Omit<ActiveItineraryResponse["days"][number], "type"> &
   { type: ActiveItineraryResponse["days"][number]["type"] | "arrival" };
 export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities" | "days"> & {
   days: TransitionalDay[];
-  // durationMinutes stays optional here until T61 adds it to the client forms and makes it required.
+  // durationMinutes stays optional on the client: older payloads and fixtures may omit it; null or absent means no duration.
   activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
     { durationMinutes?: number | null })[];
 };
@@ -44,7 +44,8 @@ const day = (v: unknown) => entity(v) && id(v.destinationId) && timestamp(v.date
   ["transit_out", "activity", "transit_return", "arrival"].includes(v.type as string) && timestamp(v.startsAt) &&
   (v.endsAt === null || (timestamp(v.endsAt) && Date.parse(v.endsAt) >= Date.parse(v.startsAt))) &&
   order(v.order) && list(v.items, item) && summary(v.expenseSummary);
-const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nullableText(v.description) &&
+const duration = (v: unknown) => v === undefined || v === null || (Number.isSafeInteger(v) && (v as number) > 0);
+const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nullableText(v.description) && duration(v.durationMinutes) &&
   timestamp(v.scheduledAt) && nullableText(v.mapsUrl) &&
   id(v.createdBy) && timestamp(v.createdAt) && ids(v.postIds);
 const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && nullableText(v.breakdown) &&

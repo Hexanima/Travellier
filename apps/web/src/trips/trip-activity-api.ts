@@ -3,7 +3,7 @@ import type { TripResult } from "./trip-management-api.js";
 import type { ItineraryActivityResponse } from "./trip-itinerary-api.js";
 
 export type ActivityResponse = Omit<ItineraryActivityResponse, "postIds">;
-export type ActivityInput = Pick<ActivityResponse, "dayId" | "title" | "scheduledAt" | "description" | "mapsUrl">;
+export type ActivityInput = Pick<ActivityResponse, "dayId" | "title" | "scheduledAt" | "description" | "mapsUrl"> & { durationMinutes?: number | null };
 export type TripActivityApi = {
   create: (tripId: string, input: ActivityInput) => Promise<TripResult<ActivityResponse>>;
   get: (tripId: string, activityId: string) => Promise<TripResult<ActivityResponse>>;
@@ -16,13 +16,15 @@ const id = (value: unknown): value is string => typeof value === "string" && /^[
 const nullableText = (value: unknown) => value === null || typeof value === "string";
 const timestamp = (value: unknown) => typeof value === "string" &&
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+/** Absent is tolerated; when present it is null or a positive whole number of minutes. */
+const validDuration = (value: unknown) => value === undefined || value === null || (Number.isSafeInteger(value) && (value as number) > 0);
 const validActivity = (value: unknown, tripId: string, activityId?: string): value is ActivityResponse => record(value) &&
   id(value.id) && (activityId === undefined || value.id === activityId) && value.tripId === tripId && id(value.tripId) &&
   id(value.dayId) && typeof value.title === "string" && value.title.trim() !== "" && nullableText(value.description) &&
-  nullableText(value.mapsUrl) && timestamp(value.scheduledAt) && timestamp(value.createdAt) && id(value.createdBy);
+  nullableText(value.mapsUrl) && validDuration(value.durationMinutes) && timestamp(value.scheduledAt) && timestamp(value.createdAt) && id(value.createdBy);
 const response = (result: { ok: true; value: unknown } | { ok: false; error: ApiClientError }, tripId: string, activityId?: string): TripResult<ActivityResponse> => {
   if (!result.ok) return { ok: false, error: { kind: result.error.kind,
-    ...(result.error.fields ? { fields: result.error.fields.map(({ field, message }) => ({ field, message })) } : {}) } };
+    ...(result.error.fields ? { fields: result.error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
   return record(result.value) && validActivity(result.value.activity, tripId, activityId)
     ? { ok: true, value: result.value.activity } : { ok: false, error: { kind: "server" } };
 };

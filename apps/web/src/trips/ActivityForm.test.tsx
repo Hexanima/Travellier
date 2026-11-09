@@ -41,6 +41,63 @@ describe("ActivityForm", () => {
     expect(container.querySelector('[name="date"]')).toHaveProperty("required", true);
     expect(container.querySelector('[name="time"]')).toHaveProperty("required", true);
   });
+  it("creates with a duration in minutes from hours and minutes", async () => {
+    const { container, create } = await render();
+    await field(container, "title", "Museo"); await field(container, "time", "09:00");
+    await field(container, "durationHours", "1"); await field(container, "durationMinutes", "30"); await submit(container);
+    expect(create).toHaveBeenCalledWith(itineraryFixture().tripId, expect.objectContaining({ durationMinutes: 90, scheduledAt: "2026-09-25T12:00:00.000Z" }));
+    expect(container.textContent).toContain("Duración estimada");
+    expect(container.textContent).toContain("opcional");
+  });
+  it("does not send the duration field when none is entered", async () => {
+    const { container, create } = await render();
+    await field(container, "title", "Museo"); await field(container, "time", "09:00"); await submit(container);
+    expect(create.mock.calls[0][1]).not.toHaveProperty("durationMinutes");
+  });
+  it("shows local duration errors without sending", async () => {
+    const { container, create } = await render();
+    await field(container, "title", "Museo"); await field(container, "time", "09:00"); await field(container, "durationMinutes", "75"); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(container.querySelector('[name="durationMinutes"]')).toHaveProperty("ariaInvalid", "true");
+    await field(container, "durationMinutes", "15"); await submit(container);
+    expect(create).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ durationMinutes: 15 }));
+  });
+  it("edits only the duration without resending the timestamp that carries milliseconds", async () => {
+    const existing = { ...itineraryFixture().activities[0], durationMinutes: null } as ActivityResponse;
+    expect(existing.scheduledAt).toBe("2026-09-25T12:00:00.123Z");
+    const { container, update } = await render(existing);
+    expect(container.querySelector('[name="durationHours"]')).toHaveProperty("value", "");
+    await field(container, "durationHours", "2"); await submit(container);
+    expect(update).toHaveBeenCalledWith(existing.tripId, existing.id, { durationMinutes: 120 });
+  });
+  it("hydrates the existing duration and removes it by sending null", async () => {
+    const existing = { ...itineraryFixture().activities[0], durationMinutes: 90 } as ActivityResponse;
+    const { container, update } = await render(existing);
+    expect(container.querySelector('[name="durationHours"]')).toHaveProperty("value", "1");
+    expect(container.querySelector('[name="durationMinutes"]')).toHaveProperty("value", "30");
+    await submit(container);
+    expect(update).not.toHaveBeenCalled(); expect(container.textContent).toContain("No hay cambios para guardar");
+    await field(container, "durationHours", ""); await field(container, "durationMinutes", ""); await submit(container);
+    expect(update).toHaveBeenCalledWith(existing.tripId, existing.id, { durationMinutes: null });
+  });
+  it.each([
+    ["outside_window", "La actividad terminaría después de la salida del destino. Acortá la duración o cambiá el horario."],
+    ["invalid", "Ingresá una duración válida."],
+  ])("shows the %s rejection on the duration and keeps the draft", async (code, text) => {
+    const { container, create, onSaved } = await render();
+    create.mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "durationMinutes", code, message: "x" }] } });
+    await field(container, "title", "Museo"); await field(container, "time", "09:00"); await field(container, "durationHours", "9"); await submit(container);
+    const minutes = container.querySelector<HTMLInputElement>('[name="durationMinutes"]')!;
+    expect(container.textContent).toContain(text);
+    expect(minutes.getAttribute("aria-invalid")).toBe("true");
+    const description = document.getElementById(minutes.getAttribute("aria-describedby")!);
+    expect(description?.textContent).toBe(text);
+    expect(container.querySelector('[name="durationHours"]')).toHaveProperty("value", "9");
+    expect(container.querySelector('[name="title"]')).toHaveProperty("value", "Museo");
+    expect(onSaved).not.toHaveBeenCalled();
+    await field(container, "durationHours", "1");
+    expect(container.textContent).not.toContain(text);
+  });
   it("shows errors without sending an invalid form", async () => {
     const { container, create } = await render(); await submit(container);
     expect(container.querySelectorAll('[aria-invalid="true"]')).toHaveLength(2);

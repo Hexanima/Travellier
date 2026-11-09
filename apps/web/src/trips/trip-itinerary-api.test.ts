@@ -18,6 +18,18 @@ describe("itinerary client", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
     expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
   });
+  it.each([[undefined], [null], [90]])("tolerates durationMinutes %s on activities", async (durationMinutes) => {
+    const itinerary = itineraryFixture();
+    if (durationMinutes !== undefined) (itinerary.activities[0] as { durationMinutes?: number | null }).durationMinutes = durationMinutes;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
+  });
+  it.each([[0], [-1], [1.5], ["90"]])("rejects an invalid durationMinutes %j", async (durationMinutes) => {
+    const itinerary = itineraryFixture();
+    (itinerary.activities[0] as { durationMinutes?: unknown }).durationMinutes = durationMinutes;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it("reads canonical UTC and legacy urban steps without mutating their fields", async () => {
     const itinerary = itineraryFixture();
     const canonical = { ...itinerary.transports[0], type: "bus_local", details: { steps: [

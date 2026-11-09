@@ -2,9 +2,11 @@ import { validateActivitySchedule, type ItineraryDay, type ObjectId } from "app-
 import type { ActivityInput, ActivityResponse } from "./trip-activity-api.js";
 import type { ItineraryDayResponse } from "./trip-itinerary-api.js";
 import type { ItinerarySegment } from "./trip-itinerary-view.js";
+import { parseDurationInput, splitDuration } from "./activity-duration.js";
 import { parseLocalDateTimeCandidates, toLocalDateTime } from "./transport-local-time.js";
 
-export type ActivityFormValues = { title: string; description: string; mapsUrl: string; date: string; time: string; originalScheduledAt?: string };
+export type ActivityFormValues = { title: string; description: string; mapsUrl: string; date: string; time: string;
+  durationHours: string; durationMinutes: string; originalScheduledAt?: string };
 export type ActivityFormContext = { tripId: string; days: ItineraryDayResponse[]; timeZone: string;
   selection: Pick<ItinerarySegment, "destinationId" | "sourceDayIds" | "startsAt" | "endsAt"> & { date: string } };
 export type ActivityFormResult = { ok: true; value: ActivityInput } | { ok: false; errors: Record<string, string> };
@@ -12,8 +14,10 @@ export type ActivityFormResult = { ok: true; value: ActivityInput } | { ok: fals
 export const initialActivityValues = (context: ActivityFormContext, existing?: ActivityResponse): ActivityFormValues => {
   const originalScheduledAt = existing?.scheduledAt;
   const local = originalScheduledAt ? toLocalDateTime(originalScheduledAt, context.timeZone) : undefined;
+  const duration = splitDuration(existing?.durationMinutes);
   return { title: existing?.title ?? "", description: existing?.description ?? "", mapsUrl: existing?.mapsUrl ?? "",
-    date: local?.slice(0, 10) ?? context.selection.date, time: local?.slice(11) ?? "", originalScheduledAt };
+    date: local?.slice(0, 10) ?? context.selection.date, time: local?.slice(11) ?? "",
+    durationHours: duration.hours, durationMinutes: duration.minutes, originalScheduledAt };
 };
 
 /** Hydration stays in the client adapter; window ownership is decided by the domain. */
@@ -27,7 +31,11 @@ export const prepareActivityInput = (values: ActivityFormValues, context: Activi
   if (!values.title.trim()) errors.title = "Ingresá un título.";
   if (!values.date) errors.date = "Ingresá la fecha.";
   if (!values.time) errors.time = "Ingresá la hora.";
+  // Local shape only: fitting the destination window is decided by the backend.
+  const duration = parseDurationInput({ hours: values.durationHours, minutes: values.durationMinutes });
+  if (!duration.ok) Object.assign(errors, duration.errors);
   if (Object.keys(errors).length) return { ok: false, errors };
+  const durationMinutes = duration.ok ? duration.value : null;
   const local = `${values.date}T${values.time}`;
   const candidates = values.originalScheduledAt && toLocalDateTime(values.originalScheduledAt, context.timeZone) === local
     ? [new Date(values.originalScheduledAt)] : parseLocalDateTimeCandidates(local, context.timeZone);
@@ -43,7 +51,7 @@ export const prepareActivityInput = (values: ActivityFormValues, context: Activi
     if (operation === "create" && values.date !== selection.date &&
         (scheduledAt.getTime() !== Date.parse(selection.endsAt!) || scheduledAt.getTime() !== selected?.endsAt?.getTime())) continue;
     if (selected) return { ok: true, value: { dayId: selected.id, title: values.title.trim(), scheduledAt: scheduledAt.toISOString(),
-      description: values.description.trim() || null, mapsUrl: values.mapsUrl.trim() || null } };
+      description: values.description.trim() || null, mapsUrl: values.mapsUrl.trim() || null, durationMinutes } };
   }
   return { ok: false, errors: { scheduledAt: operation === "edit"
     ? "Elegí un horario dentro de las franjas de actividad de este destino."

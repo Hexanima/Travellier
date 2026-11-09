@@ -9,7 +9,7 @@ const context = (timeZone = "America/Argentina/Buenos_Aires"): ActivityFormConte
   return { tripId: itinerary.tripId, days: itinerary.days, timeZone,
     selection: { date: "2026-09-25", destinationId: day.destinationId, sourceDayIds: [day.id], startsAt: day.startsAt, endsAt: day.endsAt } };
 };
-const values = () => ({ title: "  Paseo  ", description: "", mapsUrl: "", date: "2026-09-25", time: "09:00" });
+const values = () => ({ title: "  Paseo  ", description: "", mapsUrl: "", date: "2026-09-25", time: "09:00", durationHours: "", durationMinutes: "" });
 const reschedulingContext = (timeZone?: string): ActivityFormContext => {
   const ctx = context(timeZone);
   ctx.days[1].endsAt = "2026-09-26T00:00:00.000Z";
@@ -30,7 +30,7 @@ describe("activity form state", () => {
   });
   it("prepares a canonical day ID and UTC instant while clearing empty optional fields", () => {
     expect(prepareActivityInput(values(), context())).toEqual({ ok: true, value: {
-      dayId: context().days[1].id, title: "Paseo", scheduledAt: "2026-09-25T12:00:00.000Z", description: null, mapsUrl: null,
+      dayId: context().days[1].id, title: "Paseo", scheduledAt: "2026-09-25T12:00:00.000Z", description: null, mapsUrl: null, durationMinutes: null,
     } });
   });
   it.each([
@@ -39,6 +39,29 @@ describe("activity form state", () => {
     [{ time: "07:00" }, "scheduledAt"], [{ time: "06:59" }, "scheduledAt"], [{ time: "15:01" }, "scheduledAt"],
     [{ date: "2026-09-26" }, "scheduledAt"],
   ])("rejects invalid input %j", (change, field) => invalid(change, field));
+  it("hydrates an existing duration into hours and minutes and none when absent", () => {
+    const existing = (itineraryFixture() as TripItineraryResponse).activities[0];
+    expect(initialActivityValues(context(), { ...existing, durationMinutes: 90 })).toMatchObject({ durationHours: "1", durationMinutes: "30" });
+    expect(initialActivityValues(context(), { ...existing, durationMinutes: null })).toMatchObject({ durationHours: "", durationMinutes: "" });
+    expect(initialActivityValues(context(), existing)).toMatchObject({ durationHours: "", durationMinutes: "" });
+    expect(initialActivityValues(context())).toMatchObject({ durationHours: "", durationMinutes: "" });
+  });
+  it("returns the duration as minutes or null without deciding the destination window", () => {
+    expect(prepareActivityInput({ ...values(), durationHours: "1", durationMinutes: "30" }, context()))
+      .toMatchObject({ ok: true, value: { durationMinutes: 90 } });
+    expect(prepareActivityInput(values(), context())).toMatchObject({ ok: true, value: { durationMinutes: null } });
+    // 100 h overflows the destination window; only the backend rejects that.
+    expect(prepareActivityInput({ ...values(), durationHours: "100" }, context())).toMatchObject({ ok: true, value: { durationMinutes: 6000 } });
+  });
+  it.each([
+    [{ durationMinutes: "60" }, "durationMinutes"], [{ durationHours: "-1" }, "durationHours"], [{ durationHours: "1.5" }, "durationHours"],
+    [{ durationHours: "x" }, "durationHours"], [{ durationHours: "0", durationMinutes: "0" }, "durationMinutes"],
+  ])("reports local duration errors per field %j", (change, field) => invalid(change, field));
+  it("keeps the exact instant when only the duration changes", () => {
+    const existing = (itineraryFixture() as TripItineraryResponse).activities[0];
+    const value = { ...initialActivityValues(context(), existing), durationHours: "2" };
+    expect(prepareActivityInput(value, context(), "edit")).toMatchObject({ ok: true, value: { scheduledAt: existing.scheduledAt, durationMinutes: 120 } });
+  });
   it("retains optional content", () => {
     expect(prepareActivityInput({ ...values(), description: "En el centro", mapsUrl: "https://maps.app.goo.gl/example" }, context()))
       .toMatchObject({ ok: true, value: { description: "En el centro", mapsUrl: "https://maps.app.goo.gl/example" } });

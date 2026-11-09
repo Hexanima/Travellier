@@ -5,6 +5,8 @@ import type { ActivityFormContext } from "./activity-form-state.js";
 import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
+import { formatDuration } from "./activity-duration.js";
+import { formatActivityRange } from "./activity-time-format.js";
 import { projectTripItinerary } from "./trip-itinerary-view.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
@@ -45,6 +47,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const selection = request.kind === "create" ? request.selection : day && segment ? { ...segment, date: day.date } : undefined;
   const context = selection ? { tripId: itinerary.tripId, days: itinerary.days, timeZone, selection } : undefined;
   const maps = safeMapsUrl(existing?.mapsUrl ?? null);
+  const range = state.kind === "detail" ? formatActivityRange(state.value, timeZone) : undefined;
   const timestamp = new Intl.DateTimeFormat("es-AR", { timeZone, dateStyle: "full", timeStyle: "short" });
   return <div className="activity-dialog"><Modal isOpen title={request.kind === "create" ? "Nueva actividad" : state.kind === "edit" ? "Editar actividad" : "Detalle de actividad"}
     loading={saving} onClose={onClose}>
@@ -61,7 +64,8 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       {state.kind === "detail" ? <div className="activity-detail">
         <h3>{state.value.title}</h3>
         {participation}
-        <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br /><span className="activity-context">Horarios en {timeZone}</span></p>
+        <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br />{range?.endIso ? <>Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
+          <br />Duración: {formatDuration(state.value.durationMinutes!)}<br /></> : null}<span className="activity-context">Horarios en {timeZone}</span></p>
         {state.value.description ? <p className="activity-description">{state.value.description}</p> : null}
         {maps ? <a className="activity-maps-link" href={maps} target="_blank" rel="noopener noreferrer">Ver vínculo de Maps</a>
           : state.value.mapsUrl ? <p className="activity-context">Vínculo de Maps no válido.</p> : null}
