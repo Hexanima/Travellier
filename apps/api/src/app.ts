@@ -64,6 +64,10 @@ import {
   type PostDetailPayload,
   type TripPostChainResult,
   type PostEditableFields,
+  type CommentView,
+  type TripCommentPayload,
+  type CreateTripPostCommentPayload,
+  type UpdateTripPostCommentPayload,
   type Result,
   createObjectId,
   ValidationError,
@@ -128,6 +132,9 @@ export interface TripApi extends TripInvitationApi {
   getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   linkPostToNewActivity?: (payload: LinkTripPostToNewActivityPayload) => AsyncResult<LinkTripPostToNewActivityResult>;
+  listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
+  createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
+  updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<CreateTripActivityResult>;
