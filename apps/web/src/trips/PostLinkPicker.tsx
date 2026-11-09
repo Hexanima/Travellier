@@ -53,7 +53,9 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
     const result = await itinerary.get(tripId ?? "");
     return result.ok ? { ok: true, value: result.value.activities } : result;
   });
-  useEffect(() => { headingRef.current?.focus(); }, []);
+  // With a real history `navigate(-1)` resolves later (popstate): repeated taps after the first must not leave twice.
+  const leaving = useRef(false);
+  useEffect(() => { leaving.current = false; headingRef.current?.focus(); }, []);
 
   const excluded = postList.kind === "ready" ? excludedPostIds(postList.value, postId) : new Set<string>();
   const postOptions = postList.kind === "ready" ? postList.value.filter((item) => !excluded.has(item.id)) : [];
@@ -64,6 +66,8 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
   // Coming from the composer, going back pops this entry (no duplicated composer in the history); the focus and the
   // notice travel through the drafts context. Opened directly by URL, the composer replaces this entry.
   const back = (notice?: string) => {
+    if (leaving.current) return;
+    leaving.current = true;
     const result = { focus: "link" as const, ...(notice ? { notice } : {}) };
     if (fromComposer) { setReturned(result); navigate(-1); } else navigate(composer, { replace: true, state: result });
   };

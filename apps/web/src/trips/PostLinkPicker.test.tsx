@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
+import { BrowserRouter, MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostLinkPicker } from "./PostLinkPicker.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
@@ -221,5 +221,55 @@ describe("PostLinkPicker", () => {
     const { container } = await open(`${newPath}?transportId=${transportId}`, {}, seeded(null, transportId));
     await click(button(container, "Cancelar"));
     expect(probe(container).search).toBe(`?transportId=${transportId}`);
+  });
+  describe("with a real history (BrowserRouter, asynchronous popstate)", () => {
+    function BrowserProbe() {
+      const handle = usePostDraft("new"); const location = useLocation(); const navigate = useNavigate();
+      return <div>
+        <p data-testid="where">{location.pathname}</p>
+        <p data-testid="returned">{JSON.stringify(handle.returned ?? null)}</p>
+        <button type="button" onClick={() => handle.setDraft(seeded())}>sembrar</button>
+        <button type="button" onClick={() => navigate(`${location.pathname}/link`, { state: { fromComposer: true } })}>ir</button>
+      </div>;
+    }
+    const mountBrowser = async () => {
+      window.history.replaceState(null, "", "/listado"); window.history.pushState(null, "", newPath);
+      const get = vi.fn(); const list = vi.fn().mockResolvedValue({ ok: true, value: allPosts });
+      const container = document.createElement("div"); document.body.append(container);
+      const root = createRoot(container); roots.push(root);
+      await act(async () => root.render(<BrowserRouter><Routes>
+        <Route path="/listado" element={<p data-testid="where">/listado</p>} />
+        <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
+          <Route path="new" element={<BrowserProbe />} />
+          <Route path="new/link" element={<PostLinkPicker posts={{ list, get }} itinerary={{ get: vi.fn() }} />} />
+        </Route></Routes></BrowserRouter>));
+      await click(button(container, "sembrar")); await click(button(container, "ir"));
+      return container;
+    };
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const where = (container: HTMLElement) => container.querySelector('[data-testid="where"]')?.textContent;
+    it.each(["Aceptar", "Cancelar"])("a double tap on %s goes back once, to the composer", async (label) => {
+      const container = await mountBrowser();
+      const target = button(container, label)!;
+      const go = vi.spyOn(window.history, "go");
+      await act(async () => {
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      await settle();
+      expect(go).toHaveBeenCalledTimes(1);
+      go.mockRestore();
+      expect(where(container)).toBe(newPath);
+      expect(JSON.parse(container.querySelector('[data-testid="returned"]')!.textContent!)).toMatchObject({ focus: "link" });
+    });
+    it("the selector can be used again in a later visit", async () => {
+      const container = await mountBrowser();
+      await click(button(container, "Cancelar")); await settle();
+      expect(where(container)).toBe(newPath);
+      await click(button(container, "ir"));
+      expect(container.querySelector("h1")?.textContent).toBe("Vincular recuerdo");
+      await click(button(container, "Cancelar")); await settle();
+      expect(where(container)).toBe(newPath);
+    });
   });
 });
