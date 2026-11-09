@@ -27,6 +27,7 @@ import { createTripManagementApi, type TripManagementApi } from './trips/trip-ma
 import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-api.js'
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
 import { PostComposer } from './trips/PostComposer.js'
+import { PostLinkPicker } from './trips/PostLinkPicker.js'
 import { MemoriesLayout, TripMemoriesScreen } from './trips/TripMemoriesScreen.js'
 
 type AppProps = {
@@ -299,6 +300,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} />} />
           <Route path=":postId/edit" element={<PostComposer posts={tripPosts} />} />
+          <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} />} />
         </Route>
         <Route path="/profile" element={
           !sessionReady

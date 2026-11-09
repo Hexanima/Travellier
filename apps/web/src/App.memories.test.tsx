@@ -88,3 +88,48 @@ describe("App memories integration", () => {
     expect(JSON.parse(call[1].body as string)).toEqual({ description: "Atardecer" });
   });
 });
+
+describe("App memories link routes", () => {
+  const activityId = itineraryId(40), transportId = itineraryId(50);
+  const buttonOf = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) ?? null;
+  const radioOf = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector("input") ?? null;
+  const itinerary = () => ({ get: vi.fn().mockResolvedValue({ ok: true, value: { activities: [{ id: activityId, title: "Paseo por el centro", scheduledAt: "2026-09-25T15:00:00.000Z" }] } }) });
+  it("renders the selector in the new route with the injected itinerary and links an activity", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: saved() });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [] });
+    const api = itinerary();
+    const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), itinerary: api, posts: { create, list } });
+    await type(container, "description", "Con actividad");
+    await click(buttonOf(container, "Vincular a"));
+    expect(container.querySelector("h1")?.textContent).toBe("Vincular recuerdo");
+    await click(radioOf(container, "Actividad"));
+    expect(api.get).toHaveBeenCalledExactlyOnceWith(tripId);
+    await click(radioOf(container, "Paseo por el centro")); await click(buttonOf(container, "Aceptar"));
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Con actividad");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Con actividad", activityId });
+  });
+  it("renders the selector in the edit route and lists the other memories", async () => {
+    const otherId = itineraryId(33);
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved(), saved({ id: otherId, description: "Otro" })] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
+    const container = await render(`/trips/${tripId}/memories/${postId}/edit`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: { list, get } });
+    await click(buttonOf(container, "Vincular a"));
+    await click(radioOf(container, "Post"));
+    expect(list).toHaveBeenCalledExactlyOnceWith(tripId);
+    expect(radioOf(container, "Otro")).not.toBeNull(); expect(radioOf(container, "Atardecer")).toBeNull();
+  });
+  it("passes ?transportId= from the route to the composer", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: saved() });
+    const container = await render(`/trips/${tripId}/memories/new?transportId=${transportId}`, { auth, sessionStorage: storage(true), posts: { create } });
+    expect(container.textContent).toContain("Vinculado a un transporte");
+    await type(container, "description", "En camino"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "En camino", transportId });
+  });
+  it("without a session the selector route redirects to login and requests nothing", async () => {
+    const list = vi.fn(), api = itinerary();
+    const container = await render(`/trips/${tripId}/memories/new/link`, { auth: {}, sessionStorage: storage(false), itinerary: api, posts: { list } });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(list).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled();
+  });
+});
