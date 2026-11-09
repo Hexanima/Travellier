@@ -8,7 +8,12 @@ import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
 type LoadState = { kind: "loading" } | { kind: "ready"; posts: PostResponse[] } | { kind: "error"; error: TripFailure };
-type Saved = { post: PostResponse; notice: "created" | "updated" };
+/** `*-activity` means an activity was created together with the post; `going` is true only when the author's participation came back valid. */
+type Notice = "created" | "updated" | "created-activity" | "linked-activity";
+type Saved = { post: PostResponse; notice: Notice; going: boolean };
+const notices: readonly unknown[] = ["created", "updated", "created-activity", "linked-activity"];
+const noticeText = ({ notice, going }: Saved) => notice === "created" ? "Recuerdo publicado." : notice === "updated" ? "Cambios guardados."
+  : `${notice === "created-activity" ? "Recuerdo publicado" : "Cambios guardados"} y actividad creada.${going ? " Vas a ir." : ""}`;
 
 /** Layout of `memories/*`: drafts live here, keyed by Trip, so they are shared by the child routes and dropped when leaving the Trip. */
 export function MemoriesLayout() {
@@ -26,10 +31,10 @@ const merge = (server: readonly PostResponse[], local: PostResponse | undefined)
   arrange(local && !server.some((item) => item.id === local.id) ? [...server, local] : server);
 const savedFrom = (state: unknown, tripId: string | undefined): Saved | undefined => {
   if (typeof state !== "object" || state === null) return undefined;
-  const { post, notice } = state as { post?: Partial<PostResponse>; notice?: unknown };
+  const { post, notice, going } = state as { post?: Partial<PostResponse>; notice?: unknown; going?: unknown };
   if (typeof post !== "object" || post === null || typeof post.id !== "string" || post.tripId !== tripId || typeof post.createdAt !== "string" ||
-    !Number.isFinite(Date.parse(post.createdAt)) || (post.description !== null && typeof post.description !== "string") || (notice !== "created" && notice !== "updated")) return undefined;
-  return { post: post as PostResponse, notice };
+    !Number.isFinite(Date.parse(post.createdAt)) || (post.description !== null && typeof post.description !== "string") || !notices.includes(notice)) return undefined;
+  return { post: post as PostResponse, notice: notice as Notice, going: going === true };
 };
 
 export function TripMemoriesScreen({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripMemoriesScreenProps) {
@@ -84,7 +89,7 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
         <p>Lo que vive el grupo, del más reciente al más antiguo. Horarios en tu zona local.</p>
         <Link className="trips-settings-link" to={create}>Nuevo recuerdo</Link>
       </header>
-      {state.kind === "ready" && saved ? <Feedback variant="success">{saved.notice === "created" ? "Recuerdo publicado." : "Cambios guardados."}</Feedback> : null}
+      {state.kind === "ready" && saved ? <Feedback variant="success">{noticeText(saved)}</Feedback> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdos…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
         <Feedback variant="error">No pudimos actualizar los recuerdos. Los cambios guardados se conservan.</Feedback>

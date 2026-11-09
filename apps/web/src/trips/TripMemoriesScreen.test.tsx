@@ -102,4 +102,27 @@ describe("TripMemoriesScreen", () => {
     expect(container.textContent).toContain("Todavía no hay recuerdos.");
     expect(container.textContent).not.toContain("Recuerdo publicado.");
   });
+  const statuses = (container: HTMLElement) => Array.from(container.querySelectorAll('[role="status"]')).map((item) => item.textContent);
+  it.each([
+    ["created-activity", true, "Recuerdo publicado y actividad creada. Vas a ir."],
+    ["created-activity", false, "Recuerdo publicado y actividad creada."],
+    ["linked-activity", true, "Cambios guardados y actividad creada. Vas a ir."],
+    ["linked-activity", false, "Cambios guardados y actividad creada."],
+  ])("confirms %s (going %s) with the created activity", async (notice, going, message) => {
+    const saved = post(20, "2026-01-05T10:00:00.000Z", "Recién guardado");
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [post(11, "2026-01-01T10:00:00.000Z")] }), { post: saved, notice, going });
+    expect(texts(container)).toEqual(["Recién guardado", "Recuerdo 11"]);
+    expect(statuses(container)).toContain(message);
+    expect(statuses(container).filter((text) => text?.includes("Recuerdo publicado") || text?.includes("Cambios guardados"))).toHaveLength(1);
+  });
+  it("keeps the plain notices without mentioning an activity", async () => {
+    const saved = post(20, "2026-01-05T10:00:00.000Z", "Recién guardado");
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }), { post: saved, notice: "created", going: true });
+    expect(statuses(container)).toContain("Recuerdo publicado.");
+    expect(container.textContent).not.toContain("actividad creada");
+  });
+  it("ignores an unknown notice", async () => {
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }), { post: post(20, "2026-01-05T10:00:00.000Z"), notice: "other" });
+    expect(container.textContent).toContain("Todavía no hay recuerdos.");
+  });
 });
