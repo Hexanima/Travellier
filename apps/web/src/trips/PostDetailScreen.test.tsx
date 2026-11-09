@@ -76,6 +76,16 @@ describe("PostDetailScreen content", () => {
     expect(link?.textContent).toBe("Ver ubicación");
     expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
   });
+  it.each(["javascript:alert(1)", "/relativo/mapa", "ftp://maps.test/x", "data:text/html,x", "maps.test/x", "mailto:a@b.c"])("does not link an unsafe location (%s)", async (mapsUrl) => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl } }))));
+    expect(container.textContent).toContain("Recuerdo 5");
+    expect(container.textContent).not.toContain("Ver ubicación");
+    expect(container.querySelector("a[href^='javascript:'], a[href='/relativo/mapa'], a[href^='ftp:'], a[href^='data:'], a[href^='mailto:']")).toBeNull();
+  });
+  it("links an http location as well", async () => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl: "http://maps.test/x" } }))));
+    expect(container.querySelector('a[href="http://maps.test/x"]')?.getAttribute("rel")).toBe("noopener noreferrer");
+  });
   it("shows generic link labels for an activity root and a transport", async () => {
     const withActivity = await open(vi.fn().mockResolvedValue(ok(detail(5, { rootActivityId: itineraryId(8) }))));
     expect(withActivity.container.textContent).toContain("Vinculado a una actividad");

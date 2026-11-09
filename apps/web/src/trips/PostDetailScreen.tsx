@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
+import { safeMapsUrl } from "./safe-maps-url.js";
 import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostDetail, PostSummary, TripPostApi } from "./trip-post-api.js";
@@ -96,7 +97,7 @@ function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; pos
           <section className="activity-detail" aria-labelledby="memory-content-title">
             <h2 id="memory-content-title">Contenido</h2>
             <p className="itinerary-post-description">{post.description?.trim() ? post.description : noText}</p>
-            {post.mapsUrl ? <a className="trips-settings-link" href={post.mapsUrl} rel="noopener noreferrer">Ver ubicación</a> : null}
+            {safeMapsUrl(post.mapsUrl) ? <a className="trips-settings-link" href={safeMapsUrl(post.mapsUrl)} rel="noopener noreferrer">Ver ubicación</a> : null}
             <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
             {rootActivityId ? <p className="itinerary-secondary">Vinculado a una actividad</p> : null}
             {post.transportId ? <p className="itinerary-secondary">Vinculado a un transporte</p> : null}

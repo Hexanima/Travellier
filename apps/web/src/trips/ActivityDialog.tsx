@@ -9,6 +9,7 @@ import type { ParticipationResponse } from "./trip-participation-api.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityRange } from "./activity-time-format.js";
 import { projectTripItinerary } from "./trip-itinerary-view.js";
+import { safeMapsUrl } from "./safe-maps-url.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
 type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse; timeZone: string; activities: TripActivityApi;
@@ -18,12 +19,6 @@ type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse;
   /** A participation write or conflict confirmation for this activity is pending: removal waits. */
   busy?: boolean; participation?: ReactNode };
 type DetailState = { kind: "loading" } | { kind: "error"; error: TripFailure } | { kind: "detail" | "edit"; value: ActivityResponse };
-
-const safeMapsUrl = (value: string | null) => {
-  if (!value) return undefined;
-  try { const url = new URL(value); return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined; }
-  catch { return undefined; }
-};
 
 export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, onRemoved, busy = false, participation }: Props) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
