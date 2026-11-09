@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createHttpClient } from "../api/http-client.js";
-import { itineraryFixture } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
 import { createTripItineraryApi } from "./trip-itinerary-api.js";
 
 describe("itinerary client", () => {
@@ -57,10 +57,16 @@ describe("itinerary client", () => {
     const get = vi.fn().mockResolvedValueOnce({ ok: true, value: { itinerary: {
       ...itinerary, days: [], activities: [], transports: [], posts: [],
     } } }).mockResolvedValueOnce({ ok: true, value: { itinerary: {
-      ...itinerary, days: itinerary.days.map((day, index) => index === 1 ? { ...day, type: "arrival", endsAt: null } : day),
+      ...itinerary, days: itinerary.days.map((day, index) => index === 1 ? { ...day, endsAt: null } : day),
     } } });
     expect(await createApi({ get }).get(itinerary.tripId)).toMatchObject({ ok: true, value: { days: [] } });
     expect(await createApi({ get }).get(itinerary.tripId)).toMatchObject({ ok: true, value: { days: [{}, { endsAt: null }, {}] } });
+  });
+  it("rejects a retired arrival band as a server error instead of filtering or labelling it", async () => {
+    const itinerary = itineraryFixture();
+    (itinerary.days[1] as { type: string }).type = "arrival";
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
   });
   it.each(["network", "not-found", "forbidden", "unauthorized", "server"])("propagates %s errors", async (kind) => {
     const createApi = createTripItineraryApi;
@@ -83,12 +89,82 @@ describe("itinerary client", () => {
     (v: ReturnType<typeof itineraryFixture>) => { v.activities[0].scheduledAt = "invalid"; },
     (v: ReturnType<typeof itineraryFixture>) => { v.transports[0].arrivalAt = "invalid"; },
     (v: ReturnType<typeof itineraryFixture>) => { v.posts[0].expense!.totalAmount = Infinity; },
-    (v: ReturnType<typeof itineraryFixture>) => { v.posts[0].dayId = "000000000000000000000099"; },
     (v: ReturnType<typeof itineraryFixture>) => { v.days[0].items[0].id = "000000000000000000000099"; },
   ])("rejects malformed aggregate %# rather than exposing partial data", async (mutate) => {
     const createApi = createTripItineraryApi, itinerary = itineraryFixture();
     const tripId = itinerary.tripId; mutate(itinerary);
     const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
     expect(await createApi({ get }).get(tripId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+});
+
+const accepts = async (itinerary: object & { tripId: string }) => {
+  const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+  return createTripItineraryApi({ get }).get(itinerary.tripId);
+};
+type Fixture = ReturnType<typeof itineraryFixture>;
+describe("itinerary client: posts without dayId and with context", () => {
+  it("accepts posts with no dayId, a legacy dayId (ignored), a null dayId and legacy voting fields", async () => {
+    const itinerary = itineraryFixture();
+    expect("dayId" in itinerary.posts[0]).toBe(false);
+    expect(await accepts(itinerary)).toEqual({ ok: true, value: itinerary });
+    (itinerary.posts[0] as { dayId?: unknown }).dayId = itineraryId(99);
+    (itinerary.posts[1] as { dayId?: unknown }).dayId = null;
+    (itinerary.posts[0] as { votingEnabled?: unknown }).votingEnabled = true;
+    (itinerary.posts[0] as { status?: unknown }).status = "proposed";
+    expect(await accepts(itinerary)).toEqual({ ok: true, value: itinerary });
+  });
+  it("accepts unplacedPosts with dayId null and a child whose parent is not in posts but in the context", async () => {
+    const itinerary = itineraryFixture();
+    const parent = itinerary.posts[0];
+    const child = linkPost({ ...itineraryFixture().posts[0], id: itineraryId(40), expense: null }, { parentPostId: parent.id, rootPostId: parent.id });
+    (child as { dayId?: unknown }).dayId = null;
+    itinerary.unplacedPosts = [child];
+    expect(await accepts(itinerary)).toEqual({ ok: true, value: itinerary });
+    itinerary.posts[0].parentPostId = null;
+    itinerary.unplacedPosts[0].parentPostId = parent.id;
+    expect((await accepts(itinerary)).ok).toBe(true);
+  });
+  it("accepts a descendant of an activity with no own activityId", async () => {
+    const itinerary = itineraryFixture();
+    const activityId = itinerary.activities[0].id;
+    linkPost(itinerary.posts[0], { activityId });
+    const child = linkPost({ ...itineraryFixture().posts[0], id: itineraryId(41), expense: null },
+      { parentPostId: itinerary.posts[0].id, rootPostId: itinerary.posts[0].id, rootActivityId: activityId });
+    itinerary.posts.push(child); itinerary.activities[0].postIds = [itinerary.posts[0].id, child.id];
+    expect((await accepts(itinerary)).ok).toBe(true);
+  });
+  it.each<[string, (v: Fixture) => void]>([
+    ["context absent", (v) => { delete (v.posts[0] as { context?: unknown }).context; }],
+    ["context null", (v) => { (v.posts[0] as { context: unknown }).context = null; }],
+    ["context rootPostId malformed", (v) => { v.posts[0].context.rootPostId = "bad"; }],
+    ["placement unknown", (v) => { (v.posts[0].context as { placement: string }).placement = "other"; }],
+    ["activity placement without rootActivityId", (v) => { v.posts[0].context.placement = "activity"; }],
+    ["transport placement without rootTransportId", (v) => { v.posts[0].context.placement = "transport"; }],
+    ["transport placement with a rootActivityId", (v) => { v.posts[1].context.rootActivityId = itineraryFixture().activities[0].id; }],
+    ["independent placement with a rootTransportId", (v) => { v.posts[0].context.rootTransportId = itineraryFixture().transports[0].id; }],
+    ["independent placement with a rootActivityId", (v) => { v.posts[0].context.rootActivityId = itineraryFixture().activities[0].id; }],
+    ["rootActivityId nonexistent", (v) => { v.posts[0].context.placement = "activity"; v.posts[0].context.rootActivityId = itineraryId(99); }],
+    ["rootTransportId nonexistent", (v) => { v.posts[1].context.rootTransportId = itineraryId(99); }],
+    ["rootPostId nonexistent", (v) => { v.posts[0].context.rootPostId = itineraryId(99); }],
+    ["context parentPostId nonexistent", (v) => { v.posts[0].context.parentPostId = itineraryId(99); }],
+    ["parentPostId nonexistent", (v) => { v.posts[0].parentPostId = itineraryId(99); }],
+    ["own activityId nonexistent", (v) => { v.posts[0].activityId = itineraryId(99); }],
+    ["own transportId nonexistent", (v) => { v.posts[0].transportId = itineraryId(99); }],
+    ["unplacedPosts absent", (v) => { delete (v as { unplacedPosts?: unknown }).unplacedPosts; }],
+    ["unplacedPosts not an array", (v) => { (v as { unplacedPosts: unknown }).unplacedPosts = {}; }],
+    ["unplaced post malformed", (v) => { v.unplacedPosts = [{ ...v.posts[0], id: "bad" }]; }],
+    ["id duplicated between posts and unplacedPosts", (v) => { v.unplacedPosts = [{ ...v.posts[0] }]; }],
+    ["activity postIds pointing nowhere", (v) => { v.activities[0].postIds = [itineraryId(99)]; }],
+    ["transport postIds pointing nowhere", (v) => { v.transports[0].postIds = [itineraryId(99)]; }],
+  ])("rejects: %s", async (_name, mutate) => {
+    const itinerary = itineraryFixture(); mutate(itinerary);
+    expect(await accepts(itinerary)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("accepts activity and transport postIds that point to unplaced posts", async () => {
+    const itinerary = itineraryFixture();
+    itinerary.unplacedPosts = [itinerary.posts.pop()!];
+    itinerary.transports[0].postIds = [itinerary.unplacedPosts[0].id];
+    expect((await accepts(itinerary)).ok).toBe(true);
   });
 });

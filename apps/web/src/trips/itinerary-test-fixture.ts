@@ -1,5 +1,18 @@
 // Shared synthetic itinerary for client tests; IDs and timestamps follow the HTTP contract.
 export const itineraryId = (n: number) => n.toString(16).padStart(24, "0");
+type LinkablePost = { id: string; activityId: string | null; transportId: string | null; parentPostId: string | null;
+  context: { parentPostId: string | null; rootPostId: string; rootActivityId: string | null; rootTransportId: string | null;
+    placement: "activity" | "transport" | "independent" } };
+/** Sets a post's own links and keeps `context` coherent; root fields default to the own links (use overrides for descendants). */
+export const linkPost = <T extends LinkablePost>(post: T, links: { activityId?: string | null; transportId?: string | null;
+  parentPostId?: string | null; rootPostId?: string; rootActivityId?: string | null; rootTransportId?: string | null }): T => {
+  post.activityId = links.activityId ?? null; post.transportId = links.transportId ?? null; post.parentPostId = links.parentPostId ?? null;
+  const rootActivityId = links.rootActivityId !== undefined ? links.rootActivityId : post.activityId;
+  const rootTransportId = links.rootTransportId !== undefined ? links.rootTransportId : post.transportId;
+  post.context = { parentPostId: post.parentPostId, rootPostId: links.rootPostId ?? post.parentPostId ?? post.id, rootActivityId, rootTransportId,
+    placement: rootActivityId !== null ? "activity" : rootTransportId !== null ? "transport" : "independent" };
+  return post;
+};
 export const itineraryFixture = () => {
   const tripId = itineraryId(1), destinationId = itineraryId(2);
   const time = (hour: number) => `2026-09-25T${String(hour).padStart(2, "0")}:00:00.123Z`;
@@ -14,9 +27,12 @@ export const itineraryFixture = () => {
     createdAt: time(17), postIds: [] as string[],
   });
   const post = (id: number, hour: number, description: string) => ({
-    id: itineraryId(id), tripId, dayId: itineraryId(4), authorId: itineraryId(20), description,
+    id: itineraryId(id), tripId, authorId: itineraryId(20), description,
     mapsUrl: null, activityId: null as string | null, transportId: null as string | null,
-    parentPostId: null as string | null, createdAt: time(hour), expense: null as {
+    parentPostId: null as string | null, createdAt: time(hour),
+    context: { parentPostId: null as string | null, rootPostId: itineraryId(id), rootActivityId: null as string | null,
+      rootTransportId: null as string | null, placement: "independent" as "activity" | "transport" | "independent" },
+    expense: null as {
       id: string; tripId: string; postId: string; totalAmount: number; breakdown: string | null;
       paidBy: string | null; createdAt: string;
     } | null,
@@ -27,7 +43,7 @@ export const itineraryFixture = () => {
     { kind: "post", id: itineraryId(10), at: time(13) }, { kind: "activity", id: itineraryId(9), at: time(14) }];
   days[2].items = [{ kind: "transport", id: itineraryId(7), at: time(18) }];
   const posts = [post(10, 13, "Almuerzo junto al río"), post(11, 9, "En camino")];
-  posts[1].dayId = itineraryId(3); posts[1].transportId = itineraryId(6);
+  linkPost(posts[1], { transportId: itineraryId(6) });
   posts[0].expense = { id: itineraryId(12), tripId, postId: itineraryId(10),
     totalAmount: 25.5, breakdown: "Almuerzo", paidBy: null, createdAt: time(13) };
   days[1].expenseSummary = { totalAmount: 25.5, expenseCount: 1 };
@@ -40,5 +56,6 @@ export const itineraryFixture = () => {
       { id: itineraryId(7), tripId, destinationId, direction: "return", type: "car", departurePlace: "Córdoba",
         arrivalPlace: "Buenos Aires", departureAt: time(18), arrivalAt: time(20), costPerPerson: null, details: {}, postIds: [] },
     ], activities: [activity(8, 12, "Paseo por el centro"), activity(9, 14, "Visita al museo")], posts,
+    unplacedPosts: [] as typeof posts,
   };
 };
