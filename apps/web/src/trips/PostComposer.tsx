@@ -125,7 +125,6 @@ function Composer({ tripId, postId, posts, timeZone }: PostComposerProps & { tri
           onChange={(event) => update("description", event.target.value)} />
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
-        {missingContent ? <Feedback variant="error">{missingContentMessage}</Feedback> : null}
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.</Feedback> : null}
         {failure?.kind === "validation" ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
