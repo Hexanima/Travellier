@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftFromPost, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
+import { draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
 const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
@@ -185,5 +185,13 @@ describe("post draft with a new activity", () => {
   it("an update without a new activity behaves as before", () => {
     expect(prepareUpdate(draft("Hola"), saved({ activityId: A }), resolved)).toEqual({ activityId: null });
     expect(prepareUpdate(draft("Hola"), saved(), resolved)).toEqual({});
+  });
+  it("derives the draft key from the edited post or the valid continuation parent", () => {
+    expect(draftKeyFor({ postId: P, search: `?parentPostId=${A}` })).toBe(`edit:${P}`);
+    expect(draftKeyFor({ search: "" })).toBe("new");
+    expect(draftKeyFor({ search: `?transportId=${T}` })).toBe("new");
+    expect(draftKeyFor({ search: `?parentPostId=${A}` })).toBe(`new:parent:${A}`);
+    expect(draftKeyFor({ search: "?parentPostId=nope" })).toBe("new");
+    expect(draftKeyFor({ search: `?parentPostId=${A}` })).not.toBe(draftKeyFor({ search: `?parentPostId=${P}` }));
   });
 });

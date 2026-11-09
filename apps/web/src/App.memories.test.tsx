@@ -195,3 +195,163 @@ describe("App memories new activity routes", () => {
     expect(api.get).not.toHaveBeenCalled();
   });
 });
+
+describe("App memories detail route", () => {
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+  const detail = (extra: Record<string, unknown> = {}) => ({ post: saved(), parent: null, children: [], rootActivityId: null, ...extra });
+  it("renders the detail with a session and requests only that post", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() }), list = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get, list } });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.textContent).toContain("Atardecer");
+    expect(get).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    expect(list).not.toHaveBeenCalled();
+  });
+  it("redirects to login without a session and requests nothing", async () => {
+    const get = vi.fn(), list = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth: {}, sessionStorage: storage(false), posts: { get, list } });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(container.querySelector("h1")?.textContent).not.toBe("Recuerdo");
+    expect(get).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
+  });
+  it("keeps static routes ahead of :postId so new is the composer and not a detail", async () => {
+    const get = vi.fn();
+    const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), posts: { get } });
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect(get).not.toHaveBeenCalled();
+  });
+  it("opens the detail from the diary, shows its chain and goes back to the diary", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const parentId = itineraryId(31), childId = itineraryId(32);
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ parent: { id: parentId, authorId: itineraryId(20), createdAt: "2026-01-01T10:00:00.000Z", description: "Antes" },
+      children: [{ id: childId, authorId: itineraryId(20), createdAt: "2026-01-03T10:00:00.000Z", description: "Después" }], post: saved({ parentPostId: parentId }) }) });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/${parentId}"]`)?.textContent).toBe("Antes");
+    expect(container.querySelector(`a[href="/trips/${tripId}/memories/${childId}"]`)?.textContent).toBe("Después");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  it("flows from the diary to the detail, continues the memory and publishes it with only its parent", async () => {
+    const childId = itineraryId(35);
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const create = vi.fn().mockResolvedValue({ ok: true, value: saved({ id: childId, description: "Continuación", parentPostId: postId }) });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get, create } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    const next = Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo");
+    expect(next?.getAttribute("href")).toBe(`/trips/${tripId}/memories/new?parentPostId=${postId}`);
+    await click(next ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Atardecer");
+    await type(container, "description", "Continuación"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Continuación", parentPostId: postId });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.textContent).toContain("Recuerdo publicado.");
+  });
+  it("cancels a continuation back to the detail it started from", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(container.textContent).toContain("Atardecer");
+    expect(container.textContent).not.toContain("Nuevo recuerdo");
+    expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al diario")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector(`li[data-memory="${postId}"]`)).not.toBeNull();
+    expect(container.querySelector("#post-link-summary")).toBeNull();
+  });
+  it("discarding a dirty continuation also returns to the detail and Volver reaches the diary, not the composer", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo") ?? null);
+    await type(container, "description", "Borrador");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Descartar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  it("cancelling a continuation started from the itinerary keeps the itinerary as the root origin", async () => {
+    const value = itineraryFixture();
+    const itineraryGet = vi.fn().mockResolvedValue({ ok: true, value });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ post: saved({ id: value.posts[0].id }) }) });
+    const container = await render(`/trips/${tripId}/itinerary`, { auth, sessionStorage: storage(true), itinerary: { get: itineraryGet }, posts: { get } });
+    await click(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Continuar recuerdo") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al itinerario")?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
+    expect(container.textContent).not.toContain("Volver al diario");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+    expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`)).not.toBeNull();
+  });
+  it("cancelling a composer opened with no app history replaces the entry so Volver does not reopen it", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const entry = { pathname: `/trips/${tripId}/memories/new`, search: `?parentPostId=${postId}`, state: { origin: { path: `/trips/${tripId}/memories/${postId}`, label: "recuerdo" } } };
+    await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><App auth={auth} sessionStorage={storage(true)} posts={{ get }} /></MemoryRouter>));
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("#post-link-summary")).toBeNull();
+  });
+  it("Volver on a detail opened by direct URL goes to the diary", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  const openEditFromDetail = async () => {
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Editar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+    return container;
+  };
+  it("cancelling an edit opened from the detail returns to that detail and Volver reaches the diary", async () => {
+    const container = await openEditFromDetail();
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al diario")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  it("discarding a dirty edit opened from the detail returns to that detail and Volver does not reopen the editor", async () => {
+    const container = await openEditFromDetail();
+    await type(container, "description", "Cambio");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Descartar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.textContent).not.toContain("Editar recuerdo");
+  });
+  it("cancelling an edit opened from the detail of an itinerary post keeps the itinerary as root origin", async () => {
+    const value = itineraryFixture();
+    const itineraryGet = vi.fn().mockResolvedValue({ ok: true, value });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ post: saved({ id: value.posts[0].id }) }) });
+    const container = await render(`/trips/${tripId}/itinerary`, { auth, sessionStorage: storage(true), itinerary: { get: itineraryGet }, posts: { get } });
+    await click(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] a`));
+    await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Editar") ?? null);
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+  });
+});

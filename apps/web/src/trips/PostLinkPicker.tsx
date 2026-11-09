@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState } from "../components/index.js";
-import { setLink, type PostDraft, type PostLink } from "./post-draft.js";
+import { draftKeyFor, setLink, type PostDraft, type PostLink } from "./post-draft.js";
 import { activityOptionLabel, excludedPostIds, linkSummary, postOptionLabel } from "./post-link-options.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import type { TripResult } from "./trip-management-api.js";
@@ -35,8 +35,8 @@ function useLazy<T>(wanted: boolean, load: () => Promise<TripResult<T>>): [Lazy<
 
 export function PostLinkPicker(props: PostLinkPickerProps) {
   const { tripId, postId } = useParams();
-  const handle = usePostDraft(postId ? `edit:${postId}` : "new");
   const { search } = useLocation();
+  const handle = usePostDraft(draftKeyFor({ postId, search }));
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
   if (!handle.draft) return <Navigate to={composer} replace />;

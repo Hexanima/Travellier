@@ -9,7 +9,7 @@ type Store = { drafts: Readonly<Record<string, PostDraft>>; set: (key: string, d
   returns: Readonly<Record<string, PostReturn>>; setReturn: (key: string, value: PostReturn) => void; clearReturn: (key: string) => void };
 const Context = createContext<Store | undefined>(undefined);
 /**
- * Holds post drafts by key (`new` or `edit:<postId>`) at the level of the trip's memories layout, so child routes
+ * Holds post drafts by key (`new`, `new:parent:<id>` or `edit:<postId>`, see `draftKeyFor`) at the level of the trip's memories layout, so child routes
  * (composer, later subforms for links, photos and expense) share them. It lives only while the layout is mounted:
  * leaving the trip discards it, and it is never persisted.
  */

@@ -83,6 +83,9 @@
 .post-composer .itinerary-secondary { margin: 0; }
 .memories-list > .itinerary-nested-post { display: grid; gap: 6px; }
 .memories-list .trips-settings-link { min-height: 44px; display: inline-flex; align-items: center; }
+.memories-list .itinerary-post-description a, .memory-detail .trips-back, .memory-detail .trips-settings-link { min-height: 44px; display: inline-flex; align-items: center; }
+.memory-detail .memory-actions { display: flex; flex-wrap: wrap; gap: 16px; }
+.memory-detail > .ui-button { align-self: flex-start; }
 .post-link-section, .post-link-transport, .post-link-panel { display: grid; gap: 8px; }
 .post-link-section p, .post-link-transport p { margin: 0; }
 .post-link-options { display: grid; gap: 4px; }
