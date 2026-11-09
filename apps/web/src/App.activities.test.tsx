@@ -65,6 +65,26 @@ describe("App activity integration", () => {
     expect(fetch.mock.calls.filter(([url]) => (url as string).endsWith("/itinerary"))).toHaveLength(3);
     expect(fetch.mock.calls.filter(([url]) => (url as string).endsWith("/participation"))).toHaveLength(3);
   });
+  it("sends the duration through the adapters and shows the derived end after the reload", async () => {
+    const fixture = itineraryFixture();
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "renewed-refresh" }));
+      if (url.endsWith("/itinerary")) return new Response(JSON.stringify({ itinerary: fixture }));
+      if (url.endsWith("/participation")) return new Response(JSON.stringify({ participation: null }));
+      const activity = fixture.activities.find((a) => url.endsWith(a.id))!;
+      if (request.method === "PATCH") Object.assign(activity, JSON.parse(request.body as string));
+      return new Response(JSON.stringify({ activity: withoutPosts(activity) }));
+    });
+    const container = await render(fetch);
+    await click(container, "Paseo por el centro"); await click(container, "Editar actividad");
+    await field(container, "durationHours", "1"); await field(container, "durationMinutes", "30"); await save(container);
+    const patch = fetch.mock.calls.find(([, request]) => request?.method === "PATCH")!;
+    expect(JSON.parse(patch[1].body)).toEqual({ durationMinutes: 90 });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector(`[data-itinerary-item="${itineraryId(8)}"]`)?.textContent).toContain("Duración 1 h 30 min");
+    await click(container, "Paseo por el centro");
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Duración: 1 h 30 min");
+  });
   it("redirects to login when the shared session expires during creation", async () => {
     const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
       if (url.endsWith("/auth/refresh")) return new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "refresh" }));

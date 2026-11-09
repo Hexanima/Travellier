@@ -4,6 +4,8 @@ import { Button, Feedback, List, ListItem, LoadingState } from "../components/in
 import type { TripFailure } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectTripItinerary, type ItineraryViewItem } from "./trip-itinerary-view.js";
+import { formatDuration } from "./activity-duration.js";
+import { formatActivityRange } from "./activity-time-format.js";
 import { ActivityDialog, type ActivityDialogRequest } from "./ActivityDialog.js";
 import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripParticipationApi } from "./trip-participation-api.js";
@@ -125,7 +127,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
                 ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} clock={clock} publication={publication}
+                {segment.items.map((item) => <AgendaItem key={`${item.kind}-${item.id}`} item={item} clock={clock} publication={publication} timeZone={timeZone}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
                   disabled={refreshing} onActivity={activities ? (activityId) => setDialog({ kind: "detail", activityId }) : undefined} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
@@ -147,8 +149,9 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
   </main>;
 }
 
-function AgendaItem({ item, clock, publication, onActivity, disabled, participation }: { item: ItineraryViewItem; clock: Intl.DateTimeFormat; publication: Intl.DateTimeFormat;
+function AgendaItem({ item, clock, publication, timeZone, onActivity, disabled, participation }: { item: ItineraryViewItem; clock: Intl.DateTimeFormat; publication: Intl.DateTimeFormat; timeZone: string;
   onActivity?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
+  const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
   return <ListItem className="itinerary-item" data-itinerary-item={item.id}>
     <time className="itinerary-item-time" dateTime={item.at}>{clock.format(new Date(item.at))}</time>
     <div className="itinerary-item-content">
@@ -160,6 +163,8 @@ function AgendaItem({ item, clock, publication, onActivity, disabled, participat
       </> : item.kind === "activity" ? <>
         <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
         {item.activity.description ? <p>{item.activity.description}</p> : null}
+        {range?.endIso ? <p className="itinerary-secondary">Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
+          {" · "}Duración {formatDuration(item.activity.durationMinutes!)}</p> : null}
         {participation}
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Posts de ${item.activity.title}`}>
           {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary post={post} publication={publication} /></ListItem>)}

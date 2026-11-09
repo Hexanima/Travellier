@@ -146,6 +146,43 @@ describe("itinerary activity flows", () => {
     expect(container.querySelectorAll(`[data-itinerary-post="${fixture.posts[0].id}"]`)).toHaveLength(1);
     expect(fixture.posts[0].dayId).toBe(originalPostDayId);
   });
+  const row = (container: HTMLElement, n: number) => container.querySelector<HTMLElement>(`[data-itinerary-item="${itineraryId(n)}"]`)!;
+  it("shows the derived end and duration in the agenda only when a duration exists", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse; fixture.activities[0].durationMinutes = 90;
+    const { container } = await render(fixture);
+    expect(row(container, 8).querySelector(".itinerary-item-time")?.textContent).toBe("09:00");
+    expect(row(container, 8).textContent).toContain("Hasta 10:30");
+    expect(row(container, 8).textContent).toContain("Duración 1 h 30 min");
+    expect(row(container, 8).textContent).not.toContain(" del ");
+    expect(row(container, 9).querySelector(".itinerary-item-time")?.textContent).toBe("11:00");
+    expect(row(container, 9).textContent).not.toContain("Hasta"); expect(row(container, 9).textContent).not.toContain("Duración");
+  });
+  it("shows the end date when the activity finishes on another local day", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse;
+    Object.assign(fixture.activities[0], { scheduledAt: "2026-09-25T17:30:00.123Z", durationMinutes: 600 });
+    const { container } = await render(fixture);
+    expect(row(container, 8).textContent).toMatch(/Hasta 00:30 del 26 sep/);
+  });
+  it("shows the range and duration in the detail", async () => {
+    const fixture = itineraryFixture() as TripItineraryResponse; fixture.activities[0].durationMinutes = 90;
+    const { container } = await render(fixture);
+    await click(container, "Paseo por el centro");
+    const dialog = container.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("Hasta 10:30"); expect(dialog.textContent).toContain("Duración: 1 h 30 min");
+    await click(container, "Cerrar"); await click(container, "Visita al museo");
+    expect(container.querySelector('[role="dialog"]')!.textContent).not.toContain("Duración");
+    expect(container.querySelector('[role="dialog"]')!.textContent).not.toContain("Hasta");
+  });
+  it("updates the agenda and the detail after saving a new duration without resending the instant", async () => {
+    const { container, update } = await render();
+    await click(container, "Paseo por el centro"); await click(container, "Editar actividad");
+    await field(container, "durationHours", "2"); await save(container);
+    expect(update).toHaveBeenCalledWith(itineraryFixture().tripId, itineraryId(8), { durationMinutes: 120 });
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(row(container, 8).textContent).toContain("Hasta 11:00"); expect(row(container, 8).textContent).toContain("Duración 2 h");
+    await click(container, "Paseo por el centro");
+    expect(container.querySelector('[role="dialog"]')!.textContent).toContain("Duración: 2 h");
+  });
   it("shows saved content even if reloading fails and retries only the GET", async () => {
     const { container, create, getItinerary } = await render();
     getItinerary.mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
