@@ -70,6 +70,9 @@ export function Modal({
       return;
     }
 
+    // React events cross portals: keep a stacked modal's Tab from reaching the modal underneath.
+    event.stopPropagation();
+
     const dialog = dialogRef.current;
     if (!dialog) {
       return;
