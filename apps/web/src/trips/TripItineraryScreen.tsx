@@ -155,10 +155,10 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
           </div>
         </section>)}
       </div> : null}
-      {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <ParticipationConflictModal
+      {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <div className="participation-conflict-layer"><ParticipationConflictModal
         conflicts={confirming.confirming.confirmation.confirmedConflicts} activities={state.value.activities} timeZone={timeZone}
         stale={confirming.confirming.stale} saving={!!confirming.saving}
-        onCancel={() => participation.cancelConfirmation(confirmingId)} onConfirm={() => { void participation.confirmChange(confirmingId); }} /> : null}
+        onCancel={() => participation.cancelConfirmation(confirmingId)} onConfirm={() => { void participation.confirmChange(confirmingId); }} /></div> : null}
       {state.kind === "ready" && activities && dialog ? <ActivityDialog key={dialog.kind === "detail" ? dialog.activityId : "new"}
         request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved}
         participation={dialog.kind === "detail" ? participationControls(dialog.activityId,

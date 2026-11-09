@@ -244,6 +244,7 @@ describe("individual itinerary participation", () => {
       const { container, set } = await nineBase();
       await click(card(container, itineraryId(9)), "Voy");
       expect(titles(container)).toHaveLength(1);
+      expect(titles(container)[0]!.closest(".participation-conflict-layer"), "stacking proxy: modal mounted in its own layer").not.toBeNull();
       const items = Array.from(container.querySelectorAll("ul.participation-conflict-list li"));
       expect(items).toHaveLength(2);
       expect(items[0]!.textContent).toContain("Paseo por el centro"); expect(items[0]!.textContent).toContain("Se superpone");
