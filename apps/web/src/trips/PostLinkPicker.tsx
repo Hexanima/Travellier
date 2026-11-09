@@ -9,7 +9,9 @@ import type { PostResponse, TripPostApi } from "./trip-post-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
 
-export type PostLinkPickerProps = { posts: Pick<TripPostApi, "list" | "get">; itinerary: TripItineraryApi; timeZone?: string; onCreateSpontaneous?: () => void };
+export type PostLinkPickerProps = { posts: Pick<TripPostApi, "list" | "get">; itinerary: TripItineraryApi; timeZone?: string; onCreateSpontaneous?: () => void;
+  /** Enables «Crear actividad espontánea» by opening the subform of the composer (T67); `onCreateSpontaneous` still wins when given. */
+  spontaneousActivity?: boolean };
 type Kind = "none" | "post" | "activity";
 type Lazy<T> = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; value: T } | { kind: "error" };
 type Activity = { id: string; title: string; scheduledAt: string };
@@ -43,7 +45,7 @@ export function PostLinkPicker(props: PostLinkPickerProps) {
 
 type PickerInnerProps = PostLinkPickerProps & { tripId?: string; postId?: string; draft: PostDraft; commit: (draft: PostDraft) => void; setReturned: PostDraftHandle["setReturned"]; composer: string };
 
-function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, onCreateSpontaneous, tripId, postId, draft, commit, setReturned, composer }: PickerInnerProps) {
+function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, onCreateSpontaneous, spontaneousActivity, tripId, postId, draft, commit, setReturned, composer }: PickerInnerProps) {
   const navigate = useNavigate();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [kind, setKind] = useState<Kind>(draft.extras.link?.kind ?? "none");
@@ -62,6 +64,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
   const activityOptions = activityList.kind === "ready" ? activityList.value.slice().sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt)) : [];
   const chosen = selected?.kind === kind ? selected : null;
   const dropsTransport = kind === "post" && draft.extras.transportId !== null;
+  const { search } = useLocation();
   const fromComposer = (useLocation().state as { fromComposer?: boolean } | null)?.fromComposer === true;
   // Coming from the composer, going back pops this entry (no duplicated composer in the history); the focus and the
   // notice travel through the drafts context. Opened directly by URL, the composer replaces this entry.
@@ -78,6 +81,13 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
     commit(setLink(draft, link));
     back(`Vínculo actualizado: ${linkSummary(link)}.${dropsTransport ? ` ${transportDroppedNotice}` : ""}`);
   };
+  // The subform replaces this entry (the composer stays right behind) and the pending choice is not saved: choosing a link and creating an activity exclude each other.
+  const openSpontaneous = () => {
+    if (leaving.current) return;
+    leaving.current = true;
+    navigate(`/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}/activity${search}`, { replace: true, state: { fromComposer } });
+  };
+  const spontaneous = onCreateSpontaneous ?? (spontaneousActivity ? openSpontaneous : undefined);
   const choose = (kindValue: Exclude<Kind, "none">, id: string, label: string) => setSelected({ kind: kindValue, id, label });
   const kinds: [Kind, string][] = [["none", "Sin vínculo"], ["post", "Post"], ["activity", "Actividad"]];
 
@@ -118,8 +128,8 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
             <input type="radio" name="link-activity" checked={chosen?.id === item.id} onChange={() => choose("activity", item.id, activityOptionLabel(item, timeZone))} /> {activityOptionLabel(item, timeZone)}
           </label>)}
         </div> : null}
-        <button type="button" className="ui-button" disabled={!onCreateSpontaneous} aria-disabled={!onCreateSpontaneous || undefined} onClick={onCreateSpontaneous}>
-          {onCreateSpontaneous ? "Crear actividad espontánea" : "Crear actividad espontánea — Disponible próximamente"}
+        <button type="button" className="ui-button" disabled={!spontaneous} aria-disabled={!spontaneous || undefined} onClick={spontaneous}>
+          {spontaneous ? "Crear actividad espontánea" : "Crear actividad espontánea — Disponible próximamente"}
         </button>
       </section> : null}
       <Button disabled={kind !== "none" && chosen === null} onClick={accept}>Aceptar</Button>

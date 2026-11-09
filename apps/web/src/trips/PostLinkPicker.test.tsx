@@ -28,23 +28,23 @@ function Probe() {
   const { postId } = useParams(); const handle = usePostDraft(postId ? `edit:${postId}` : "new");
   const location = useLocation(); const navigate = useNavigate();
   return <div>
-    <p data-testid="probe">{JSON.stringify({ draft: handle.draft ?? null, state: location.state, search: location.search })}</p>
+    <p data-testid="probe">{JSON.stringify({ draft: handle.draft ?? null, state: location.state, search: location.search, path: location.pathname })}</p>
     <button type="button" onClick={() => handle.setDraft(seed)}>sembrar</button>
     <button type="button" onClick={() => navigate(`${location.pathname}/link${location.search}`)}>ir</button>
   </div>;
 }
-type Mocks = { list?: ReturnType<typeof vi.fn>; itineraryGet?: ReturnType<typeof vi.fn>; onCreateSpontaneous?: () => void };
+type Mocks = { list?: ReturnType<typeof vi.fn>; itineraryGet?: ReturnType<typeof vi.fn>; onCreateSpontaneous?: () => void; spontaneousActivity?: boolean };
 async function render(path: string, mocks: Mocks = {}) {
   const list = mocks.list ?? vi.fn().mockResolvedValue({ ok: true, value: allPosts });
   const get = vi.fn();
   const itineraryGet = mocks.itineraryGet ?? vi.fn().mockResolvedValue(itineraryOf());
-  const picker = <PostLinkPicker posts={{ list, get }} itinerary={{ get: itineraryGet }} timeZone="America/Argentina/Buenos_Aires" onCreateSpontaneous={mocks.onCreateSpontaneous} />;
+  const picker = <PostLinkPicker posts={{ list, get }} itinerary={{ get: itineraryGet }} timeZone="America/Argentina/Buenos_Aires" onCreateSpontaneous={mocks.onCreateSpontaneous} spontaneousActivity={mocks.spontaneousActivity} />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
-      <Route path="new" element={<Probe />} /><Route path="new/link" element={picker} />
-      <Route path=":postId/edit" element={<Probe />} /><Route path=":postId/edit/link" element={picker} />
+      <Route path="new" element={<Probe />} /><Route path="new/link" element={picker} /><Route path="new/activity" element={<Probe />} />
+      <Route path=":postId/edit" element={<Probe />} /><Route path=":postId/edit/link" element={picker} /><Route path=":postId/edit/activity" element={<Probe />} />
     </Route></Routes></MemoryRouter>));
   return { container, list, get, itineraryGet };
 }
@@ -55,7 +55,7 @@ const radio = (container: ParentNode, label: string) => {
   return found?.querySelector('input[type="radio"]') as HTMLInputElement | undefined;
 };
 const probe = (container: HTMLElement) => JSON.parse(container.querySelector('[data-testid="probe"]')!.textContent!) as
-  { draft: PostDraft | null; state: { focus?: string; notice?: string } | null; search: string };
+  { draft: PostDraft | null; state: { focus?: string; notice?: string; fromComposer?: boolean } | null; search: string; path: string };
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
 const editPath = `/trips/${tripId}/memories/${selfId}/edit`, newPath = `/trips/${tripId}/memories/new`;
 async function open(path: string, mocks: Mocks = {}, draft: PostDraft = seeded()) {
@@ -216,6 +216,25 @@ describe("PostLinkPicker", () => {
     await click(spontaneous);
     expect(onCreateSpontaneous).toHaveBeenCalledTimes(1);
     expect(container.textContent).not.toContain("Disponible próximamente");
+  });
+  it("with spontaneousActivity the button opens the activity subform, replacing the picker, without writing the pending link", async () => {
+    const { container } = await open(`${newPath}?transportId=${transportId}`, { spontaneousActivity: true }, seeded(null, transportId));
+    await click(radio(container, "Actividad")); await click(radio(container, "Paseo"));
+    const spontaneous = button(container, "Crear actividad espontánea")!;
+    expect(spontaneous.disabled).toBe(false);
+    expect(container.textContent).not.toContain("Disponible próximamente");
+    await click(spontaneous);
+    const result = probe(container);
+    expect(result.path).toBe(`${newPath}/activity`);
+    expect(result.search).toBe(`?transportId=${transportId}`);
+    expect(result.state).toEqual({ fromComposer: false });
+    expect(result.draft).toEqual(seeded(null, transportId));
+  });
+  it("on an edit the subform route keeps the post id, and the opening state of the picker is passed on", async () => {
+    const { container } = await open(editPath, { spontaneousActivity: true });
+    await click(radio(container, "Actividad"));
+    await click(button(container, "Crear actividad espontánea"));
+    expect(probe(container).path).toBe(`${editPath}/activity`);
   });
   it("keeps the search so the composer base stays the same on return", async () => {
     const { container } = await open(`${newPath}?transportId=${transportId}`, {}, seeded(null, transportId));
