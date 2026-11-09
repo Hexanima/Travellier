@@ -34,7 +34,7 @@ describe("activity HTTP adapter", () => {
     const { api, fetch } = setup({ activity: value }, operation === "create" ? 201 : 200);
     const result = operation === "create" ? await api.create(value.tripId, input)
       : operation === "get" ? await api.get(value.tripId, value.id) : await api.update(value.tripId, value.id, { description: null });
-    expect(result).toEqual({ ok: true, value });
+    expect(result).toEqual({ ok: true, value: operation === "create" ? { activity: value, participation: null } : value });
     const [url, request] = fetch.mock.calls[0];
     expect(url).toBe(`https://api.test/trips/${value.tripId}/activities${operation === "create" ? "" : `/${value.id}`}`);
     expect(request.method).toBe({ create: "POST", get: "GET", update: "PATCH" }[operation]);
@@ -88,5 +88,38 @@ describe("activity HTTP adapter", () => {
   it("propagates network errors", async () => {
     const { api, fetch } = setup({}); fetch.mockRejectedValue(new Error("Offline"));
     expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "network" } });
+  });
+  describe("create with participation and confirmation", () => {
+    const participation = (status = "going") => ({ id: itineraryId(50), tripId: itineraryId(1), activityId: itineraryId(8),
+      userId: itineraryId(20), status, updatedAt: "2026-09-25T12:00:00.123Z" });
+    const confirmation = { confirmedConflicts: [{ activityId: itineraryId(9), reason: "same_start", scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: null }],
+      confirmedActivity: { scheduledAt: "2026-09-25T12:00:00.123Z", durationMinutes: null } } as const;
+    it("does not send confirmation keys without confirmation", async () => {
+      const { api, fetch } = setup({ activity: activity() }, 201);
+      await api.create(itineraryId(1), input);
+      const body = JSON.parse(fetch.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty("confirmedConflicts"); expect(body).not.toHaveProperty("confirmedActivity");
+    });
+    it("sends the confirmation unchanged next to the input", async () => {
+      const { api, fetch } = setup({ activity: activity() }, 201);
+      await api.create(itineraryId(1), input, confirmation as never);
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ ...input, ...confirmation });
+    });
+    it("returns the activity and the author's participation from a 201", async () => {
+      const { api } = setup({ activity: activity(), participation: participation() }, 201);
+      expect(await api.create(itineraryId(1), input)).toEqual({ ok: true, value: { activity: activity(), participation: participation() } });
+    });
+    it.each([[{ status: "confirmed" }], [{ activityId: itineraryId(99) }], [{ tripId: itineraryId(99) }]])("keeps the saved activity with participation null when participation is invalid: %j", async (change) => {
+      const { api } = setup({ activity: activity(), participation: { ...participation(), ...change } }, 201);
+      expect(await api.create(itineraryId(1), input)).toEqual({ ok: true, value: { activity: activity(), participation: null } });
+    });
+    it("maps a valid 409 to participation-conflict", async () => {
+      const { api } = setup({ error: { code: "ParticipationConflictError", message: "x", conflicts: confirmation.confirmedConflicts, activity: confirmation.confirmedActivity } }, 409);
+      expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "participation-conflict", confirmation } });
+    });
+    it("treats a malformed 409 as a server failure", async () => {
+      const { api } = setup({ error: { code: "ParticipationConflictError", conflicts: [] } }, 409);
+      expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "server" } });
+    });
   });
 });

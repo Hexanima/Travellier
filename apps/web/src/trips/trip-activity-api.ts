@@ -1,11 +1,14 @@
 import type { ApiClientError, HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 import type { ItineraryActivityResponse } from "./trip-itinerary-api.js";
+import { parseConfirmation, type ParticipationConfirmation } from "./participation-conflict.js";
+import { valid as validParticipation, type ParticipationResponse } from "./trip-participation-api.js";
 
 export type ActivityResponse = Omit<ItineraryActivityResponse, "postIds">;
 export type ActivityInput = Pick<ActivityResponse, "dayId" | "title" | "scheduledAt" | "description" | "mapsUrl"> & { durationMinutes?: number | null };
+export type CreatedActivity = { activity: ActivityResponse; participation: ParticipationResponse | null };
 export type TripActivityApi = {
-  create: (tripId: string, input: ActivityInput) => Promise<TripResult<ActivityResponse>>;
+  create: (tripId: string, input: ActivityInput, confirmation?: ParticipationConfirmation) => Promise<TripResult<CreatedActivity>>;
   get: (tripId: string, activityId: string) => Promise<TripResult<ActivityResponse>>;
   update: (tripId: string, activityId: string, input: Partial<ActivityInput>) => Promise<TripResult<ActivityResponse>>;
 };
@@ -22,14 +25,29 @@ const validActivity = (value: unknown, tripId: string, activityId?: string): val
   id(value.id) && (activityId === undefined || value.id === activityId) && value.tripId === tripId && id(value.tripId) &&
   id(value.dayId) && typeof value.title === "string" && value.title.trim() !== "" && nullableText(value.description) &&
   nullableText(value.mapsUrl) && validDuration(value.durationMinutes) && timestamp(value.scheduledAt) && timestamp(value.createdAt) && id(value.createdBy);
-const response = (result: { ok: true; value: unknown } | { ok: false; error: ApiClientError }, tripId: string, activityId?: string): TripResult<ActivityResponse> => {
-  if (!result.ok) return { ok: false, error: { kind: result.error.kind,
-    ...(result.error.fields ? { fields: result.error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
+type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
+const failure = (error: ApiClientError): TripResult<never> => {
+  if (error.status === 409 && error.code === "ParticipationConflictError") {
+    const confirmation = parseConfirmation(error.details);
+    return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
+  }
+  return { ok: false, error: { kind: error.kind,
+    ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
+};
+const response = (result: Raw, tripId: string, activityId?: string): TripResult<ActivityResponse> => {
+  if (!result.ok) return failure(result.error);
   return record(result.value) && validActivity(result.value.activity, tripId, activityId)
     ? { ok: true, value: result.value.activity } : { ok: false, error: { kind: "server" } };
 };
+/** A saved activity is accepted even when the author's participation is missing or invalid. */
+const created = (result: Raw, tripId: string): TripResult<CreatedActivity> => {
+  const saved = response(result, tripId);
+  if (!saved.ok || !result.ok) return saved as TripResult<never>;
+  const participation = (result.value as Record<string, unknown>).participation;
+  return { ok: true, value: { activity: saved.value, participation: validParticipation(participation, tripId, saved.value.id) ? participation : null } };
+};
 export const createTripActivityApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripActivityApi => ({
-  create: async (tripId, input) => response(await client.post<unknown>(path(tripId), input), tripId),
+  create: async (tripId, input, confirmation) => created(await client.post<unknown>(path(tripId), { ...input, ...confirmation }), tripId),
   get: async (tripId, activityId) => response(await client.get<unknown>(`${path(tripId)}/${encodeURIComponent(activityId)}`), tripId, activityId),
   update: async (tripId, activityId, input) => response(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(activityId)}`, input), tripId, activityId),
 });

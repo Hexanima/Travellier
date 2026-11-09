@@ -15,12 +15,12 @@ async function render(existing?: ActivityResponse, providedContext?: ActivityFor
   const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
   const context: ActivityFormContext = providedContext ?? { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
     selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
-  const create = vi.fn().mockResolvedValue({ ok: true, value: itinerary.activities[0] });
+  const create = vi.fn().mockResolvedValue({ ok: true, value: { activity: itinerary.activities[0], participation: null } });
   const update = vi.fn().mockResolvedValue({ ok: true, value: itinerary.activities[0] });
   const onSaved = vi.fn(), onBusyChange = vi.fn();
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<ActivityForm context={context} activities={{ create, update }} existing={existing} onSaved={onSaved} onBusyChange={onBusyChange} />));
+  await act(async () => root.render(<ActivityForm context={context} activities={{ create, update }} knownActivities={itinerary.activities} existing={existing} onSaved={onSaved} onBusyChange={onBusyChange} />));
   return { container, create, update, onSaved, onBusyChange, root, context };
 }
 async function field(container: HTMLElement, name: string, value: string) {
@@ -165,7 +165,7 @@ describe("ActivityForm", () => {
     await field(container, "title", "Museo"); await field(container, "time", "09:00"); await submit(container); await submit(container);
     expect(create).toHaveBeenCalledOnce(); expect(container.querySelector('[name="title"]')).toHaveProperty("disabled", true);
     expect(onBusyChange).toHaveBeenCalledWith(true);
-    await act(async () => resolve({ ok: true, value: itineraryFixture().activities[0] }));
+    await act(async () => resolve({ ok: true, value: { activity: itineraryFixture().activities[0], participation: null } }));
     expect(onBusyChange).toHaveBeenLastCalledWith(false);
   });
   it.each(["network", "validation", "not-found", "unauthorized"])("keeps entered data after %s errors", async (kind) => {
@@ -176,5 +176,73 @@ describe("ActivityForm", () => {
     expect(container.querySelector('[role="alert"]')).not.toBeNull(); expect(onSaved).not.toHaveBeenCalled();
     if (kind === "validation") expect(container.querySelector('[name="time"]')).toHaveProperty("ariaInvalid", "true");
     if (kind === "unauthorized") expect(container.querySelector('a[href="/login"]')).not.toBeNull();
+  });
+
+  describe("participation conflict on creation", () => {
+    const confirmation = { confirmedConflicts: [
+      { activityId: itineraryFixture().activities[0].id, reason: "overlap", scheduledAt: "2026-09-25T12:00:00.123Z", durationMinutes: 60 },
+      { activityId: itineraryFixture().activities[1].id, reason: "same_start", scheduledAt: "2026-09-25T14:00:00.123Z", durationMinutes: null }],
+    confirmedActivity: { scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: 90 } };
+    const conflict = (stale = confirmation) => ({ ok: false, error: { kind: "participation-conflict", confirmation: stale } });
+    const draft = async (container: HTMLElement) => {
+      await field(container, "title", "Museo"); await field(container, "time", "09:00");
+      await field(container, "durationHours", "1"); await field(container, "durationMinutes", "30"); await submit(container);
+    };
+    const dialogs = () => Array.from(document.querySelectorAll("h2")).filter((h) => h.textContent === "Cambiar de plan");
+    const press = async (label: string) => act(async () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.textContent === label)!.click());
+    it("opens the modal with all incompatible plans and keeps the draft untouched; cancelling sends and publishes nothing", async () => {
+      const { container, create, onSaved } = await render();
+      create.mockResolvedValue(conflict());
+      await draft(container);
+      expect(dialogs()).toHaveLength(1);
+      expect(document.querySelectorAll("ul.participation-conflict-list li")).toHaveLength(2);
+      expect(document.body.textContent).toContain("Paseo por el centro"); expect(document.body.textContent).toContain("Visita al museo");
+      await press("Conservar mi participación actual");
+      expect(dialogs()).toHaveLength(0); expect(create).toHaveBeenCalledTimes(1); expect(onSaved).not.toHaveBeenCalled();
+      for (const [name, value] of [["title", "Museo"], ["time", "09:00"], ["durationHours", "1"], ["durationMinutes", "30"], ["date", "2026-09-25"]])
+        expect(container.querySelector(`[name="${name}"]`)).toHaveProperty("value", value);
+    });
+    it("confirming resends the same input with the exact confirmation and publishes the activity with its participation", async () => {
+      const { container, create, onSaved, onBusyChange } = await render();
+      const saved = { activity: itineraryFixture().activities[0], participation: { id: "p" } };
+      create.mockResolvedValueOnce(conflict()).mockResolvedValueOnce({ ok: true, value: saved });
+      await draft(container); await press("Cambiar de plan");
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(create.mock.calls[1][1]).toEqual(create.mock.calls[0][1]); expect(create.mock.calls[1][2]).toEqual(confirmation);
+      expect(create.mock.calls[0]).toHaveLength(2);
+      expect(onSaved).toHaveBeenCalledOnce(); expect(onSaved).toHaveBeenCalledWith(saved.activity, saved.participation);
+      expect(dialogs()).toHaveLength(0); expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    });
+    it("shows the modal again flagged as stale on a second 409, without publishing", async () => {
+      const { container, create, onSaved } = await render();
+      const fresh = { ...confirmation, confirmedConflicts: [confirmation.confirmedConflicts[0]] };
+      create.mockResolvedValueOnce(conflict()).mockResolvedValueOnce(conflict(fresh as never));
+      await draft(container); await press("Cambiar de plan");
+      expect(dialogs()).toHaveLength(1); expect(document.querySelector('[role="alert"].participation-conflict-stale')).not.toBeNull();
+      expect(document.querySelectorAll("ul.participation-conflict-list li")).toHaveLength(1); expect(onSaved).not.toHaveBeenCalled();
+      expect(container.querySelector('[name="title"]')).toHaveProperty("value", "Museo");
+    });
+    it.each(["validation", "network", "server"])("a %s failure while confirming closes the modal, keeps the draft and does not publish", async (kind) => {
+      const { container, create, onSaved } = await render();
+      create.mockResolvedValueOnce(conflict()).mockResolvedValueOnce({ ok: false, error: { kind } });
+      await draft(container); await press("Cambiar de plan");
+      expect(dialogs()).toHaveLength(0); expect(onSaved).not.toHaveBeenCalled();
+      expect(container.querySelector('[role="alert"]')).not.toBeNull();
+      expect(container.querySelector('[name="title"]')).toHaveProperty("value", "Museo");
+      expect(container.querySelector('[name="durationHours"]')).toHaveProperty("value", "1");
+    });
+    it("a thrown error while confirming keeps the draft", async () => {
+      const { container, create, onSaved } = await render();
+      create.mockResolvedValueOnce(conflict()).mockRejectedValueOnce(new Error("Offline"));
+      await draft(container); await press("Cambiar de plan");
+      expect(dialogs()).toHaveLength(0); expect(onSaved).not.toHaveBeenCalled(); expect(container.querySelector('[name="title"]')).toHaveProperty("value", "Museo");
+    });
+    it("editing never asks for a confirmation and does not forward a participation", async () => {
+      const existing = itineraryFixture().activities[0] as ActivityResponse;
+      const { container, update, onSaved } = await render(existing);
+      await field(container, "title", "Otro"); await submit(container);
+      expect(update).toHaveBeenCalledWith(existing.tripId, existing.id, { title: "Otro" });
+      expect(onSaved).toHaveBeenCalledWith(itineraryFixture().activities[0], null);
+    });
   });
 });

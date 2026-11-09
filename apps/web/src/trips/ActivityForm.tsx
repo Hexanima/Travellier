@@ -1,13 +1,20 @@
 import { useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import { Button, Feedback, TextAreaField, TextField } from "../components/index.js";
 import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues } from "./activity-form-state.js";
 import type { ActivityInput, ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripFailure } from "./trip-management-api.js";
+import type { ParticipationConfirmation } from "./participation-conflict.js";
+import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
+import type { ParticipationResponse } from "./trip-participation-api.js";
 import { toLocalDateTime } from "./transport-local-time.js";
 
 type Props = { context: ActivityFormContext; activities: Pick<TripActivityApi, "create" | "update">; existing?: ActivityResponse;
-  onSaved: (activity: ActivityResponse) => void; onBusyChange: (busy: boolean) => void };
-export function ActivityForm({ context, activities, existing, onSaved, onBusyChange }: Props) {
+  /** Activities of the loaded itinerary, used only to name the incompatible plans in the confirmation. */
+  knownActivities?: readonly ActivityResponse[];
+  onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void; onBusyChange: (busy: boolean) => void };
+type PendingConfirmation = { changes: ActivityInput; confirmation: ParticipationConfirmation; stale: boolean };
+export function ActivityForm({ context, activities, existing, knownActivities = [], onSaved, onBusyChange }: Props) {
   const [timeZone] = useState(context.timeZone);
   const localContext = { ...context, timeZone };
   const [values, setValues] = useState(() => initialActivityValues(localContext, existing));
@@ -15,6 +22,7 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
   const [failure, setFailure] = useState<TripFailure>();
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pending, setPending] = useState<PendingConfirmation>();
   const savingRef = useRef(false);
   const update = (field: keyof ActivityFormValues, value: string) => {
     setValues((current) => ({ ...current, [field]: value }));
@@ -41,23 +49,35 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
         .map((key) => [key, prepared.value[key]]),
     ) : Object.fromEntries(Object.entries(prepared.value).filter(([key, value]) => key !== "durationMinutes" || value !== null)) as ActivityInput;
     if (existing && Object.keys(changes).length === 0) { setMessage("No hay cambios para guardar."); return; }
+    await send(changes, undefined);
+  };
+  /** Saves the draft; a confirmation (from a previous 409) is forwarded unchanged. Never publishes on failure. */
+  const send = async (changes: Partial<ActivityInput>, confirmation: ParticipationConfirmation | undefined) => {
     setErrors({}); savingRef.current = true; setSaving(true); onBusyChange(true);
     try {
-      const result = existing ? await activities.update(context.tripId, existing.id, changes) : await activities.create(context.tripId, changes as ActivityInput);
-      if (result.ok) onSaved(result.value);
-      else {
-        setFailure(result.error);
-        if (result.error.kind === "validation") setErrors(Object.fromEntries((result.error.fields ?? []).map(({ field, code }) => [field,
-          field === "scheduledAt" || field === "dayId" ? "Elegí un horario dentro de la franja de actividad vigente."
-            : field === "title" ? "Ingresá un título válido."
-            : field === "durationMinutes" ? code === "outside_window"
-              ? "La actividad terminaría después de la salida del destino. Acortá la duración o cambiá el horario."
-              : "Ingresá una duración válida."
-            : "Revisá este campo.",
-        ])));
+      if (existing) {
+        const updated = await activities.update(context.tripId, existing.id, changes);
+        if (updated.ok) onSaved(updated.value, null); else fail(updated.error);
+        return;
       }
-    } catch { setFailure({ kind: "network" }); }
+      const created = confirmation ? await activities.create(context.tripId, changes as ActivityInput, confirmation) : await activities.create(context.tripId, changes as ActivityInput);
+      if (created.ok) { setPending(undefined); onSaved(created.value.activity, created.value.participation); }
+      else if (created.error.kind === "participation-conflict" && created.error.confirmation) {
+        setPending({ changes: changes as ActivityInput, confirmation: created.error.confirmation, stale: confirmation !== undefined });
+      } else fail(created.error);
+    } catch { fail({ kind: "network" }); }
     finally { savingRef.current = false; setSaving(false); onBusyChange(false); }
+  };
+  const fail = (error: TripFailure) => {
+    setPending(undefined); setFailure(error);
+    if (error.kind === "validation") setErrors(Object.fromEntries((error.fields ?? []).map(({ field, code }) => [field,
+      field === "scheduledAt" || field === "dayId" ? "Elegí un horario dentro de la franja de actividad vigente."
+        : field === "title" ? "Ingresá un título válido."
+        : field === "durationMinutes" ? code === "outside_window"
+          ? "La actividad terminaría después de la salida del destino. Acortá la duración o cambiá el horario."
+          : "Ingresá una duración válida."
+        : "Revisá este campo.",
+    ])));
   };
   const clock = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
     second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" });
@@ -96,5 +116,8 @@ export function ActivityForm({ context, activities, existing, onSaved, onBusyCha
       : failure.kind === "not-found" || failure.kind === "forbidden" ? "La actividad o el día ya no están disponibles. Volvé a cargar el itinerario."
       : "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback> : null}
     <Button type="submit" loading={saving}>{existing ? "Guardar cambios" : "Guardar actividad"}</Button>
+    {pending ? createPortal(<ParticipationConflictModal conflicts={pending.confirmation.confirmedConflicts} activities={knownActivities}
+      timeZone={timeZone} stale={pending.stale} saving={saving}
+      onCancel={() => setPending(undefined)} onConfirm={() => { if (!savingRef.current) void send(pending.changes, pending.confirmation); }} />, document.body) : null}
   </form>;
 }

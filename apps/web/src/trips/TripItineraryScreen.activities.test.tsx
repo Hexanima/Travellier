@@ -15,7 +15,7 @@ async function render(value = itineraryFixture() as TripItineraryResponse, timeZ
   const getItinerary = vi.fn().mockImplementation(async () => ({ ok: true, value: structuredClone(value) }));
   const create = vi.fn().mockImplementation(async (_tripId, input: ActivityInput) => {
     const saved = { ...(itineraryFixture() as TripItineraryResponse).activities[0], ...input, id: itineraryId(30), postIds: [] };
-    value.activities.push(saved); return { ok: true, value: saved };
+    value.activities.push(saved); return { ok: true, value: { activity: saved, participation: null } };
   });
   const get = vi.fn().mockImplementation(async (_tripId, id) => ({ ok: true, value: value.activities.find((a) => a.id === id) }));
   const update = vi.fn().mockImplementation(async (_tripId, id, input) => {
