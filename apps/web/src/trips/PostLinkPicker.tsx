@@ -6,7 +6,7 @@ import { activityOptionLabel, excludedPostIds, linkSummary, postOptionLabel } fr
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import type { TripResult } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
-import { usePostDraft } from "./use-post-drafts.js";
+import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
 
 export type PostLinkPickerProps = { posts: Pick<TripPostApi, "list" | "get">; itinerary: TripItineraryApi; timeZone?: string; onCreateSpontaneous?: () => void };
@@ -38,12 +38,12 @@ export function PostLinkPicker(props: PostLinkPickerProps) {
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
   if (!handle.draft) return <Navigate to={composer} replace />;
-  return <Picker {...props} tripId={tripId} postId={postId} draft={handle.draft} commit={handle.setDraft} composer={composer} />;
+  return <Picker {...props} tripId={tripId} postId={postId} draft={handle.draft} commit={handle.setDraft} setReturned={handle.setReturned} composer={composer} />;
 }
 
-type PickerInnerProps = PostLinkPickerProps & { tripId?: string; postId?: string; draft: PostDraft; commit: (draft: PostDraft) => void; composer: string };
+type PickerInnerProps = PostLinkPickerProps & { tripId?: string; postId?: string; draft: PostDraft; commit: (draft: PostDraft) => void; setReturned: PostDraftHandle["setReturned"]; composer: string };
 
-function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, onCreateSpontaneous, tripId, postId, draft, commit, composer }: PickerInnerProps) {
+function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone, onCreateSpontaneous, tripId, postId, draft, commit, setReturned, composer }: PickerInnerProps) {
   const navigate = useNavigate();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [kind, setKind] = useState<Kind>(draft.extras.link?.kind ?? "none");
@@ -60,7 +60,13 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
   const activityOptions = activityList.kind === "ready" ? activityList.value.slice().sort((a, b) => Date.parse(a.scheduledAt) - Date.parse(b.scheduledAt)) : [];
   const chosen = selected?.kind === kind ? selected : null;
   const dropsTransport = kind === "post" && draft.extras.transportId !== null;
-  const back = (notice?: string) => navigate(composer, { replace: true, state: { focus: "link", ...(notice ? { notice } : {}) } });
+  const fromComposer = (useLocation().state as { fromComposer?: boolean } | null)?.fromComposer === true;
+  // Coming from the composer, going back pops this entry (no duplicated composer in the history); the focus and the
+  // notice travel through the drafts context. Opened directly by URL, the composer replaces this entry.
+  const back = (notice?: string) => {
+    const result = { focus: "link" as const, ...(notice ? { notice } : {}) };
+    if (fromComposer) { setReturned(result); navigate(-1); } else navigate(composer, { replace: true, state: result });
+  };
   const accept = () => {
     const link: PostLink | null = kind === "none" ? null : chosen;
     if (kind !== "none" && !link) return;

@@ -15,6 +15,9 @@ function Probe({ name }: { name: string }) {
     <output>{handle.draft ? handle.draft.values.description : "none"}</output>
     <button type="button" data-action="set" onClick={() => handle.setDraft(draft(`texto ${name}`))}>set</button>
     <button type="button" data-action="clear" onClick={handle.clear}>clear</button>
+    <span data-returned>{handle.returned ? `${handle.returned.focus}|${handle.returned.notice}` : "none"}</span>
+    <button type="button" data-action="return" onClick={() => handle.setReturned({ focus: "link", notice: `aviso ${name}` })}>return</button>
+    <button type="button" data-action="clear-return" onClick={handle.clearReturned}>clear-return</button>
   </div>;
 }
 function Host({ names }: { names: string[] }) {
@@ -35,6 +38,17 @@ const shown = (container: HTMLElement, name: string) => container.querySelector(
 
 describe("post drafts context", () => {
   it("starts without a draft", async () => expect(shown(await render(["new"]), "new")).toBe("none"));
+  it("keeps the selector return signal per key until it is cleared, apart from the draft", async () => {
+    const container = await render(["new", "edit:a"]);
+    const returned = (name: string) => container.querySelector(`[data-probe="${name}"] [data-returned]`)?.textContent;
+    expect(returned("new")).toBe("none");
+    await click(container, '[data-probe="new"] [data-action="return"]');
+    expect(returned("new")).toBe("link|aviso new"); expect(returned("edit:a")).toBe("none");
+    await click(container, '[data-probe="new"] [data-action="clear"]');
+    expect(returned("new")).toBe("link|aviso new");
+    await click(container, '[data-probe="new"] [data-action="clear-return"]');
+    expect(returned("new")).toBe("none");
+  });
   it("keeps the draft when the composer unmounts and mounts again inside the same provider", async () => {
     const container = await render(["new"]);
     await click(container, '[data-probe="new"] [data-action="set"]');
