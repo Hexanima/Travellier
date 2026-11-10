@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostPhoto, TripPostPort, TripPostScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostExpense, PostPhoto, TripPostPort, TripPostScope, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -19,11 +19,12 @@ const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, au
 
 describe("Trip post use cases", () => {
   let role: TripRole | undefined, votingEnabled: boolean, tripExists: boolean;
+  let expenseRecords: PostExpense[];
   let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
+    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; expenseRecords = []; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
@@ -40,6 +41,12 @@ describe("Trip post use cases", () => {
       findPhoto: async (id) => domain.ok(photoRecords.find((p) => p.id === id)),
       findPhotosByKeys: async (keys) => domain.ok(photoRecords.filter((p) => keys.includes(p.s3Key))),
       insertPhotos: async (photos) => { photoRecords.push(...photos); return domain.ok(undefined); },
+      findExpense: async (id) => domain.ok(expenseRecords.find((e) => e.postId === id)),
+      insertExpense: async (expense) => { expenseRecords.push(expense); return domain.ok(undefined); },
+      updateExpenseFields: async (expense, fields) => {
+        expenseRecords = expenseRecords.map((e) => e.id === expense.id ? { ...e, ...Object.fromEntries(fields.map((f) => [f, expense[f]])) } : e);
+        return domain.ok(undefined);
+      },
       insert: async (post) => { records.push(post); return domain.ok(undefined); },
       replace: async (post) => { records = records.map((p) => p.id === post.id ? post : p); return domain.ok(undefined); },
       insertActivity: async (activity) => { activities.push(activity); return domain.ok(undefined); },
@@ -56,9 +63,9 @@ describe("Trip post use cases", () => {
     posts = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone({ records, activities, participations, photoRecords });
+        const before = structuredClone({ records, activities, participations, photoRecords, expenseRecords });
         const result = await work(scope);
-        if (!result.ok) { photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
+        if (!result.ok) { expenseRecords = before.expenseRecords; photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
         return result;
       },
     };
@@ -785,6 +792,179 @@ describe("Trip post use cases", () => {
         scope.insertPhotos = async () => domain.err(new domain.UnknownError("failed"));
         expect(await createWith({ newActivity: withDuration, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
         expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      describe("expense of the post (T79)", () => {
+        const expense = { totalAmount: 1500.5, currency: "ARS", breakdown: "agua 5000" };
+        const full = () => structuredClone({ ...state(), expenseRecords });
+        const empty = { records: [], activities: [], participations: [], photoRecords: [], expenseRecords: [] };
+        const stored = (fields: Record<string, unknown> = {}): PostExpense => ({ id: id(70), tripId, postId, totalAmount: 100, currency: "USD",
+          breakdown: "viejo", createdAt: new Date("2026-01-01T00:00:00Z"), ...fields }) as PostExpense;
+        const writers = () => (["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation"] as const)
+          .map((method) => vi.spyOn(scope, method));
+        const calls = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+
+        it("creates the post and its expense with the server id and the post publication time", async () => {
+          const result = await createWith({ description: "Cena", expense });
+          expect(result).toEqual(domain.ok({ outcome: "created", post: seedPost({ id: id(20), authorId: actor, description: "Cena", mapsUrl: null }),
+            expense: { id: id(21), tripId, postId: id(20), ...expense, createdAt } }));
+          expect(expenseRecords).toEqual([{ id: id(21), tripId, postId: id(20), ...expense, createdAt }]);
+        });
+
+        it("writes the expense after the post, and answers exactly as before without an expense", async () => {
+          const insert = vi.spyOn(scope, "insert"), insertExpense = vi.spyOn(scope, "insertExpense"), find = vi.spyOn(scope, "findExpense");
+          expect(await createWith({ expense })).toMatchObject({ ok: true });
+          expect(insert.mock.invocationCallOrder[0]).toBeLessThan(insertExpense.mock.invocationCallOrder[0]!);
+          insert.mockClear(); insertExpense.mockClear(); find.mockClear(); expenseRecords = []; records = [seedPost()];
+          const plain = await createWith({ description: "Sin gasto" });
+          expect(plain.ok && Object.keys(plain.value).sort()).toEqual(["outcome", "post"]);
+          expect(await updateWith({ description: "Editado" })).toEqual(domain.ok(seedPost({ description: "Editado" })));
+          expect(find).not.toHaveBeenCalled(); expect(insertExpense).not.toHaveBeenCalled(); expect(expenseRecords).toEqual([]);
+        });
+
+        it("saves post, new activity, participation, photos and expense in a single transaction", async () => {
+          uploaded(1);
+          const transaction = vi.spyOn(posts, "withTransaction");
+          const result = await createWith({ newActivity: withDuration, photos: refs(1), expense });
+          expect(result).toMatchObject({ ok: true, value: { outcome: "created", photos: [{ order: 1 }],
+            expense: { postId: id(20), ...expense, createdAt } } });
+          expect(transaction).toHaveBeenCalledTimes(1);
+          const saved = full();
+          expect(saved.records).toHaveLength(1); expect(saved.activities).toHaveLength(1); expect(saved.participations).toHaveLength(1);
+          expect(saved.photoRecords).toHaveLength(1); expect(saved.expenseRecords).toHaveLength(1);
+        });
+
+        it("does not write the expense when the agenda needs confirmation and saves it with the confirmation", async () => {
+          seedAgenda();
+          const before = full(), spies = writers();
+          const first = await createWith({ newActivity: withDuration, expense });
+          expect(first).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+          expect(calls(spies)).toBe(0); expect(full()).toEqual(before);
+          sequence = 20;
+          expect(await createWith({ newActivity: withDuration, expense, ...confirmationFrom(first) }))
+            .toMatchObject({ ok: true, value: { outcome: "created", expense: { totalAmount: 1500.5 } } });
+          expect(expenseRecords).toHaveLength(1);
+          records = [seedPost()]; expenseRecords = []; sequence = 20;
+          vi.restoreAllMocks();
+          const spiesLink = writers(), beforeLink = full();
+          expect(await linkWith({ expense })).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+          expect(calls(spiesLink)).toBe(0); expect(full()).toEqual(beforeLink);
+        });
+
+        it("accepts a PATCH with only the expense without touching the post, stamping the expense with now()", async () => {
+          records = [seedPost({ description: "Intacta" })];
+          const replace = vi.spyOn(scope, "replace");
+          expect(await updateWith({ expense })).toEqual(domain.ok({ ...seedPost({ description: "Intacta" }),
+            expense: { id: id(20), tripId, postId, ...expense, createdAt } }));
+          expect(replace).not.toHaveBeenCalled();
+          expect(records).toEqual([seedPost({ description: "Intacta" })]);
+          expect(expenseRecords).toEqual([{ id: id(20), tripId, postId, ...expense, createdAt }]);
+        });
+
+        it("links the post to a new activity and saves its expense together", async () => {
+          records = [seedPost()]; uploaded(1);
+          expect(await linkWith({ expense, photos: refs(1) })).toMatchObject({ ok: true, value: { outcome: "linked", photos: [{ order: 1 }],
+            expense: { postId, totalAmount: 1500.5, currency: "ARS" } } });
+          expect(expenseRecords).toHaveLength(1);
+          expect(activities).toHaveLength(1);
+        });
+
+        it("completes a legacy expense by $set of only the present fields and never inserts a second record", async () => {
+          const legacy = { ...stored({ currency: null, breakdown: null }), paidBy: id(33), payments: [{ userId: id(33) }] } as PostExpense;
+          expenseRecords = [legacy]; records = [seedPost()];
+          const insertExpense = vi.spyOn(scope, "insertExpense"), update = vi.spyOn(scope, "updateExpenseFields");
+          const result = await updateWith({ expense: { currency: "EUR" } });
+          expect(result).toMatchObject({ ok: true, value: { expense: { id: id(70), currency: "EUR", totalAmount: 100, createdAt: legacy.createdAt } } });
+          expect(insertExpense).not.toHaveBeenCalled();
+          expect(update).toHaveBeenCalledTimes(1);
+          expect(update.mock.calls[0]![1]).toEqual(["currency"]);
+          expect(expenseRecords).toEqual([{ ...legacy, currency: "EUR" }]);
+        });
+
+        it("merges a partial update over the stored expense and clears the breakdown with null", async () => {
+          expenseRecords = [stored()]; records = [seedPost()];
+          expect(await updateWith({ expense: { totalAmount: 250 } })).toMatchObject({ ok: true, value: { expense: { totalAmount: 250, currency: "USD", breakdown: "viejo" } } });
+          expect(await updateWith({ expense: { breakdown: null } })).toMatchObject({ ok: true, value: { expense: { totalAmount: 250, breakdown: null } } });
+          expect(expenseRecords).toEqual([stored({ totalAmount: 250, breakdown: null })]);
+        });
+
+        it("needs a currency after the merge when completing a legacy expense: none is invented", async () => {
+          expenseRecords = [stored({ currency: null })]; records = [seedPost()];
+          const before = full();
+          expect(failures(await updateWith({ expense: { breakdown: "x" } }))).toEqual(["expense.currency/required"]);
+          expect(full()).toEqual(before);
+        });
+
+        it("rejects an expense without total or currency when the post has none", async () => {
+          expect(failures(await createWith({ expense: { currency: "ARS" } }))).toEqual(["expense.totalAmount/required"]);
+          expect(failures(await createWith({ expense: { totalAmount: 5 } }))).toEqual(["expense.currency/required"]);
+          expect(full()).toEqual(empty);
+        });
+
+        it.each([
+          ["a non-positive total", { totalAmount: 0, currency: "ARS" }, "expense.totalAmount/invalid"],
+          ["a currency outside the catalog", { totalAmount: 5, currency: "BRL" }, "expense.currency/invalid"],
+          ["payments", { totalAmount: 5, currency: "ARS", payments: [] }, "expense.payments/unsupported"],
+          ["shares", { totalAmount: 5, currency: "ARS", shares: [] }, "expense.shares/unsupported"],
+          ["paidBy", { totalAmount: 5, currency: "ARS", paidBy: id(2) }, "expense.paidBy/unsupported"],
+          ["null", null, "expense/invalid"], ["an empty object", {}, "expense/invalid"], ["a list", [], "expense/invalid"], ["text", "10", "expense/invalid"],
+        ])("rejects %s and writes nothing on create, link or update", async (_, bad, expected) => {
+          uploaded(1); records = [];
+          const spies = writers();
+          expect(failures(await createWith({ newActivity: withDuration, photos: refs(1), expense: bad }))).toEqual([expected]);
+          records = [seedPost()];
+          expect(failures(await linkWith({ photos: refs(1), expense: bad }))).toEqual([expected]);
+          expect(failures(await updateWith({ description: "Editado", expense: bad }))).toEqual([expected]);
+          expect(calls(spies)).toBe(0);
+          expect(full()).toEqual({ ...empty, records: [seedPost()] });
+        });
+
+        it.each(["insertExpense", "updateExpenseFields"] as const)("rolls back everything when %s fails", async (method) => {
+          uploaded(1); scope[method] = async () => domain.err(new domain.UnknownError("failed"));
+          if (method === "insertExpense") {
+            expect(await createWith({ newActivity: withDuration, photos: refs(1), expense })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+            expect(full()).toEqual(empty);
+            records = [seedPost()];
+            expect(await linkWith({ photos: refs(1), expense })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+            expect(full()).toEqual({ ...empty, records: [seedPost()] });
+          } else {
+            expenseRecords = [stored()]; records = [seedPost()];
+            const before = full();
+            expect(await updateWith({ description: "Editado", photos: refs(1), expense: { totalAmount: 9 } })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+            expect(full()).toEqual(before);
+          }
+        });
+
+        it("answers 404 to a non-member before validating or writing anything, even with an invalid expense", async () => {
+          role = undefined; records = [seedPost()];
+          const spies = writers(), before = full();
+          for (const bad of [expense, { totalAmount: 0 }]) {
+            expect(await createWith({ expense: bad })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+            expect(await updateWith({ expense: bad })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+            expect(await linkWith({ expense: bad })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+          }
+          expect(calls(spies)).toBe(0); expect(full()).toEqual(before);
+        });
+
+        it("answers 404 for a missing post and rejects a PATCH with nothing to edit", async () => {
+          expect(await updateWith({ expense })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+          records = [seedPost()];
+          expect(await updateWith()).toMatchObject({ ok: false, error: { issues: [{ field: "post", code: "required" }] } });
+          expect(expenseRecords).toEqual([]);
+        });
+
+        it("fails with UnknownError when an expense arrives without id and clock", async () => {
+          records = [seedPost()];
+          expect(await domain.updateTripPost.execute({ posts }, { ...context, postId, expense })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          expect(expenseRecords).toEqual([]);
+        });
+
+        it("lets any current member (admin or participant) edit the expense of any post", async () => {
+          for (const memberRole of ["admin", "participant"] as const) {
+            role = memberRole; expenseRecords = [stored()]; records = [seedPost({ authorId: id(99) })];
+            expect(await updateWith({ expense: { totalAmount: 7 } })).toMatchObject({ ok: true, value: { expense: { totalAmount: 7 } } });
+          }
+        });
       });
     });
   });
