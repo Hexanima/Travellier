@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
@@ -30,6 +30,7 @@ describe("Mongo Trip management repository", () => {
       database.collection("trips").deleteMany({}),
       database.collection("tripMembers").deleteMany({}),
       database.collection("destinations").deleteMany({}),
+      database.collection("transports").deleteMany({}),
     ]);
   });
 
@@ -148,6 +149,140 @@ describe("Mongo Trip management repository", () => {
     expect(await repository.updateConfigurationForMember(input.trip.id, outsider, { visibility: "public" })).toEqual({ ok: true, value: undefined });
     expect(await repository.updateConfigurationForMember(input.trip.id, input.trip.createdBy, { visibility: "public", expenseMode: "balance" })).toMatchObject({
       ok: true, value: { visibility: "public", expenseMode: "balance" },
+    });
+  });
+
+  describe("derived trip dates in the listing", () => {
+    const at = (value: string) => new Date(value);
+    const seedTransport = async (tripId: string, destinationId: string, departureAt: unknown, arrivalAt: unknown) => {
+      const taken = await database.collection("transports").countDocuments({ destinationId: new ObjectId(destinationId) });
+      await database.collection("transports").insertOne({
+        _id: new ObjectId(), tripId: new ObjectId(tripId), destinationId: new ObjectId(destinationId),
+        direction: taken === 0 ? "outbound" : "return", type: "plane", departureAt, arrivalAt, createdAt: new Date(),
+      });
+    };
+    const seedTrip = async (code: string, creator = new ObjectId(), createdAt?: Date) => {
+      const repository = createMongoTripManagementRepository(database);
+      const input = record(code, creator);
+      if (createdAt !== undefined) input.trip.createdAt = createdAt;
+      await repository.createWithAdminAndDestination(input);
+      return input;
+    };
+    const listed = async (userId: ObjectId) => {
+      const result = await createMongoTripManagementRepository(database).listForMember(domainId(userId));
+      if (!result.ok) throw result.error;
+      return result.value;
+    };
+
+    it("returns null bounds for a trip without transports", async () => {
+      const owner = new ObjectId();
+      await seedTrip("VIAJE-A1", owner);
+      expect(await listed(owner)).toMatchObject([{ startAt: null, endAt: null }]);
+    });
+
+    it("derives min and max across several destinations and unordered transports", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-A2", owner);
+      const second = new ObjectId();
+      await database.collection("destinations").insertOne({ _id: second, tripId: new ObjectId(input.trip.id), name: "Ushuaia", order: 2, createdAt: new Date() });
+      await seedTransport(input.trip.id, second.toHexString(), at("2026-10-20T08:00:00.000Z"), at("2026-10-20T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
+      await seedTransport(input.trip.id, second.toHexString(), at("2026-10-25T08:00:00.000Z"), at("2026-10-25T18:00:00.000Z"));
+      const [item] = await listed(owner);
+      expect(item!.startAt).toEqual(at("2026-10-05T08:00:00.000Z"));
+      expect(item!.endAt).toEqual(at("2026-10-25T18:00:00.000Z"));
+    });
+
+    it("keeps only known dates for incomplete or legacy transports", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-A3", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), null);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "2026-09-01T00:00:00.000Z", undefined);
+      const [item] = await listed(owner);
+      expect(item!.startAt).toEqual(at("2026-10-05T08:00:00.000Z"));
+      expect(item!.endAt).toEqual(at("2026-10-05T08:00:00.000Z"));
+    });
+
+    it("returns null bounds when every stored date is unusable", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-A4", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, null, "2026-09-01");
+      expect(await listed(owner)).toMatchObject([{ startAt: null, endAt: null }]);
+    });
+
+    it("preserves millisecond precision", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-A5", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.123Z"), at("2026-10-09T08:00:00.999Z"));
+      const [item] = await listed(owner);
+      expect(item!.startAt?.toISOString()).toBe("2026-10-05T08:00:00.123Z");
+      expect(item!.endAt?.toISOString()).toBe("2026-10-09T08:00:00.999Z");
+    });
+
+    it("reflects edited transport dates on the next listing", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-A6", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), at("2026-10-09T08:00:00.000Z"));
+      expect(await listed(owner)).toMatchObject([{ endAt: at("2026-10-09T08:00:00.000Z") }]);
+      await database.collection("transports").updateOne({ tripId: new ObjectId(input.trip.id) }, { $set: { arrivalAt: at("2026-10-12T08:00:00.000Z"), departureAt: at("2026-10-01T08:00:00.000Z") } });
+      expect(await listed(owner)).toMatchObject([{ startAt: at("2026-10-01T08:00:00.000Z"), endAt: at("2026-10-12T08:00:00.000Z") }]);
+    });
+
+    it("isolates trips, keeps createdAt order and hides foreign trips from non-members", async () => {
+      const owner = new ObjectId();
+      const older = await seedTrip("VIAJE-B1", owner, at("2026-09-01T00:00:00.000Z"));
+      const newer = await seedTrip("VIAJE-B2", owner, at("2026-09-02T00:00:00.000Z"));
+      const foreign = await seedTrip("VIAJE-B3", new ObjectId());
+      await seedTransport(older.trip.id, older.primaryDestination.id, at("2026-10-01T00:00:00.000Z"), at("2026-10-02T00:00:00.000Z"));
+      await seedTransport(foreign.trip.id, foreign.primaryDestination.id, at("2026-01-01T00:00:00.000Z"), at("2027-01-01T00:00:00.000Z"));
+      const items = await listed(owner);
+      expect(items.map((item) => item.id)).toEqual([newer.trip.id, older.trip.id]);
+      expect(items[0]).toMatchObject({ startAt: null, endAt: null });
+      expect(items[1]).toMatchObject({ startAt: at("2026-10-01T00:00:00.000Z"), endAt: at("2026-10-02T00:00:00.000Z") });
+      expect(await listed(new ObjectId())).toEqual([]);
+    });
+
+    it("reads transports with a single grouped aggregation for many trips", async () => {
+      const owner = new ObjectId();
+      for (const code of ["VIAJE-C1", "VIAJE-C2", "VIAJE-C3"]) {
+        const input = await seedTrip(code, owner);
+        await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-01T00:00:00.000Z"), at("2026-10-02T00:00:00.000Z"));
+      }
+      const original = database.collection.bind(database);
+      const calls = { aggregate: 0, find: 0 };
+      const spy = vi.spyOn(database, "collection").mockImplementation(((name: string) => {
+        const collection = original(name);
+        if (name !== "transports") return collection;
+        const aggregate = collection.aggregate.bind(collection);
+        const find = collection.find.bind(collection);
+        collection.aggregate = ((...args: unknown[]) => { calls.aggregate += 1; return (aggregate as (...a: unknown[]) => unknown)(...args); }) as never;
+        collection.find = ((...args: unknown[]) => { calls.find += 1; return (find as (...a: unknown[]) => unknown)(...args); }) as never;
+        return collection;
+      }) as never);
+      try {
+        const result = await createMongoTripManagementRepository(database).listForMember(domainId(owner));
+        expect(result).toMatchObject({ ok: true });
+        expect(calls).toEqual({ aggregate: 1, find: 0 });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("fails without partial data when the transports read fails", async () => {
+      const owner = new ObjectId();
+      await seedTrip("VIAJE-D1", owner);
+      const original = database.collection.bind(database);
+      const spy = vi.spyOn(database, "collection").mockImplementation(((name: string) => {
+        if (name !== "transports") return original(name);
+        return { aggregate: () => { throw new Error("boom"); } };
+      }) as never);
+      try {
+        const result = await createMongoTripManagementRepository(database).listForMember(domainId(owner));
+        expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(result).not.toHaveProperty("value");
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
