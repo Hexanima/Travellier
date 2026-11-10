@@ -27,7 +27,13 @@ const excerpt = (text: string | null, max: number): string | undefined => {
   return clean.length > max ? `${clean.slice(0, max).trimEnd()}…` : clean;
 };
 /** Only the restore data of an origin travels back, so its place (anchor and scroll) is recovered. */
-const restoreOf = (origin: PostOrigin) => origin.anchor !== undefined && origin.scrollY !== undefined ? { restore: { anchor: origin.anchor, scrollY: origin.scrollY } } : undefined;
+const restoreOf = (origin: PostOrigin) => {
+  if (origin.anchor === undefined || origin.scrollY === undefined) return undefined;
+  const panel = origin.label === "fotos" ? { panel: "photos" as const } : {};
+  // From the viewer the photo is derived from the anchor (an id only); the signed urls are never in the state.
+  const photo = origin.viewer && origin.anchor.startsWith("data-photo=") ? origin.anchor.slice("data-photo=".length) : undefined;
+  return { ...(photo ? { photo } : {}), restore: { anchor: origin.anchor, scrollY: origin.scrollY, ...panel } };
+};
 
 export function PostDetailScreen({ posts, members, comments, likes, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostDetailScreenProps) {
   const { tripId, postId } = useParams();

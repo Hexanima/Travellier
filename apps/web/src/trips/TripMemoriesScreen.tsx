@@ -8,6 +8,7 @@ import { useRestorePosition } from "./use-restore-position.js";
 import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
+import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
 import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
@@ -19,10 +20,14 @@ const notices: readonly unknown[] = ["created", "updated", "created-activity", "
 const noticeText = ({ notice, going }: Saved) => notice === "created" ? "Recuerdo publicado." : notice === "updated" ? "Cambios guardados."
   : `${notice === "created-activity" ? "Recuerdo publicado" : "Cambios guardados"} y actividad creada.${going ? " Vas a ir." : ""}`;
 
-/** Layout of `memories/*`: drafts live here, keyed by Trip, so they are shared by the child routes and dropped when leaving the Trip. */
-export function MemoriesLayout() {
+/**
+ * Layout of `memories/*`: drafts and the gallery snapshots live here, keyed by Trip, so they are shared by the child routes and dropped
+ * when leaving the Trip. Without `gallery` there is no gallery provider (the photos route needs it).
+ */
+export function MemoriesLayout({ gallery }: { gallery?: GalleryProviderProps } = {}) {
   const { tripId } = useParams();
-  return <PostDraftsProvider key={tripId}><CommentDraftsProvider key={tripId}><Outlet /></CommentDraftsProvider></PostDraftsProvider>;
+  const content = <PostDraftsProvider key={tripId}><CommentDraftsProvider key={tripId}><Outlet /></CommentDraftsProvider></PostDraftsProvider>;
+  return gallery ? <GalleryProvider key={tripId} {...gallery}>{content}</GalleryProvider> : content;
 }
 
 /** Newest first; the id breaks ties so the order is stable. Repeated ids keep their first occurrence. */
@@ -93,6 +98,8 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
         <h1>Recuerdos</h1>
         <p>Lo que vive el grupo, del más reciente al más antiguo. Horarios en tu zona local.</p>
         <Link className="trips-settings-link" to={create}>Nuevo recuerdo</Link>
+        {/* Provisional entry to the gallery: the Posts/Fotos tabs of T98 replace it. */}
+        <Link className="trips-settings-link" to={`/trips/${tripId}/memories/photos`}>Fotos</Link>
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">{noticeText(saved)}</Feedback> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdos…" /> : null}
