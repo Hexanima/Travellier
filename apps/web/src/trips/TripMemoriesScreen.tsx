@@ -17,6 +17,13 @@ type LoadState = { kind: "loading" } | { kind: "ready"; posts: PostResponse[] } 
 type Notice = "created" | "updated" | "created-activity" | "linked-activity";
 type Saved = { post: PostResponse; notice: Notice; going: boolean };
 const notices: readonly unknown[] = ["created", "updated", "created-activity", "linked-activity"];
+const alreadySavedText = "Ese recuerdo ya se había guardado. Revisá si tus últimos cambios hacen falta.";
+/** Left by the composer when the server says this attempt was already saved: no post travels, only the notice and the memory to open. */
+const alreadySavedFrom = (state: unknown): { postId?: string } | undefined => {
+  if (typeof state !== "object" || state === null || (state as { notice?: unknown }).notice !== "already-saved") return undefined;
+  const postId = (state as { postId?: unknown }).postId;
+  return typeof postId === "string" && /^[0-9a-f]{24}$/.test(postId) ? { postId } : {};
+};
 const noticeText = ({ notice, going }: Saved) => notice === "created" ? "Recuerdo publicado." : notice === "updated" ? "Cambios guardados."
   : `${notice === "created-activity" ? "Recuerdo publicado" : "Cambios guardados"} y actividad creada.${going ? " Vas a ir." : ""}`;
 
@@ -56,12 +63,13 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
   const navigate = useNavigate();
   // Read once: the saved post is kept locally and the history entry is cleaned so going back does not repeat the notice.
   const [saved] = useState(() => savedFrom(location.state, tripId));
+  const [alreadySaved] = useState(() => alreadySavedFrom(location.state));
   const localPost = useRef(saved?.post);
   const [state, setState] = useState<LoadState>(saved ? { kind: "ready", posts: [saved.post] } : { kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
-  useEffect(() => { if (saved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -102,6 +110,10 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
         <Link className="trips-settings-link" to={`/trips/${tripId}/memories/photos`}>Fotos</Link>
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">{noticeText(saved)}</Feedback> : null}
+      {alreadySaved ? <div className="activity-detail">
+        <Feedback>{alreadySavedText}</Feedback>
+        {alreadySaved.postId ? <PostLink tripId={tripId ?? ""} postId={alreadySaved.postId} anchor={memoryAnchor(alreadySaved.postId)} label="diario">Ver recuerdo</PostLink> : null}
+      </div> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdos…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
         <Feedback variant="error">No pudimos actualizar los recuerdos. Los cambios guardados se conservan.</Feedback>

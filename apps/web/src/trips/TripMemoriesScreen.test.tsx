@@ -218,4 +218,27 @@ describe("TripMemoriesScreen detail links and restoration", () => {
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
     expect(last().pathname).toBe(`/trips/${tripId}/memories`);
   });
+
+  describe("already saved notice (T88)", () => {
+    const text = "Ese recuerdo ya se había guardado. Revisá si tus últimos cambios hacen falta.";
+    it("shows the notice and a link to the saved memory while still listing from the server", async () => {
+      const list = vi.fn().mockResolvedValue({ ok: true, value: [post(11, "2026-01-01T10:00:00.000Z")] });
+      const container = await render(list, { notice: "already-saved", postId: itineraryId(11) });
+      expect(container.textContent).toContain(text);
+      expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Ver recuerdo")?.getAttribute("href")).toBe(`/trips/${tripId}/memories/${itineraryId(11)}`);
+      expect(list).toHaveBeenCalledOnce();
+      expect(texts(container)).toEqual(["Recuerdo 11"]);
+    });
+    it("shows the notice before the list arrives and without a link when there is no valid postId", async () => {
+      const pending = deferred<unknown>();
+      const container = await render(vi.fn().mockReturnValue(pending.promise), { notice: "already-saved", postId: "../x" });
+      expect(container.textContent).toContain(text);
+      expect(Array.from(container.querySelectorAll("a")).some((item) => item.textContent === "Ver recuerdo")).toBe(false);
+      await act(async () => pending.resolve({ ok: true, value: [] }));
+    });
+    it("shows nothing for a notice that is not known", async () => {
+      const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }), { notice: "other" });
+      expect(container.textContent).not.toContain(text);
+    });
+  });
 });

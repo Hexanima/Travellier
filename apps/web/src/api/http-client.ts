@@ -22,6 +22,9 @@ export class ApiClientError extends TaggedError<"ApiClientError"> {
   readonly fields: readonly ApiFieldError[] | undefined;
   /** Only for 409 ParticipationConflictError: the raw `conflicts` and `activity`, unvalidated. */
   details?: Readonly<Record<string, unknown>>;
+  /** Only for 409 PostRequestConflictError: `reason` ("already_saved") and `postId` when the server sends them as strings; a generic 409 carries neither. */
+  reason?: string;
+  postId?: string;
 
   constructor(
     kind: ApiErrorKind,
@@ -134,6 +137,11 @@ const toApiClientError = (status: number, payload: unknown): ApiClientError => {
 
   if (status === 409 && code === "ParticipationConflictError" && apiError) {
     error.details = { conflicts: apiError.conflicts, activity: apiError.activity };
+  }
+
+  if (status === 409 && code === "PostRequestConflictError" && apiError) {
+    if (typeof apiError.reason === "string") error.reason = apiError.reason;
+    if (typeof apiError.postId === "string") error.postId = apiError.postId;
   }
 
   return error;

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExpenseForm } from "./ExpenseForm.js";
 import { ExpenseSplitForm } from "./ExpenseSplitForm.js";
 import { PostComposer } from "./PostComposer.js";
+import { ignoreRetryIds } from "./post-composer-test-api.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
 import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
@@ -31,7 +32,7 @@ async function render(path: string, mocks: Mocks = {}) {
   const update = mocks.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved(withExpenseId) });
   const get = mocks.get ?? vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null,
     ...(mocks.storedExpense ? { expense: mocks.storedExpense } : {}) } }));
-  const composer = <PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone={zone} />;
+  const composer = <PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone={zone} />;
   const expenseForm = <ExpenseForm itinerary={itinerary} />;
   const splitForm = <ExpenseSplitForm posts={{ get }} members={{ list: membersList }} />;
   const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={zone} spontaneousActivity />;
@@ -148,7 +149,7 @@ describe("PostComposer expense (create)", () => {
     await type(container, "description", "Cena");
     await addExpense(container);
     await submit(container);
-    expect(container.textContent).toContain("Revisá tus recuerdos antes de reintentar");
+    expect(container.textContent).toContain("Podés reintentar: el recuerdo no se va a publicar dos veces.");
     expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
     await submit(container);
     expect(create).toHaveBeenCalledTimes(2);

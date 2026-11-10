@@ -7,6 +7,7 @@ import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./exp
 import { mapSplitFieldErrors, sentSplitKeys, type ListErrors, type RowErrors } from "./expense-split.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey } from "./expense-format.js";
 import { PostPhotosSection } from "./PostPhotosSection.js";
+import { newObjectId } from "./new-object-id.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
@@ -20,7 +21,9 @@ import { usePostPhotos, type PostPhotoDeps, type UploadOutcome } from "./use-pos
 import "./itinerary.css";
 
 /** `photos` is optional: without it the composer shows no photo section (nothing about photos reaches the form). */
-export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string; photos?: PostPhotoDeps };
+export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string; photos?: PostPhotoDeps;
+  /** Creates the retry id of a publication attempt (24 lowercase hex). Injectable for tests; defaults to `newObjectId`. */
+  newId?: () => string };
 /** A conflict answer waits here for an explicit decision: the same entry is resent with the confirmation, or dropped on cancel. */
 type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfirmation; stale: boolean };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse; expense?: SavedExpenseView } | { kind: "error"; error: TripFailure };
@@ -46,6 +49,10 @@ const activityMessage = (field: string, code: string) => field === "title" ? "In
   : field === "durationMinutes" ? code === "outside_window" ? "La actividad terminaría después de la salida del destino. Acortá la duración o elegí otro horario." : "Revisá la duración estimada."
   : field === "scheduledAt" || field === "dayId" ? windowMessage : undefined;
 const retryHint = "Revisá tus recuerdos antes de reintentar por si ya se publicó.";
+/** With a retry id the server recognizes a repeated request, so retrying cannot publish twice. */
+const safeRetryHint = "Podés reintentar: el recuerdo no se va a publicar dos veces.";
+const isGenericRequestConflict = (error: TripFailure) => error.kind === "server" && error.code === "PostRequestConflictError";
+const withoutAttempt = (draft: PostDraft, which: "attemptId" | "activityAttemptId"): PostDraft => { const next = { ...draft }; delete next[which]; return next; };
 const badPhotoMessage = "Una foto no es válida. Reintentá subirla o quitala.";
 const invalidReservedMessage = "Alguna foto no es válida. Revisá las fotos marcadas, quitalas o reemplazalas.";
 const photosFieldMessage = "Revisá las fotos: un recuerdo admite hasta 10, en formato JPEG, PNG o WebP.";
@@ -59,12 +66,12 @@ const parentLabelOf = (state: unknown) => { const label = typeof state === "obje
 /** Presentation only: the title of the activity sent by its dialog (the id is what travels). */
 const activityLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { activityLabel?: unknown }).activityLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
 
-export function PostComposer({ posts, itinerary, photos, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
+export function PostComposer({ posts, itinerary, photos, newId, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
-  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} photos={photos} timeZone={timeZone} />;
+  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} photos={photos} newId={newId ?? newObjectId} timeZone={timeZone} />;
 }
 
-function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<PostComposerProps, "timeZone"> & { timeZone: string; tripId?: string; postId?: string }) {
+function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }: Omit<PostComposerProps, "timeZone" | "newId"> & { timeZone: string; newId: () => string; tripId?: string; postId?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const handle = usePostDraft(draftKeyFor({ postId, search: location.search }));
@@ -217,6 +224,9 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
       const mapped: Record<string, string> = {};
       const splitFields: { field: string; code?: string }[] = [];
       for (const { field, code } of error.fields ?? []) {
+        // A rejected retry id is dropped: the next attempt creates a fresh one (nothing was saved with it).
+        if (field === "id") applyDraft((current) => withoutAttempt(current, "attemptId"));
+        if (field === "newActivity.id") applyDraft((current) => withoutAttempt(current, "activityAttemptId"));
         const photoField = /^photos\[(\d+)\]/.exec(field);
         if (photoField) {
           // The index is the position in what was sent; it is resolved through the ids kept when the input was built (not the current draft order).
@@ -276,7 +286,19 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     return result.value;
   };
   /** Built once per attempt, from the draft as it is after the uploads: a confirmed retry resends this very input. */
-  const buildInput = (source: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
+  /**
+   * The retry ids of this attempt live in the draft: created the first time an input is built and reused by every retry (a failure, a cancelled or
+   * confirmed schedule modal, an edited text), so the server can recognize a repeated request. Creating needs the post id; editing needs the activity id only when it creates one.
+   */
+  const withAttempt = (source: PostDraft): PostDraft => {
+    const needPost = !existing && source.attemptId === undefined, needActivity = existing !== undefined && source.extras.newActivity !== null && source.activityAttemptId === undefined;
+    if (!needPost && !needActivity) return source;
+    const next: PostDraft = { ...source, ...(needPost ? { attemptId: newId() } : {}), ...(needActivity ? { activityAttemptId: newId() } : {}) };
+    applyDraft(() => next);
+    return next;
+  };
+  const buildInput = (plain: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
+    const source = withAttempt(plain);
     // Same selection as the input's `photos` (uploaded ones, in order): index i of a 422 `photos[i]` is the photo with this id.
     sentPhotoIds.current = source.extras.photos.filter((item) => item.status === "uploaded" && item.key !== undefined).map((item) => item.localId);
     sentSplit.current = sentSplitKeys(source.extras.split);
@@ -307,8 +329,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
       await send(buildInput(draftRef.current, resolved), undefined);
     } finally { savingRef.current = false; setSaving(false); }
   };
-  /** Saves memory and activity together; a confirmation from a previous 409 is forwarded unchanged. Nothing is announced unless everything was saved. */
-  const send = async (input: PostInput, confirmation: ParticipationConfirmation | undefined) => {
+  /**
+   * Saves memory and activity together; a confirmation from a previous 409 is forwarded unchanged. Nothing is announced unless everything was saved.
+   * `retried` marks the single automatic retry after a generic 409 (the id was taken by someone else): it uses a new id and never repeats again.
+   */
+  const send = async (input: PostInput, confirmation: ParticipationConfirmation | undefined, retried = false) => {
     if (!tripId) return;
     savingRef.current = true; setSaving(true);
     try {
@@ -322,8 +347,19 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         if (backToBalance()) return;
         navigate(listing, { state: { post, going: participation?.status === "going",
           notice: activity ? (existing ? "linked-activity" : "created-activity") : existing ? "updated" : "created" } });
+      } else if (result.error.kind === "already-saved") {
+        // The same attempt was saved before (a lost answer): never republish. The draft is dropped and the saved memory is one tap away in the listing.
+        const savedId = existing ? existing.id : result.error.postId;
+        setPending(undefined);
+        handle.clear();
+        navigate(listing, { state: { notice: "already-saved", ...(savedId !== undefined ? { postId: savedId } : {}) } });
       } else if (result.error.kind === "participation-conflict" && result.error.confirmation) {
         setPending({ input, confirmation: result.error.confirmation, stale: confirmation !== undefined });
+      } else if (!retried && isGenericRequestConflict(result.error) && (existing ? input.newActivity?.id !== undefined : input.id !== undefined)) {
+        // The id belongs to someone else (not a retry of ours): a fresh one, same content, once.
+        const fresh = newId();
+        applyDraft((current) => existing ? { ...current, activityAttemptId: fresh } : { ...current, attemptId: fresh });
+        await send(existing && input.newActivity ? { ...input, newActivity: { ...input.newActivity, id: fresh } } : { ...input, id: fresh }, confirmation, true);
       } else { setPending(undefined); fail(result.error); }
     } catch { setPending(undefined); fail({ kind: "network" }); }
     finally { savingRef.current = false; setSaving(false); }
@@ -381,6 +417,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;
 
   const blocked = loaded.kind === "error" ? loaded.error : failure && (unavailable(failure.kind) || failure.kind === "unauthorized") ? failure : undefined;
+  // Creating always carries its id once an input was built; editing only when it creates an activity (a plain PATCH has no id and keeps the old hint).
+  const safeRetry = existing ? newActivity !== null && draft.activityAttemptId !== undefined : draft.attemptId !== undefined;
   const photoConflict = failure?.code === "PhotoConflictError";
   const conflictAlert: ReactNode = photoConflict ? <>Revisá tus recuerdos antes de reintentar; puede que ya esté publicado. <Link to={listing}>Ver recuerdos</Link></> : undefined;
   const photoAlert: ReactNode = photoError || errors.photos || conflictAlert || photosCtl.message || undefined;
@@ -472,7 +510,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         </section>
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" && !photoConflict ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
-          {(newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${retryHint}` : ""}</Feedback> : null}
+          {(safeRetry || newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${safeRetry ? safeRetryHint : retryHint}` : ""}</Feedback> : null}
         {failure?.kind === "validation" && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}

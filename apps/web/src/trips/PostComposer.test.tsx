@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
+import { ignoreRetryIds } from "./post-composer-test-api.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
 import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
@@ -53,8 +54,8 @@ async function render(path: Entry | Entry[] = `/trips/${tripId}/memories/new`, o
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path=":postId" element={<Detail />} />
-      <Route path="new" element={<PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
-      <Route path=":postId/edit" element={<PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route path="new" element={<PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route path=":postId/edit" element={<PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />} />
       <Route path="new/link" element={picker} />
       <Route path=":postId/edit/link" element={picker} />
       <Route path="new/activity" element={subform} />
@@ -734,7 +735,7 @@ describe("PostComposer (new activity)", () => {
       expect(dialog()).toBeNull();
       expect(container.querySelector('[data-testid="listing"]')).toBeNull();
       expect(alerts(container)).toHaveLength(1);
-      expect(alerts(container)[0]!.textContent).toContain("Revisá tus recuerdos antes de reintentar por si ya se publicó.");
+      expect(alerts(container)[0]!.textContent).toContain("Podés reintentar: el recuerdo no se va a publicar dos veces.");
       expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
     });
   });
@@ -771,22 +772,22 @@ describe("PostComposer (new activity)", () => {
       const { container } = await failWith({ kind: "validation", fields: [{ field: "transportId", code: "not_found", message: "x" }] });
       expect(alerts(container).map((item) => item.textContent)).toEqual(["No pudimos aplicar el vínculo. Elegí otro."]);
     });
-    it.each([["network"], ["server"]])("a %s error keeps the draft and suggests checking the memories before retrying", async (kind) => {
+    it.each([["network"], ["server"]])("a %s error keeps the draft and says the retry is safe", async (kind) => {
       const { container } = await failWith({ kind });
       expect(alerts(container)).toHaveLength(1);
-      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Revisá tus recuerdos antes de reintentar por si ya se publicó.");
+      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Podés reintentar: el recuerdo no se va a publicar dos veces.");
       expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
       expect(container.querySelector('[data-testid="listing"]')).toBeNull();
     });
-    it("without a new activity the network message has no suggestion", async () => {
+    it("without a new activity the network message of a creation still says the retry is safe", async () => {
       const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
       const { container } = await render(undefined, { create });
       await field(container, "description", "Hola"); await submit(container);
-      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Podés reintentar: el recuerdo no se va a publicar dos veces.");
     });
     it("a rejected request is treated as a network error with the suggestion", async () => {
       const { container } = await failWith(undefined, { create: vi.fn().mockRejectedValue(new Error("down")) });
-      expect(alerts(container)[0]!.textContent).toContain("Revisá tus recuerdos antes de reintentar");
+      expect(alerts(container)[0]!.textContent).toContain("Podés reintentar");
     });
     it("a success response without the activity is not announced and does not navigate", async () => {
       const { container } = await failWith(undefined, { create: vi.fn().mockResolvedValue({ ok: true, value: saved() }) });

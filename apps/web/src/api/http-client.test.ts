@@ -315,4 +315,35 @@ describe("createHttpClient", () => {
       expect((await run(500, { code: "ParticipationConflictError", conflicts, activity })).details).toBeUndefined();
     });
   });
+
+  describe("post request conflict details", () => {
+    const postId = "b".repeat(24);
+    const run = async (status: number, error: Record<string, unknown>) => {
+      const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error }), { status }));
+      const client = createHttpClient({ baseUrl: "https://api.example.test", fetch, getAccessToken: async () => "t", onUnauthorized: vi.fn() });
+      const result = await client.post("/x", {});
+      if (result.ok) throw new Error("expected failure");
+      return result.error;
+    };
+    it("exposes reason and postId of a 409 PostRequestConflictError and keeps the server kind", async () => {
+      const error = await run(409, { code: "PostRequestConflictError", message: "Secreto", reason: "already_saved", postId });
+      expect(error).toMatchObject({ kind: "server", code: "PostRequestConflictError", reason: "already_saved", postId });
+      expect(error.details).toBeUndefined();
+    });
+    it("leaves reason and postId undefined for the generic 409", async () => {
+      const error = await run(409, { code: "PostRequestConflictError", message: "x" });
+      expect(error.reason).toBeUndefined(); expect(error.postId).toBeUndefined();
+    });
+    it("ignores a non string reason or postId and any other code or status", async () => {
+      expect((await run(409, { code: "PostRequestConflictError", reason: 1, postId: 2 }))).toMatchObject({ reason: undefined, postId: undefined });
+      expect((await run(409, { code: "Conflict", reason: "already_saved", postId })).reason).toBeUndefined();
+      expect((await run(500, { code: "PostRequestConflictError", reason: "already_saved", postId })).reason).toBeUndefined();
+    });
+    it("keeps the participation conflict details untouched", async () => {
+      const conflicts = [{ activityId: "a".repeat(24), reason: "overlap", scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: 60 }];
+      const error = await run(409, { code: "ParticipationConflictError", conflicts, activity: { scheduledAt: "2026-09-25T12:30:00.000Z", durationMinutes: null }, reason: "x", postId });
+      expect(Object.keys(error.details ?? {}).sort()).toEqual(["activity", "conflicts"]);
+      expect(error.reason).toBeUndefined(); expect(error.postId).toBeUndefined();
+    });
+  });
 });
