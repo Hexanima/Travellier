@@ -70,7 +70,7 @@ describe("App photo wiring", () => {
     expect(reserve).toHaveBeenCalledExactlyOnceWith(tripId, [{ contentType: "image/jpeg", sizeBytes: 1 }]);
     expect(put).toHaveBeenCalledTimes(1);
     expect(put.mock.calls[0]![0]).toBe("https://s3.test/k1");
-    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { photos: [{ key: `trips/${tripId}/photos/k1` }] });
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { id: expect.stringMatching(/^[0-9a-f]{24}$/), photos: [{ key: `trips/${tripId}/photos/k1` }] });
     for (const plugin of [native.camera]) expect(plugin.requestPermissions).not.toHaveBeenCalled();
   });
 });
