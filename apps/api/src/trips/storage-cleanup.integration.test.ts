@@ -228,7 +228,7 @@ describe("storage cleanup: Trip deletion jobs and abandoned uploads", () => {
       const avatar = `avatars/${f.actor}.jpg`, alien = `trips/${f.trip}/photo.jpg`;
       cleanup.put(avatar, ago(OLD * 10)); cleanup.put(alien, ago(OLD * 10));
       const result = await sweep();
-      expect(result).toEqual({ ok: true, value: { pages: 1, scanned: 5, deleted: 2, keptRecent: 1, keptLinked: 1, ignored: 1, listFailed: false, deleteFailed: 0, truncated: false } });
+      expect(result).toEqual({ ok: true, value: { pages: 1, scanned: 5, deleted: 2, keptRecent: 1, keptLinked: 1, ignored: 1, listFailed: false, deleteFailed: 0, linkCheckFailed: 0, truncated: false } });
       expect([...cleanup.deleted].sort()).toEqual([orphanExisting, orphanRemoved].sort());
       expect(cleanup.keys()).toEqual([linked[0]!, recent, avatar, alien].sort());
     });
