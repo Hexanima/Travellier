@@ -6,8 +6,11 @@ import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
 const maxOctets = 75;
 const encoder = new TextEncoder();
 
-/** TEXT escaping: backslash, semicolon, comma and every newline form (CRLF, CR, LF) become `\n`. */
-export const escapeText = (value: string) => value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+/** RFC 5545 TEXT excludes C0 controls (HTAB allowed; CR/LF are escaped before this runs) and DEL. Built from code points to avoid control-character regexes. */
+const withoutControls = (value: string) => [...value].filter((char) => { const code = char.codePointAt(0)!; return code >= 0x20 ? code !== 0x7f : code === 0x09; }).join("");
+
+/** TEXT escaping: backslash, semicolon, comma and every newline form (CRLF, CR, LF) become `\n`; other control characters are dropped. */
+export const escapeText = (value: string) => withoutControls(value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n"));
 
 /** Folds a logical line at 75 octets (UTF-8) with `CRLF + space`; whole code points only (surrogate pairs included). */
 export function foldLine(line: string): string {
