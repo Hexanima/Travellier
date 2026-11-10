@@ -65,7 +65,7 @@ describe("trip notification adapter", () => {
 
   it("rejects ids that are not 24 hex, anywhere", async () => {
     const bad = [
-      mutate("post.created", (i) => { i.id = "xyz"; }), mutate("post.created", (i) => { i.tripId = itineraryId(1).toUpperCase(); }), mutate("post.created", (i) => { i.actorId = "x"; }),
+      mutate("post.created", (i) => { i.id = "xyz"; }), mutate("post.created", (i) => { i.tripId = itineraryId(10).toUpperCase(); }), mutate("post.created", (i) => { i.actorId = "x"; }),
       mutate("post.created", (i) => { payloadOf(i).postId = "../etc"; }), mutate("post.created", (i) => { payloadOf(i).activityId = "x"; }), mutate("post.created", (i) => { payloadOf(i).actorId = 5; }),
       mutate("activity.created", (i) => { payloadOf(i).activityId = `${itineraryId(11)}0`; }), mutate("comment.created", (i) => { payloadOf(i).commentId = "z"; }),
       mutate("member.joined", (i) => { payloadOf(i).memberId = "z"; }), mutate("member.joined", (i) => { payloadOf(i).userId = null; }),
