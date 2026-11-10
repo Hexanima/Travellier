@@ -14,7 +14,7 @@ export type UploadPendingParams = { tripId: string; items: readonly PhotoDraftIt
   api: Pick<TripPhotoApi, "reserve">; transfer: DirectUpload; now: () => number; signal?: AbortSignal;
   onProgress?: (localId: string, fraction: number) => void; onUpdate?: (localId: string, change: PhotoChange) => void };
 
-const needsUpload = (item: PhotoDraftItem, now: number) =>
+export const needsUpload = (item: PhotoDraftItem, now: number) =>
   item.status !== "uploaded" || item.key === undefined || item.uploadedAt === undefined || now - item.uploadedAt > MAX_RESERVED_AGE_MS;
 const descriptor = (item: PhotoDraftItem) => ({ contentType: item.contentType, sizeBytes: item.sizeBytes });
 const fatal = (error: TripFailure) => error.kind === "not-found" || error.kind === "forbidden" || error.kind === "unauthorized";

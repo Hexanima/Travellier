@@ -103,3 +103,10 @@
 .comment-actions .ui-button, .like-button { min-height: 44px; min-width: 44px; }
 .like-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
 .like-control, .post-like, .like-error { display: grid; gap: var(--ui-space-2); justify-items: start; }
+.post-photos-section { display: grid; gap: 8px; }
+.post-photos-section h2, .post-photos-section p { margin: 0; }
+.post-photos-add, .post-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.post-photos-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.post-photo { display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: center; }
+.post-photo img, .post-photo-placeholder { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #d9e2f2; grid-row: span 2; }
+.post-photo-actions { grid-column: 2; }
