@@ -18,7 +18,8 @@ type GalleryContext = { store: Store; list: TripGalleryApi["list"]; now: () => n
 const Context = createContext<GalleryContext | undefined>(undefined);
 
 /** In-memory snapshots per filter. The signed urls live only here (never in history state, url, storage or logs); the provider is keyed by Trip. */
-export function GalleryProvider({ list, now = Date.now, children }: { list: TripGalleryApi["list"]; now?: () => number; children: ReactNode }) {
+export type GalleryProviderProps = { list: TripGalleryApi["list"]; now?: () => number };
+export function GalleryProvider({ list, now = Date.now, children }: GalleryProviderProps & { children: ReactNode }) {
   const store = useRef<Store>(new Map());
   const value = useMemo(() => ({ store: store.current, list, now }), [list, now]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
