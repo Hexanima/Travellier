@@ -26,3 +26,4 @@ export { calculateTripBalance } from "./expense-balance.js";
 export type { CalculateTripBalanceInput } from "./expense-balance.js";
 export * from "./post-save-request.js";
 export * from "./push-device.js";
+export * from "./trip-notification.js";
