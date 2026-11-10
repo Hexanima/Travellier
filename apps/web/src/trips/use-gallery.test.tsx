@@ -230,6 +230,19 @@ describe("useGalleryPages", () => {
     expect(api.refreshFailed).toBe(true);
     expect([...api.failed]).toEqual([itineraryId(5)]);
   });
+  it("exposes why a refresh failed (a 404 tells the filter is gone) until it succeeds or is retried", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([photo(5, "a5")], null)).mockResolvedValueOnce(fail("not-found")).mockResolvedValueOnce(page([photo(5, "b5")], null));
+    await mount(list);
+    expect(api.refreshError).toBeUndefined();
+    await act(async () => api.imageError(itineraryId(5)));
+    await flush();
+    expect(api.refreshFailed).toBe(true);
+    expect(api.refreshError).toEqual({ kind: "not-found" });
+    await act(async () => api.retryRefresh());
+    await flush();
+    expect(api.refreshFailed).toBe(false);
+    expect(api.refreshError).toBeUndefined();
+  });
   it("«Reintentar» on a failed image forces a real refresh even when the url did not change, and fails again if it still does not load", async () => {
     const list = vi.fn().mockResolvedValue(page([photo(5, "same")], null));
     await mount(list);
