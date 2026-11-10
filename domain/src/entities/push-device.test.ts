@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_PUSH_DEVICES_PER_USER, maskPushToken, validatePushDeviceInput } from "./push-device.js";
+import { MAX_PUSH_DEVICES_PER_USER, maskPushToken, validatePushDeviceInput, validatePushTokenReference } from "./push-device.js";
 import type { ValidationError } from "../errors/validation-error.js";
 
 const token = "fAkE-token_0123456789:APA91bH";
@@ -67,5 +67,14 @@ describe("maskPushToken", () => {
 describe("MAX_PUSH_DEVICES_PER_USER", () => {
   it("is the provisional limit of 10", () => {
     expect(MAX_PUSH_DEVICES_PER_USER).toBe(10);
+  });
+});
+
+describe("validatePushTokenReference", () => {
+  it("validates provider and token without a platform", () => {
+    expect(validatePushTokenReference({ provider: "apns", token: ` ${token} `, extra: 1 })).toEqual({ ok: true, value: { provider: "apns", token } });
+    const bad = validatePushTokenReference({ provider: "x", token: "a b" });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect((bad.error as ValidationError).issues.map((issue) => issue.field)).toEqual(["provider", "token"]);
   });
 });
