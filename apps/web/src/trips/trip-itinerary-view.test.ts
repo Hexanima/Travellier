@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost, settleItinerary, throughClientValidator } from "./itinerary-test-fixture.js";
 import type { ExpenseTotals } from "./expense-format.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectItineraryView, projectTripItinerary } from "./trip-itinerary-view.js";
@@ -256,6 +256,43 @@ describe("local itinerary projection", () => {
       expectEachOnce(itinerary, linked);
       linkPost(itinerary.posts[0], {}); itinerary.activities[0].postIds = [];
       expect(projectItineraryView(itinerary, timeZone)).toEqual(independent);
+    });
+    it("moves the expense of the linked post to the new day when the activity is rescheduled", () => {
+      const itinerary = setup();
+      // Published on the 24th (UTC and Buenos Aires), a different local day than the new activity (the 25th): grouping by publication would fail.
+      itinerary.posts[0].createdAt = "2026-09-24T12:00:00.000Z";
+      linkPost(itinerary.posts[0], { activityId: itinerary.activities[0].id }); itinerary.activities[0].postIds = [itineraryId(10)];
+      const before = projectItineraryView(itinerary, timeZone);
+      expect(dayExpenses(before.days).map((d) => d.expenseCount)).toEqual([1, 0]);
+      // Rescheduled into the second source day (backend moves the dayId along with the instant).
+      itinerary.activities[0].dayId = itineraryId(30); itinerary.activities[0].scheduledAt = "2026-09-25T06:00:00.000Z";
+      settleItinerary(itinerary);
+      const after = projectItineraryView(itinerary, timeZone);
+      expect(dayExpenses(after.days)).toEqual([
+        { date: "2026-09-24", totalAmount: 0, expenseCount: 0 }, { date: "2026-09-25", totalAmount: 25.5, expenseCount: 1 },
+      ]);
+      expect(activityPosts(after, itinerary.activities[0].id)).toEqual([itineraryId(10)]);
+      expect(after.outsideExpensePosts).toEqual([]);
+      expect(after.tripExpenses).toEqual(before.tripExpenses);
+      expectEachOnce(itinerary, after);
+    });
+    it("sends the expense outside the itinerary, without double counting, when the activity is removed and the post was published outside the trip dates", async () => {
+      const itinerary = setup();
+      linkPost(itinerary.posts[0], { activityId: itinerary.activities[0].id }); itinerary.activities[0].postIds = [itineraryId(10)];
+      settleItinerary(itinerary);
+      const before = projectItineraryView(itinerary, timeZone);
+      // The state the backend returns after deleting the activity: no activity, no direct link, the post keeps its (out of range) publication.
+      itinerary.activities = []; linkPost(itinerary.posts[0], {});
+      itinerary.posts[0].createdAt = "2031-01-01T12:00:00.000Z";
+      settleItinerary(itinerary);
+      expect(await throughClientValidator(itinerary)).toEqual({ ok: true, value: itinerary });
+      expect(itinerary.expenses[0]).toMatchObject({ source: "publication", rootActivityId: null, dayId: null });
+      const after = projectItineraryView(itinerary, timeZone);
+      expect(after.outsideExpensePosts.map((p) => p.id)).toEqual([itineraryId(10)]);
+      expect(dayExpenses(after.days).map((d) => d.expenseCount)).toEqual([0, 0]);
+      expect(after.tripExpenses).toEqual(before.tripExpenses);
+      expect(after.tripExpenses.expenseCount).toBe(1);
+      expectEachOnce(itinerary, after);
     });
     it("projects former descendants by publication, keeping the parent link, after the activity is removed", () => {
       const itinerary = setup();

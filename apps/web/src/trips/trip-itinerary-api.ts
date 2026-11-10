@@ -13,7 +13,10 @@ export type ItineraryPostContext = {
   placement: "activity" | "transport" | "independent";
 };
 /** The post's day is no longer part of the client contract: a legacy `dayId` is tolerated but ignored at runtime. */
-export type ItineraryPostResponse = Omit<ActiveItineraryResponse["posts"][number], "dayId" | "context"> & { context: ItineraryPostContext };
+/** `paidBy` may be absent in older payloads (the validator accepts it); null or absent means nobody is recorded as payer. */
+type ItineraryExpenseResponse = Omit<NonNullable<ActiveItineraryResponse["posts"][number]["expense"]>, "paidBy"> & { paidBy?: string | null };
+export type ItineraryPostResponse = Omit<ActiveItineraryResponse["posts"][number], "dayId" | "context" | "expense"> &
+  { context: ItineraryPostContext; expense: ItineraryExpenseResponse | null };
 export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities" | "posts" | "unplacedPosts"> & {
   // durationMinutes stays optional on the client: older payloads and fixtures may omit it; null or absent means no duration.
   activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
@@ -62,7 +65,7 @@ const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nu
   timestamp(v.scheduledAt) && nullableText(v.mapsUrl) &&
   id(v.createdBy) && timestamp(v.createdAt) && ids(v.postIds);
 const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && (v.currency === null || currencies.includes(v.currency as string)) && nullableText(v.breakdown) &&
-  nullableId(v.paidBy) && timestamp(v.createdAt);
+  (v.paidBy === undefined || nullableId(v.paidBy)) && timestamp(v.createdAt);
 const placements = ["activity", "transport", "independent"];
 // A legacy dayId (absent, null or an ObjectId) is accepted and never used.
 const context = (v: unknown) => record(v) && nullableId(v.parentPostId) && id(v.rootPostId) && nullableId(v.rootActivityId) &&
