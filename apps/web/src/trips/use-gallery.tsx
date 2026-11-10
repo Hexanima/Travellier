@@ -26,11 +26,11 @@ export function GalleryProvider({ list, now = Date.now, children }: GalleryProvi
 }
 
 export type Phase = "initial-loading" | "initial-error" | "idle" | "more-loading" | "more-error";
-type State = { pages: GalleryPageData[]; phase: Phase; error?: TripFailure; refreshFailed: boolean; failed: ReadonlySet<string> };
+type State = { pages: GalleryPageData[]; phase: Phase; error?: TripFailure; refreshFailed: boolean; /** Why the last url refresh failed (404/403 tell the filter is gone). */ refreshError?: TripFailure; failed: ReadonlySet<string> };
 const pageKey = (cursor: string | null) => cursor ?? "";
 
 export type GalleryPages = {
-  photos: GalleryPhoto[]; phase: Phase; error: TripFailure | undefined; hasMore: boolean; refreshFailed: boolean; failed: ReadonlySet<string>;
+  photos: GalleryPhoto[]; phase: Phase; error: TripFailure | undefined; hasMore: boolean; refreshFailed: boolean; refreshError: TripFailure | undefined; failed: ReadonlySet<string>;
   loadMore: () => void; retry: () => void; restart: () => void; retryRefresh: () => void; imageError: (photoId: string) => void; retryImage: (photoId: string) => void;
 };
 
@@ -39,7 +39,7 @@ export type GalleryPages = {
  * runs in parallel. Results of a request whose cursor is no longer the current one are discarded.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
+export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { reuse?: boolean } = {}): GalleryPages {
   const context = useContext(Context);
   if (!context) throw new Error("useGalleryPages needs a GalleryProvider");
   const { store, list, now } = context;
@@ -48,7 +48,8 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
   const key = filterKey(filter);
   const { activityId, transportId } = filter;
   // Read once: only an entry that comes back (restore or open viewer) may reuse the snapshot; a fresh entry asks for page 1.
-  const [reusable] = useState(() => readRestore(location.state) !== undefined || readPhoto(location.state) !== undefined);
+  // `reuse: false` (the activity filter) always asks page 1, so a relink or a removal made meanwhile is never hidden by an old snapshot.
+  const [reusable] = useState(() => reuse && (readRestore(location.state) !== undefined || readPhoto(location.state) !== undefined));
   const [state, setState] = useState<State>({ pages: [], phase: "initial-loading", refreshFailed: false, failed: new Set() });
   const stateRef = useRef(state);
   const generation = useRef(0);
@@ -94,7 +95,7 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
             if (before.get(photo.id) !== photo.url) failed.delete(photo.id);
             else if (tried.current.get(photo.id) === photo.url) failed.add(photo.id);
           }
-          return { ...current, pages, failed, refreshFailed: failedPages.current.size > 0 };
+          return { ...current, pages, failed, refreshFailed: failedPages.current.size > 0, refreshError: failedPages.current.size > 0 ? current.refreshError : undefined };
         });
       } else {
         failedPages.current.add(id);
@@ -102,7 +103,7 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
         commit((current) => {
           const failed = new Set(current.failed);
           for (const photo of current.pages.find((page) => page.cursor === cursor)?.photos ?? []) if (tried.current.get(photo.id) === photo.url) failed.add(photo.id);
-          return { ...current, failed, refreshFailed: true };
+          return { ...current, failed, refreshFailed: true, refreshError: result.error };
         });
       }
     });
@@ -152,7 +153,7 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
   }, [commit, loadFirst, loadMore]);
 
   const retryRefresh = useCallback(() => {
-    commit((current) => ({ ...current, refreshFailed: false }));
+    commit((current) => ({ ...current, refreshFailed: false, refreshError: undefined }));
     const gen = generation.current;
     for (const page of stateRef.current.pages) {
       if (!failedPages.current.has(pageKey(page.cursor))) continue;
@@ -212,6 +213,6 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
   }, [tripId, key, list, query]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const photos = useMemo(() => flatten(state.pages), [state.pages]);
-  return { photos, phase: state.phase, error: state.error, hasMore: currentCursor(state.pages) !== null, refreshFailed: state.refreshFailed, failed: state.failed,
+  return { photos, phase: state.phase, error: state.error, hasMore: currentCursor(state.pages) !== null, refreshFailed: state.refreshFailed, refreshError: state.refreshError, failed: state.failed,
     loadMore, retry, restart, retryRefresh, imageError, retryImage };
 }

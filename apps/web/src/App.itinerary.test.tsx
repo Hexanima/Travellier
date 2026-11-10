@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
-import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost } from "./trips/itinerary-test-fixture.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -72,6 +72,48 @@ describe("App itinerary integration", () => {
       await act(async () => back?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
       expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
       expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`)).not.toBeNull();
+    });
+  });
+  describe("memories and photos of an activity", () => {
+    beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+    const A = itineraryId(8);
+    const wiring = () => {
+      const value = itineraryFixture();
+      linkPost(value.posts[0]!, { activityId: A });
+      const photo = { id: itineraryId(40), postId: value.posts[0]!.id, order: 0, uploadedAt: "2026-09-25T13:30:00.000Z", uploaderId: itineraryId(20), url: "https://s3.test/40", expiresAtMs: Date.now() + 300_000,
+        post: { createdAt: value.posts[0]!.createdAt, authorId: itineraryId(20), rootActivityId: A, rootTransportId: null } };
+      return { value, photo, props: {
+        auth: { refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "a", refreshToken: "r" } }) }, sessionStorage: storage(true),
+        itinerary: { get: vi.fn().mockResolvedValue({ ok: true, value }) },
+        activities: { get: vi.fn().mockImplementation(async (_t: string, id: string) => ({ ok: true, value: value.activities.find((a) => a.id === id) })) },
+        gallery: { list: vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo], nextCursor: null } }) },
+        members: { list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: itineraryId(20), members: [] } }) },
+        posts: { get: vi.fn().mockResolvedValue({ ok: true, value: { post: { ...value.posts[0], tripId: itineraryId(1) }, parent: null, children: [], rootActivityId: A } }) },
+      } as unknown as ComponentProps<typeof App> };
+    };
+    const click = (element: Element | null | undefined) => act(async () => element?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    it("opens the memory from the activity and «Volver a la actividad» restores the dialog and the focus", async () => {
+      const { value, props } = wiring();
+      const container = await render(`/trips/${itineraryId(1)}/itinerary?activity=${A}`, props);
+      await act(async () => { await Promise.resolve(); });
+      const row = document.querySelector(`[data-memory="${value.posts[0]!.id}"]`);
+      expect(row).not.toBeNull();
+      await click(row!.querySelector("a"));
+      expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+      const back = Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver a la actividad");
+      expect(back).toBeDefined();
+      await click(back);
+      await act(async () => { await Promise.resolve(); });
+      expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+      expect(document.querySelector(".activity-dialog")).not.toBeNull();
+      expect(document.activeElement).toBe(document.querySelector(`[data-memory="${value.posts[0]!.id}"]`));
+    });
+    it("lists the images of the activity in Fotos using the shared gallery provider", async () => {
+      const { photo, props } = wiring();
+      await render(`/trips/${itineraryId(1)}/itinerary?activity=${A}&tab=photos`, props);
+      await act(async () => { await Promise.resolve(); });
+      expect(document.querySelector(`[data-photo="${photo.id}"]`)).not.toBeNull();
+      expect((props.gallery!.list as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(itineraryId(1), { activityId: A });
     });
   });
 });

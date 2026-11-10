@@ -17,10 +17,12 @@ type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse;
   /** "removed": the server deleted it; "gone": it was already missing (404/403), so nothing is claimed as an own deletion. */
   onRemoved: (activityId: string, outcome: "removed" | "gone") => void;
   /** A participation write or conflict confirmation for this activity is pending: removal waits. */
-  busy?: boolean; participation?: ReactNode };
+  busy?: boolean; participation?: ReactNode;
+  /** Recuerdos and Fotos of the activity (detail only); rendered below the details. */
+  memories?: ReactNode };
 type DetailState = { kind: "loading" } | { kind: "error"; error: TripFailure } | { kind: "detail" | "edit"; value: ActivityResponse };
 
-export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, onRemoved, busy = false, participation }: Props) {
+export function ActivityDialog({ request, itinerary, timeZone, activities, onClose, onSaved, onRemoved, busy = false, participation, memories }: Props) {
   const [state, setState] = useState<DetailState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -99,6 +101,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
         {context ? <Button onClick={() => setState({ kind: "edit", value: state.value })}>Editar actividad</Button>
           : <Feedback variant="error">El día de esta actividad cambió. Cerrá el detalle y volvé a cargar el itinerario.</Feedback>}
         <Button error disabled={busy} onClick={(event) => { removeTrigger.current = event.currentTarget; setRemoval("confirming"); setRemovalError(undefined); }}>Eliminar actividad</Button>
+        {memories}
       </div> : null}
       {state.kind === "edit" && context ? <ActivityForm context={context} activities={activities} existing={state.value} onSaved={onSaved} onBusyChange={setSaving} /> : null}
     </> : null}
