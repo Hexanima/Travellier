@@ -56,6 +56,7 @@ const setup = (rows: Row[], options: SetupOptions = {}) => {
       if (!found) return ok(undefined);
       found.leaseOwner = owner;
       found.leaseUntil = leaseUntil;
+      found.attempts += 1;
       return ok({ ...found.claim, attempts: found.attempts, deliveredDeviceIds: [...found.claim.deliveredDeviceIds] });
     },
     recordDelivered: async (eid, owner, deviceId) => {
@@ -80,7 +81,7 @@ const setup = (rows: Row[], options: SetupOptions = {}) => {
       writes.push("release");
       const found = rows.find((r) => r.claim.id === eid && r.leaseOwner === owner);
       if (!found) return ok(false);
-      Object.assign(found, { status: input.status, attempts: input.attempts, availableAt: input.nextAttemptAt, lastErrorCode: input.lastErrorCode });
+      Object.assign(found, { status: input.status, attempts: found.attempts - (input.refundAttempt === true ? 1 : 0), availableAt: input.nextAttemptAt, lastErrorCode: input.lastErrorCode });
       found.leaseOwner = undefined;
       found.leaseUntil = undefined;
       return ok(true);
@@ -207,6 +208,38 @@ describe("dispatchPushNotifications", () => {
     expect(t.rows).toHaveLength(1);
     expect(t.rows[0]).toMatchObject({ status: "failed", attempts: PUSH_DISPATCH_MAX_ATTEMPTS });
     expect(summary).toMatchObject({ transient: 1, exhausted: 1 });
+  });
+
+  it("counts the attempt at claim time, so a transient release does not count it twice", async () => {
+    const t = setup([pending(claimOf("comment.created"))], { sends: () => ({ kind: "transient", code: "throttled" }) });
+    await dispatchPushNotifications(t.deps);
+    expect(t.rows[0]).toMatchObject({ status: "pending", attempts: 1 });
+    expect(t.rows[0]?.availableAt).toEqual(new Date(T0.getTime() + computePushRetryDelay(1)));
+  });
+
+  it("converges to failed without sending when workers keep dying with the event leased", async () => {
+    const rows = [pending(claimOf("comment.created"))];
+    let now = T0;
+    const t = setup(rows, { clock: () => now, deadline: new Date(T0.getTime() + 10 * 3600_000) });
+    // Each worker claims and never completes: the lease just expires.
+    for (let claim = 1; claim <= PUSH_DISPATCH_MAX_ATTEMPTS; claim += 1) {
+      const claimed = await t.deps.dispatch.claimNext({ now, leaseUntil: new Date(now.getTime() + 120_000), owner: `dead-${claim}` });
+      expect(claimed).toMatchObject({ ok: true, value: { attempts: claim } });
+      now = new Date(now.getTime() + 121_000);
+    }
+    const summary = await summaryOf(t.deps);
+    expect(t.sent).toHaveLength(0);
+    expect(rows[0]).toMatchObject({ status: "failed", lastErrorCode: "exhausted", attempts: PUSH_DISPATCH_MAX_ATTEMPTS + 1 });
+    expect(summary).toMatchObject({ claimed: 1, exhausted: 1, delivered: 0 });
+    expect((await summaryOf(t.deps)).claimed).toBe(0);
+  });
+
+  it("still sends only to the missing device when a partially delivered event is reclaimed", async () => {
+    const claim = claimOf("comment.created", { deliveredDeviceIds: [devA] });
+    const t = setup([pending(claim, { attempts: 1 })], { devices: [device(devA, "token-a"), device(devB, "token-b")] });
+    await dispatchPushNotifications(t.deps);
+    expect(t.sent.map((s) => s.token)).toEqual(["token-b"]);
+    expect(t.rows[0]).toMatchObject({ status: "sent", outcome: "delivered", attempts: 2 });
   });
 
   it("treats an infrastructure error of the provider as transient", async () => {

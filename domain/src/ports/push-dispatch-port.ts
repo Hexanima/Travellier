@@ -8,7 +8,7 @@ export type PushDispatchClaim = PushableEvent & {
   /** Recipient. */
   userId: ObjectId;
   createdAt: Date;
-  /** Failed attempts so far (before this claim). */
+  /** Attempts counted so far, INCLUDING this claim: `claimNext` adds it atomically, so a worker that dies still consumed one. */
   attempts: number;
   /** Devices that already received this event: the idempotency key per (event, device). */
   deliveredDeviceIds: ObjectId[];
@@ -22,7 +22,8 @@ export interface PushDispatchCompletion {
 
 export interface PushDispatchRelease {
   nextAttemptAt: Date;
-  attempts: number;
+  /** Gives back the attempt counted at claim time (the work was cut by the deadline, not a failure). */
+  refundAttempt?: boolean;
   status: "pending" | "failed";
   lastErrorCode: string;
 }
@@ -33,7 +34,7 @@ export interface PushDispatchRelease {
  * An event is never deleted and the dispatch never creates or removes app notifications.
  */
 export interface PushDispatchPort {
-  /** Atomically leases the next eligible event (`pending`, `availableAt <= now`, no live lease). */
+  /** Atomically leases the next eligible event (`pending`, `availableAt <= now`, no live lease) and counts the attempt (`$inc`). */
   claimNext: (input: { now: Date; leaseUntil: Date; owner: string }) => AsyncResult<PushDispatchClaim | undefined>;
   /** Adds the device to `deliveredDeviceIds` (idempotent). */
   recordDelivered: (eventId: ObjectId, owner: string, deviceId: ObjectId) => AsyncResult<boolean>;

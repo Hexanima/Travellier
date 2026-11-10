@@ -38,12 +38,12 @@ export const createMongoPushDispatchRepository = (database: Db): PushDispatchPor
     claimNext: ({ now, leaseUntil, owner }) => guard(async () => {
       const claimed = await events().findOneAndUpdate(
         { status: "pending", availableAt: { $lte: now }, $or: [{ leaseUntil: { $exists: false } }, { leaseUntil: null }, { leaseUntil: { $lte: now } }] },
-        { $set: { leaseUntil, leaseOwner: owner, lastAttemptAt: now } },
+        { $set: { leaseUntil, leaseOwner: owner, lastAttemptAt: now }, $inc: { attempts: 1 } },
         { sort: { availableAt: 1, _id: 1 }, returnDocument: "after" },
       );
       if (claimed === null) return undefined;
       return { id: domainId(claimed._id), type: claimed.type, tripId: domainId(claimed.tripId), userId: domainId(claimed.userId),
-        payload: fromStoredPayload(claimed.payload), createdAt: claimed.createdAt, attempts: claimed.attempts ?? 0,
+        payload: fromStoredPayload(claimed.payload), createdAt: claimed.createdAt, attempts: claimed.attempts ?? 1,
         deliveredDeviceIds: (claimed.deliveredDeviceIds ?? []).map(domainId) } as PushDispatchClaim;
     }),
     recordDelivered: (eventId, owner, deviceId) => guard(async () => {
@@ -55,9 +55,9 @@ export const createMongoPushDispatchRepository = (database: Db): PushDispatchPor
         { $set: { status, outcome, completedAt: now }, $unset: unsetLease });
       return result.matchedCount === 1;
     }),
-    release: (eventId, owner, { nextAttemptAt, attempts, status, lastErrorCode }) => guard(async () => {
+    release: (eventId, owner, { nextAttemptAt, refundAttempt, status, lastErrorCode }) => guard(async () => {
       const result = await events().updateOne({ _id: new MongoObjectId(eventId), leaseOwner: owner },
-        { $set: { status, attempts, availableAt: nextAttemptAt, lastErrorCode }, $unset: unsetLease });
+        { $set: { status, availableAt: nextAttemptAt, lastErrorCode }, $unset: unsetLease, ...(refundAttempt === true ? { $inc: { attempts: -1 } } : {}) });
       return result.matchedCount === 1;
     }),
   };

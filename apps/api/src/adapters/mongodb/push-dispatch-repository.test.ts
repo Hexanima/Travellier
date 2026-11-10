@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { createObjectId, type ObjectId as DomainObjectId } from "app-domain";
+import { PUSH_DISPATCH_MAX_ATTEMPTS, createObjectId, dispatchPushNotifications, ok, type ObjectId as DomainObjectId, type PushDevice, type PushSendResult } from "app-domain";
 
 import { migrateMongoSchema } from "./migrations.js";
 import { createMongoDispatchAudience, createMongoPushDispatchRepository } from "./push-dispatch-repository.js";
@@ -40,8 +40,8 @@ describe("MongoDB push dispatch repository", () => {
     const { insertedId } = await insert();
     const claimed = await claim("w1");
     expect(claimed).toMatchObject({ ok: true, value: { id: insertedId.toHexString(), type: "activity.updated", tripId: trip.toHexString(), userId: user.toHexString(),
-      createdAt: at(-10), attempts: 0, deliveredDeviceIds: [], payload: { activityId: activity.toHexString(), changedFields: ["scheduledAt"] } } });
-    expect(await events().findOne({ _id: insertedId })).toMatchObject({ leaseOwner: "w1", leaseUntil: at(120), lastAttemptAt: NOW, status: "pending" });
+      createdAt: at(-10), attempts: 1, deliveredDeviceIds: [], payload: { activityId: activity.toHexString(), changedFields: ["scheduledAt"] } } });
+    expect(await events().findOne({ _id: insertedId })).toMatchObject({ leaseOwner: "w1", leaseUntil: at(120), lastAttemptAt: NOW, status: "pending", attempts: 1 });
   });
 
   it("returns dates of the payload as Date, so the message can be built", async () => {
@@ -64,7 +64,7 @@ describe("MongoDB push dispatch repository", () => {
     await insert({ availableAt: at(1) });
     const leased = await insert({ leaseOwner: "w0", leaseUntil: at(10) });
     expect(await claim("w1")).toEqual({ ok: true, value: undefined });
-    expect(await claim("w1", at(10))).toMatchObject({ ok: true, value: { id: leased.insertedId.toHexString(), attempts: 0 } });
+    expect(await claim("w1", at(10))).toMatchObject({ ok: true, value: { id: leased.insertedId.toHexString(), attempts: 1 } });
     expect(await events().findOne({ _id: leased.insertedId })).toMatchObject({ leaseOwner: "w1" });
   });
 
@@ -74,10 +74,20 @@ describe("MongoDB push dispatch repository", () => {
     expect(await claim("w1")).toMatchObject({ ok: true, value: { id: oldest.insertedId.toHexString() } });
   });
 
+  it("adds one attempt at every claim, atomically, and marks the claim time", async () => {
+    const { insertedId } = await insert({ attempts: 2 });
+    expect(await claim("w1")).toMatchObject({ ok: true, value: { attempts: 3 } });
+    expect(await claim("w2", at(121))).toMatchObject({ ok: true, value: { attempts: 4 } });
+    expect(await events().findOne({ _id: insertedId })).toMatchObject({ attempts: 4, leaseOwner: "w2", lastAttemptAt: at(121) });
+    const second = await insert();
+    await Promise.all([claim("w3", at(500)), claim("w4", at(500)), claim("w5", at(500))]);
+    expect((await events().findOne({ _id: second.insertedId }))?.attempts).toBe(1);
+  });
+
   it("reports the progress of a previous attempt", async () => {
     const device = new ObjectId();
     await insert({ attempts: 2, deliveredDeviceIds: [device] });
-    expect(await claim("w1")).toMatchObject({ ok: true, value: { attempts: 2, deliveredDeviceIds: [device.toHexString()] } });
+    expect(await claim("w1")).toMatchObject({ ok: true, value: { attempts: 3, deliveredDeviceIds: [device.toHexString()] } });
   });
 
   it("filters every write after the claim by the lease owner", async () => {
@@ -86,7 +96,7 @@ describe("MongoDB push dispatch repository", () => {
     const eventId = domainId(insertedId), device = domainId(new ObjectId());
     expect(await dispatch().recordDelivered(eventId, "intruder", device)).toEqual({ ok: true, value: false });
     expect(await dispatch().complete(eventId, "intruder", { status: "sent", outcome: "delivered", now: NOW })).toEqual({ ok: true, value: false });
-    expect(await dispatch().release(eventId, "intruder", { nextAttemptAt: at(60), attempts: 1, status: "pending", lastErrorCode: "x" })).toEqual({ ok: true, value: false });
+    expect(await dispatch().release(eventId, "intruder", { nextAttemptAt: at(60), status: "pending", lastErrorCode: "x" })).toEqual({ ok: true, value: false });
     expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "pending", leaseOwner: "w1" });
     expect((await events().findOne({ _id: insertedId }))?.deliveredDeviceIds).toBeUndefined();
   });
@@ -114,13 +124,73 @@ describe("MongoDB push dispatch repository", () => {
   it("releases an event for a later attempt, or leaves it failed, and keeps it claimable only when pending and due", async () => {
     const { insertedId } = await insert();
     await claim("w1");
-    expect(await dispatch().release(domainId(insertedId), "w1", { nextAttemptAt: at(60), attempts: 1, status: "pending", lastErrorCode: "throttled" })).toEqual({ ok: true, value: true });
+    expect(await dispatch().release(domainId(insertedId), "w1", { nextAttemptAt: at(60), status: "pending", lastErrorCode: "throttled" })).toEqual({ ok: true, value: true });
     expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "pending", attempts: 1, availableAt: at(60), lastErrorCode: "throttled" });
     expect(await claim("w2", at(30))).toEqual({ ok: true, value: undefined });
-    expect(await claim("w2", at(60))).toMatchObject({ ok: true, value: { attempts: 1 } });
-    await dispatch().release(domainId(insertedId), "w2", { nextAttemptAt: at(600), attempts: 5, status: "failed", lastErrorCode: "throttled" });
-    expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "failed", attempts: 5 });
+    expect(await claim("w2", at(60))).toMatchObject({ ok: true, value: { attempts: 2 } });
+    await dispatch().release(domainId(insertedId), "w2", { nextAttemptAt: at(600), status: "failed", lastErrorCode: "throttled" });
+    expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "failed", attempts: 2 });
     expect(await claim("w3", at(100_000))).toEqual({ ok: true, value: undefined });
+  });
+
+  it("a release can give back the attempt counted at claim time", async () => {
+    const { insertedId } = await insert();
+    await claim("w1");
+    await dispatch().release(domainId(insertedId), "w1", { nextAttemptAt: at(0), refundAttempt: true, status: "pending", lastErrorCode: "deadline" });
+    expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  describe("dispatch with real claims", () => {
+    const device = (id: ObjectId, token: string): PushDevice => ({ id: domainId(id), userId: domainId(user), provider: "fcm", platform: "android", token,
+      createdAt: NOW, updatedAt: NOW, lastRegisteredAt: NOW });
+    const devA = new ObjectId(), devB = new ObjectId();
+    const run = (now: () => Date, send: (token: string) => Promise<PushSendResult>, owner: string) => dispatchPushNotifications({
+      dispatch: dispatch(), audience: { isCurrentMember: async () => ok(true), tripExists: async () => ok(true) },
+      devices: { listForUser: async () => ok([device(devA, "token-a"), device(devB, "token-b")]) },
+      provider: { send: async ({ device: target }) => ok(await send(target.token)) }, removeInvalid: { removeInvalid: async (_p, tokens) => ok(tokens.length) },
+      now, createOwner: () => owner, deadline: new Date(NOW.getTime() + 10 * 3600_000), maxEvents: 5 });
+
+    it("a worker that dies on every claim converges to failed without sending, and never loops", async () => {
+      const { insertedId } = await insert({ createdAt: at(-10) });
+      for (let index = 1; index <= PUSH_DISPATCH_MAX_ATTEMPTS; index += 1) {
+        expect(await claim(`dead-${index}`, at(index * 130))).toMatchObject({ ok: true, value: { attempts: index } });
+      }
+      const sent: string[] = [];
+      const result = await run(() => at(10 * 130), async (token) => { sent.push(token); return { kind: "delivered" }; }, "live");
+      expect(result).toMatchObject({ ok: true, value: { claimed: 1, exhausted: 1, delivered: 0 } });
+      expect(sent).toEqual([]);
+      expect(await events().findOne({ _id: insertedId })).toMatchObject({ status: "failed", lastErrorCode: "exhausted", attempts: PUSH_DISPATCH_MAX_ATTEMPTS + 1 });
+      expect(await claim("later", at(100_000))).toEqual({ ok: true, value: undefined });
+    });
+
+    it("a worker with a send in flight loses the lease: the next worker sends the missing device and the first one cannot overwrite it", async () => {
+      const { insertedId } = await insert({ createdAt: at(-10) });
+      let clock = NOW;
+      const sentByA: string[] = [], sentByB: string[] = [];
+      let releaseA!: () => void;
+      const blockedA = new Promise<void>((resolve) => { releaseA = resolve; });
+      const workerA = run(() => clock, async (token) => {
+        sentByA.push(token);
+        if (token === "token-b") await blockedA;
+        return { kind: "delivered" };
+      }, "A");
+      // A delivers token-a and stays pending on token-b.
+      for (let spin = 0; spin < 200 && sentByA.length < 2; spin += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(sentByA).toEqual(["token-a", "token-b"]);
+      expect(await events().findOne({ _id: insertedId })).toMatchObject({ leaseOwner: "A", attempts: 1 });
+      clock = at(121);
+      const workerB = await run(() => clock, async (token) => { sentByB.push(token); return { kind: "delivered" }; }, "B");
+      expect(workerB).toMatchObject({ ok: true, value: { claimed: 1, delivered: 1 } });
+      expect(sentByB).toEqual(["token-b"]);
+      const afterB = await events().findOne({ _id: insertedId });
+      expect(afterB).toMatchObject({ status: "sent", outcome: "delivered", attempts: 2 });
+      releaseA();
+      const resultA = await workerA;
+      expect(resultA).toMatchObject({ ok: true, value: { leaseLost: 1, delivered: 0 } });
+      expect(await events().findOne({ _id: insertedId })).toEqual(afterB);
+      expect(await dispatch().recordDelivered(domainId(insertedId), "A", domainId(devB))).toEqual({ ok: true, value: false });
+      expect(await dispatch().complete(domainId(insertedId), "A", { status: "sent", outcome: "delivered", now: clock })).toEqual({ ok: true, value: false });
+    });
   });
 
   it("answers whether the user is a current member and whether the Trip exists", async () => {

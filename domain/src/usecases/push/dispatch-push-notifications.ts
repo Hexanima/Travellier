@@ -61,10 +61,11 @@ export const dispatchPushNotifications = async (deps: DispatchPushNotificationsD
     const release = async (code: string, mode: "retry" | "deadline" | "permanent"): Promise<EventResult> => {
       const now = deps.now();
       const counts = mode !== "deadline";
-      const attempts = claim.attempts + (counts ? 1 : 0);
-      const exhausted = mode === "permanent" || (counts && attempts >= PUSH_DISPATCH_MAX_ATTEMPTS);
-      const nextAttemptAt = counts ? new Date(now.getTime() + computePushRetryDelay(attempts)) : now;
-      const released = await deps.dispatch.release(claim.id, owner, { nextAttemptAt, attempts, status: exhausted ? "failed" : "pending", lastErrorCode: code });
+      // The attempt was already counted when the event was claimed: `claim.attempts` includes it.
+      const exhausted = mode === "permanent" || (counts && claim.attempts >= PUSH_DISPATCH_MAX_ATTEMPTS);
+      const nextAttemptAt = counts ? new Date(now.getTime() + computePushRetryDelay(claim.attempts)) : now;
+      const released = await deps.dispatch.release(claim.id, owner, { nextAttemptAt, ...(counts ? {} : { refundAttempt: true }),
+        status: exhausted ? "failed" : "pending", lastErrorCode: code });
       if (released.ok && !released.value) return "lease_lost";
       if (mode === "deadline") return "deadline";
       if (mode === "permanent") return "failed";
@@ -76,6 +77,11 @@ export const dispatchPushNotifications = async (deps: DispatchPushNotificationsD
       return done.value ? result : "lease_lost";
     };
 
+    // Claims that died before finishing (lease expired) already used the attempts: past the maximum nothing is sent anymore.
+    if (claim.attempts > PUSH_DISPATCH_MAX_ATTEMPTS) {
+      const released = await deps.dispatch.release(claim.id, owner, { nextAttemptAt: deps.now(), status: "failed", lastErrorCode: "exhausted" });
+      return released.ok && !released.value ? "lease_lost" : "exhausted";
+    }
     if (deps.now().getTime() - claim.createdAt.getTime() > PUSH_DISPATCH_VALIDITY_MS) {
       summary.skipped.expired += 1;
       return complete("skipped", "expired", "skipped");
@@ -145,12 +151,12 @@ export const dispatchPushNotifications = async (deps: DispatchPushNotificationsD
     try {
       result = await processEvent(claimed.value, owner);
     } catch {
-      // A poison event must not loop forever: count the attempt; if even that fails, the lease expiry frees it.
+      // A poison event must not loop forever: the attempt is already counted; if releasing fails, the lease expiry frees it.
       try {
-        const attempts = claimed.value.attempts + 1, at = deps.now();
+        const attempts = claimed.value.attempts, at = deps.now();
         const exhausted = attempts >= PUSH_DISPATCH_MAX_ATTEMPTS;
         const released = await deps.dispatch.release(claimed.value.id, owner, { nextAttemptAt: new Date(at.getTime() + computePushRetryDelay(attempts)),
-          attempts, status: exhausted ? "failed" : "pending", lastErrorCode: "unexpected" });
+          status: exhausted ? "failed" : "pending", lastErrorCode: "unexpected" });
         result = released.ok && !released.value ? "lease_lost" : exhausted ? "exhausted" : "retry";
       } catch { result = "retry"; }
     }
