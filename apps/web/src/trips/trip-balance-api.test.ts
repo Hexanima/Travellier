@@ -31,6 +31,12 @@ describe("balance HTTP adapter", () => {
     await api.get("a/b");
     expect(fetch.mock.calls[0][0]).toBe("https://api.test/trips/a%2Fb/balance");
   });
+  it("compares the trip id ignoring case, as the server lowercases it", async () => {
+    const lower = "abcdefabcdefabcdefabcdef", upper = lower.toUpperCase();
+    const result = await setup({ balance: balance({ tripId: lower }) }).api.get(upper);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.tripId).toBe(lower);
+  });
   it("accepts an empty register-mode answer", async () => {
     const empty = { tripId, expenseMode: "register", currencies: [], excludedExpenses: [], includedExpenseCount: 0 };
     expect(await respond(empty)).toEqual({ ok: true, value: empty });

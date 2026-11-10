@@ -45,7 +45,7 @@ const parseExcluded = (value: unknown): ExcludedExpense | undefined => {
 };
 
 const parseBalance = (value: unknown, tripId: string): TripBalance | undefined => {
-  if (!isRecord(value) || value.tripId !== tripId || (value.expenseMode !== "register" && value.expenseMode !== "balance") || !nonNegative(value.includedExpenseCount) ||
+  if (!isRecord(value) || typeof value.tripId !== "string" || value.tripId.toLowerCase() !== tripId.toLowerCase() || (value.expenseMode !== "register" && value.expenseMode !== "balance") || !nonNegative(value.includedExpenseCount) ||
     !Array.isArray(value.currencies) || !Array.isArray(value.excludedExpenses)) return undefined;
   if (value.expenseMode === "register" && (value.currencies.length > 0 || value.excludedExpenses.length > 0 || value.includedExpenseCount !== 0)) return undefined;
   const currencies = value.currencies.map(parseCurrency), excludedExpenses = value.excludedExpenses.map(parseExcluded);
@@ -54,7 +54,7 @@ const parseBalance = (value: unknown, tripId: string): TripBalance | undefined =
   // Strictly increasing in the ARS, EUR, USD order: no repeats and no reordering by the client.
   const order = checked.map(({ currency }) => expenseCurrencies.indexOf(currency));
   if (order.some((index, position) => position > 0 && index <= order[position - 1])) return undefined;
-  return { tripId, expenseMode: value.expenseMode, currencies: checked, excludedExpenses: excludedExpenses as ExcludedExpense[], includedExpenseCount: value.includedExpenseCount };
+  return { tripId: value.tripId, expenseMode: value.expenseMode, currencies: checked, excludedExpenses: excludedExpenses as ExcludedExpense[], includedExpenseCount: value.includedExpenseCount };
 };
 
 export const createTripBalanceApi = (client: Pick<HttpClient, "get">): TripBalanceApi => ({

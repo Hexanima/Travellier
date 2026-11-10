@@ -99,6 +99,7 @@ describe("TripBalanceScreen: register mode", () => {
     expect(link(container, "Ver gastos del viaje")?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
     expect(link(container, "Ver recuerdos")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
     expect(container.querySelector("h2")).toBeNull();
+    expect(container.textContent).not.toContain("Saldos por persona y moneda");
     expect(container.textContent).not.toMatch(/Gastos por completar|Compensaciones|Tiene a favor|Debe /);
     expect(list).not.toHaveBeenCalled(); expect(membersList).not.toHaveBeenCalled();
   });
@@ -120,6 +121,10 @@ describe("TripBalanceScreen: balance mode", () => {
     expect(section(container, "Pesos (ARS)").textContent).not.toContain("USD");
     expect(section(container, "Dólares (USD)").textContent).not.toContain("ARS");
     expect(container.textContent).not.toMatch(/Total|EUR/);
+  });
+  it("explains the balances in the subtitle in balance mode", async () => {
+    const { container } = await render();
+    expect(container.querySelector("header p")?.textContent).toBe("Saldos por persona y moneda, según los gastos completos del viaje.");
   });
   it("shows who is owed, who owes and who has no balance, with each person named the same way everywhere", async () => {
     const { container } = await render();
@@ -285,6 +290,49 @@ describe("TripBalanceScreen: refresh", () => {
     await act(async () => first.resolve(ok(balance())));
     expect(container.textContent).not.toContain("Pesos (ARS)");
     expect(container.textContent).not.toContain("Actualizando balance…");
+  });
+  it("the automatic refresh is silent: no status, no busy state and the data stays as is until the answer", async () => {
+    const second = deferred<unknown>();
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockReturnValueOnce(second.promise);
+    const { container } = await render({ get });
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Actualizando balance…");
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(container.textContent).toContain("Pesos (ARS)");
+    await act(async () => second.resolve(ok(balance({ currencies: [usd()], includedExpenseCount: 1 }))));
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.textContent).not.toContain("Pesos (ARS)");
+    expect(container.textContent).toContain("Dólares (USD)");
+  });
+  it("the periodic refresh is silent too", async () => {
+    vi.useFakeTimers();
+    const second = deferred<unknown>();
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockReturnValueOnce(second.promise);
+    const { container } = await render({ get });
+    await act(async () => { await vi.advanceTimersByTimeAsync(45_000); });
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    await act(async () => second.resolve(ok(balance())));
+  });
+  it("a failed automatic refresh keeps the data and shows the single outdated warning", async () => {
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+    const { container } = await render({ get });
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(container.textContent).toContain("Pesos (ARS)");
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toBe("No pudimos actualizar el balance. Lo que ves puede estar desactualizado.");
+  });
+  it("the manual refresh does show the status while it runs", async () => {
+    const second = deferred<unknown>();
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockReturnValueOnce(second.promise);
+    const { container } = await render({ get });
+    await click(button(container, "Actualizar balance"));
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
+    await act(async () => second.resolve(ok(balance())));
+    expect(container.querySelector('[role="status"]')).toBeNull();
   });
   it("refreshes when the window gets the focus again", async () => {
     const get = vi.fn().mockResolvedValue(ok(balance()));

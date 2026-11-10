@@ -45,11 +45,12 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
     if (["network", "server"].includes(error.kind)) { setRefreshError(true); setState((current) => current.kind === "ready" ? current : { kind: "error", error }); }
     else setState({ kind: "error", error });
   };
-  const load = async () => {
+  /** `silent` (automatic refresh) shows no indicator: only the manual refresh and the first load do. */
+  const load = async (silent = false) => {
     const mine = ++generation.current;
     if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
     setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-    setRefreshing(true); setRefreshError(false);
+    if (!silent) { setRefreshing(true); setRefreshError(false); }
     try {
       const result = await balance.get(tripId);
       if (mine !== generation.current) return;
@@ -63,6 +64,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       ]);
       if (mine !== generation.current) return;
       setState({ kind: "ready", balance: value, people, titles });
+      if (silent) setRefreshError(false);
     } catch {
       if (mine === generation.current) fail({ kind: "network" });
     } finally {
@@ -73,7 +75,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
     void load();
     return () => { generation.current += 1; };
   }, [tripId, balance, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
-  useTripRefresh(() => state.kind === "ready" ? load() : undefined);
+  useTripRefresh(() => state.kind === "ready" ? load(true) : undefined);
   useRestorePosition(state.kind === "ready");
 
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
@@ -83,7 +85,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
       <header className="itinerary-header">
         <h1 tabIndex={-1}>Balance</h1>
-        <p>Saldos por persona y moneda, según los gastos completos del viaje.</p>
+        {state.kind === "ready" && state.balance.expenseMode === "register" ? null : <p>Saldos por persona y moneda, según los gastos completos del viaje.</p>}
       </header>
       {state.kind === "loading" ? <LoadingState label="Cargando balance…" /> : null}
       {state.kind === "error" ? <div className="trips-state">
