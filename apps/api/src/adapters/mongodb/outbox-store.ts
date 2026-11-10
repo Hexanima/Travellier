@@ -26,7 +26,8 @@ export const fromStoredPayload = (value: unknown): unknown => {
 
 /**
  * Outbox/inbox writes shared by every transactional scope that emits events (T91); always pass the transaction session.
- * `outboxEvents` holds one document per (event, recipient); a document is never consumed or changed once written.
+ * `outboxEvents` holds one document per (event, recipient); its content (type, payload, recipient) never changes once written. The push dispatcher (T92) only adds dispatch fields
+ * (status, attempts, lease, deliveredDeviceIds...) and never inserts or deletes: the inbox ignores them.
  */
 export const createOutboxStore = (database: Db, tripId: ObjectId, session: ClientSession): NotificationScope => {
   const mongoTripId = new MongoObjectId(tripId);

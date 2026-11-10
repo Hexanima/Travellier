@@ -229,6 +229,17 @@ No emiten: editar un post o un comentario, «Voy / No voy», likes, votos (retir
 - `lambda.ts` ahora entrega a la ruta el `rawQueryString` de API Gateway (antes se descartaba: `limit` y `cursor` no llegaban a ninguna ruta con parámetros, incluida la lista de fotos). Solo `/notifications` y `/trips/:id/photos` leen la query; las demás rutas la ignoran porque `handleApiRequest` las matchea sobre el pathname.
 - Verificado con MongoDB efímero (`mongodb-memory-server`); no se probó con Atlas, push real (T92), volumen del fan-out ni textos finales del cliente.
 
+## Despacho de avisos push (T92)
+
+Código del worker que entrega por push los eventos de `outboxEvents` (T91), **sin cablear ni desplegar** y sin SDK de SNS (ver `docs/infraestructura/servicios-pendientes.md`, «Estado de T92»).
+
+- `src/events-lambda.ts`: `createEventsHandler` (SQS, lote de 1, `ReportBatchItemFailures`, tick exacto `{ kind: "events", stage }`, deadline interno 45 s, hasta 20 eventos por tick, logs solo de contadores), `createEventsRun` y `createEventsRuntimeLoader`. No exporta un `handler` productivo: la fábrica del cliente SNS real queda pendiente. `src/sqs-tick.ts` comparte `isTick`/`parseBody`/tipos SQS con `storage-deletion-lambda.ts`.
+- `dispatchPushNotifications` (dominio): reclama cada evento con lease de 120 s, omite eventos de más de 24 h, de un Trip eliminado o de quien dejó de ser miembro (la expulsión solo se entrega a quien no es miembro), lista los dispositivos del usuario y envía a los que no figuran en `deliveredDeviceIds` (idempotencia por evento y dispositivo). Token inválido (`EndpointDisabled`) → se elimina una vez por proveedor y no se reintenta; el intento se cuenta al reclamar (`$inc` atómico en `claimNext`); fallo transitorio → release con backoff de 1 min a 6 h que NO suma otro intento, y `failed` al quinto, sin borrar; el corte por deadline devuelve el intento (`refundAttempt`); un evento cuyo worker muere repetidamente pasa a `failed` con `lastErrorCode: exhausted` sin enviar (`claim.attempts > 5`); rechazo permanente (`InvalidParameter`, `AuthorizationError`) → no se borra el token. Nunca crea ni borra avisos de la app.
+- `adapters/mongodb/push-dispatch-repository.ts`: reclamo atómico con `findOneAndUpdate` sobre `{ status: "pending", availableAt <= now, sin lease vigente }`; toda escritura posterior filtra por `_id` y `leaseOwner` y devuelve `false` si se perdió el lease. `PushDeviceRepository.listForUser` devuelve los dispositivos con su token (no se expone por HTTP).
+- `adapters/aws/sns-push-provider.ts`: `createSnsPushProvider({ client, applications })` con cliente estructural; `adapters/aws/events-config.ts`: lee `APP_ENV`, `MONGODB_SECRET_ARN` y `PUSH_APPLICATIONS_SECRET_ARN`.
+- Mensaje (`buildPushMessage`): `data` solo con strings: `notificationId`, `type`, `tripId` e IDs del recurso (más `scheduledAt` y `durationMinutes` en el desvinculado); sin textos del usuario, tokens ni la lista de actividades incompatibles (el cliente la consulta en `GET /notifications`). Sin ningún tipo de voto o aprobación.
+- Verificado con MongoDB efímero y un cliente SNS falso; no se probó FCM/APNs/SNS reales, el formato exacto de los mensajes SNS, los nombres de error del SDK, IAM, EventBridge/SQS/DLQ ni Atlas.
+
 ## API de participación (T38)
 
 Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden consultar y actualizar únicamente su propia participación; `userId` se obtiene del JWT.
