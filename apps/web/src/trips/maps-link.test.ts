@@ -108,7 +108,7 @@ describe("parseMapsLink", () => {
       expect(valid("https://maps.google.com/?q=a%0Ab").place).toBeUndefined();
     });
     it("keeps literal markup as plain text for the caller to render as text", () => {
-      expect(valid("https://www.google.com/maps/place/%3Cscript%3Ealert(1)%3C%2Fscript%3E").place).toBe("<script>alert(1)</script>");
+      expect(valid("https://www.google.com/maps/place/%3Cscript%3Ealert(1)%3C").place).toBe("<script>alert(1)<");
     });
     it("is absent when the url carries no place", () => {
       expect(valid("https://maps.google.com/").place).toBeUndefined();
@@ -213,5 +213,34 @@ describe("parseMapsLink", () => {
   it("rejects values longer than 2048 characters", () => {
     expect(parseMapsLink(`https://maps.google.com/?q=${"a".repeat(5000)}`)).toEqual({ kind: "invalid" });
     expect(parseMapsLink(`https://maps.google.com/?q=${"a".repeat(2048 - "https://maps.google.com/?q=".length)}`).kind).toBe("valid");
+  });
+
+  describe("evasive paths", () => {
+    it.each([
+      "https://www.google.com/maps/%2e%2e/url?q=https://evil.example",
+      "https://www.google.com/maps/%2E%2E/url",
+      "https://www.google.com/maps.evil",
+      "https://www.google.com/maps%2Fx",
+      "https://www.google.com/Maps",
+      "https://maps.google.com//url",
+      "https://maps.google.com/maps;x/../url",
+      "https://www.google.com/maps/..%2furl",
+      "https://www.google.com/maps/..%5curl",
+      "https://www.google.com/maps/..%2Furl",
+      "https://www.google.com/maps/..%2e/url",
+      "https://www.google.com/maps/x%00y",
+      "https://maps.apple.com/place/..%2furl",
+      "https://goo.gl/maps/..%2furl",
+    ])("rejects %s", (link) => {
+      expect(parseMapsLink(link)).toEqual({ kind: "invalid" });
+    });
+    it.each([
+      "https://www.google.com/maps?x=1#/../url",
+      "https://www.google.com/maps/place/Caf%C3%A9",
+      "https://maps.google.com/?q=Caf%C3%A9%2C+Paris",
+      "https://www.google.com/maps/search/?api=1&query=Paris",
+    ])("keeps %s valid", (link) => {
+      expect(parseMapsLink(link).kind).toBe("valid");
+    });
   });
 });

@@ -19,6 +19,8 @@ const atPair = new RegExp(`@(${number}),(${number})(?:[,/]|$)`);
 /** Path equals `root` or is a sub-path of it, with a segment boundary (`/maps`, `/maps/x`; never `/mapsfoo`). */
 const atSegment = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 const underMaps = (path: string) => atSegment(path, "/maps");
+/** Encoded separators, NUL or residual encoded dots in the pathname (the query is not checked). */
+const hasEncodedEvasion = (path: string) => /%(?:2f|5c|00|2e)/i.test(path);
 const appleRoots = ["/place", "/directions", "/search"];
 /** Exact host allowlist; a host never matches by suffix or substring. Each rule can also restrict the path. */
 const hosts: Record<string, { shortener: boolean; path?: (path: string) => boolean }> = {
@@ -55,7 +57,7 @@ export function parseMapsLink(raw: string | null | undefined): MapsLink {
   try { url = new URL(value); } catch { return invalid; }
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.port !== "") return invalid;
   const rule = Object.hasOwn(hosts, url.hostname) ? hosts[url.hostname] : undefined;
-  if (!rule || (rule.path && !rule.path(url.pathname))) return invalid;
+  if (!rule || hasEncodedEvasion(url.pathname) || (rule.path && !rule.path(url.pathname))) return invalid;
   if (url.href.length > maxLength) return invalid;
   const base = { kind: "valid" as const, url: url.href, host: url.hostname, shortener: rule.shortener };
   if (rule.shortener) return base;
