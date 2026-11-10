@@ -47,6 +47,15 @@ describe("createTripManagementApi", () => {
     expect(get).toHaveBeenCalledWith("/trips");
   });
 
+  it("tolerates the additive startAt/endAt of the Trip list, as ISO strings or null", async () => {
+    const dated = { ...trip, startAt: "2026-10-01T10:00:00.123Z", endAt: "2026-10-09T12:00:00.999Z" };
+    const undated = { ...trip, id: "507f191e810c19729de860eb", startAt: null, endAt: null };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [dated, undated] } });
+    const api = createTripManagementApi({ get, post: vi.fn() } as never);
+
+    expect(await api.list()).toEqual({ ok: true, value: [dated, undated] });
+  });
+
   it("loads only limited public Trip previews", async () => {
     const publicTrip = { ...trip, visibility: "public" };
     const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [publicTrip] } });
