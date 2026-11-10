@@ -374,3 +374,82 @@ describe("PostComposer request conflicts (T88)", () => {
     expect(itineraryGet.mock.calls.length).toBe(reads); expect(list).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled();
   });
 });
+
+describe("PostComposer complete publication scenarios (T88)", () => {
+  const select = async (container: HTMLElement, name: string, value: string) => {
+    const element = container.querySelector(`select[name="${name}"]`) as HTMLSelectElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+  const choose = async (container: HTMLElement, value: string) => select(container, "currency", value);
+  const splitButton = (container: HTMLElement) => container.querySelector('button[name="split"]') as HTMLButtonElement;
+  const expenseButton = (container: HTMLElement) => container.querySelector('button[name="expense"]') as HTMLButtonElement;
+  /** Gasto of 100 ARS where Beto paid 60, shares as proposed (remainder for each member). */
+  async function addExpenseWithSplit(container: HTMLElement) {
+    await click(expenseButton(container)); await type(container, "amount", "100"); await choose(container, "ARS"); await click(button(container, "Aceptar"));
+    await click(splitButton(container));
+    await select(container, "payments-add", beto); await click(button(container, "Agregar pago"));
+    const row = container.querySelector<HTMLElement>('[data-section="payments"] [data-row]')!;
+    const input = row.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "60"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click(button(container, "Aceptar"));
+  }
+  const expectedExpense = { totalAmount: 100, currency: "ARS", payments: [{ userId: beto, unit: "amount", value: 60 }],
+    shares: [{ userId: me, unit: "remainder", value: null }, { userId: beto, unit: "remainder", value: null }] };
+  const key1 = { key: `trips/${tripId}/photos/k1` };
+
+  it("a spontaneous activity with photos and an expense with payments and shares is one POST with everything and no other request", async () => {
+    const mocks = makeDeps();
+    const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+    const { container, update, get, list } = await render(newPath, { create, photos: mocks.deps });
+    await type(container, "description", "Cena");
+    await addActivity(container);
+    mocks.offer(1); await click(button(container, "Agregar fotos"));
+    await addExpenseWithSplit(container);
+    await submit(container);
+    expect(create).toHaveBeenCalledOnce();
+    expect(body(create)).toEqual({ id: ID1, description: "Cena", newActivity: newActivityBody, photos: [key1], expense: expectedExpense });
+    expect(update).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
+    expect(mocks.api.reserve).toHaveBeenCalledOnce(); expect(mocks.transfer.put).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("created-activity");
+  });
+  it("relinking an existing memory to a new activity is one PATCH with the activity id, without activityId or a post id", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved({ activityId: itineraryId(8) }), parent: null, children: [], rootActivityId: itineraryId(8) } });
+    const { container, create } = await render(editPath, { update, get });
+    await addActivity(container); await submit(container);
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0]![1]).toBe(postId);
+    expect(update.mock.calls[0]![2]).toEqual({ newActivity: { id: ID1, ...newActivityBody } });
+    expect(create).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("linked-activity");
+  });
+  it("an agenda rejection has no partial effects: nothing is cleared, navigated or read; cancelling keeps everything and confirming resends the same input", async () => {
+    const mocks = makeDeps();
+    const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce(conflict).mockResolvedValue({ ok: true, value: withActivity() });
+    const { container, update, get, list } = await render(newPath, { create, photos: mocks.deps });
+    await type(container, "description", "Cena");
+    await addActivity(container);
+    mocks.offer(1); await click(button(container, "Agregar fotos"));
+    await addExpenseWithSplit(container);
+    await submit(container);
+    expect(dialog()).not.toBeNull();
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    await click(button(dialog()!, "Conservar mi participación actual"));
+    // Nothing was cleared: text, activity, photo and expense are still there.
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Cena");
+    expect(container.querySelector("#post-link-summary")?.textContent).toContain("Actividad nueva: Cena");
+    expect(container.querySelectorAll(".post-photos-section img")).toHaveLength(1);
+    expect(container.querySelector("#post-expense-summary")?.textContent).toContain("Gasto:");
+    expect(container.querySelector("#post-split-summary")).not.toBeNull();
+    await submit(container);
+    await click(button(dialog()!, "Cambiar de plan"));
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[1]![1]).toEqual(create.mock.calls[0]![1]);
+    expect(create.mock.calls[2]![1]).toEqual(create.mock.calls[0]![1]);
+    expect(body(create, 0)).toEqual({ id: ID1, description: "Cena", newActivity: newActivityBody, photos: [key1], expense: expectedExpense });
+    expect(create.mock.calls[2]![2]).toEqual(confirmation);
+    expect(mocks.api.reserve).toHaveBeenCalledOnce(); expect(mocks.transfer.put).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+});
