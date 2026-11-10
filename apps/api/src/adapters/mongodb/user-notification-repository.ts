@@ -25,6 +25,7 @@ export const createMongoUserNotificationQueryRepository = (database: Db): UserNo
       const mongoUserId = new MongoObjectId(userId);
       const memberships = await database.collection<{ tripId: MongoObjectId }>("tripMembers")
         .find({ userId: mongoUserId }, { projection: { tripId: 1 } }).toArray();
+      // The `$in` size is proportional to the memberships of the user: it is not bounded nor measured (see docs/REVISION_PENDIENTE.md, T91).
       const authorized = { $or: [{ tripId: { $in: memberships.map((membership) => membership.tripId) } }, { type: "member.expelled" as TripNotificationType }] };
       const position = after === undefined ? [] : [{ $or: [{ createdAt: { $lt: new Date(after.createdAtMs) } },
         { createdAt: new Date(after.createdAtMs), _id: { $lt: new MongoObjectId(after.id) } }] }];
