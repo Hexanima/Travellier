@@ -7,7 +7,7 @@ export type LocationPreviewContext = "activity" | "memory" | "composer";
 export type LocationPreviewProps = { value: string | null | undefined; context: LocationPreviewContext };
 type Valid = Extract<MapsLink, { kind: "valid" }>;
 
-const openFailed = "No pudimos abrir Maps. Probá de nuevo o copiá el enlace.";
+const openFailed = "No pudimos abrir Maps. Probá de nuevo.";
 
 /**
  * Derived from the link text only (no map tiles, no third-party request, nothing resolved): absent renders nothing, an invalid link is a

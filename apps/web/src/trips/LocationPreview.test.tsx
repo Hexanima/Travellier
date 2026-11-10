@@ -108,7 +108,7 @@ describe("LocationPreview", () => {
     await act(async () => openButton(container).click());
     const alerts = container.querySelectorAll("[role=alert]");
     expect(alerts).toHaveLength(1);
-    expect(alerts[0]?.textContent).toBe("No pudimos abrir Maps. Probá de nuevo o copiá el enlace.");
+    expect(alerts[0]?.textContent).toBe("No pudimos abrir Maps. Probá de nuevo.");
     expect(openButton(container).getAttribute("aria-disabled")).toBeNull();
     await act(async () => openButton(container).click());
     expect(container.querySelectorAll("[role=alert]")).toHaveLength(1);
