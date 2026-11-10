@@ -317,6 +317,26 @@ describe("PostComposer photos: publishing", () => {
     expect(value(container, "description")).toBe("Mi texto largo");
     expect(create).toHaveBeenCalledTimes(1);
   });
+  it("a 404 while reserving in creation says the memory was not published and keeps the text copyable", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "not-found" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    expect(container.textContent).toContain("Tu recuerdo no se publicó. Copiá tu texto antes de salir.");
+    expect(container.textContent).not.toContain("Ya no podés editar este recuerdo");
+    expect((container.querySelector("textarea[readonly]") as HTMLTextAreaElement).value).toBe("Texto");
+  });
+  it("a 404 while reserving in an edit says the memory can no longer be edited, not that it was not published, and keeps the text copyable", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "not-found" } } as never);
+    const { container } = await render(editPath, mocks);
+    await choose(container, mocks, 1); await field(container, "description", "Texto editado");
+    await submit(container);
+    expect(container.textContent).toContain("Ya no podés editar este recuerdo. Tu texto sigue acá para que lo copies.");
+    expect(container.textContent).not.toContain("no se publicó");
+    expect((container.querySelector("textarea[readonly]") as HTMLTextAreaElement).value).toBe("Texto editado");
+  });
   it("a 404 while reserving blocks the form without clearing the draft or calling create", async () => {
     const mocks = makeDeps();
     mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "not-found" } } as never);
@@ -347,6 +367,48 @@ describe("PostComposer photos: publishing", () => {
     expect(alerts(container)).toHaveLength(1);
     expect(alerts(container)[0]!.textContent).toContain("No pudimos subir las fotos");
     expect(container.querySelector("form")).not.toBeNull();
+  });
+  it("a 422 on the reservation marks the named photo of the batch and points to it instead of blaming the connection", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "files[1].contentType", code: "unsupported", message: "x" }] } } as never);
+    const { container, create } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1, 2, 3);
+    await submit(container);
+    expect(create).not.toHaveBeenCalled(); expect(mocks.transfer.put).not.toHaveBeenCalled();
+    expect(statuses(container)[0]).toBe("Lista"); expect(statuses(container)[2]).toBe("Lista");
+    expect(statuses(container)[1]).not.toBe("Lista");
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toContain("Alguna foto no es válida. Revisá las fotos marcadas, quitalas o reemplazalas.");
+    expect(alerts(container)[0]!.textContent).not.toContain("conexión");
+    expect(value(container, "description")).toBe("Texto");
+  });
+  it("a 422 on the reservation maps files[i] to the photo of the batch, not to the position in the current draft", async () => {
+    const mocks = makeDeps();
+    // Photo 1 ends up uploaded (the create fails), so the next batch holds photos 2 and 3: files[0] is photo 2, which is position 1 of the draft.
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const { container } = await render(newPath, mocks, { create });
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    await choose(container, mocks, 2, 3);
+    const before = statuses(container);
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "files[0].sizeBytes", code: "too_large", message: "x" }] } } as never);
+    await submit(container);
+    const after = statuses(container);
+    expect(after[0]).toBe(before[0]); expect(after[2]).toBe(before[2]);
+    expect(after[1]).not.toBe(before[1]);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toContain("Alguna foto no es válida");
+  });
+  it("a network failure on the reservation keeps the connection message", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "network" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1, 2);
+    await submit(container);
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]!.textContent).toContain("Revisá tu conexión");
+    expect(alerts(container)[0]!.textContent).not.toContain("no es válida");
   });
   it("on a network failure after uploading, the retry hint appears and the retry reuses the same keys", async () => {
     const mocks = makeDeps();

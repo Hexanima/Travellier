@@ -31,6 +31,7 @@ const activityMessage = (field: string, code: string) => field === "title" ? "In
   : field === "scheduledAt" || field === "dayId" ? windowMessage : undefined;
 const retryHint = "Revisá tus recuerdos antes de reintentar por si ya se publicó.";
 const badPhotoMessage = "Una foto no es válida. Reintentá subirla o quitala.";
+const invalidReservedMessage = "Alguna foto no es válida. Revisá las fotos marcadas, quitalas o reemplazalas.";
 const photosFieldMessage = "Revisá las fotos: un recuerdo admite hasta 10, en formato JPEG, PNG o WebP.";
 const linkMessage = (code: string) => code === "cycle" || code === "self_reference" ? "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."
   : code === "conflict" ? "Un recuerdo continuación no puede tener otro vínculo directo." : "No pudimos aplicar el vínculo. Elegí otro.";
@@ -72,6 +73,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const itineraryRequest = useRef<Promise<TripItineraryResponse | undefined> | undefined>(undefined);
   const hadPending = useRef(false);
   const savingRef = useRef(false);
+  /** The photo ids behind the `photos` of the input last sent, by position. */
+  const sentPhotoIds = useRef<readonly string[]>([]);
   const focusPending = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -160,8 +163,10 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
       for (const { field, code } of error.fields ?? []) {
         const photoField = /^photos\[(\d+)\]/.exec(field);
         if (photoField) {
-          // The index is the position of the photo in what was sent (the draft order): that one is uploaded again on the next attempt.
-          photosCtl.markFailedAt(Number(photoField[1]), code ?? "invalid"); mapped.photos = badPhotoMessage; setFocusRetry((value) => value + 1);
+          // The index is the position in what was sent; it is resolved through the ids kept when the input was built (not the current draft order).
+          const sent = sentPhotoIds.current[Number(photoField[1])];
+          if (sent !== undefined) photosCtl.markFailed(sent, code ?? "invalid");
+          mapped.photos = badPhotoMessage; setFocusRetry((value) => value + 1);
         } else if (field === "photos") mapped.photos ??= photosFieldMessage;
         else if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
         else if (field in fieldMessages) mapped[field] = fieldMessages[field]!;
@@ -178,6 +183,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     const unsaved = !publishing ? "" : existing ? " El recuerdo no cambió." : " El recuerdo no se publicó.";
     if (outcome.kind === "error") {
       if (unavailable(outcome.error.kind) || outcome.error.kind === "unauthorized") fail(outcome.error);
+      // A validation failure of the reservation already marked each photo it names (by its place in the reserved batch): point to them.
+      else if (outcome.error.kind === "validation" && (outcome.error.fields?.length ?? 0) > 0) setPhotoError(`${invalidReservedMessage}${unsaved}`);
       else setPhotoError(`No pudimos subir las fotos. Revisá tu conexión e intentá nuevamente.${unsaved}`);
       if (outcome.failed > 0) setFocusRetry((value) => value + 1);
       return false;
@@ -199,7 +206,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     return result.value;
   };
   /** Built once per attempt, from the draft as it is after the uploads: a confirmed retry resends this very input. */
-  const buildInput = (source: PostDraft, resolved?: ResolvedNewActivity): PostInput => existing ? prepareUpdate(source, existing, resolved) : prepareCreate(source, resolved);
+  const buildInput = (source: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
+    // Same selection as the input's `photos` (uploaded ones, in order): index i of a 422 `photos[i]` is the photo with this id.
+    sentPhotoIds.current = source.extras.photos.filter((item) => item.status === "uploaded" && item.key !== undefined).map((item) => item.localId);
+    return existing ? prepareUpdate(source, existing, resolved) : prepareCreate(source, resolved);
+  };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (savingRef.current || photosCtl.isBusy() || !tripId) return;
@@ -279,7 +290,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
       {blocked && unavailable(blocked.kind) ? <div className="trips-state">
         <Feedback variant="error">Este recuerdo ya no está disponible para tu cuenta.</Feedback>
         {hasText ? <div className="post-unsaved">
-          <p>Tu recuerdo no se publicó. Copiá tu texto antes de salir.</p>
+          <p>{existing ? "Ya no podés editar este recuerdo. Tu texto sigue acá para que lo copies." : "Tu recuerdo no se publicó. Copiá tu texto antes de salir."}</p>
           {draft.values.description.trim() !== "" ? <textarea readOnly rows={6} aria-label="Texto de tu recuerdo, solo lectura" value={draft.values.description} /> : null}
           {draft.values.mapsUrl.trim() !== "" ? <input readOnly type="text" aria-label="Ubicación de tu recuerdo, solo lectura" value={draft.values.mapsUrl} /> : null}
         </div> : null}

@@ -124,11 +124,10 @@ export function usePostPhotos({ deps, tripId, getDraft, applyDraft, blobs, isSav
     applyDraft((draft) => removePhoto(draft, localId));
   };
   const move = (localId: string, delta: -1 | 1) => { if (idle()) applyDraft((draft) => movePhoto(draft, localId, delta)); };
-  /** A server validation error names the photo by its position in what was sent: it is uploaded again on the next attempt. */
-  const markFailedAt = (index: number, code: string) => {
-    const item = getDraft().extras.photos[index];
-    if (item) applyDraft((draft) => markPhoto(draft, item.localId, { status: "failed", failure: code }));
+  /** A server validation error names a photo by its key in what was sent (resolved by the caller): it is uploaded again on the next attempt. */
+  const markFailed = (localId: string, code: string) => {
+    if (getDraft().extras.photos.some((item) => item.localId === localId)) applyDraft((draft) => markPhoto(draft, localId, { status: "failed", failure: code }));
   };
-  return { uploading, selecting, active, progress, summary, message, setMessage, ensureUploaded, retry, add, remove, move, markFailedAt,
+  return { uploading, selecting, active, progress, summary, message, setMessage, ensureUploaded, retry, add, remove, move, markFailed,
     isBusy: () => uploadingRef.current || selectingRef.current };
 }
