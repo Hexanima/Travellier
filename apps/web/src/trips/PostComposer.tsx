@@ -16,6 +16,7 @@ import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostInput, PostResponse, SavedExpenseView, TripPostApi } from "./trip-post-api.js";
+import { LocationPreview } from "./LocationPreview.js";
 import { usePostDraft } from "./use-post-drafts.js";
 import { usePostPhotos, type PostPhotoDeps, type UploadOutcome } from "./use-post-photos.js";
 import "./itinerary.css";
@@ -464,6 +465,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
           onChange={(event) => update("description", event.target.value)} />
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
+        <LocationPreview value={draft.values.mapsUrl} context="composer" />
         {photos ? <PostPhotosSection items={draft.extras.photos} active={photosCtl.active} progress={photosCtl.progress} summary={photosCtl.summary} alert={photoAlert}
           busy={saving || photosCtl.uploading || photosCtl.selecting} focusRetry={focusRetry}
           onAdd={(source) => { setPhotoError(undefined); setMissingContent(false); setNotice(""); return photosCtl.add(source); }}

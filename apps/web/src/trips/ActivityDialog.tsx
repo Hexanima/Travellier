@@ -9,7 +9,7 @@ import type { ParticipationResponse } from "./trip-participation-api.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityRange } from "./activity-time-format.js";
 import { projectTripItinerary } from "./trip-itinerary-view.js";
-import { safeMapsUrl } from "./safe-maps-url.js";
+import { LocationPreview } from "./LocationPreview.js";
 
 export type ActivityDialogRequest = { kind: "create"; selection: ActivityFormContext["selection"] } | { kind: "detail"; activityId: string };
 type Props = { request: ActivityDialogRequest; itinerary: TripItineraryResponse; timeZone: string; activities: TripActivityApi;
@@ -61,7 +61,6 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const segment = day?.segments.find((s) => s.items.some((item) => item.kind === "activity" && item.id === existing?.id));
   const selection = request.kind === "create" ? request.selection : day && segment ? { ...segment, date: day.date } : undefined;
   const context = selection ? { tripId: itinerary.tripId, days: itinerary.days, timeZone, selection } : undefined;
-  const maps = safeMapsUrl(existing?.mapsUrl ?? null);
   const range = state.kind === "detail" ? formatActivityRange(state.value, timeZone) : undefined;
   const timestamp = new Intl.DateTimeFormat("es-AR", { timeZone, dateStyle: "full", timeStyle: "short" });
   const confirmRemoval = async () => {
@@ -96,8 +95,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
         <p><time dateTime={state.value.scheduledAt}>{timestamp.format(new Date(state.value.scheduledAt))}</time><br />{range?.endIso ? <>Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
           <br />Duración: {formatDuration(state.value.durationMinutes!)}<br /></> : null}<span className="activity-context">Horarios en {timeZone}</span></p>
         {state.value.description ? <p className="activity-description">{state.value.description}</p> : null}
-        {maps ? <a className="activity-maps-link" href={maps} target="_blank" rel="noopener noreferrer">Ver vínculo de Maps</a>
-          : state.value.mapsUrl ? <p className="activity-context">Vínculo de Maps no válido.</p> : null}
+        <LocationPreview value={state.value.mapsUrl} context="activity" />
         {context ? <Button onClick={() => setState({ kind: "edit", value: state.value })}>Editar actividad</Button>
           : <Feedback variant="error">El día de esta actividad cambió. Cerrá el detalle y volvé a cargar el itinerario.</Feedback>}
         <Button error disabled={busy} onClick={(event) => { removeTrigger.current = event.currentTarget; setRemoval("confirming"); setRemovalError(undefined); }}>Eliminar actividad</Button>

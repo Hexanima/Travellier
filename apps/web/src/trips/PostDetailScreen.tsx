@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
-import { safeMapsUrl } from "./safe-maps-url.js";
+import { LocationPreview } from "./LocationPreview.js";
 import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
 import { CommentsPanel, PostLikeControl } from "./PostComments.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -135,7 +135,7 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
     <section className="activity-detail" aria-labelledby="memory-content-title">
       <h2 id="memory-content-title">Contenido</h2>
       <p className="itinerary-post-description">{post.description?.trim() ? post.description : noText}</p>
-      {safeMapsUrl(post.mapsUrl) ? <a className="trips-settings-link" href={safeMapsUrl(post.mapsUrl)} rel="noopener noreferrer">Ver ubicación</a> : null}
+      <LocationPreview value={post.mapsUrl} context="memory" />
       <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{format(post.createdAt)}</time></p>
       {rootActivityId ? <p className="itinerary-secondary">Vinculado a una actividad</p> : null}
       {post.transportId ? <p className="itinerary-secondary">Vinculado a un transporte</p> : null}

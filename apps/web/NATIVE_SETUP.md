@@ -158,3 +158,9 @@ Comprobaciones manuales en un dispositivo de prueba, sin datos ajenos:
 - **Pendiente:** recepción push con configuración real FCM/APNs; compilación/firma iOS en macOS y pruebas en iPhone físico. Estas evidencias no acreditan entrega push ni sincronización de eventos de T96.
 
 Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/environment-setup), [Camera](https://capacitorjs.com/docs/apis/camera), [Push Notifications](https://capacitorjs.com/docs/apis/push-notifications), [Calendar](https://capacitorjs.com/docs/apis/calendar).
+
+## Apertura de enlaces de ubicación T94
+
+- `ExternalLinkPort.open(url)` (adaptador `src/native/external-link.ts`) revalida el enlace con `parseMapsLink` (solo `https:` y lista exacta de hosts de Maps) y abre `window.open(url, "_blank", "noopener,noreferrer")`. Construcción sin efectos y sin registrar la URL.
+- `@capacitor/app` 8.1.1 no incluye `openUrl` y `@capacitor/browser` no está instalado; no se agregaron dependencias ni cambios en `android/` o `ios/`.
+- No verificado: cómo el WebView de Capacitor maneja `window.open` hacia Google Maps o Apple Maps (intents de Android, universal links de iOS) ni la apertura real en dispositivos. Detalle y decisiones pendientes (mapa estático/WebView, credenciales, privacidad) en `docs/REVISION_PENDIENTE.md` (T94).

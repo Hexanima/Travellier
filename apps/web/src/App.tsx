@@ -13,11 +13,12 @@ import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
+import { ExternalLinkContext } from './trips/external-link-context.js'
 import { createPhotoFileReader } from './native/photo-file.js'
 import { NotificationsScreen } from './notifications/NotificationsScreen.js'
 import { createNotificationOpener, type NotificationOpener, type SessionStatus } from './notifications/notification-opener.js'
 import { createTripNotificationApi, type TripNotificationApi } from './notifications/trip-notification-api.js'
-import type { PushRegistrationPort } from 'app-domain'
+import type { ExternalLinkPort, PushRegistrationPort } from 'app-domain'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { PushNotices } from './push/PushNotices.js'
 import { createPushDeviceApi, type PushDeviceApi } from './push/push-device-api.js'
@@ -84,6 +85,8 @@ type AppProps = {
   notifications?: Partial<TripNotificationApi>
   /** Port the notice opener listens on; by default it exists only on a native platform (inert on the web). */
   noticePort?: Pick<PushRegistrationPort, 'listen'>
+  /** Opens a location link outside the app; the default is the Capacitor adapter and does nothing until a person taps `Abrir en Maps`. */
+  externalLink?: ExternalLinkPort
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -106,7 +109,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -239,6 +242,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     create: activePosts?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activePosts])
+  const linkPort = useMemo(() => externalLink ?? createCapacitorCapabilities().externalLink, [externalLink])
   // Without a reservation api there is no photo section. Device defaults are built on first need and request nothing at startup.
   const photoDeps = useMemo<PostPhotoDeps | undefined>(() => {
     const reserve = activePhotos?.reserve
@@ -413,6 +417,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       {hasSession && noticeAnnounced && location.pathname !== '/notifications'
         ? <Feedback variant="info">Tenés un aviso nuevo. <Link to="/notifications">Ver avisos</Link> <Button onClick={() => setNoticeAnnounced(false)}>Descartar</Button></Feedback>
         : null}
+      <ExternalLinkContext.Provider value={linkPort}>
       <Routes>
         <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
@@ -497,6 +502,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </ExternalLinkContext.Provider>
     </>
   )
 }
