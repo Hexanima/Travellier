@@ -214,11 +214,24 @@ describe("MongoDB push device repository", () => {
       await broken.register({ userId: user, provider: "fcm", platform: "android", token: SENTINEL, now: NOW, limit: 10 }),
       await broken.revokeById(user, domainId(new ObjectId())),
       await broken.revokeByToken(user, "fcm", SENTINEL),
+      await broken.listForUser(user),
       await broken.removeInvalid("fcm", [SENTINEL]),
     ]) {
       expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError", message: "Database operation failed." } });
       expect(JSON.stringify(result)).not.toContain(SENTINEL);
     }
+  });
+
+  it("lists only the devices of the user with their token, most recently registered first", async () => {
+    const user = new ObjectId(), other = new ObjectId();
+    await repo().register(input(user, "tok-old", { now: at(-60) }));
+    await repo().register(input(user, "tok-new", { provider: "apns", platform: "ios" }));
+    await repo().register(input(other, "tok-other"));
+    const listed = await repo().listForUser(domainId(user));
+    if (!listed.ok) throw new Error("expected success");
+    expect(listed.value.map((device) => device.token)).toEqual(["tok-new", "tok-old"]);
+    expect(listed.value[0]).toMatchObject({ userId: user.toHexString(), provider: "apns", platform: "ios" });
+    expect(await repo().listForUser(domainId(new ObjectId()))).toEqual({ ok: true, value: [] });
   });
 
   it("enforces the unique (provider, token) index at the database level", async () => {

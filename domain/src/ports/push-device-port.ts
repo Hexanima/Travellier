@@ -21,6 +21,8 @@ export interface PushDeviceRepository {
   register: (input: RegisterPushDeviceInput) => AsyncResult<{ device: PushDevice; created: boolean }>;
   revokeById: (userId: ObjectId, id: ObjectId) => AsyncResult<void>;
   revokeByToken: (userId: ObjectId, provider: PushProvider, token: string) => AsyncResult<void>;
+  /** Devices of the user with their raw token, for the dispatcher (T92). Not exposed over HTTP. */
+  listForUser: (userId: ObjectId) => AsyncResult<PushDevice[]>;
   /** Removes tokens the provider reported as invalid, whoever owns them; returns how many were removed. Not exposed over HTTP. */
   removeInvalid: (provider: PushProvider, tokens: readonly string[]) => AsyncResult<number>;
 }

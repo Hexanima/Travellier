@@ -81,6 +81,11 @@ export const createMongoPushDeviceRepository = (database: Db): PushDeviceReposit
     revokeByToken: (userId, provider, token) => guard(async () => {
       await database.collection<PushDeviceDocument>("pushDevices").deleteOne({ provider, token, userId: new MongoObjectId(userId) });
     }),
+    listForUser: (userId) => guard(async () => {
+      const documents = await database.collection<PushDeviceDocument>("pushDevices").find({ userId: new MongoObjectId(userId) })
+        .sort({ lastRegisteredAt: -1, _id: 1 }).toArray();
+      return documents.map(toDevice);
+    }),
     removeInvalid: (provider, tokens) => guard(async () => {
       if (tokens.length === 0) return 0;
       const result = await database.collection<PushDeviceDocument>("pushDevices").deleteMany({ provider, token: { $in: [...tokens] } });

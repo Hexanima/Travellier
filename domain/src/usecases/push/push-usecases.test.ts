@@ -23,6 +23,7 @@ const makeRepo = (overrides: Partial<PushDeviceRepository> = {}): PushDeviceRepo
   register: vi.fn(async () => ok({ device, created: true })),
   revokeById: vi.fn(async () => ok(undefined)),
   revokeByToken: vi.fn(async () => ok(undefined)),
+  listForUser: vi.fn(async () => ok([device])),
   removeInvalid: vi.fn(async (_provider, tokens) => ok(tokens.length)),
   ...overrides,
 });

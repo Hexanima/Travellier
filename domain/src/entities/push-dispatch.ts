@@ -19,7 +19,7 @@ export const PUSH_DISPATCH_MAX_MESSAGE_BYTES = 3500;
 
 /** Dispatch state of an `outboxEvents` document (additive; documents of T91 start as `pending` with no attempts). */
 export type PushDispatchStatus = "pending" | "sent" | "skipped" | "failed";
-export type PushDispatchOutcome = "delivered" | "no_devices" | "not_member" | "trip_deleted" | "expired" | "invalid_only";
+export type PushDispatchOutcome = "delivered" | "no_devices" | "not_member" | "trip_deleted" | "expired" | "invalid_only" | "rejoined";
 
 /** Delay before the next attempt after `attempts` failed attempts: 1 minute doubling, capped at 6 hours. */
 export const computePushRetryDelay = (attempts: number): number => computeRetryDelay(attempts);
