@@ -340,14 +340,34 @@ describe("joint post save and idempotent retry", () => {
         const retry = await patch(created.id, body);
         expect(retry.statusCode, retry.body).toBe(409);
         expect(JSON.parse(retry.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: created.id });
+        expect(await data()).toEqual(before);
         const second = JSON.parse((await post({ description: "Segundo" })).body).post;
         const foreign = { newActivity: { ...withDuration(), id: newId(), title: "Del editor" } };
         expect((await patch(second.id, foreign, editor)).statusCode).toBe(200);
+        const beforeForeign = await data();
         const mine = await patch(created.id, foreign);
         expect(mine.statusCode, mine.body).toBe(409);
         expect(JSON.parse(mine.body).error).not.toHaveProperty("reason");
         expect(await f.db.collection("posts").countDocuments({})).toBe(2);
-        expect(before).toBeDefined();
+        expect(await data()).toEqual(beforeForeign);
+      });
+
+      it("a post already linked to an activity with that id created by ANOTHER member is a generic 409 without reason and without writes", async () => {
+        const editor = await addMember("admin");
+        const created = JSON.parse((await post({ description: "Original" })).body).post;
+        const second = JSON.parse((await post({ description: "Segundo" })).body).post;
+        const foreign = { newActivity: { ...withDuration(), id: newId(), title: "Del editor" } };
+        const made = await patch(second.id, foreign, editor);
+        expect(made.statusCode, made.body).toBe(200);
+        const activityId = JSON.parse(made.body).post.activityId;
+        const activity = await f.db.collection("activities").findOne({});
+        await f.db.collection("posts").updateOne({ _id: await f.db.collection("posts").findOne({ description: "Original" }).then((doc) => doc!._id) },
+          { $set: { activityId: activity!._id } });
+        const before = await data();
+        const mine = await patch(created.id, { newActivity: { ...foreign.newActivity, id: activityId } });
+        expect(mine.statusCode, mine.body).toBe(409);
+        expect(JSON.parse(mine.body).error).not.toHaveProperty("reason");
+        expect(await data()).toEqual(before);
       });
 
       it("without id on an already linked post it still creates another activity and repoints (documented ambiguity)", async () => {
