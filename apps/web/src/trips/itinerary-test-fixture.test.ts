@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import { bandOf, itineraryFixture, itineraryId, settleItinerary } from "./itinerary-test-fixture.js";
 
 describe("itinerary test fixture mirrors the backend", () => {
@@ -14,7 +15,7 @@ describe("itinerary test fixture mirrors the backend", () => {
     expect(bandOf(days, "2026-09-26T00:00:00.000Z")).toBeNull();
   });
   it("settleItinerary moves posts without a day to unplacedPosts and rebuilds the day items", () => {
-    const value = itineraryFixture();
+    const value = itineraryFixture() as TripItineraryResponse;
     value.activities[1].dayId = itineraryId(5); value.activities[1].scheduledAt = "2026-09-25T19:00:00.000Z";
     value.activities = value.activities.filter((activity) => activity.id !== itineraryId(8));
     value.posts[0].createdAt = "2026-10-03T12:00:00.000Z";

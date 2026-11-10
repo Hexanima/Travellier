@@ -259,6 +259,8 @@ describe("local itinerary projection", () => {
     });
     it("moves the expense of the linked post to the new day when the activity is rescheduled", () => {
       const itinerary = setup();
+      // Published on the 24th (UTC and Buenos Aires), a different local day than the new activity (the 25th): grouping by publication would fail.
+      itinerary.posts[0].createdAt = "2026-09-24T12:00:00.000Z";
       linkPost(itinerary.posts[0], { activityId: itinerary.activities[0].id }); itinerary.activities[0].postIds = [itineraryId(10)];
       const before = projectItineraryView(itinerary, timeZone);
       expect(dayExpenses(before.days).map((d) => d.expenseCount)).toEqual([1, 0]);
