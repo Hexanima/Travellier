@@ -63,6 +63,11 @@ import {
   type TripPostPayload,
   type PostDetailPayload,
   type TripPostChainResult,
+  type PhotoPayload,
+  type PhotoUploadPayload,
+  type PhotoUploadView,
+  type PostPhotoPayload,
+  type PostPhotoView,
   type PostEditableFields,
   type CommentView,
   type TripCommentPayload,
@@ -136,6 +141,9 @@ export interface TripApi extends TripInvitationApi {
   getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
   linkPostToNewActivity?: (payload: LinkTripPostToNewActivityPayload) => AsyncResult<LinkTripPostToNewActivityResult>;
+  createPhotoUploads?: (payload: PhotoUploadPayload) => AsyncResult<{ uploads: PhotoUploadView[] }>;
+  getPostPhotos?: (payload: PostPhotoPayload) => AsyncResult<PostPhotoView[]>;
+  getPhoto?: (payload: PhotoPayload) => AsyncResult<PostPhotoView>;
   listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
   createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
   updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
@@ -272,6 +280,12 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "CommentNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Comment not found." } });
+  }
+  if (error.tag === "PhotoNotFoundError") {
+    return jsonResponse(404, { error: { code: error.tag, message: "Photo not found." } });
+  }
+  if (error.tag === "PhotoConflictError") {
+    return jsonResponse(409, { error: { code: error.tag, message: "A photo of this upload is already registered in another post." } });
   }
   if (error.tag === "PostNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Post not found." } });
@@ -515,11 +529,13 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
 };
 
 const postPayload = (payload: Record<string, unknown>):
-  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId">, ValidationError> => {
+  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos">, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
   ]));
-  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId"> = {};
+  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos"> = {};
+  // Photo references are validated by the domain (all failures are reported together with the storage checks).
+  if (Object.hasOwn(payload, "photos")) fields.photos = payload.photos;
   // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, and it is optional:
   // when absent the domain derives the slice from scheduledAt.
   if (Object.hasOwn(payload, "newActivity") && payload.dayId != null) {
@@ -700,6 +716,33 @@ export const handleApiRequest = async (
     }
   }
 
+  const photoUploadsMatch = request.url?.match(/^\/trips\/([^/?]+)\/photo-uploads$/);
+  const postPhotosMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/photos$/);
+  const photoMatch = request.url?.match(/^\/trips\/([^/?]+)\/photos\/([^/?]+)$/);
+  if ((request.method === "POST" && photoUploadsMatch) || (request.method === "GET" && (postPhotosMatch || photoMatch))) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const found = (photoUploadsMatch ?? postPhotosMatch ?? photoMatch)!;
+    const tripId = createObjectId(found[1] ?? ""), second = found[2] === undefined ? undefined : createObjectId(found[2]);
+    if (!tripId.ok || (second !== undefined && !second.ok)) return invalidRequestResponse();
+    const context = { tripId: tripId.value, authenticatedUserId: request.authenticatedUserId }, trips = dependencies.trips;
+    if (photoUploadsMatch) {
+      if (!payload) return invalidRequestResponse();
+      if (!trips?.createPhotoUploads) return unavailableResponse();
+      const result = await trips.createPhotoUploads({ ...context, files: payload.files });
+      return result.ok ? jsonResponse(201, result.value) : errorResponse(result.error);
+    }
+    if (postPhotosMatch && second?.ok) {
+      if (!trips?.getPostPhotos) return unavailableResponse();
+      const result = await trips.getPostPhotos({ ...context, postId: second.value });
+      return result.ok ? jsonResponse(200, { photos: result.value }) : errorResponse(result.error);
+    }
+    if (second?.ok) {
+      if (!trips?.getPhoto) return unavailableResponse();
+      const result = await trips.getPhoto({ ...context, photoId: second.value });
+      return result.ok ? jsonResponse(200, { photo: result.value }) : errorResponse(result.error);
+    }
+  }
+
   const postListMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts$/);
   const postDetailMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)$/);
   if (postListMatch || postDetailMatch) {
@@ -722,8 +765,8 @@ export const handleApiRequest = async (
         confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity } as CreateTripPostPayload);
       if (!result.ok) return errorResponse(result.error);
       if (result.value.outcome === "confirmation_required") return participationConflictResponse(result.value);
-      const { post, activity, participation } = result.value;
-      return jsonResponse(201, activity ? { post, activity, participation } : { post });
+      const { post, activity, participation, photos } = result.value;
+      return jsonResponse(201, { post, ...(activity ? { activity, participation } : {}), ...(photos ? { photos } : {}) });
     }
     if (postId?.ok) {
       const detail = { ...context, postId: postId.value };
@@ -747,12 +790,15 @@ export const handleApiRequest = async (
             confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
           if (!linked.ok) return errorResponse(linked.error);
           if (linked.value.outcome === "confirmation_required") return participationConflictResponse(linked.value);
-          const { post, activity, participation } = linked.value;
-          return jsonResponse(200, { post, activity, participation });
+          const { post, activity, participation, photos } = linked.value;
+          return jsonResponse(200, { post, activity, participation, ...(photos ? { photos } : {}) });
         }
         if (!trips?.updatePost) return unavailableResponse();
         const result = await trips.updatePost({ ...detail, ...parsed.value });
-        return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);
+        if (!result.ok) return errorResponse(result.error);
+        // `photos` only exists when the edit carried photos; it is not part of the post.
+        const { photos, ...post } = result.value as Post & { photos?: unknown };
+        return jsonResponse(200, { post, ...(photos ? { photos } : {}) });
       }
     }
   }

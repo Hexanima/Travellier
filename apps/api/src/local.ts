@@ -35,7 +35,9 @@ export const createLocalApi = async (
       jwtSecret,
       ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
     }),
-    trips: createTripApi(connection.database),
+    // Without S3_BUCKET_NAME the local API runs without AWS: photo endpoints answer 500 and posts without photos work.
+    trips: createTripApi(connection.database, environment.S3_BUCKET_NAME
+      ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
   }, createJwtMiddleware({ jwtSecret }), environment.API_VERBOSE === "false"
     ? undefined
     : (entry) => console.log(JSON.stringify(entry)),

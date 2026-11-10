@@ -89,6 +89,14 @@ describe("local API entrypoint", () => {
       await expect(profile.json()).resolves.toEqual({
         profile: { name: "Local", email: "local@example.test", avatar: null },
       });
+
+      // No S3_BUCKET_NAME: the API still starts without AWS and photo endpoints report the missing storage.
+      const photoUploads = await fetch(`http://127.0.0.1:${port}/trips/${new ObjectId()}/photo-uploads`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${session.accessToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ files: [{ contentType: "image/jpeg", sizeBytes: 1 }] }),
+      });
+      expect(photoUploads.status).toBe(500);
     } finally {
       await new Promise<void>((resolve, reject) =>
         localApi.app.close((error) =>
