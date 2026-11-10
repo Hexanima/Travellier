@@ -83,8 +83,8 @@ Las nuevas migraciones son aditivas y se ejecutan después de `0001–0003`, cuy
 | --- | --- |
 | `0004-publication-and-personal-agenda-indexes` | `posts.tripId_createdAt_desc`: `{ tripId: 1, createdAt: -1 }`; `activityParticipations.tripId_userId_status`: `{ tripId: 1, userId: 1, status: 1 }`. |
 | `0005-notification-outbox-indexes` | `outboxEvents.eventKey_unique`: `{ eventKey: 1 }` único; `outboxEvents.status_availableAt`: `{ status: 1, availableAt: 1 }`. |
-| `0008-notification-inbox-indexes` | `outboxEvents.userId_createdAt_id`: `{ userId: 1, createdAt: -1, _id: -1 }` (bandeja personal); `outboxEvents.tripId`: `{ tripId: 1 }` (cascada y autorización). Aditiva, idempotente, sin TTL y sin tocar documentos (T91; fuera del PRD, ver «API de avisos (T91)»). |
 | `0007-push-device-indexes` | `pushDevices.provider_token_unique`: `{ provider: 1, token: 1 }` único; `pushDevices.userId`: `{ userId: 1 }`. Colección nueva de T89, sin TTL (no está en el PRD; ver «API de dispositivos push (T89)»). |
+| `0008-notification-inbox-indexes` | `outboxEvents.userId_createdAt_id`: `{ userId: 1, createdAt: -1, _id: -1 }` (bandeja personal); `outboxEvents.tripId`: `{ tripId: 1 }` (cascada y autorización). Aditiva, idempotente, sin TTL y sin tocar documentos (T91; fuera del PRD, ver «API de avisos (T91)»). |
 
 Se mantienen todos los índices anteriores, incluidos los únicos de membresías, participaciones, likes, gastos, posiciones de destinos, direcciones de transporte e identidad de itinerario, además del TTL de refresh tokens. No se quitan índices heredados de `dayId` ni se borra `activityVotes`.
 
