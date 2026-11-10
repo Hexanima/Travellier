@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { MongoClient, type Db, type IndexDescription } from "mongodb";
+import { MongoClient, ObjectId, type Db, type IndexDescription } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
 import {
@@ -7,6 +7,7 @@ import {
   JOURNEY_MIGRATION_ID,
   ITINERARY_MIGRATION_ID,
   POST_PHOTO_MIGRATION_ID,
+  STORAGE_DELETION_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
 import { OUTBOX_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID } from "./pending-contract-migrations.js";
@@ -139,10 +140,11 @@ describe("MongoDB schema migration", () => {
       .toArray();
 
     expect(collections.map(({ name }) => name).sort()).toEqual(
-      [...prdCollections, "outboxEvents", "_migrations"].sort(),
+      [...prdCollections, "outboxEvents", "storageDeletionJobs", "_migrations"].sort(),
     );
     expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
-      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, POST_PHOTO_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID].sort(),
+      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, POST_PHOTO_MIGRATION_ID, STORAGE_DELETION_MIGRATION_ID,
+        PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID].sort(),
     );
   });
 
@@ -207,6 +209,39 @@ describe("MongoDB schema migration", () => {
     await expect(photos.insertOne({ postId: "q", order: 1, s3Key: "a" })).rejects.toMatchObject({ code: 11000 });
     await expect(photos.insertOne({ postId: "p", order: 1, s3Key: "b" })).rejects.toMatchObject({ code: 11000 });
     await photos.insertOne({ postId: "p", order: 2, s3Key: "b" });
+  });
+
+  it("adds the storage deletion job indexes and backfills legacy jobs without deleting anything", async () => {
+    await migrateMongoSchema(database);
+    const jobs = database.collection("storageDeletionJobs");
+    await database.collection("_migrations").deleteOne({ id: STORAGE_DELETION_MIGRATION_ID });
+    for (const name of ["status_nextAttemptAt", "tripId"]) await jobs.dropIndex(name);
+    const createdAt = new Date("2026-11-01T00:00:00.000Z"), tripId = new ObjectId();
+    const legacy = await jobs.insertOne({ tripId, objectKeys: ["a", "b"], createdAt });
+    const current = await jobs.insertOne({ tripId, objectKeys: ["c"], createdAt, status: "failed", attempts: 10, resolvedKeys: ["c"], rejectedKeys: [],
+      nextAttemptAt: new Date("2026-11-02T00:00:00.000Z"), lastErrorCode: "delete_failed" });
+    await migrateMongoSchema(database);
+    expect(await jobs.countDocuments({})).toBe(2);
+    expect(await jobs.findOne({ _id: legacy.insertedId })).toEqual({ _id: legacy.insertedId, tripId, objectKeys: ["a", "b"], createdAt,
+      status: "pending", attempts: 0, resolvedKeys: [], rejectedKeys: [], nextAttemptAt: createdAt });
+    expect(await jobs.findOne({ _id: current.insertedId })).toEqual({ _id: current.insertedId, tripId, objectKeys: ["c"], createdAt, status: "failed",
+      attempts: 10, resolvedKeys: ["c"], rejectedKeys: [], nextAttemptAt: new Date("2026-11-02T00:00:00.000Z"), lastErrorCode: "delete_failed" });
+    expect(await jobs.listIndexes().toArray()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: { status: 1, nextAttemptAt: 1 }, name: "status_nextAttemptAt" }),
+      expect.objectContaining({ key: { tripId: 1 }, name: "tripId" }),
+    ]));
+  });
+
+  it("keeps the storage deletion migration idempotent over two runs", async () => {
+    await migrateMongoSchema(database);
+    const jobs = database.collection("storageDeletionJobs");
+    await jobs.insertOne({ tripId: new ObjectId(), objectKeys: ["a"], createdAt: new Date("2026-11-01T00:00:00.000Z"), status: "pending", attempts: 3, resolvedKeys: ["a"], rejectedKeys: [],
+      nextAttemptAt: new Date("2026-11-05T00:00:00.000Z") });
+    const before = await jobs.find({}).toArray();
+    await migrateMongoSchema(database);
+    expect(await jobs.find({}).toArray()).toEqual(before);
+    expect(await database.collection("_migrations").countDocuments({ id: STORAGE_DELETION_MIGRATION_ID })).toBe(1);
+    expect((await jobs.listIndexes().toArray()).map((index) => index.name).sort()).toEqual(["_id_", "status_nextAttemptAt", "tripId"]);
   });
 
   it("enforces itinerary identity while allowing different types and destinations on one date", async () => {

@@ -57,8 +57,10 @@ export const createMongoTripDeletionRepository = (database: Db): TripDeletionPor
               { ...options, projection: { s3Key: 1 } }).toArray();
             const objectKeys = [...new Set(photos.flatMap((photo) => typeof photo.s3Key === "string" && photo.s3Key !== "" ? [photo.s3Key] : []))];
             if (objectKeys.length > 0) {
-              // Preserve cleanup intent atomically. S3 cleanup belongs to the photo integration worker.
-              await database.collection("storageDeletionJobs").insertOne({ tripId: mongoTripId, objectKeys, createdAt: new Date() }, options);
+              // Preserve cleanup intent atomically. S3 cleanup belongs to the storage deletion worker (never to this transaction).
+              const createdAt = new Date();
+              await database.collection("storageDeletionJobs").insertOne({ tripId: mongoTripId, objectKeys, createdAt, status: "pending",
+                attempts: 0, resolvedKeys: [], rejectedKeys: [], nextAttemptAt: createdAt }, options);
             }
             for (const name of ["tripMembers", "destinations", "transports", "itineraryDays", "activities",
               "activityParticipations", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes"]) {

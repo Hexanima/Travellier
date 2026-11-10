@@ -13,7 +13,7 @@ export interface LambdaRuntimeConfig {
 
 type RuntimeEnvironment = Record<string, string | undefined>;
 
-const requiredSetting = (
+export const requiredSetting = (
   environment: RuntimeEnvironment,
   name: keyof RuntimeEnvironment,
 ): string => {
@@ -26,7 +26,7 @@ const requiredSetting = (
   return value;
 };
 
-const readMongoSecret = (secret: string): MongoDatabaseConfig => {
+export const readMongoSecret = (secret: string): MongoDatabaseConfig => {
   let value: unknown;
 
   try {

@@ -9,6 +9,7 @@ export const MONGO_MIGRATION_ID = "0001-create-prd-schema";
 export const JOURNEY_MIGRATION_ID = "0002-unique-journey-order-and-direction";
 export const ITINERARY_MIGRATION_ID = "0003-unique-itinerary-identity";
 export const POST_PHOTO_MIGRATION_ID = "0004-unique-post-photo-keys";
+export const STORAGE_DELETION_MIGRATION_ID = "0005-storage-deletion-job-indexes";
 
 type CollectionSchema = {
   name: string;
@@ -214,6 +215,17 @@ export const migrateMongoSchema = async (database: Db): Promise<void> => {
     await photos.createIndex({ s3Key: 1 }, { name: "s3Key_unique", unique: true });
     await photos.createIndex({ postId: 1, order: 1 }, { name: "postId_order_unique", unique: true });
     await migrations.insertOne({ id: POST_PHOTO_MIGRATION_ID, appliedAt: new Date() });
+  }
+
+  if (!(await migrations.findOne({ id: STORAGE_DELETION_MIGRATION_ID }))) {
+    const jobs = database.collection("storageDeletionJobs");
+    await jobs.createIndex({ status: 1, nextAttemptAt: 1 }, { name: "status_nextAttemptAt" });
+    await jobs.createIndex({ tripId: 1 }, { name: "tripId" });
+    // Additive: legacy jobs ({ tripId, objectKeys, createdAt }) only gain the processing fields; nothing is deleted.
+    await jobs.updateMany({ status: { $exists: false } }, [{ $set: {
+      status: "pending", attempts: 0, resolvedKeys: [], rejectedKeys: [], nextAttemptAt: { $ifNull: ["$createdAt", "$$NOW"] },
+    } }]);
+    await migrations.insertOne({ id: STORAGE_DELETION_MIGRATION_ID, appliedAt: new Date() });
   }
 
   await migratePendingContracts(database);

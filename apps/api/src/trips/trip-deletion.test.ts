@@ -168,7 +168,8 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     ]);
     expect((await deleteTripRequest()).statusCode).toBe(204);
     expect(await database.collection("storageDeletionJobs").find({ tripId }).toArray()).toMatchObject([
-      { objectKeys: ["trips/test/photo.jpg", "trips/test/photo-2.jpg"], createdAt: expect.any(Date) },
+      { objectKeys: ["trips/test/photo.jpg", "trips/test/photo-2.jpg"], createdAt: expect.any(Date), status: "pending", attempts: 0,
+        resolvedKeys: [], rejectedKeys: [], nextAttemptAt: expect.any(Date) },
     ]);
     expect(await database.collection("postPhotos").countDocuments({ tripId })).toBe(0);
     expect(await database.collection("postPhotos").countDocuments({ s3Key: "trips/other/keep.jpg" })).toBe(1);

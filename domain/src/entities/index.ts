@@ -14,3 +14,4 @@ export * from "./post-photo.js";
 export * from "./comment.js";
 export * from "./post-like.js";
 export * from "./comment-like.js";
+export * from "./storage-deletion-job.js";

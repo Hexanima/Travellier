@@ -15,3 +15,6 @@ export * from "./trip-post-port.js";
 export * from "./native-capabilities-port.js";
 export * from "./trip-comment-port.js";
 export * from "./trip-like-port.js";
+export * from "./object-storage-cleanup-port.js";
+export * from "./storage-deletion-job-port.js";
+export * from "./photo-link-port.js";
