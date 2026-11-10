@@ -23,6 +23,9 @@ import { ProfileScreen } from './profile/ProfileScreen.js'
 import { PushNotices } from './push/PushNotices.js'
 import { createPushDeviceApi, type PushDeviceApi } from './push/push-device-api.js'
 import { createPushDeviceService, type PushDeviceService } from './push/push-device-service.js'
+import { accountIdFromAccessToken } from './calendar/calendar-account.js'
+import { createCalendarRefStore } from './calendar/calendar-ref-store.js'
+import { createCalendarSyncService, type CalendarSyncService } from './calendar/calendar-sync-service.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
 import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
@@ -87,6 +90,8 @@ type AppProps = {
   noticePort?: Pick<PushRegistrationPort, 'listen'>
   /** Opens a location link outside the app; the default is the Capacitor adapter and does nothing until a person taps `Abrir en Maps`. */
   externalLink?: ExternalLinkPort
+  /** Native calendar sync; by default it exists only on a native platform (inert on the web) and nothing runs until the person enables it. */
+  calendarSync?: CalendarSyncService
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -109,7 +114,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -140,6 +145,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const [noticeSignal, setNoticeSignal] = useState(0)
   const [noticeAnnounced, setNoticeAnnounced] = useState(false)
   const defaultPush = useRef<PushDeviceService | undefined>(undefined)
+  const defaultCalendarSync = useRef<CalendarSyncService | undefined>(undefined)
   const pushRef = useRef<PushDeviceService | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
@@ -217,6 +223,18 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       },
     })
   }
+  // Building the service has no plugin, permission or Preferences side effect. The account is the `sub` of the session token (not verified: it only keys local data).
+  if (calendarSync === undefined && defaultCalendarSync.current === undefined && Capacitor.isNativePlatform()) {
+    const capabilities = createCapacitorCapabilities()
+    defaultCalendarSync.current = createCalendarSyncService({
+      access: capabilities.calendar,
+      events: capabilities.calendarEvents,
+      store: createCalendarRefStore(Preferences),
+      accountId: () => accountIdFromAccessToken(session.current?.accessToken),
+      now: () => new Date(),
+    })
+  }
+  const activeCalendarSync = calendarSync ?? defaultCalendarSync.current
   const activePush = push ?? defaultPush.current
   pushRef.current = activePush
   // Stable reference: the gallery hook depends on it.
@@ -469,7 +487,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           </TripRoute>
         }>
         <Route path="/trips/:tripId/itinerary" element={
-          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} />
+          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} calendarSync={activeCalendarSync} />
         } />
         <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>

@@ -145,3 +145,7 @@
 /* Provisional structure of the .ics export (no final tokens): T98 places it. */
 .ics-export { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
 .ics-export-notice, .ics-export-empty { margin: 0; color: #526270; line-height: 1.5; }
+/* Provisional structure of the native calendar sync panel (no final tokens): T98 places it. */
+.calendar-sync { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
+.calendar-sync p { margin: 0; line-height: 1.5; }
+.calendar-sync [role="group"] { display: grid; justify-items: start; gap: 8px; }

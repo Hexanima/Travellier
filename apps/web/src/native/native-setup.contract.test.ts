@@ -36,6 +36,13 @@ describe("native setup", () => {
     expect(entitlements).not.toMatch(/icloud|healthkit|associated-domains/);
   });
 
+  it("keeps the calendar plugin surface the event adapter relies on (no id-based modify)", () => {
+    const definitions = read("../../../../node_modules/@capacitor/calendar/dist/esm/definitions.d.ts");
+    for (const method of ["findEvents", "createEvent", "modifyEvent", "deleteEvent"]) expect(definitions).toContain(`${method}(options`);
+    expect(definitions).toMatch(/interface ModifyEventOptions \{[^}]*filter: EventFilter;[^}]*newEvent: Partial<CreateEventOptions>;/s);
+    expect(definitions).not.toMatch(/interface ModifyEventOptions \{[^}]*\bid\b/s);
+  });
+
   it("syncs all three new plugins into Android and iOS SPM", () => {
     const gradle = read("../../android/app/capacitor.build.gradle");
     const spm = read("../../ios/App/CapApp-SPM/Package.swift");
