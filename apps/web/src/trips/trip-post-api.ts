@@ -52,6 +52,7 @@ const failure = (error: ApiClientError): TripResult<never> => {
     const confirmation = parseConfirmation(error.details);
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
   }
+  if (error.status === 409 && error.code === "PhotoConflictError") return { ok: false, error: { kind: "server", code: "PhotoConflictError" } };
   return { ok: false, error: { kind: error.kind,
     ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
 };
@@ -79,6 +80,7 @@ const body = (input: PostInput, confirmation?: ParticipationConfirmation): PostI
   ...(input.activityId !== undefined ? { activityId: input.activityId } : {}),
   ...(input.transportId !== undefined ? { transportId: input.transportId } : {}),
   ...(input.newActivity !== undefined ? { newActivity: newActivityBody(input.newActivity) } : {}),
+  ...(input.photos !== undefined ? { photos: input.photos.map(({ key }) => ({ key })) } : {}),
   ...(confirmation ? { confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } : {}),
 });
 export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripPostApi => ({
