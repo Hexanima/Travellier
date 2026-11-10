@@ -15,6 +15,8 @@ import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { createPhotoFileReader } from './native/photo-file.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
+import { createPushDeviceApi, type PushDeviceApi } from './push/push-device-api.js'
+import { createPushDeviceService, type PushDeviceService } from './push/push-device-service.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
 import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
@@ -69,6 +71,10 @@ type AppProps = {
   gallery?: Partial<TripGalleryApi>
   /** Device side of the photo upload (picker, file reader, direct transfer); the defaults are the Capacitor ones and request no permission until used. */
   devicePhotos?: Partial<Omit<PostPhotoDeps, 'api'>>
+  /** Push registration service; by default it exists only on a native platform and nothing runs until there is a session. */
+  push?: PushDeviceService
+  /** Push device endpoints; the default uses the authenticated client. */
+  pushDevices?: Partial<PushDeviceApi>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -91,7 +97,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -115,6 +121,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultPhotos = useRef<TripPhotoApi | undefined>(undefined)
   const defaultGallery = useRef<TripGalleryApi | undefined>(undefined)
   const defaultDevicePhotos = useRef<Partial<Omit<PostPhotoDeps, 'api'>>>({})
+  const defaultPushDevices = useRef<PushDeviceApi | undefined>(undefined)
+  const defaultPush = useRef<PushDeviceService | undefined>(undefined)
+  const pushRef = useRef<PushDeviceService | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -134,6 +143,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       fetch: (input, init) => globalThis.fetch(input, init),
       getAccessToken: async () => session.current?.accessToken ?? null,
       onUnauthorized: () => {
+        // A 401 leaves no authentication to revoke with: forget the push registration locally.
+        pushRef.current?.reset()
         session.current = undefined
         setHasSession(false)
       },
@@ -151,6 +162,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultBalance.current = createTripBalanceApi(client)
     defaultPhotos.current = createTripPhotoApi(client)
     defaultGallery.current = createTripGalleryApi(client)
+    defaultPushDevices.current = createPushDeviceApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -166,6 +178,19 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeBalance = balance ?? defaultBalance.current
   const activePhotos = photos ?? defaultPhotos.current
   const activeGallery = gallery ?? defaultGallery.current
+  // Inert outside a native platform; building the service has no plugin or permission side effects.
+  if (push === undefined && defaultPush.current === undefined && Capacitor.isNativePlatform()) {
+    const failed = async () => ({ ok: false as const, error: { kind: 'server' as const } })
+    defaultPush.current = createPushDeviceService({
+      port: createCapacitorCapabilities().push,
+      api: {
+        register: (input) => (pushDevices?.register ?? defaultPushDevices.current?.register ?? failed)(input),
+        revoke: (input) => (pushDevices?.revoke ?? defaultPushDevices.current?.revoke ?? failed)(input),
+      },
+    })
+  }
+  const activePush = push ?? defaultPush.current
+  pushRef.current = activePush
   // Stable reference: the gallery hook depends on it.
   const galleryProvider = useMemo(() => ({
     list: activeGallery?.list ?? (async () => ({ ok: false as const, error: { kind: 'server' as const } })),
@@ -269,6 +294,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
         session.current = result.value
         setHasSession(true)
+        void pushRef.current?.resume()
         return
       }
 
@@ -279,6 +305,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
       session.current = persistedSession
       setHasSession(true)
+      void pushRef.current?.resume()
     }
 
     void restoreSession().catch(() => undefined).finally(() => setSessionReady(true))
@@ -291,17 +318,27 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     }
   }, [hasSession, launchChecked, location.pathname, location.state, navigate, sessionReady])
 
+  // Never throws; the push service bounds the wait, so closing or switching a session never depends on it.
+  const revokePush = async () => {
+    try { await pushRef.current?.revokeBeforeLogout() } catch { /* best effort */ }
+  }
+
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
+    // With a previous session, revoke its device registration while its bearer is still the active one.
+    if (session.current !== undefined) await revokePush()
     await queueStorageOperation(() => storage.save(authenticatedSession))
     session.current = authenticatedSession
     setHasSession(true)
     setSessionReady(true)
+    void pushRef.current?.resume()
     navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true })
   }
 
   const onLocalLogout = async () => {
     sessionRevision.current += 1
+    // The device token is revoked with the outgoing bearer before the session is dropped.
+    await revokePush()
     session.current = undefined
     setHasSession(false)
     await queueStorageOperation(() => storage.clear())
