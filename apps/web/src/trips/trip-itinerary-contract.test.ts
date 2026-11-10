@@ -21,7 +21,7 @@ function snapshot(): domain.TripItinerarySnapshot {
     id: id(n), tripId, dayId: ids.activityDay, authorId: actor, description: `post ${n}`, mapsUrl: null,
     activityId: links.activityId ?? null, transportId: links.transportId ?? null, parentPostId: links.parentPostId ?? null, createdAt,
   });
-  const expense = (n: number, postId: number, totalAmount: number) => ({ id: id(n), tripId, postId: id(postId), totalAmount, breakdown: null, paidBy: null, createdAt: at(12) });
+  const expense = (n: number, postId: number, totalAmount: number) => ({ id: id(n), tripId, postId: id(postId), totalAmount, currency: "ARS" as const, breakdown: null, paidBy: null, createdAt: at(12) });
   return {
     trip: { id: tripId, expenseMode: "register" },
     destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: at(0) }],
@@ -108,7 +108,9 @@ describe("itinerary contract with the real read model", () => {
     const sum = (summaries: { totalAmount: number; expenseCount: number }[]) =>
       ({ totalAmount: summaries.reduce((total, s) => total + s.totalAmount, 0), expenseCount: summaries.reduce((count, s) => count + s.expenseCount, 0) });
     const unplaced = (itinerary.unplacedPosts as TripItineraryResponse["posts"]).filter((post) => post.expense !== null);
-    const server = sum(itinerary.days.map((day) => day.expenseSummary));
+    // The server totals in cents per currency (all ARS here); the local view still adds decimals.
+    const server = { totalAmount: itinerary.days.reduce((total, day) => total + day.expenseSummary.byCurrency.reduce((cents, c) => cents + c.totalCents, 0), 0) / 100,
+      expenseCount: itinerary.days.reduce((count, day) => count + day.expenseSummary.expenseCount, 0) };
     expect(sum(view.days.map((day) => day.expenseSummary))).toEqual(server);
     expect(sum(view.days.map((day) => day.expenseSummary))).toEqual({ totalAmount: 27, expenseCount: 4 });
     expect(unplaced.map((post) => post.expense!.totalAmount)).toEqual([100]);

@@ -56,14 +56,14 @@ describe("aggregate itinerary HTTP API", () => {
       { ...postBase, _id: transitPost, dayId: days[0]!._id, transportId: new ObjectId(outbound.id), createdAt: new Date("2026-09-25T09:00:00Z") },
     ]);
     await db.collection("postExpenses").insertMany([
-      { tripId, postId: combined, totalAmount: 10.5, breakdown: null, paidBy: null, createdAt: new Date() },
-      { tripId, postId: spontaneous, totalAmount: 20, breakdown: "Agua", paidBy: null, createdAt: new Date() },
-      { tripId, postId: transitPost, totalAmount: 5, breakdown: null, paidBy: null, createdAt: new Date() },
+      { tripId, postId: combined, totalAmount: 10.5, currency: "ARS", breakdown: null, paidBy: null, createdAt: new Date() },
+      { tripId, postId: spontaneous, totalAmount: 20, currency: "ARS", breakdown: "Agua", paidBy: null, createdAt: new Date() },
+      { tripId, postId: transitPost, totalAmount: 5, currency: "ARS", breakdown: null, paidBy: null, createdAt: new Date() },
     ]);
     const response = await fetch(`${base}/trips/${trip.id}/itinerary`, { headers });
     expect(response.status).toBe(200);
     const { itinerary } = await response.json() as { itinerary: {
-      days: { id: string; order: number; startsAt: string; items: { kind: string; id: string }[]; expenseSummary: { totalAmount: number; expenseCount: number } }[];
+      days: { id: string; order: number; startsAt: string; items: { kind: string; id: string }[]; expenseSummary: { byCurrency: { currency: string; totalCents: number; expenseCount: number }[]; expenseCount: number } }[];
       activities: { id: string; postIds: string[]; durationMinutes: number | null }[]; transports: { id: string; postIds: string[] }[];
       posts: { id: string; dayId: string; activityId: string | null; transportId: string | null; parentPostId: string | null; createdAt: string }[];
     } };
@@ -77,8 +77,8 @@ describe("aggregate itinerary HTTP API", () => {
     expect(itinerary.posts).toHaveLength(3);
     expect(itinerary.posts.find((p) => p.id === combined.toHexString())).toMatchObject({ dayId: days[1]!._id.toHexString(), activityId: activity.toHexString(),
       transportId: outbound.id, parentPostId: spontaneous.toHexString(), createdAt: "2026-10-03T12:00:00.789Z" });
-    expect(itinerary.days.map((day) => day.expenseSummary)).toEqual([
-      { totalAmount: 5, expenseCount: 1 }, { totalAmount: 30.5, expenseCount: 2 }, { totalAmount: 0, expenseCount: 0 }, { totalAmount: 0, expenseCount: 0 },
+    expect(itinerary.days.map((day) => [day.expenseSummary.byCurrency, day.expenseSummary.expenseCount])).toEqual([
+      [[{ currency: "ARS", totalCents: 500, expenseCount: 1 }], 1], [[{ currency: "ARS", totalCents: 3050, expenseCount: 2 }], 2], [[], 0], [[], 0],
     ]);
   });
 
@@ -109,6 +109,62 @@ describe("aggregate itinerary HTTP API", () => {
       [free.toHexString(), days[1]!._id.toHexString(), "independent"], [child.toHexString(), days[1]!._id.toHexString(), "activity"]]);
     expect(itinerary.unplacedPosts).toMatchObject([{ id: late.toHexString(), dayId: null, createdAt: "2027-01-01T00:00:00.001Z", context: { placement: "independent" } }]);
     expect(itinerary.days[1]!.items.map((i) => i.id)).toContain(free.toHexString());
+  });
+
+  it("recomputes the expense projection after reschedule, relink and delete through the real endpoints without touching persisted amounts", async () => {
+    const trip = await createTrip(), tripId = new ObjectId(trip.id);
+    const transportsPath = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
+    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, details: {} };
+    expect((await post(transportsPath, { ...input, direction: "outbound", departureAt: "2026-09-25T08:00:00.123Z", arrivalAt: "2026-09-25T10:00:00.456Z" })).status).toBe(201);
+    expect((await post(transportsPath, { ...input, direction: "return", departureAt: "2026-09-26T18:00:00.789Z", arrivalAt: "2026-09-26T20:00:00.123Z" })).status).toBe(201);
+    type Itinerary = { days: { id: string; startsAt: string; expenseSummary: { byCurrency: { currency: string; totalCents: number; expenseCount: number }[]; expenseCount: number } }[];
+      expenseSummary: { expenseCount: number; byCurrency: { currency: string; totalCents: number }[]; outsideItinerary: { expenseCount: number } };
+      expenses: { postId: string; rootPostId: string; source: string; rootActivityId: string | null; occurredAt: string; publishedAt: string; dayId: string | null; amountCents: number }[] };
+    const get = async () => (await (await fetch(`${base}/trips/${trip.id}/itinerary`, { headers })).json() as { itinerary: Itinerary }).itinerary;
+    const days = (await get()).days;
+    const activityPath = `/trips/${trip.id}/activities`;
+    const created = async (body: unknown) => { const r = await post(activityPath, body); expect(r.status).toBe(201); return (await r.json() as { activity: { id: string } }).activity.id; };
+    const first = await created({ dayId: days[1]!.id, title: "A", scheduledAt: "2026-09-25T12:00:00.456Z" });
+    const second = await created({ dayId: days[1]!.id, title: "B", scheduledAt: "2026-09-25T15:00:00.789Z" });
+    const memory = async (fields: unknown) => { const r = await post(`/trips/${trip.id}/posts`, { description: "Recuerdo", ...(fields as object) }); expect(r.status).toBe(201); return (await r.json() as { post: { id: string; createdAt: string } }).post; };
+    const root = await memory({ activityId: first }), child = await memory({ parentPostId: root.id });
+    await db.collection("postExpenses").insertMany([
+      { tripId, postId: new ObjectId(root.id), totalAmount: 10.5, currency: "ARS", breakdown: null, payments: [], shares: [], createdAt: new Date() },
+      { tripId, postId: new ObjectId(child.id), totalAmount: 5, currency: "USD", breakdown: null, payments: [], shares: [], createdAt: new Date() },
+    ]);
+    const persisted = async () => ({ expenses: await db.collection("postExpenses").find({ tripId }, { projection: { _id: 1, postId: 1, totalAmount: 1, currency: 1, createdAt: 1 } }).sort({ _id: 1 }).toArray(),
+      posts: (await db.collection("posts").find({ tripId }, { projection: { createdAt: 1 } }).sort({ _id: 1 }).toArray()).map((p) => [p._id.toHexString(), p.createdAt.toISOString()]) });
+    const baseline = await persisted();
+    const ars = (cents: number) => ({ currency: "ARS", totalCents: cents, expenseCount: 1 }), usd = (cents: number) => ({ currency: "USD", totalCents: cents, expenseCount: 1 });
+
+    let value = await get();
+    expect(value.days[1]!.expenseSummary).toMatchObject({ byCurrency: [ars(1050), usd(500)], expenseCount: 2 });
+    expect(value.expenses.map((e) => [e.postId, e.rootPostId, e.rootActivityId, e.occurredAt, e.dayId])).toEqual([
+      [root.id, root.id, first, "2026-09-25T12:00:00.456Z", days[1]!.id], [child.id, root.id, first, "2026-09-25T12:00:00.456Z", days[1]!.id]]);
+    expect(value.expenses[1]!.publishedAt).toBe(child.createdAt);
+
+    // Reschedule the root activity to the next day: both expenses follow it, with the same amounts and publication instants.
+    expect((await fetch(`${base}${activityPath}/${first}`, { method: "PATCH", headers, body: JSON.stringify({ dayId: days[2]!.id, scheduledAt: days[2]!.startsAt }) })).status).toBe(200);
+    value = await get();
+    expect(value.days[1]!.expenseSummary.expenseCount).toBe(0);
+    expect(value.days[2]!.expenseSummary).toMatchObject({ byCurrency: [ars(1050), usd(500)], expenseCount: 2 });
+    expect(value.expenses.map((e) => [e.occurredAt, e.dayId, e.amountCents])).toEqual([[days[2]!.startsAt, days[2]!.id, 1050], [days[2]!.startsAt, days[2]!.id, 500]]);
+    expect(value.expenses.map((e) => e.publishedAt)).toEqual([root.createdAt, child.createdAt]);
+
+    // Relink the root memory: its descendant follows it.
+    expect((await fetch(`${base}/trips/${trip.id}/posts/${root.id}`, { method: "PATCH", headers, body: JSON.stringify({ activityId: second }) })).status).toBe(200);
+    value = await get();
+    expect(value.days[1]!.expenseSummary).toMatchObject({ byCurrency: [ars(1050), usd(500)], expenseCount: 2 });
+    expect(value.days[2]!.expenseSummary.expenseCount).toBe(0);
+    expect(value.expenses.map((e) => e.rootActivityId)).toEqual([second, second]);
+
+    // Delete the activity: each expense falls back to its own publication (outside the itinerary), amounts untouched.
+    expect((await fetch(`${base}${activityPath}/${second}`, { method: "DELETE", headers })).status).toBe(204);
+    value = await get();
+    expect(value.days.map((day) => day.expenseSummary.expenseCount)).toEqual([0, 0, 0, 0]);
+    expect(value.expenses.map((e) => [e.source, e.rootActivityId, e.dayId, e.amountCents])).toEqual([["publication", null, null, 1050], ["publication", null, null, 500]]);
+    expect(value.expenseSummary).toMatchObject({ expenseCount: 2, byCurrency: [{ currency: "ARS", totalCents: 1050 }, { currency: "USD", totalCents: 500 }], outsideItinerary: { expenseCount: 2 } });
+    expect(await persisted()).toEqual(baseline);
   });
 
   it("supports an empty Trip and enforces authentication and membership", async () => {

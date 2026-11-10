@@ -42,7 +42,15 @@ const ids = (v: unknown): v is string[] => Array.isArray(v) && v.every(id) && ne
 const list = (v: unknown, valid: (item: unknown) => boolean): v is RecordValue[] =>
   Array.isArray(v) && v.every(valid);
 const entity = (v: unknown): v is RecordValue => record(v) && id(v.id) && id(v.tripId);
-const summary = (v: unknown) => record(v) && finite(v.totalAmount) && Number.isSafeInteger(v.expenseCount) && (v.expenseCount as number) >= 0;
+const count = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
+const currencies = ["ARS", "EUR", "USD"];
+const currencyTotal = (v: unknown) => record(v) && currencies.includes(v.currency as string) && count(v.totalCents) && count(v.expenseCount);
+const totals = (v: unknown) => record(v) && list(v.byCurrency, currencyTotal) && record(v.withoutCurrency) && count(v.withoutCurrency.expenseCount);
+const summary = (v: unknown) => totals(v) && count((v as RecordValue).expenseCount);
+const tripSummary = (v: unknown) => summary(v) && summary((v as RecordValue).outsideItinerary);
+const attribution = (v: unknown) => record(v) && id(v.expenseId) && id(v.postId) && id(v.rootPostId) && ["activity", "publication"].includes(v.source as string) &&
+  nullableId(v.rootActivityId) && timestamp(v.occurredAt) && timestamp(v.publishedAt) && nullableId(v.dayId) &&
+  (v.currency === null || currencies.includes(v.currency as string)) && (v.amountCents === null || count(v.amountCents));
 const destination = (v: unknown) => entity(v) && text(v.name) && order(v.order) && timestamp(v.createdAt);
 const item = (v: unknown) => record(v) && ["transport", "activity", "post"].includes(v.kind as string) && id(v.id) && timestamp(v.at);
 const day = (v: unknown) => entity(v) && id(v.destinationId) && timestamp(v.date) &&
@@ -53,7 +61,7 @@ const duration = (v: unknown) => v === undefined || v === null || (Number.isSafe
 const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nullableText(v.description) && duration(v.durationMinutes) &&
   timestamp(v.scheduledAt) && nullableText(v.mapsUrl) &&
   id(v.createdBy) && timestamp(v.createdAt) && ids(v.postIds);
-const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && nullableText(v.breakdown) &&
+const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && (v.currency === null || currencies.includes(v.currency as string)) && nullableText(v.breakdown) &&
   nullableId(v.paidBy) && timestamp(v.createdAt);
 const placements = ["activity", "transport", "independent"];
 // A legacy dayId (absent, null or an ObjectId) is accepted and never used.
@@ -75,7 +83,8 @@ const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse 
   if (!record(v) || !id(v.tripId) || v.tripId !== tripId ||
       !["register", "balance"].includes(v.expenseMode as string) ||
       !list(v.destinations, destination) || !list(v.days, day) || !list(v.transports, transport) ||
-      !list(v.activities, activity) || !list(v.posts, post) || !list(v.unplacedPosts, post)) return false;
+      !list(v.activities, activity) || !list(v.posts, post) || !list(v.unplacedPosts, post) ||
+      !tripSummary(v.expenseSummary) || !list(v.expenses, attribution)) return false;
   const allPosts = [...v.posts, ...v.unplacedPosts];
   const sets = Object.fromEntries(["destinations", "days", "transports", "activities", "posts"].map((key) => {
     const values = (key === "posts" ? allPosts : v[key]) as RecordValue[];

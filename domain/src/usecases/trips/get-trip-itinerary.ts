@@ -5,6 +5,7 @@ import type { TaggedError } from "../../types/error.js";
 import { err, ok } from "../../types/result.js";
 import type { ItineraryDay } from "../../entities/itinerary-day.js";
 import type { Transport } from "../../entities/transport.js";
+import { attributeExpense, totalizeExpenses } from "../../entities/expense-projection.js";
 import { resolvePostChain } from "../../entities/post.js";
 import type { ItineraryItem, ItineraryPostContext, TripItinerary, TripItinerarySnapshot } from "../../types/trip-itinerary.js";
 import type { UseCase } from "../../types/usecase.js";
@@ -77,10 +78,14 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
     const dayId = activityId !== null ? activityById.get(activityId)!.dayId : publicationDayId ?? transitDayId;
     const context: ItineraryPostContext = { parentPostId: post.parentPostId != null && postById.has(post.parentPostId) ? post.parentPostId : null,
       rootPostId: root.id, rootActivityId: activityId, rootTransportId: transportId, placement };
-    // Expenses are attributed to the activity day, or else to the publication slice (PRD 3.6).
-    const summaryDayId = activityId !== null ? dayId : publicationDayId;
-    return { post, activityId, transportId, dayId, context, summaryDayId, expense: expenses.get(post.id) ?? null };
+    // Expenses are attributed to the effective root activity, or else to the publication slice (PRD 3.6).
+    const expense = expenses.get(post.id) ?? null;
+    const attribution = expense === null ? null : attributeExpense({ expense, post, rootPostId: root.id,
+      activity: activityId === null ? null : activityById.get(activityId)!, publicationDayId });
+    return { post, activityId, transportId, dayId, context, attribution, expense };
   });
+  const attributions = resolved.flatMap((value) => value.attribution === null ? [] : [value.attribution])
+    .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || byId({ id: a.expenseId }, { id: b.expenseId }));
   const placedIds = new Set(resolved.filter((value) => value.dayId !== null).map((value) => value.post.id));
   const view = (value: (typeof resolved)[number]) => ({ ...value.post, context: value.context, expense: value.expense,
     activityId: value.post.activityId !== null && activityIds.has(value.post.activityId) ? value.post.activityId : null,
@@ -92,7 +97,7 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
   const postsByActivity = group(placedResolved, (value) => value.activityId);
   const postsByTransport = group(placedResolved, (value) => value.transportId);
   const independentByDay = group(placedResolved.filter((value) => value.context.placement === "independent"), (value) => value.dayId);
-  const expensesByDay = group(resolved.filter((value) => value.expense !== null && value.summaryDayId !== null), (value) => value.summaryDayId);
+  const expensesByDay = group(attributions, (value) => value.dayId);
   const activitiesByDay = group(activities, (activity) => activity.dayId);
   const transportsByDestination = group(transports, (transport) => transport.destinationId);
   const itemRank = { transport: 0, activity: 1, post: 2 };
@@ -112,10 +117,10 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
       }
       for (const value of independentByDay.get(day.id) ?? []) items.push({ kind: "post", id: value.post.id, at: value.post.createdAt });
       items.sort((a, b) => a.at.getTime() - b.at.getTime() || itemRank[a.kind] - itemRank[b.kind] || byId(a, b));
-      const expenseSummary = { totalAmount: 0, expenseCount: 0 };
-      for (const value of expensesByDay.get(day.id) ?? []) { expenseSummary.totalAmount += value.expense!.totalAmount; expenseSummary.expenseCount++; }
-      return { ...day, items, expenseSummary };
+      return { ...day, items, expenseSummary: totalizeExpenses(expensesByDay.get(day.id) ?? []) };
     }),
+    expenseSummary: { ...totalizeExpenses(attributions), outsideItinerary: totalizeExpenses(attributions.filter((value) => value.dayId === null)) },
+    expenses: attributions,
   };
 };
 

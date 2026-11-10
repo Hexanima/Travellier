@@ -30,6 +30,25 @@ describe("itinerary client", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
     expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
   });
+  it.each([
+    ["the pre-T81 day summary with a mixed total", (i: ReturnType<typeof itineraryFixture>) => { (i.days[1] as { expenseSummary: unknown }).expenseSummary = { totalAmount: 25.5, expenseCount: 1 }; }],
+    ["a fractional total in cents", (i: ReturnType<typeof itineraryFixture>) => { i.days[1]!.expenseSummary.byCurrency[0]!.totalCents = 25.5; }],
+    ["an unknown currency", (i: ReturnType<typeof itineraryFixture>) => { (i.expenses[0] as { currency: unknown }).currency = "BRL"; }],
+    ["a missing Trip summary", (i: ReturnType<typeof itineraryFixture>) => { delete (i as { expenseSummary?: unknown }).expenseSummary; }],
+    ["a non-UTC attribution instant", (i: ReturnType<typeof itineraryFixture>) => { i.expenses[0]!.occurredAt = "2026-09-25T10:00:00-03:00"; }],
+  ])("rejects %s", async (_name, mutate) => {
+    const itinerary = itineraryFixture();
+    mutate(itinerary);
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("accepts a legacy expense without currency (null) and an attribution without a day", async () => {
+    const itinerary = itineraryFixture();
+    itinerary.posts[0]!.expense!.currency = null;
+    itinerary.expenses[0]!.currency = null; itinerary.expenses[0]!.dayId = null;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
+  });
   it("reads canonical UTC and legacy urban steps without mutating their fields", async () => {
     const itinerary = itineraryFixture();
     const canonical = { ...itinerary.transports[0], type: "bus_local", details: { steps: [

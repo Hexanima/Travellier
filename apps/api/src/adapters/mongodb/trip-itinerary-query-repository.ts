@@ -1,6 +1,6 @@
 import { ObjectId as MongoObjectId, type Db } from "mongodb";
 import {
-  createObjectId, err, ok, UnknownError,
+  createCurrency, createObjectId, err, ok, UnknownError,
   type ItineraryActivity, type ItineraryDay, type ItineraryExpense, type ItineraryPost, type ObjectId,
   type Transport, type TripDestination, type TripItineraryQueryPort, type TripItinerarySnapshot,
 } from "app-domain";
@@ -15,6 +15,9 @@ const id = (value: MongoObjectId): ObjectId => {
 };
 const optionalId = (value: MongoObjectId | null | undefined) => value == null ? null : id(value);
 /** Posts created since T54 have no day; legacy ones keep theirs only as stored data: the domain computes dayId by context (T56). */
+/** A missing, unknown or malformed stored currency/payer reads as null: it is never inferred. */
+const legacyPayer = (value: unknown) => value instanceof MongoObjectId ? id(value) : null;
+const storedCurrency = (value: unknown) => { const result = createCurrency(value); return result.ok ? result.value : null; };
 const legacyDayId = (value: { dayId?: unknown }) => optionalId(value.dayId as MongoObjectId | null | undefined);
 
 /** Independent of the mutation repository: a GET never acquires a Trip write lock. */
@@ -51,7 +54,7 @@ export const createMongoTripItineraryQueryRepository = (database: Db): TripItine
             description: value.description, mapsUrl: value.mapsUrl, activityId: optionalId(value.activityId), parentPostId: optionalId(value.parentPostId),
             transportId: optionalId(value.transportId), createdAt: value.createdAt })),
           expenses: expenses.map((value) => ({ id: id(value._id), tripId: id(value.tripId), postId: id(value.postId), totalAmount: value.totalAmount,
-            breakdown: value.breakdown, paidBy: optionalId(value.paidBy), createdAt: value.createdAt })),
+            currency: storedCurrency((value as { currency?: unknown }).currency), breakdown: value.breakdown ?? null, paidBy: legacyPayer(value.paidBy), createdAt: value.createdAt })),
         };
       }, { readConcern: { level: "snapshot" }, readPreference: "primary" });
       return ok(snapshot);

@@ -19,7 +19,8 @@ export const itineraryFixture = () => {
   const day = (id: number, type: string, start: number, end: number, order: number) => ({
     id: itineraryId(id), tripId, destinationId, date: time(0), type,
     startsAt: time(start), endsAt: time(end), order, items: [] as { kind: string; id: string; at: string }[],
-    expenseSummary: { totalAmount: 0, expenseCount: 0 },
+    expenseSummary: { byCurrency: [] as { currency: "ARS" | "EUR" | "USD"; totalCents: number; expenseCount: number }[],
+      withoutCurrency: { expenseCount: 0 }, expenseCount: 0 },
   });
   const activity = (id: number, hour: number, title: string) => ({
     id: itineraryId(id), tripId, dayId: itineraryId(4), title, description: null,
@@ -33,7 +34,8 @@ export const itineraryFixture = () => {
     context: { parentPostId: null as string | null, rootPostId: itineraryId(id), rootActivityId: null as string | null,
       rootTransportId: null as string | null, placement: "independent" as "activity" | "transport" | "independent" },
     expense: null as {
-      id: string; tripId: string; postId: string; totalAmount: number; breakdown: string | null;
+      id: string; tripId: string; postId: string; totalAmount: number;
+      currency: "ARS" | "EUR" | "USD" | null; breakdown: string | null;
       paidBy: string | null; createdAt: string;
     } | null,
   });
@@ -45,8 +47,8 @@ export const itineraryFixture = () => {
   const posts = [post(10, 13, "Almuerzo junto al río"), post(11, 9, "En camino")];
   linkPost(posts[1], { transportId: itineraryId(6) });
   posts[0].expense = { id: itineraryId(12), tripId, postId: itineraryId(10),
-    totalAmount: 25.5, breakdown: "Almuerzo", paidBy: null, createdAt: time(13) };
-  days[1].expenseSummary = { totalAmount: 25.5, expenseCount: 1 };
+    totalAmount: 25.5, currency: "ARS", breakdown: "Almuerzo", paidBy: null, createdAt: time(13) };
+  days[1].expenseSummary = { byCurrency: [{ currency: "ARS", totalCents: 2550, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 };
   return {
     tripId, expenseMode: "register",
     destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: time(0) }], days,
@@ -57,5 +59,10 @@ export const itineraryFixture = () => {
         arrivalPlace: "Buenos Aires", departureAt: time(18), arrivalAt: time(20), costPerPerson: null, details: {}, postIds: [] },
     ], activities: [activity(8, 12, "Paseo por el centro"), activity(9, 14, "Visita al museo")], posts,
     unplacedPosts: [] as typeof posts,
+    expenseSummary: { ...days[1].expenseSummary, outsideItinerary: { byCurrency: [] as typeof days[1]["expenseSummary"]["byCurrency"],
+      withoutCurrency: { expenseCount: 0 }, expenseCount: 0 } },
+    expenses: [{ expenseId: itineraryId(12), postId: itineraryId(10), rootPostId: itineraryId(10), source: "publication" as "activity" | "publication",
+      rootActivityId: null as string | null, occurredAt: time(13), publishedAt: time(13), dayId: itineraryId(4) as string | null,
+      currency: "ARS" as "ARS" | "EUR" | "USD" | null, amountCents: 2550 as number | null }],
   };
 };

@@ -37,7 +37,7 @@ describe("Mongo itinerary query", () => {
       scheduledAt: new Date("2026-09-25T12:00:00.789Z"), mapsUrl: null, status: "confirmed", createdBy: actor, createdAt: arrival });
     await db.collection("posts").insertOne({ _id: post, tripId: trip, dayId: day, authorId: actor, description: null, mapsUrl: null,
       activityId: activity, transportId: transport, parentPostId: null, createdAt: arrival });
-    await db.collection("postExpenses").insertOne({ tripId: trip, postId: post, totalAmount: 42.5, breakdown: null, paidBy: actor, createdAt: arrival });
+    await db.collection("postExpenses").insertOne({ tripId: trip, postId: post, totalAmount: 42.5, currency: "EUR", breakdown: null, paidBy: actor, createdAt: arrival });
   });
   const query = async (user = actor, target = trip) => {
     const api = createTripApi(db);
@@ -50,9 +50,20 @@ describe("Mongo itinerary query", () => {
       destinations: [{ id: destination.toHexString(), name: "Córdoba" }],
       activities: [{ id: activity.toHexString(), scheduledAt: new Date("2026-09-25T12:00:00.789Z"), postIds: [post.toHexString()] }],
       transports: [{ id: transport.toHexString(), departureAt: departure, postIds: [post.toHexString()] }],
-      days: [{ id: day.toHexString(), endsAt: null, expenseSummary: { totalAmount: 42.5, expenseCount: 1 } }],
+      days: [{ id: day.toHexString(), endsAt: null, expenseSummary: { byCurrency: [{ currency: "EUR", totalCents: 4250, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 } }],
+      expenseSummary: { expenseCount: 1, outsideItinerary: { expenseCount: 0 } },
+      expenses: [{ postId: post.toHexString(), rootActivityId: activity.toHexString(), source: "activity", currency: "EUR", amountCents: 4250,
+        occurredAt: new Date("2026-09-25T12:00:00.789Z"), publishedAt: arrival, dayId: day.toHexString() }],
       posts: [{ id: post.toHexString(), authorId: actor.toHexString(), activityId: activity.toHexString(), transportId: transport.toHexString(), parentPostId: null,
-        expense: { totalAmount: 42.5, paidBy: actor.toHexString() } }] } });
+        expense: { totalAmount: 42.5, currency: "EUR", paidBy: actor.toHexString() } }] } });
+  });
+
+  it("reads a legacy expense without currency as null (counted, never inferred) and tolerates a malformed legacy paidBy", async () => {
+    await db.collection("postExpenses").updateOne({ postId: post }, { $unset: { currency: "" }, $set: { paidBy: [actor] } });
+    const result = await query();
+    expect(result).toMatchObject({ ok: true, value: { posts: [{ expense: { currency: null, paidBy: null, totalAmount: 42.5 } }],
+      expenseSummary: { byCurrency: [], withoutCurrency: { expenseCount: 1 }, expenseCount: 1 }, expenses: [{ currency: null, amountCents: 4250 }] } });
+    expect(await db.collection("postExpenses").findOne({ postId: post })).toMatchObject({ paidBy: [actor], totalAmount: 42.5 });
   });
 
   it("filters legacy arrival days from the aggregate without deleting them", async () => {
@@ -80,7 +91,7 @@ describe("Mongo itinerary query", () => {
     await db.collection("postExpenses").insertOne({ postId: new ObjectId(), tripId: trip, totalAmount: 900 });
     const result = await query();
     expect(result).toMatchObject({ ok: true, value: { activities: [{ id: activity.toHexString() }],
-      posts: [{ id: post.toHexString(), activityId: null, parentPostId: null, expense: null }], days: [{ expenseSummary: { totalAmount: 0, expenseCount: 0 } }] } });
+      posts: [{ id: post.toHexString(), activityId: null, parentPostId: null, expense: null }], days: [{ expenseSummary: { byCurrency: [], expenseCount: 0 } }], expenses: [] } });
   });
 
   it("projects posts without a physical day by context and keeps late chains under their roots", async () => {
