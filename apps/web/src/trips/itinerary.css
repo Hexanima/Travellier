@@ -110,3 +110,13 @@
 .post-photo { display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: center; }
 .post-photo img, .post-photo-placeholder { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #d9e2f2; grid-row: span 2; }
 .post-photo-actions { grid-column: 2; }
+
+/* Structural only: the final look belongs to the visual phase. */
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: 8px; align-items: start; margin: 0; padding: 0; list-style: none; }
+.photo-grid__item { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.photo-grid__open { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+.photo-grid__open img, .photo-grid__failed { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+.photo-grid__caption { margin: 0; overflow-wrap: anywhere; }
+.photo-viewer { display: grid; gap: 8px; }
+.photo-viewer img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
+.photo-viewer__nav { display: flex; flex-wrap: wrap; gap: 8px; }
