@@ -167,6 +167,31 @@ describe("joint post save and idempotent retry", () => {
       expect(await data()).toEqual(before);
     });
 
+    it("a retry after another member edited the saved post is 409 already_saved with the post id (own post, own Trip), without writes", async () => {
+      const editor = await addMember("admin");
+      const body = { id: newId(), description: "Cena", photos: photoRefs(1) };
+      expect((await post(body)).statusCode).toBe(201);
+      expect((await patch(body.id, { description: "Editado por otro" }, editor)).statusCode).toBe(200);
+      const before = await data();
+      const retry = await post(body);
+      expect(retry.statusCode, retry.body).toBe(409);
+      expect(JSON.parse(retry.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: body.id });
+      expect(await data()).toEqual(before);
+    });
+
+    it("a PATCH retry after another member edited the post is 409 already_saved with the post id, without writes", async () => {
+      const editor = await addMember("admin");
+      const created = JSON.parse((await post({ description: "Original" })).body).post;
+      const body = { description: "Editado", newActivity: { ...withDuration(), id: newId() } };
+      expect((await patch(created.id, body)).statusCode).toBe(200);
+      expect((await patch(created.id, { description: "Cambiado por otro" }, editor)).statusCode).toBe(200);
+      const before = await data();
+      const retry = await patch(created.id, body);
+      expect(retry.statusCode, retry.body).toBe(409);
+      expect(JSON.parse(retry.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: created.id });
+      expect(await data()).toEqual(before);
+    });
+
     it("another author or another Trip reusing the id gets the same generic 409, and nothing is written or leaked", async () => {
       const body = { id: newId(), description: "Mio" };
       expect((await post(body)).statusCode).toBe(201);
@@ -180,6 +205,7 @@ describe("joint post save and idempotent retry", () => {
       expect(inOtherTrip.statusCode).toBe(409);
       expect(JSON.parse(byOther.body)).toEqual(JSON.parse(inOtherTrip.body));
       expect(byOther.body).not.toContain(hex(f.actor));
+      expect(JSON.parse(byOther.body).error).toEqual({ code: "PostRequestConflictError", message: expect.any(String) });
       expect(await counts()).toMatchObject({ posts: 1 });
       expect(await f.db.collection("posts").countDocuments({ tripId: otherTrip })).toBe(0);
     });
@@ -220,6 +246,40 @@ describe("joint post save and idempotent retry", () => {
       const retry = await post(body);
       expect(retry.statusCode, retry.body).toBe(201);
       expect(await counts()).toMatchObject({ posts: 1, activities: 1, postPhotos: 1 });
+    });
+
+    describe("11000 race on a client id taken between the check and the insert", () => {
+      const otherTripWith = async () => {
+        const otherTrip = new ObjectId();
+        await f.db.collection("trips").insertOne({ _id: otherTrip, inviteCode: hex(otherTrip), visibility: "public", votingEnabled: false, expenseMode: "register" });
+        return otherTrip;
+      };
+
+      it("a post id that another Trip took after the owner check is the generic 409 (not 500) and nothing is written", async () => {
+        const id = newId(), otherTrip = await otherTripWith();
+        await f.db.collection("posts").insertOne({ _id: new ObjectId(id), tripId: otherTrip, authorId: new ObjectId(), createdAt: new Date(), description: "Ajeno",
+          mapsUrl: null, activityId: null, parentPostId: null, transportId: null });
+        // The owner lookup (the only findOne with a projection) answers "free", as if the other Trip's insert came after it.
+        const collection = f.db.collection("posts"), original = f.db.collection.bind(f.db), realFindOne = collection.findOne.bind(collection) as (...args: unknown[]) => Promise<unknown>;
+        vi.spyOn(collection, "findOne").mockImplementation(((filter: unknown, options?: { projection?: unknown }) =>
+          options?.projection === undefined ? realFindOne(filter, options) : Promise.resolve(null)) as never);
+        vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "posts" ? collection : original(key, options));
+        const before = await data();
+        const response = await post({ id, description: "Mio" });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(JSON.parse(response.body).error).toEqual({ code: "PostRequestConflictError", message: expect.any(String) });
+        expect(await data()).toEqual(before);
+      });
+
+      it("a new activity id that another Trip owns is the generic 409 (not 500) and nothing is written", async () => {
+        const created = JSON.parse((await post({ description: "Original" })).body).post, id = newId(), otherTrip = await otherTripWith();
+        await f.db.collection("activities").insertOne({ _id: new ObjectId(id), tripId: otherTrip, title: "Ajena" });
+        const before = await data();
+        const response = await patch(created.id, { newActivity: { ...withDuration(), id } });
+        expect(response.statusCode, response.body).toBe(409);
+        expect(JSON.parse(response.body).error).toEqual({ code: "PostRequestConflictError", message: expect.any(String) });
+        expect(await data()).toEqual(before);
+      });
     });
 
     describe("PATCH with newActivity.id", () => {
@@ -334,13 +394,15 @@ describe("joint post save and idempotent retry", () => {
       let second!: ReturnType<typeof post>;
       try {
         await paused.reached;
-        second = launch(post({ id, description: "Dos" }));
+        second = launch(post({ id, description: "Dos" })); const secondState = track(second);
         await pause();
+        expect(secondState.settled, "the second POST finished while the first transaction was open").toBe(false);
       } finally { paused.release(); }
       const [a, b] = await Promise.all([first, second]);
       expect([a.statusCode, b.statusCode]).toEqual([201, 409]);
       expect(JSON.parse(b.body).error.code).toBe("PostRequestConflictError");
       expect(await f.db.collection("posts").find({ _id: new ObjectId(id) }).toArray()).toMatchObject([{ description: "Uno" }]);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(1);
     });
 
     concurrent("a POST with a new activity and an expulsion of its author: the expulsion waits for the save, which stays whole", async () => {
