@@ -129,7 +129,7 @@ describe("post persistence and transactions", () => {
     const { post: d } = await create({ parentPostId: a.id, description: "D" });
     for (const post of [root, a, b, d]) {
       for (const name of ["postPhotos", "postExpenses"])
-        await f.db.collection(name).insertOne({ tripId: f.trip, postId: new ObjectId(post.id), value: post.id });
+        await f.db.collection(name).insertOne({ tripId: f.trip, postId: new ObjectId(post.id), value: post.id, s3Key: post.id, order: 1 });
     }
     const before = await f.db.collection("posts").find({ tripId: f.trip }).sort({ _id: 1 }).toArray();
     const projected = await f.api.getPostChain!({ ...f.context(), postId: b.id });

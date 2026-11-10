@@ -1,6 +1,6 @@
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { createObjectId } from "app-domain";
+import { createObjectId, type ObjectStoragePort } from "app-domain";
 import { migrateMongoSchema } from "../src/adapters/mongodb/migrations.js";
 import { handleApiRequest, type TripApi } from "../src/app.js";
 import { createTripApi } from "../src/trips/trip-api.js";
@@ -16,6 +16,8 @@ export class PostFixture {
   client!: MongoClient;
   db!: Db;
   api!: TripApi;
+  /** Object storage handed to the Trip API on the next `reset()`; absent keeps the API without photo storage. */
+  storage: ObjectStoragePort | undefined;
   trip!: ObjectId;
   actor!: ObjectId;
   destination!: ObjectId;
@@ -29,7 +31,7 @@ export class PostFixture {
   async stop() { await this.client?.close(); await this.server?.stop(); }
   async reset() {
     for (const name of ["trips", "tripMembers", "destinations", "itineraryDays", "activities", "transports", "posts",
-      "postPhotos", "postExpenses", "comments", "postLikes", "commentLikes", "activityVotes", "activityParticipations"])
+      "postPhotos", "postExpenses", "comments", "postLikes", "commentLikes", "activityVotes", "activityParticipations", "storageDeletionJobs"])
       await this.db.collection(name).deleteMany({});
     this.trip = new ObjectId(); this.actor = new ObjectId(); this.destination = new ObjectId(); this.day = new ObjectId();
     await this.db.collection("trips").insertOne({ _id: this.trip, inviteCode: this.trip.toHexString(), visibility: "public", votingEnabled: false, expenseMode: "register" });
@@ -37,7 +39,7 @@ export class PostFixture {
     await this.db.collection("destinations").insertOne({ _id: this.destination, tripId: this.trip, name: "Córdoba", order: 1, createdAt: new Date() });
     await this.db.collection("itineraryDays").insertOne({ _id: this.day, tripId: this.trip, destinationId: this.destination, type: "activity", order: 1,
       date: new Date("2026-09-25T00:00:00Z"), startsAt: new Date("2026-09-25T10:00:00.123Z"), endsAt: new Date("2026-09-25T18:00:00.789Z") });
-    this.api = createTripApi(this.db);
+    this.api = createTripApi(this.db, { storage: this.storage });
   }
   context() { return { tripId: domainId(this.trip), authenticatedUserId: domainId(this.actor) }; }
   input() { return { ...this.context(), description: "Recuerdo" }; }
