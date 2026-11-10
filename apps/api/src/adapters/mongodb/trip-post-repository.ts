@@ -1,5 +1,5 @@
-import { ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
-import { createObjectId, err, ok, PostNotFoundError, TaggedError, TripNotFoundError, UnknownError,
+import { MongoServerError, ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
+import { createObjectId, err, ok, PostNotFoundError, PostRequestConflictError, TaggedError, TripNotFoundError, UnknownError,
   type Activity, type AsyncResult, type ObjectId, type Post, type TripPostPort, type TripPostScope, type TripRole } from "app-domain";
 import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
 import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
@@ -62,6 +62,11 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       const post = await posts.findOne({ ...query, _id: new MongoObjectId(postId) }, options);
       return ok(post === null ? undefined : toPost(post));
     },
+    // Any Trip on purpose: only tells a free client-supplied id from a taken one; the use case never reveals which.
+    findPostOwner: async (postId) => {
+      const post = await posts.findOne({ _id: new MongoObjectId(postId) }, { ...options, projection: { _id: 1, tripId: 1, authorId: 1 } });
+      return ok(post === null ? undefined : { id: domainId(post._id), tripId: domainId(post.tripId), authorId: domainId(post.authorId) });
+    },
     // The index serves the publication order; the use case applies the stable id-descending tie-break.
     list: async () => ok((await posts.find(query, options).sort({ createdAt: -1 }).toArray()).map(toPost)),
     // Planner uses the parentPostId index (checked by explain in post-persistence tests); the tripId filter and the sort run on its results.
@@ -84,8 +89,14 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     updateExpenseFields: expenses.updateExpenseFields,
     insert: async (post) => {
       if (post.tripId !== tripId) throw new TripNotFoundError();
-      await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),
-        createdAt: post.createdAt, ...editable(post) }, options);
+      try {
+        await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),
+          createdAt: post.createdAt, ...editable(post) }, options);
+      } catch (error) {
+        // A client-supplied id taken in the meantime (another Trip's save): the same generic conflict as a known one.
+        if (error instanceof MongoServerError && error.code === 11000) return err(new PostRequestConflictError());
+        throw error;
+      }
       return ok(undefined);
     },
     replace: async (post) => {
@@ -96,7 +107,12 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     },
     insertActivity: async (activity: Activity) => {
       if (activity.tripId !== tripId) throw new TripNotFoundError();
-      await database.collection<ActivityDocument>("activities").insertOne(toActivityDocument(activity), options);
+      try {
+        await database.collection<ActivityDocument>("activities").insertOne(toActivityDocument(activity), options);
+      } catch (error) {
+        if (error instanceof MongoServerError && error.code === 11000) return err(new PostRequestConflictError());
+        throw error;
+      }
       return ok(undefined);
     },
     listActivities: async () => ok((await database.collection<ActivityDocument>("activities").find(query, options)
