@@ -15,8 +15,10 @@ import "./itinerary.css";
 export type TripPhotosScreenProps = { members: Pick<TripMembersApi, "list">; timeZone?: string };
 
 const stateOf = (state: unknown): Record<string, unknown> => typeof state === "object" && state !== null && !Array.isArray(state) ? { ...(state as Record<string, unknown>) } : {};
-/** The entry state without the open photo (null when nothing else is left). Anything else stays. */
-const withoutPhoto = (state: unknown) => { const rest = stateOf(state); delete rest.photo; return Object.keys(rest).length > 0 ? rest : null; };
+/** The entry state without the open photo nor its viewer-entry mark (null when nothing else is left). Anything else stays. */
+const withoutPhoto = (state: unknown) => { const rest = stateOf(state); delete rest.photo; delete rest.viewerEntry; return Object.keys(rest).length > 0 ? rest : null; };
+/** The viewer entry was pushed by the grid itself: closing it goes one step back. A viewer reopened by a return (restore) has no such mark. */
+const isViewerEntry = (state: unknown) => stateOf(state).viewerEntry === true;
 const rejectsCursor = (error: TripFailure) => error.kind === "validation" && (error.fields ?? []).some((item) => item.field === "cursor");
 
 export function TripPhotosScreen({ members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripPhotosScreenProps) {
@@ -77,10 +79,11 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
     const author = authorLabel(people, item.uploaderId);
     const date = day.format(new Date(item.uploadedAt));
     return { id: item.id, src: item.url, name: `Foto ${index + 1} de ${photos.length}. De ${author}, ${date}`, caption: `${author}, ${date}`, failed: gallery.failed.has(item.id),
-      onOpen: () => navigate(here, { state: { photo: item.id } }), onError: () => gallery.imageError(item.id), onRetry: () => gallery.retryImage(item.id) };
+      onOpen: () => navigate(here, { state: { photo: item.id, viewerEntry: true } }), onError: () => gallery.imageError(item.id), onRetry: () => gallery.retryImage(item.id) };
   });
   const select = (id: string) => navigate(here, { replace: true, state: { ...stateOf(location.state), photo: id } });
-  const close = () => { if (canGoBack(location)) navigate(-1); else navigate(here, { replace: true, state: withoutPhoto(location.state) }); };
+  // Only the entry the grid pushed is undone with a step back; any other (a return from the detail, a reload) is cleaned in place and never leaves the screen.
+  const close = () => { if (isViewerEntry(location.state) && canGoBack(location)) navigate(-1); else navigate(here, { replace: true, state: withoutPhoto(location.state) }); };
   const viewed = viewing ? photos.find((item) => item.id === viewing) : undefined;
 
   const failure = phase === "initial-error" || phase === "more-error" ? error : undefined;

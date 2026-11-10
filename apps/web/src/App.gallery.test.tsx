@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
 import { itineraryId } from "./trips/itinerary-test-fixture.js";
@@ -25,12 +25,17 @@ const members = { list: vi.fn().mockResolvedValue({ ok: true, value: { currentUs
 const props = (over: Partial<ComponentProps<typeof App>> = {}): ComponentProps<typeof App> => ({ auth, sessionStorage: storage(), members,
   posts: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn().mockImplementation(async (_trip: string, id: string) => detailOf(id)) },
   gallery: { list: vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo(3), photo(2)], nextCursor: null } }) }, ...over });
+let go: NavigateFunction = () => undefined;
+function Nav() { go = useNavigate(); return null; }
 async function render(entry: string | { pathname: string; state?: unknown }, app: ComponentProps<typeof App>) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><App {...app} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><Nav /><App {...app} /></MemoryRouter>));
   return container;
 }
+const title = (container: HTMLElement) => container.querySelector("h1")?.textContent;
+const dialog = () => document.querySelector('[role="dialog"]');
+const closeViewer = () => click(document.querySelector('[aria-label="Cerrar"]'));
 const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
 const named = (selector: string, text: string, root: ParentNode = document) => Array.from(root.querySelectorAll(selector)).find((item) => item.textContent === text);
 const thumb = (container: HTMLElement, n: number) => container.querySelector(`[data-photo="${itineraryId(n)}"] button`);
@@ -73,6 +78,64 @@ describe("App gallery integration", () => {
     const container = await render({ pathname: `${base}/${itineraryId(502)}`, state: { origin } }, app);
     await click(named("a", "Volver a las fotos", container));
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
+  });
+  it("grid, viewer, close: one entry back to the grid and then the diary, with no loop", async () => {
+    const container = await render(base, props());
+    await click(named("a", "Fotos", container));
+    await click(thumb(container, 2));
+    expect(dialog()).not.toBeNull();
+    await closeViewer();
+    expect(dialog()).toBeNull();
+    expect(title(container)).toBe("Fotos");
+    await act(async () => go(-1));
+    expect(title(container)).not.toBe("Fotos");
+    expect(named("a", "Fotos", container)).toBeTruthy();
+  });
+  it("grid, viewer, «Ver recuerdo», back, viewer reopened, close: lands on the grid", async () => {
+    const container = await render(base, props());
+    await click(named("a", "Fotos", container));
+    await click(thumb(container, 2));
+    await click(named("a", "Ver recuerdo"));
+    await click(named("button", "Volver", container));
+    expect(dialog()).not.toBeNull();
+    await closeViewer();
+    expect(dialog()).toBeNull();
+    expect(title(container)).toBe("Fotos");
+    await act(async () => go(-1));
+    expect(title(container)).not.toBe("Fotos");
+    expect(title(container)).not.toBe("Recuerdo");
+  });
+  it("deep link detail with the viewer origin: «Volver a las fotos», viewer, close stays on the grid and not on the detail", async () => {
+    const origin = { path: `${base}/photos`, label: "fotos", anchor: `data-photo=${itineraryId(2)}`, scrollY: 0, viewer: true };
+    const container = await render({ pathname: `${base}/${itineraryId(502)}`, state: { origin } }, props());
+    await click(named("a", "Volver a las fotos", container));
+    expect(dialog()).not.toBeNull();
+    await closeViewer();
+    expect(dialog()).toBeNull();
+    expect(title(container)).toBe("Fotos");
+    expect(Array.from(container.querySelectorAll("ul.photo-grid > li"))).toHaveLength(2);
+    // The history is [detail, grid]: nothing extra was pushed by closing.
+    await act(async () => go(-1));
+    expect(title(container)).toBe("Recuerdo");
+    await act(async () => go(-1));
+    expect(title(container)).toBe("Recuerdo");
+    await act(async () => go(1));
+    expect(title(container)).toBe("Fotos");
+    expect(dialog()).toBeNull();
+  });
+  it("deep link detail without history: «Volver» reopens the viewer and closing it stays on the grid", async () => {
+    const origin = { path: `${base}/photos`, label: "fotos", anchor: `data-photo=${itineraryId(2)}`, scrollY: 0, viewer: true };
+    const container = await render({ pathname: `${base}/${itineraryId(502)}`, state: { origin } }, props());
+    await click(named("button", "Volver", container));
+    expect(dialog()?.querySelector("h2")?.textContent).toBe("Foto 2 de 2");
+    await closeViewer();
+    expect(dialog()).toBeNull();
+    expect(title(container)).toBe("Fotos");
+    await act(async () => go(-1));
+    expect(title(container)).toBe("Recuerdo");
+    await act(async () => go(1));
+    expect(title(container)).toBe("Fotos");
+    expect(dialog()).toBeNull();
   });
   it("does not take the static photos route as a post id", async () => {
     const app = props();

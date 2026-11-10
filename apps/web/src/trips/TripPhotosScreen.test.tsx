@@ -153,7 +153,7 @@ describe("TripPhotosScreen", () => {
     const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)));
     const thumb = container.querySelector(`[data-photo="${itineraryId(2)}"] button`)!;
     await click(thumb);
-    expect(last().state).toEqual({ photo: itineraryId(2) });
+    expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
     await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -174,10 +174,58 @@ describe("TripPhotosScreen", () => {
     await click(Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Siguiente"));
     await click(Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Siguiente"));
     expect(document.querySelector("h2")?.textContent).toBe("Foto 3 de 3");
-    expect(last().state).toEqual({ photo: itineraryId(1) });
+    expect(last().state).toEqual({ photo: itineraryId(1), viewerEntry: true });
     await act(async () => go(-1));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(last().pathname).toBe(path);
+  });
+  it("closes a viewer opened from the grid with one step back, even after moving between photos", async () => {
+    const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2), photo(1)], null)));
+    await click(container.querySelector(`[data-photo="${itineraryId(3)}"] button`));
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Siguiente"));
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(last()).toMatchObject({ pathname: path, state: null });
+    await act(async () => go(-1));
+    expect(last().pathname).toBe(`/trips/${tripId}/memories`);
+  });
+  it("closes a viewer reopened by a return (state with photo and restore, not opened from the grid) replacing the entry, never going back to the detail", async () => {
+    const restore = { anchor: `data-photo=${itineraryId(2)}`, scrollY: 0, panel: "photos" };
+    const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)), [{ pathname: `/trips/${tripId}/memories/${itineraryId(502)}` }]);
+    await act(async () => go(path, { state: { photo: itineraryId(2), restore } }));
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(last()).toMatchObject({ pathname: path, state: null }); // the restore data was already consumed by the position restore
+    expect(thumbs(container)).toEqual([itineraryId(3), itineraryId(2)]);
+    await act(async () => go(1));
+    expect(last().pathname).toBe(path);
+    await act(async () => go(-1));
+    expect(last().pathname).toBe(`/trips/${tripId}/memories/${itineraryId(502)}`);
+  });
+  it("keeps the viewer-entry mark when moving between photos with replace, and closes after a reload with the state alive without leaving the screen", async () => {
+    const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)), [{ pathname: path }, { pathname: path, state: { photo: itineraryId(3), viewerEntry: true } }]);
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Siguiente"));
+    expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(last().pathname).toBe(path);
+    expect(thumbs(container)).toEqual([itineraryId(3), itineraryId(2)]);
+  });
+  it("a reload with the state alive and nothing behind (first entry) closes by replacing, without leaving the screen", async () => {
+    seen.length = 0;
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const list = vi.fn().mockResolvedValue(page([photo(2)], null));
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state: { photo: itineraryId(2), viewerEntry: true } }]}><Spy />
+      <GalleryProvider list={list as never} now={() => NOW}><Routes>
+        <Route path="/trips/:tripId/memories/photos" element={<TripPhotosScreen members={members as never} timeZone="America/Argentina/Buenos_Aires" />} />
+      </Routes></GalleryProvider></MemoryRouter>));
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 1 de 1");
+    await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(last()).toMatchObject({ pathname: path, state: null });
+    expect(container.querySelector("ul.photo-grid")).not.toBeNull();
   });
   it("closes without leaving the screen when there is nothing behind the viewer", async () => {
     const list = vi.fn().mockResolvedValue(page([photo(2)], null));
@@ -209,7 +257,7 @@ describe("TripPhotosScreen", () => {
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
     expect(list).toHaveBeenCalledTimes(1);
     expect(thumbs(container)).toEqual([itineraryId(3), itineraryId(2)]);
-    expect(last().state).toEqual({ photo: itineraryId(2) });
+    expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
   });
   it("never puts a signed url in the history state, outside an src, or in the console", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((name) => vi.spyOn(console, name).mockImplementation(() => undefined));
