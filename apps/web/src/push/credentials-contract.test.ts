@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -30,13 +31,22 @@ const walk = (directory: string): string[] => {
     return [path];
   });
 };
-/** Everything under src/ and android/ on disk, tracked or not; the ignored local google-services.json is the legitimate place for real values and is never part of the repository. */
-const scanned = (): string[] =>
-  [...walk(join(webRoot, "src")), ...walk(join(webRoot, "android"))]
+const maxScannedBytes = 1024 * 1024;
+/** Binary or oversized files are skipped explicitly: a NUL byte means binary, and anything over 1 MiB is not a configuration file. */
+const readText = (path: string): string | undefined => {
+  if (statSync(path).size > maxScannedBytes) return undefined;
+  const buffer = readFileSync(path);
+  return buffer.includes(0) ? undefined : buffer.toString("utf8");
+};
+/** Everything under src/, android/ and ios/ on disk, tracked or not; the ignored local google-services.json is the legitimate place for real values and is never part of the repository. */
+const scannedIn = (...directories: string[]): string[] =>
+  directories.flatMap((directory) => walk(join(webRoot, directory)))
     .filter((path) => path !== self && basename(path) !== "google-services.json" && textExtensions.test(path));
+const scanned = (): string[] => scannedIn("src", "android", "ios");
 
 const privateKeyHeader = new RegExp(`-----BEGIN (?:[A-Z]+ )*PRIVATE ${"KEY"}-----`);
 const googleApiKey = new RegExp(`${"AI"}za[0-9A-Za-z_-]{30,}`);
+const apnsKeyReference = /\bAuthKey_[0-9A-Za-z]+\.p8\b/;
 const fcmConfigValue = new RegExp(`"(?:private_key|private_key_id|client_email|mobilesdk_app_id|current_key|project_number)"\\s*:|${"firebase"}-adminsdk|\\bAAAA[0-9A-Za-z_-]{7}:[0-9A-Za-z_-]{100,}`);
 
 describe("push credentials stay out of the repository", () => {
@@ -58,14 +68,41 @@ describe("push credentials stay out of the repository", () => {
     expect(lines).toContain("*.p8");
   });
 
-  it("src/ and android/ hold no private keys, Google API keys or FCM configuration values", () => {
+  it("src/, android/ and ios/ hold no private keys, Google API keys, APNs key references or FCM configuration values", () => {
     const files = scanned();
     expect(files.length).toBeGreaterThan(20);
-    const offenders = files.filter((path) => {
-      const content = readFileSync(path, "utf8");
-      return privateKeyHeader.test(content) || googleApiKey.test(content) || fcmConfigValue.test(content);
-    }).map((path) => posix(relative(repoRoot, path)));
+    const contents = files.map((path) => ({ path, content: readText(path) })).filter((item): item is { path: string; content: string } => item.content !== undefined);
+    expect(contents.length).toBeGreaterThan(20);
+    const offenders = contents.filter(({ content }) => privateKeyHeader.test(content) || googleApiKey.test(content) || apnsKeyReference.test(content) || fcmConfigValue.test(content))
+      .map(({ path }) => posix(relative(repoRoot, path)));
     expect(offenders).toEqual([]);
+  });
+
+  it("the content of ios/ is actually scanned (not only its file names)", () => {
+    const ios = scannedIn("ios").map((path) => posix(relative(webRoot, path)));
+    expect(ios.length).toBeGreaterThanOrEqual(10);
+    expect(ios.some((path) => path.endsWith("project.pbxproj"))).toBe(true);
+    expect(ios.every((path) => path.startsWith("ios/"))).toBe(true);
+    // The scan used by the content test includes them.
+    expect(scanned().filter((path) => posix(relative(webRoot, path)).startsWith("ios/")).length).toBe(ios.length);
+  });
+
+  it("the detectors flag synthetic secrets and ignore binary files", () => {
+    expect(privateKeyHeader.test(`-----BEGIN ${"PRIVATE"} KEY-----`)).toBe(true);
+    expect(googleApiKey.test(`${"AI"}za${"x".repeat(35)}`)).toBe(true);
+    expect(apnsKeyReference.test("AuthKey_ABC123DEF4.p8")).toBe(true);
+    expect(fcmConfigValue.test('"private_key": "x"')).toBe(true);
+    const directory = mkdtempSync(join(tmpdir(), "push-contract-"));
+    try {
+      const binary = join(directory, "asset.json");
+      writeFileSync(binary, Buffer.from([0x7b, 0x00, 0xff, 0x00]));
+      const text = join(directory, "plain.json");
+      writeFileSync(text, "{}");
+      expect(readText(binary)).toBeUndefined();
+      expect(readText(text)).toBe("{}");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("capacitor.config.ts does not reference credentials", () => {
