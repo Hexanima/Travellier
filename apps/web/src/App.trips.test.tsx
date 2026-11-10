@@ -7,11 +7,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.js";
 import type { NativeSessionStorage } from "./auth/native-session-storage.js";
+import { getRememberedFilter, resetRememberedFilter } from "./trips/trips-filter-memory.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
+  resetRememberedFilter();
   await act(async () => roots.splice(0).forEach((root) => root.unmount()));
   document.body.replaceChildren();
 });
@@ -371,5 +373,52 @@ describe("App Trip routes", () => {
 
     expect(container.textContent).not.toContain("actividades existentes");
     expect(container.textContent).toContain("gastos anteriores se conservan");
+  });
+
+  describe("Active/Finished list", () => {
+    const dated = (id: string, name: string, endAt: string | null) =>
+      ({ id, name, description: null, primaryDestination: { name: "Destino" }, startAt: null, endAt });
+    const finishedTrip = dated(tripId, "Terminado", "2020-01-09T10:00:00.000Z");
+    const activeTrip = dated("507f191e810c19729de860eb", "Futuro", "2099-01-09T10:00:00.000Z");
+    const names = (container: HTMLElement) => [...container.querySelectorAll(".trips-item h2")].map((el) => el.textContent);
+    const tabButton = (container: HTMLElement, label: string) => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === label);
+    const backLink = (container: HTMLElement) => [...container.querySelectorAll("a")].find((a) => a.textContent === "Volver a mis viajes");
+
+    it("keeps Finalizados selected when coming back from a Trip with the back link", async () => {
+      const list = vi.fn().mockResolvedValue({ ok: true, value: [finishedTrip, activeTrip] });
+      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) });
+      expect(names(container)).toEqual(["Futuro"]);
+      await act(async () => tabButton(container, "Finalizados")?.click());
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/config"]`)?.click());
+      expect(container.textContent).toContain("Configuración del viaje");
+      await act(async () => backLink(container)?.click());
+      expect(tabButton(container, "Finalizados")?.getAttribute("aria-selected")).toBe("true");
+      expect(names(container)).toEqual(["Terminado"]);
+    });
+
+    it("forgets the selected tab when the session is closed", async () => {
+      const list = vi.fn().mockResolvedValue({ ok: true, value: [finishedTrip, activeTrip] });
+      const container = await render("/trips", true, { list });
+      await act(async () => tabButton(container, "Finalizados")?.click());
+      expect(getRememberedFilter()).toBe("finished");
+      await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Cerrar sesión")?.click());
+      expect(getRememberedFilter()).toBe("active");
+    });
+
+    it("moves a Trip between tabs after changing its transports and coming back", async () => {
+      const list = vi.fn()
+        .mockResolvedValueOnce({ ok: true, value: [dated(tripId, "Patagonia", "2099-01-09T10:00:00.000Z")] })
+        .mockResolvedValue({ ok: true, value: [dated(tripId, "Patagonia", "2020-01-09T10:00:00.000Z")] });
+      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) },
+        { listDestinations: async () => ({ ok: true, value: [] }), listTransports: async () => ({ ok: true, value: [] }) });
+      expect(names(container)).toEqual(["Patagonia"]);
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/journey"]`)?.click());
+      expect(container.textContent).toContain("Destinos y transportes");
+      await act(async () => backLink(container)?.click());
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(names(container)).toEqual([]);
+      await act(async () => tabButton(container, "Finalizados")?.click());
+      expect(names(container)).toEqual(["Patagonia"]);
+    });
   });
 });

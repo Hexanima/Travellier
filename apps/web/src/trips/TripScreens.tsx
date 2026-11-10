@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, TextField } from "../components/index.js";
-import { classifyTrips, nextBoundaryMs, type TripFilter } from "./trip-list-filter.js";
+import { classifyTrips, nextBoundaryMs, parseFilter, type TripFilter } from "./trip-list-filter.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
+import { getRememberedFilter, rememberFilter } from "./trips-filter-memory.js";
 import { useTripRefresh } from "./use-trip-refresh.js";
 
 type TripsListScreenProps = {
@@ -20,7 +21,16 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
   const [items, setItems] = useState<TripListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
-  const [filter, setFilter] = useState<TripFilter>("active");
+  // The tab lives in the URL (?filter=finished; Activos is the absence of the parameter) and, for the links back that carry no parameter, in the session memory.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rawFilter = searchParams.get("filter");
+  const filter: TripFilter = rawFilter === null ? getRememberedFilter() : parseFilter(rawFilter);
+  useEffect(() => { rememberFilter(filter); }, [filter]);
+  const selectFilter = (id: string) => {
+    const next = parseFilter(id);
+    rememberFilter(next);
+    setSearchParams(next === "finished" ? { filter: "finished" } : {}, { replace: true });
+  };
   const [nowMs, setNowMs] = useState(() => now());
   const nowRef = useRef(now);
   nowRef.current = now;
@@ -96,7 +106,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
           <Link className="trips-join-link" to="/trips/explore">Explorar viajes públicos</Link>
         </nav>
 
-        <Tabs idPrefix="trips-filter" label="Filtrar viajes" items={filterTabs} selected={filter} onSelect={(id) => setFilter(id as TripFilter)}>
+        <Tabs idPrefix="trips-filter" label="Filtrar viajes" items={filterTabs} selected={filter} onSelect={selectFilter}>
           {loading ? <LoadingState label="Cargando viajes…" /> : null}
           {!loading && loadError ? (
             <div className="trips-state">

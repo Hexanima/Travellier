@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripsListScreen } from "./TripScreens.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
+import { resetRememberedFilter } from "./trips-filter-memory.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +20,7 @@ const undated = mk("507f191e810c19729de86003", "Sin fechas", null, null);
 const roots: ReturnType<typeof createRoot>[] = [];
 
 afterEach(async () => {
+  resetRememberedFilter();
   await act(async () => roots.splice(0).forEach((root) => root.unmount()));
   document.body.replaceChildren();
 });
