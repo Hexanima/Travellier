@@ -92,7 +92,7 @@ describe("Trip screens", () => {
 
     expect(container.getAttribute("role")).toBeNull();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar tus viajes");
-    await act(async () => container.querySelector("button")?.click());
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Reintentar")?.click());
     expect(list).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Patagonia");
   });
