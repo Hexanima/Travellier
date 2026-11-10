@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { itineraryFixture } from "../trips/itinerary-test-fixture.js";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
-import { buildItineraryIcs } from "./ics.js";
+import { buildItineraryIcs, escapeText } from "./ics.js";
 
 const exportedAt = new Date("2026-11-10T12:34:56.789Z");
 const empty = (): TripItineraryResponse => ({ ...(itineraryFixture() as TripItineraryResponse), days: [], transports: [], activities: [] });
@@ -61,6 +61,46 @@ describe("ics base format", () => {
       const unfolded = unfold(text);
       expect(unfolded).toContain("SUMMARY:abcdefgh\r\n");
       expect(unfolded).toContain("DESCRIPTION:dabcdefgh\tz\r\n");
+    });
+    const controls = ["\u0001", "\u0007", "\u000c", "\u007f"];
+    const withControls = (word: string, code: string) => `${word.slice(0, 3)}${code}${word.slice(3)}`;
+    it("strips them from the destination name (band summary) and keeps the rest, accents included", () => {
+      for (const code of controls) {
+        const value = { ...(itineraryFixture() as TripItineraryResponse) };
+        value.destinations = value.destinations.map((destination, index) => (index === 0 ? { ...destination, name: withControls("Córdoba", code) } : destination));
+        const text = build("Viaje", value);
+        expect(hasControl(text)).toBe(false);
+        expect(unfold(text)).toContain("SUMMARY:Córdoba — actividades\r\n");
+      }
+    });
+    it("strips them from the transport origin and destination and keeps the rest", () => {
+      for (const code of controls) {
+        const value = { ...(itineraryFixture() as TripItineraryResponse) };
+        value.transports = value.transports.map((transport, index) => (index === 0
+          ? { ...transport, departurePlace: withControls("Buenos Aires", code), arrivalPlace: withControls("Córdoba", code) } : transport));
+        const text = build("Viaje", value);
+        expect(hasControl(text)).toBe(false);
+        expect(unfold(text)).toContain("SUMMARY:Auto: Buenos Aires → Córdoba\r\n");
+      }
+    });
+    it("LOCATION never carries controls: parseMapsLink rejects such a place first, so it falls back to coordinates", () => {
+      // parseMapsLink (placeFrom/isControl) discards any place with C0/DEL/C1, so a control can't reach LOCATION through the public
+      // function; escapeText is the second defense and is exercised directly in the next test.
+      for (const code of controls) {
+        const value = empty();
+        value.activities = [{ ...(itineraryFixture() as TripItineraryResponse).activities[0],
+          mapsUrl: `https://www.google.com/maps/place/Lugar${encodeURIComponent(code)}Raro/@-31.4,-64.2,15z` }];
+        const text = build("Viaje", value);
+        expect(hasControl(text)).toBe(false);
+        expect(unfold(text)).toContain("LOCATION:-31.4\\,-64.2\r\n");
+      }
+      const clean = empty();
+      clean.activities = [{ ...(itineraryFixture() as TripItineraryResponse).activities[0], mapsUrl: "https://www.google.com/maps/place/Lugar+Raro/@-31.4,-64.2,15z" }];
+      expect(unfold(build("Viaje", clean))).toContain("LOCATION:Lugar Raro\r\n");
+    });
+    it("escapeText (second defense for LOCATION) drops controls directly and keeps the rest", () => {
+      for (const code of controls) expect(escapeText(`Cór${code}doba, Ar`)).toBe("Córdoba\\, Ar");
+      expect(escapeText("a\tb\r\nc")).toBe("a\tb\\nc");
     });
   });
 });
