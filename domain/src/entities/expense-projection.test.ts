@@ -16,11 +16,14 @@ const activity = { id: id(6), dayId: id(4), scheduledAt: at("2026-09-25T12:00:00
 
 describe("attributeExpense", () => {
   it("attributes to the root activity scheduledAt and keeps the publication instant", () => {
-    const result = attributeExpense({ expense: expense(1), post, rootPostId: id(50), activity, publicationDayId: id(9) });
+    const input = { expense: expense(1), post, rootPostId: id(50), activity, publicationDayId: id(9) };
+    const before = structuredClone(input);
+    const result = attributeExpense(input);
     expect(result).toEqual({ expenseId: id(1), postId: id(101), rootPostId: id(50), source: "activity", rootActivityId: id(6),
       occurredAt: activity.scheduledAt, publishedAt: post.createdAt, dayId: id(4), currency: "ARS", amountCents: 1000 });
     expect(result.occurredAt).not.toBe(activity.scheduledAt);
-    expect(post.createdAt.toISOString()).toBe("2026-09-26T23:30:00.123Z");
+    expect(result.publishedAt.toISOString()).toBe("2026-09-26T23:30:00.123Z");
+    expect(input).toEqual(before);
   });
   it("attributes to its own publication without an activity, and null day outside every slice", () => {
     expect(attributeExpense({ expense: expense(1), post, rootPostId: post.id, activity: null, publicationDayId: id(9) }))
