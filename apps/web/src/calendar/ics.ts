@@ -1,4 +1,5 @@
 import { activityEndsAt } from "app-domain";
+import { parseMapsLink } from "../trips/maps-link.js";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
 
 /** Pure iCalendar (RFC 5545) builder: no Intl, no local zone, no I/O. Everything is UTC. */
@@ -32,7 +33,18 @@ const wholeSeconds = (instant: Date) => Math.floor(instant.getTime() / 1000);
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" } as const;
 const fallbackTripName = "Viaje Travellier";
 
-type IcsEvent = { kind: "activity" | "day" | "transport"; id: string; start: Date; end: Date | null; summary: string; description?: string };
+type IcsEvent = { kind: "activity" | "day" | "transport"; id: string; start: Date; end: Date | null; summary: string; description?: string; location?: string; url?: string };
+
+/**
+ * Place from the stored maps link, never resolved nor copied raw: LOCATION is the extracted place, or `lat,lng` when only
+ * coordinates exist; URL is the normalized link. A shortener only gives URL; an invalid or empty link gives nothing.
+ */
+function placeOf(mapsUrl: string | null | undefined): Pick<IcsEvent, "location" | "url"> {
+  const link = parseMapsLink(mapsUrl);
+  if (link.kind !== "valid") return {};
+  const location = link.place ?? (link.coordinates ? `${link.coordinates.lat},${link.coordinates.lng}` : undefined);
+  return { ...(location !== undefined ? { location } : {}), url: link.url };
+}
 
 /** `end` only when it is a real instant after the start at the second resolution of the format; never invented. */
 const endAfter = (start: Date, end: Date | null) => end !== null && Number.isFinite(end.getTime()) && wholeSeconds(end) > wholeSeconds(start) ? end : null;
@@ -49,7 +61,7 @@ function collectEvents(itinerary: TripItineraryResponse): IcsEvent[] {
   for (const activity of itinerary.activities) {
     const start = new Date(activity.scheduledAt);
     add({ kind: "activity", id: activity.id, start, end: endAfter(start, activityEndsAt({ scheduledAt: start, durationMinutes: activity.durationMinutes })),
-      summary: activity.title, ...(activity.description ? { description: activity.description } : {}) });
+      summary: activity.title, ...(activity.description ? { description: activity.description } : {}), ...placeOf(activity.mapsUrl) });
   }
   // One band per canonical activity day (UTC, stable id); transit days are not bands: the transport is already an event.
   for (const day of itinerary.days) {
@@ -78,8 +90,18 @@ export function buildItineraryIcs({ tripName, itinerary, exportedAt }: BuildIcsI
     if (event.end) lines.push(`DTEND:${formatUtc(event.end)}`);
     lines.push(`SUMMARY:${escapeText(event.summary)}`);
     if (event.description) lines.push(`DESCRIPTION:${escapeText(event.description)}`);
+    if (event.location) lines.push(`LOCATION:${escapeText(event.location)}`);
+    // URL is a URI value, not TEXT: the normalized href has no spaces or newlines and escaping would corrupt it.
+    if (event.url) lines.push(`URL:${event.url}`);
     lines.push("END:VEVENT");
   }
   lines.push("END:VCALENDAR");
   return lines.map(foldLine).join("\r\n") + "\r\n";
+}
+
+/** `travellier-<slug>.ics`: accents folded, anything that is not a letter or digit (paths, controls, emoji) becomes a separator. */
+export function icsFileName(tripName: string): string {
+  const slug = tripName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    .slice(0, 60).replace(/-+$/, "");
+  return `travellier-${slug || "viaje"}.ics`;
 }
