@@ -8,8 +8,9 @@ export type DownloadDeps = {
 };
 export type DownloadResult = { ok: true } | { ok: false };
 
+/** Reads globals through `globalThis` so a missing `Blob` or `URL` is `undefined` (handled below) instead of a ReferenceError. */
 const defaultDeps = (): DownloadDeps => ({
-  Blob, url: URL, document, defer: (task) => { setTimeout(task, 1000); },
+  Blob: globalThis.Blob, url: globalThis.URL, document: globalThis.document, defer: (task) => { setTimeout(task, 1000); },
 });
 
 /** Never trusts the name: only letters, digits, `_` and `-` survive, plus the fixed `.ics` extension. */
@@ -19,10 +20,11 @@ function safeFileName(name: string): string {
 }
 
 /** Returns `{ ok: false }` instead of throwing when the platform cannot create or open the file. */
-export function downloadIcs(text: string, fileName: string, deps: DownloadDeps = defaultDeps()): DownloadResult {
+export function downloadIcs(text: string, fileName: string, deps?: DownloadDeps): DownloadResult {
   let objectUrl: string;
   try {
-    if (!deps.url) return { ok: false };
+    deps ??= defaultDeps();
+    if (!deps.url || !deps.Blob || typeof deps.url.createObjectURL !== "function") return { ok: false };
     objectUrl = deps.url.createObjectURL(new deps.Blob([text], { type: "text/calendar;charset=utf-8" }));
   } catch { return { ok: false }; }
   const release = () => deps.defer(() => { try { deps.url?.revokeObjectURL(objectUrl); } catch { /* nothing left to release */ } });

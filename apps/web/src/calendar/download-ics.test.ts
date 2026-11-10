@@ -55,8 +55,33 @@ describe("downloadIcs", () => {
     expect(anchor.remove).toHaveBeenCalled();
     expect(deps.url!.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:fake-1");
   });
-  it("returns ok:false when the platform has no Blob or URL support", () => {
-    const { deps } = setup();
+  it("returns ok:false when the platform has no URL support, creating no anchor", () => {
+    const { deps, anchor } = setup();
     expect(downloadIcs("x", "a.ics", { ...deps, url: undefined })).toEqual({ ok: false });
+    expect(anchor.click).not.toHaveBeenCalled();
+  });
+  it("returns ok:false when URL exists but has no createObjectURL, creating no anchor", () => {
+    const { deps, anchor } = setup();
+    expect(downloadIcs("x", "a.ics", { ...deps, url: { revokeObjectURL: vi.fn() } as unknown as DownloadDeps["url"] })).toEqual({ ok: false });
+    expect(anchor.click).not.toHaveBeenCalled();
+  });
+  it("returns ok:false when the platform has no Blob, creating no anchor", () => {
+    const { deps, anchor } = setup();
+    expect(downloadIcs("x", "a.ics", { ...deps, Blob: undefined as unknown as typeof Blob })).toEqual({ ok: false });
+    expect(deps.url!.createObjectURL).not.toHaveBeenCalled();
+    expect(anchor.click).not.toHaveBeenCalled();
+  });
+  describe("with the default platform dependencies", () => {
+    const removed = (name: "Blob" | "URL", task: () => void) => {
+      const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)!;
+      Reflect.deleteProperty(globalThis, name);
+      try { task(); } finally { Object.defineProperty(globalThis, name, descriptor); }
+    };
+    it("does not throw and returns ok:false when Blob is not defined at all", () => {
+      removed("Blob", () => { expect(downloadIcs("x", "a.ics")).toEqual({ ok: false }); });
+    });
+    it("does not throw and returns ok:false when URL is not defined at all", () => {
+      removed("URL", () => { expect(downloadIcs("x", "a.ics")).toEqual({ ok: false }); });
+    });
   });
 });
