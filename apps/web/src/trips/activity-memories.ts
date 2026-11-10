@@ -49,7 +49,7 @@ export const memoryThumbnails = (memories: readonly ItineraryPostResponse[], pho
   const pending = new Set<string>();
   if (!hasMore) return { thumbnails, pending };
   const last = photos[photos.length - 1];
-  const frontier = last ? memories.find((item) => item.id === last.postId) : undefined;
+  const frontier = last ? { id: last.postId, createdAt: last.post.createdAt } : undefined;
   for (const item of memories) {
     if (thumbnails.has(item.id)) continue;
     // Certain only if the last loaded photo is of a post strictly older than this one: the gallery passed it without finding photos.

@@ -21,15 +21,15 @@ const fail = (kind: string) => ({ ok: false as const, error: { kind } });
 
 let api: GalleryPages;
 let go: NavigateFunction = () => undefined;
-function Probe({ filter }: { filter?: GalleryFilter }) { api = useGalleryPages(filter); return <p>{api.photos.length}</p>; }
+function Probe({ filter, reuse }: { filter?: GalleryFilter; reuse?: boolean }) { api = useGalleryPages(filter, reuse === undefined ? undefined : { reuse }); return <p>{api.photos.length}</p>; }
 function Nav() { go = useNavigate(); return null; }
-async function mount(list: ReturnType<typeof vi.fn>, options: { state?: unknown; now?: () => number; filter?: GalleryFilter } = {}) {
+async function mount(list: ReturnType<typeof vi.fn>, options: { state?: unknown; now?: () => number; filter?: GalleryFilter; reuse?: boolean } = {}) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const now = options.now ?? (() => NOW);
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state: options.state }]}><Nav />
     <GalleryProvider list={list as never} now={now}><Routes>
-      <Route path="/trips/:tripId/memories/photos" element={<Probe filter={options.filter} />} />
+      <Route path="/trips/:tripId/memories/photos" element={<Probe filter={options.filter} reuse={options.reuse} />} />
       <Route path="/elsewhere" element={<p>otra</p>} />
     </Routes></GalleryProvider></MemoryRouter>));
   return container;
@@ -132,6 +132,29 @@ describe("useGalleryPages", () => {
     await act(async () => go("/elsewhere"));
     await act(async () => go(path, { state: { restore: { anchor: `data-photo=${itineraryId(5)}`, scrollY: 3, panel: "photos" } } }));
     expect(list).toHaveBeenCalledTimes(2);
+  });
+  it("with reuse:false it asks page 1 again even when coming back with a restore or an open photo; the default keeps reusing", async () => {
+    const filter = { activityId: itineraryId(8) };
+    const list = vi.fn().mockResolvedValue(page([photo(5)], "c1"));
+    await mount(list, { filter, reuse: false });
+    expect(list).toHaveBeenCalledTimes(1);
+    await act(async () => go("/elsewhere"));
+    await act(async () => go(path, { state: { photo: itineraryId(5) } }));
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(list).toHaveBeenLastCalledWith(tripId, filter);
+    await act(async () => go("/elsewhere"));
+    await act(async () => go(path, { state: { restore: { anchor: `data-photo=${itineraryId(5)}`, scrollY: 3 } } }));
+    expect(list).toHaveBeenCalledTimes(3);
+    expect(api.phase).toBe("idle");
+  });
+  it("an activity filter with the default option still reuses its snapshot when coming back with an open photo", async () => {
+    const filter = { activityId: itineraryId(8) };
+    const list = vi.fn().mockResolvedValue(page([photo(5)], null));
+    await mount(list, { filter });
+    await act(async () => go("/elsewhere"));
+    await act(async () => go(path, { state: { photo: itineraryId(5) } }));
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(ids()).toEqual([itineraryId(5)]);
   });
   it("shows the snapshot and then refreshes only the expired pages, each with its own cursor, one after another", async () => {
     let clock = NOW;

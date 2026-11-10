@@ -39,7 +39,7 @@ export type GalleryPages = {
  * runs in parallel. Results of a request whose cursor is no longer the current one are discarded.
  */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
+export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { reuse?: boolean } = {}): GalleryPages {
   const context = useContext(Context);
   if (!context) throw new Error("useGalleryPages needs a GalleryProvider");
   const { store, list, now } = context;
@@ -48,7 +48,8 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
   const key = filterKey(filter);
   const { activityId, transportId } = filter;
   // Read once: only an entry that comes back (restore or open viewer) may reuse the snapshot; a fresh entry asks for page 1.
-  const [reusable] = useState(() => readRestore(location.state) !== undefined || readPhoto(location.state) !== undefined);
+  // `reuse: false` (the activity filter) always asks page 1, so a relink or a removal made meanwhile is never hidden by an old snapshot.
+  const [reusable] = useState(() => reuse && (readRestore(location.state) !== undefined || readPhoto(location.state) !== undefined));
   const [state, setState] = useState<State>({ pages: [], phase: "initial-loading", refreshFailed: false, failed: new Set() });
   const stateRef = useRef(state);
   const generation = useRef(0);
