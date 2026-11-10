@@ -1,4 +1,4 @@
-import { NativeCapabilityError, err, ok, type NativePermissionState, type NativePushHandlers, type NativePushToken, type PushRegistrationPort } from "app-domain";
+import { NativeCapabilityError, err, ok, type NativePermissionState, type NativePushHandlers, type NativePushToken, type PushRegistrationPort, type StopNativePushListening } from "app-domain";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PushDeviceApi } from "./push-device-api.js";
 import { createPushDeviceService, type PushDeviceService } from "./push-device-service.js";
@@ -10,13 +10,13 @@ const record = (tokenHint: string) => ({ ok: true as const, value: { id: "a".rep
 
 const setup = (permission: NativePermissionState = "granted", requested: NativePermissionState = "granted") => {
   let handlers: NativePushHandlers = {};
-  const stop = vi.fn(async () => ok(undefined));
+  const stop = vi.fn<() => Promise<Awaited<ReturnType<StopNativePushListening>>>>(async () => ok(undefined));
   const port = {
-    checkPermission: vi.fn(async () => ok(permission)),
+    checkPermission: vi.fn<PushRegistrationPort["checkPermission"]>(async () => ok(permission)),
     requestPermission: vi.fn(async () => ok(requested)),
-    register: vi.fn(async () => ok(undefined)),
+    register: vi.fn<PushRegistrationPort["register"]>(async () => ok(undefined)),
     unregister: vi.fn(async () => ok(undefined)),
-    listen: vi.fn(async (value: NativePushHandlers) => { handlers = value; return ok(stop); }),
+    listen: vi.fn<PushRegistrationPort["listen"]>(async (value: NativePushHandlers) => { handlers = value; return ok(stop); }),
   } satisfies PushRegistrationPort;
   const api = {
     register: vi.fn(async (input: { token: string }) => record(`****${input.token.slice(-4)}`)),
@@ -307,7 +307,7 @@ describe("push device service: logout and session changes", () => {
   it("without any registration it does not touch the plugin at all", async () => {
     const { port, service } = setup();
     expect(await service.revokeBeforeLogout()).toEqual({ revoked: false });
-    expect(state(service)).toBe("off");
+    expect(state(service)).toBe("unsupported");
     expect(port.unregister).not.toHaveBeenCalled();
     expect(port.requestPermission).not.toHaveBeenCalled();
   });
