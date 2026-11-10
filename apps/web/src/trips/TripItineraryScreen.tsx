@@ -18,6 +18,9 @@ import { useRestorePosition } from "./use-restore-position.js";
 import { itineraryAnchor, noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import { ActivityMemories } from "./ActivityMemories.js";
 import { readActivityParams, type ActivityTab } from "./activity-memories.js";
+import { TransportDialog } from "./TransportDialog.js";
+import { TransportMemories } from "./TransportMemories.js";
+import { readTransportParams, transportLabels } from "./transport-detail.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
@@ -34,7 +37,6 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
   calendarSync?: CalendarSyncService };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
-const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 /** Attribution of an expense as the server read it: where it was counted (activity or publication) and when it happened. */
 type Attribution = { source: "activity" | "publication"; occurredAt: string; publishedAt: string };
@@ -65,7 +67,9 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   locationRef.current = location;
   // The detail of an activity lives in the URL (`?activity=<id>&tab=memories|photos`) so a return from a memory restores it; creating stays local.
   // Changes replace the entry and keep its state (a restore or an open viewer), so «Atrás» leaves the itinerary exactly as before.
+  // The detail of a transport works the same way (`?transport=<id>&tab=`); an activity and a transport together in the URL open neither.
   const { activityId: urlActivity, tab } = readActivityParams(location.search);
+  const { transportId: urlTransport } = readTransportParams(location.search);
   const [creating, setCreating] = useState<Extract<ActivityDialogRequest, { kind: "create" }>>();
   const detail = useMemo<ActivityDialogRequest | undefined>(() => urlActivity ? { kind: "detail", activityId: urlActivity } : undefined, [urlActivity]);
   const dialog = creating ?? detail;
@@ -77,10 +81,11 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
     navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, { replace: true, state: current.state });
   };
   const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); });
+  const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); });
   const closeDialog = () => {
     setCreating(undefined);
     const params = new URLSearchParams(locationRef.current.search);
-    if (params.has("activity") || params.has("tab")) updateParams((next) => { next.delete("activity"); next.delete("tab"); });
+    if (params.has("activity") || params.has("transport") || params.has("tab")) updateParams((next) => { next.delete("activity"); next.delete("transport"); next.delete("tab"); });
   };
   const [panelSettled, setPanelSettled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -170,11 +175,22 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   };
   const dialogParticipation = dialog?.kind === "detail" ? participation.states[dialog.activityId] : undefined;
   // With the dialog open in the URL the position is restored once its panel is on screen (the focus target is inside it).
-  const awaitsPanel = members !== undefined && activities !== undefined && urlActivity !== undefined && creating === undefined;
+  const urlTransportEntry = state.kind === "ready" && creating === undefined && urlTransport !== undefined ? state.value.transports.find((item) => item.id === urlTransport) : undefined;
+  const awaitsPanel = members !== undefined && creating === undefined && ((activities !== undefined && urlActivity !== undefined) || urlTransportEntry !== undefined);
   useRestorePosition(state.kind === "ready" && (!awaitsPanel || panelSettled));
   // An id in the URL that the itinerary does not have: the dialog cannot open. The URL is cleaned first (onRemoved), then the itinerary is refreshed once.
   const missingActivity = state.kind === "ready" && activities !== undefined && creating === undefined && urlActivity !== undefined && !removedIds.current.has(urlActivity) && !state.value.activities.some((a) => a.id === urlActivity) ? urlActivity : undefined;
   useEffect(() => { if (missingActivity) onRemoved(missingActivity, "gone"); }, [missingActivity]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Same for a transport: an id the itinerary does not have (removed, or access revoked) opens nothing; the URL is cleaned and the itinerary refreshed once.
+  const removedTransportIds = useRef(new Set<string>());
+  const onTransportGone = (transportId: string) => {
+    removedTransportIds.current.add(transportId);
+    setSaved(false);
+    setNotice({ text: "El transporte ya no existe.", variant: "info" });
+    closeDialog(); setAttempt((value) => value + 1);
+  };
+  const missingTransport = state.kind === "ready" && creating === undefined && urlTransport !== undefined && urlTransportEntry === undefined && !removedTransportIds.current.has(urlTransport) ? urlTransport : undefined;
+  useEffect(() => { if (missingTransport) onTransportGone(missingTransport); }, [missingTransport]); // eslint-disable-line react-hooks/exhaustive-deps
   const setTab = (next: ActivityTab) => updateParams((params) => { params.set("tab", next); });
   const view = useMemo(() => state.kind === "ready" ? projectItineraryView(state.value, timeZone) : undefined, [state, timeZone]);
   const { days, outsidePosts } = view ?? { days: [], outsidePosts: [] };
@@ -249,7 +265,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
                 {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
-                  disabled={refreshing} onActivity={activities ? openDetail : undefined} />)}
+                  disabled={refreshing} onActivity={activities ? openDetail : undefined} onTransport={openTransport} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
             </section>)}
           </div>
@@ -290,19 +306,23 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
           activityTitle={state.value.activities.find((activity) => activity.id === dialog.activityId)?.title ?? "esta actividad"}
           itinerary={state.value} members={members} timeZone={timeZone} tab={tab} onTab={setTab}
           onGone={() => onRemoved(dialog.activityId, "gone")} onSettled={() => setPanelSettled(true)} /> : undefined} /> : null}
+      {state.kind === "ready" && !dialog && urlTransportEntry ? <TransportDialog key={urlTransportEntry.id} transport={urlTransportEntry} itinerary={state.value}
+        timeZone={timeZone} onClose={closeDialog}
+        memories={members ? <TransportMemories tripId={tripId ?? ""} transportId={urlTransportEntry.id} itinerary={state.value} members={members} timeZone={timeZone}
+          tab={tab} onTab={setTab} onGone={() => onTransportGone(urlTransportEntry.id)} onSettled={() => setPanelSettled(true)} /> : undefined} /> : null}
     </div>
   </main>;
 }
 
-function AgendaItem({ tripId, item, publication, timeZone, attributions, onActivity, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+function AgendaItem({ tripId, item, publication, timeZone, attributions, onActivity, onTransport, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
   attributions: ReadonlyMap<string, Attribution>;
-  onActivity?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
+  onActivity?: (id: string) => void; onTransport?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
   const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
   return <ListItem className="itinerary-item" data-itinerary-item={item.id}>
     <time className="itinerary-item-time" dateTime={item.at}>{range?.start ?? formatActivityClock(item.at, timeZone)}</time>
     <div className="itinerary-item-content">
       {item.kind === "transport" ? <>
-        <h4>{transportLabels[item.transport.type]}</h4>
+        <h4>{onTransport ? <Button className="transport-title" disabled={disabled} onClick={() => onTransport(item.id)}>{transportLabels[item.transport.type]}</Button> : transportLabels[item.transport.type]}</h4>
         <p>{item.transport.departurePlace} → {item.transport.arrivalPlace}</p>
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>

@@ -42,7 +42,7 @@ const save = async (container: HTMLElement) => act(async () => container.querySe
 describe("itinerary activity flows", () => {
   it("creates from an enabled band and displays the saved activity chronologically", async () => {
     const { container, create, getItinerary } = await render();
-    expect(container.querySelectorAll('[data-itinerary-kind="transit_out"] button,[data-itinerary-kind="transit_return"] button')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-itinerary-kind="transit_out"] button:not(.transport-title),[data-itinerary-kind="transit_return"] button:not(.transport-title)')).toHaveLength(0);
     await click(container, "Crear actividad");
     await field(container, "title", "Nueva actividad"); await field(container, "time", "10:30"); await save(container);
     expect(create).toHaveBeenCalledOnce(); expect(getItinerary).toHaveBeenCalledTimes(2);

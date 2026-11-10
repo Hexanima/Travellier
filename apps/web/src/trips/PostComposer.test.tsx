@@ -986,6 +986,49 @@ describe("PostComposer (continuation from a memory detail)", () => {
     });
 });
 
+describe("PostComposer (share a memory of a transport)", () => {
+  const itineraryPath = `/trips/${tripId}/itinerary`;
+  const itinerarySearch = `?transport=${transportId}&tab=photos`;
+  const origin = { path: itineraryPath, search: itinerarySearch, label: "transporte" };
+  const entry = (state: unknown = { origin }) => ({ pathname: newPath, search: `?transportId=${transportId}`, state });
+  const itineraryEntry = { pathname: itineraryPath, search: itinerarySearch };
+  const origins = (container: HTMLElement) => container.querySelector('[data-testid="activity-origin"]')?.textContent ?? "";
+
+  it("preloads the transport without a third link selector and publishes only the transportId", async () => {
+    const { container, create } = await render([itineraryEntry, entry()]);
+    expect(container.textContent).toContain("Vinculado a un transporte");
+    expect(Array.from(container.querySelectorAll("button")).filter((item) => item.textContent === "Vincular a")).toHaveLength(1);
+    await field(container, "description", "En el micro"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "En el micro", transportId });
+  });
+  it("Cancelar with history steps back one entry to the transport dialog URL", async () => {
+    const { container } = await render([itineraryEntry, entry()]);
+    await click(button(container, "Cancelar"));
+    expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+    await click(button(document.body, "adelante"));
+    expect(container.querySelector('[name="description"]')).not.toBeNull();
+  });
+  it("Cancelar without history replaces the entry with the dialog URL and marks that nothing is behind", async () => {
+    const { container } = await render([entry()]);
+    await click(button(container, "Cancelar"));
+    expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+    expect(origins(container)).toContain('"noBack":true');
+    await click(button(document.body, "adelante"));
+    expect(container.querySelector('[name="description"]')).toBeNull();
+  });
+  it.each([
+    ["a malformed origin", { origin: { path: itineraryPath, search: "?transport=1#x", label: "transporte" } }],
+    ["another trip", { origin: { path: `/trips/${otherTripId}/itinerary`, search: itinerarySearch, label: "transporte" } }],
+    ["an invented label", { origin: { path: itineraryPath, search: itinerarySearch, label: "transportes" } }],
+    ["no origin", null],
+  ])("goes to the diary with %s", async (_name, state) => {
+    const { container } = await render(entry(state));
+    await click(button(container, "Cancelar"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="activity-origin"]')).toBeNull();
+  });
+});
+
 describe("PostComposer (share a memory of an activity)", () => {
   const itineraryPath = `/trips/${tripId}/itinerary`;
   const itinerarySearch = `?activity=${activityId}&tab=photos`;

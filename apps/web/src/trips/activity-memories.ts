@@ -4,15 +4,15 @@ import type { GalleryPhoto } from "./trip-gallery-api.js";
 export type ActivityTab = "memories" | "photos";
 const idPattern = /^[0-9a-f]{24}$/;
 
-/** `?activity=<id>&tab=memories|photos`: an invalid id is dropped and an invalid or missing tab is «Recuerdos». */
+/** `?activity=<id>&tab=memories|photos` (ignored when `transport` coexists): an invalid id is dropped and an invalid or missing tab is «Recuerdos». */
 export const readActivityParams = (search: string): { activityId: string | undefined; tab: ActivityTab } => {
   const params = new URLSearchParams(search);
   const activity = params.get("activity");
-  return { activityId: activity !== null && idPattern.test(activity) ? activity : undefined, tab: params.get("tab") === "photos" ? "photos" : "memories" };
+  return { activityId: activity !== null && idPattern.test(activity) && !params.has("transport") ? activity : undefined, tab: params.get("tab") === "photos" ? "photos" : "memories" };
 };
 
 /** Publication order of the diary: newest first, ties by id descending (plain comparison, not locale-aware). */
-const newerFirst = (a: Pick<ItineraryPostResponse, "id" | "createdAt">, b: Pick<ItineraryPostResponse, "id" | "createdAt">) => {
+export const newerFirst = (a: Pick<ItineraryPostResponse, "id" | "createdAt">, b: Pick<ItineraryPostResponse, "id" | "createdAt">) => {
   const diff = Date.parse(b.createdAt) - Date.parse(a.createdAt);
   if (diff !== 0) return diff;
   return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;

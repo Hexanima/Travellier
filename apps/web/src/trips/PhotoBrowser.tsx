@@ -22,7 +22,7 @@ export type PhotoBrowserProps = {
   /** Accessible name of the grid. */
   label: string;
   /** Where a post opened from the viewer returns to: the photos page or the activity dialog. */
-  originLabel: "fotos" | "actividad";
+  originLabel: "fotos" | "actividad" | "transporte";
   /** Content of the empty state (shown when the gallery is loaded and has no photos). */
   empty: ReactNode;
   /** Stable element that receives the focus when the list restarts from page 1 (the page heading or the photos tab). */

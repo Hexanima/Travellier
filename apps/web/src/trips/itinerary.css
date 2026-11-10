@@ -44,8 +44,14 @@
 .itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-primary, currentColor); outline-offset: 4px; }
 .itinerary-shell ::selection { color: #fff; background: var(--ui-color-accent); }
 .activity-create { margin-bottom: var(--ui-space-4); }
-.activity-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
-.activity-title.ui-button:hover:not(:disabled) { color: var(--ui-color-text); }
+.activity-title.ui-button, .transport-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
+.activity-title.ui-button:hover:not(:disabled), .transport-title.ui-button:hover:not(:disabled) { color: var(--ui-color-text); }
+.transport-steps, .transport-days { margin: 0; padding-inline-start: var(--ui-space-4); display: grid; gap: var(--ui-space-2); line-height: 1.5; }
+.transport-facts { margin: 0; display: grid; gap: var(--ui-space-2); }
+.transport-facts div { display: flex; gap: var(--ui-space-2); }
+.transport-facts dt { font-weight: 600; }
+.transport-facts dd { margin: 0; overflow-wrap: anywhere; }
+.transport-dialog h3 { outline-offset: 2px; }
 .activity-form, .activity-detail { display: grid; gap: var(--ui-space-4); }
 .activity-detail h3, .activity-detail p, .activity-context { margin: 0; line-height: 1.5; }
 .activity-context { color: #526270; font-size: .875rem; }
