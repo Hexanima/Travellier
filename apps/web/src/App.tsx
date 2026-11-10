@@ -9,11 +9,15 @@ import { createHttpClient } from './api/index.js'
 import { AuthScreen } from './auth/AuthScreen.js'
 import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/auth-api.js'
 import { createNativeSessionStorage, type NativeSessionStorage } from './auth/native-session-storage.js'
-import { Button, LoadingState } from './components/index.js'
+import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { createPhotoFileReader } from './native/photo-file.js'
+import { NotificationsScreen } from './notifications/NotificationsScreen.js'
+import { createNotificationOpener, type NotificationOpener, type SessionStatus } from './notifications/notification-opener.js'
+import { createTripNotificationApi, type TripNotificationApi } from './notifications/trip-notification-api.js'
+import type { PushRegistrationPort } from 'app-domain'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { PushNotices } from './push/PushNotices.js'
 import { createPushDeviceApi, type PushDeviceApi } from './push/push-device-api.js'
@@ -76,6 +80,10 @@ type AppProps = {
   push?: PushDeviceService
   /** Push device endpoints; the default uses the authenticated client. */
   pushDevices?: Partial<PushDeviceApi>
+  /** Personal notices (GET /notifications); the default uses the authenticated client. */
+  notifications?: Partial<TripNotificationApi>
+  /** Port the notice opener listens on; by default it exists only on a native platform (inert on the web). */
+  noticePort?: Pick<PushRegistrationPort, 'listen'>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -98,7 +106,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -123,6 +131,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultGallery = useRef<TripGalleryApi | undefined>(undefined)
   const defaultDevicePhotos = useRef<Partial<Omit<PostPhotoDeps, 'api'>>>({})
   const defaultPushDevices = useRef<PushDeviceApi | undefined>(undefined)
+  const defaultNotifications = useRef<TripNotificationApi | undefined>(undefined)
+  const opener = useRef<NotificationOpener | undefined>(undefined)
+  // Bumped when a notice arrives in the foreground: the open center reloads and, elsewhere, a non intrusive announcement appears.
+  const [noticeSignal, setNoticeSignal] = useState(0)
+  const [noticeAnnounced, setNoticeAnnounced] = useState(false)
   const defaultPush = useRef<PushDeviceService | undefined>(undefined)
   const pushRef = useRef<PushDeviceService | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
@@ -148,6 +161,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         if (requestAccessToken !== (session.current?.accessToken ?? null)) return
         // A 401 leaves no authentication to revoke with: forget the push registration locally.
         pushRef.current?.reset()
+        // The rejected session is over: neither its foreground announcement nor an action waiting for a session survives it (it could be opened by another account).
+        if (session.current !== undefined) opener.current?.discard()
+        setNoticeAnnounced(false)
         session.current = undefined
         setHasSession(false)
       },
@@ -166,6 +182,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultPhotos.current = createTripPhotoApi(client)
     defaultGallery.current = createTripGalleryApi(client)
     defaultPushDevices.current = createPushDeviceApi(client)
+    defaultNotifications.current = createTripNotificationApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -181,6 +198,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeBalance = balance ?? defaultBalance.current
   const activePhotos = photos ?? defaultPhotos.current
   const activeGallery = gallery ?? defaultGallery.current
+  const activeNotifications = notifications ?? defaultNotifications.current
+  // Stable reference: the notices hook depends on it.
+  const tripNotifications = useMemo<TripNotificationApi>(() => ({
+    list: activeNotifications?.list ?? (async () => ({ ok: false as const, error: { kind: 'server' as const } })),
+  }), [activeNotifications])
   // Inert outside a native platform; building the service has no plugin or permission side effects.
   if (push === undefined && defaultPush.current === undefined && Capacitor.isNativePlatform()) {
     const failed = async () => ({ ok: false as const, error: { kind: 'server' as const } })
@@ -265,6 +287,31 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     updateTransport: activeJourney?.updateTransport ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeJourney])
 
+  const navigateRef = useRef(navigate)
+  navigateRef.current = navigate
+  const sessionStatus: SessionStatus = !sessionReady ? 'restoring' : hasSession ? 'active' : 'none'
+  const sessionStatusRef = useRef(sessionStatus)
+  sessionStatusRef.current = sessionStatus
+
+  // The opener listens as early as possible (before the session is restored) and queues what arrives until there is one.
+  // Inert on the web and in jsdom: it needs a native platform or an injected port.
+  useEffect(() => {
+    const port = noticePort ?? (Capacitor.isNativePlatform() ? createCapacitorCapabilities().push : undefined)
+    if (!port) return
+    const created = createNotificationOpener({
+      port,
+      navigate: (path, options) => navigateRef.current(path, options),
+      onOpen: () => { deepLinkReceived.current = true },
+      onForeground: () => { setNoticeSignal((value) => value + 1); setNoticeAnnounced(true) },
+    })
+    created.setSession(sessionStatusRef.current)
+    opener.current = created
+    void created.start()
+    return () => { if (opener.current === created) opener.current = undefined; void created.stop() }
+  }, [noticePort])
+  useEffect(() => { opener.current?.setSession(sessionStatus) }, [sessionStatus])
+  useEffect(() => { if (location.pathname === '/notifications') setNoticeAnnounced(false) }, [location.pathname])
+
   useEffect(() => {
     if (!hasApiConfiguration || restoredSession.current) {
       return
@@ -302,6 +349,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       }
 
       if (result?.error.kind === 'unauthorized') {
+        // A rejected refresh at cold start drops the pending action: the client does not know the notice's account.
+        opener.current?.discard()
         await queueStorageOperation(() => storage.clear())
         return
       }
@@ -329,6 +378,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
+    // With a previous session (possibly another account) a notice waiting for a session is not retaken.
+    if (session.current !== undefined) opener.current?.discard()
+    setNoticeAnnounced(false)
     // With a previous session, revoke its device registration while its bearer is still the active one.
     if (session.current !== undefined) await revokePush()
     await queueStorageOperation(() => storage.save(authenticatedSession))
@@ -341,6 +393,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   const onLocalLogout = async () => {
     sessionRevision.current += 1
+    opener.current?.discard()
+    setNoticeAnnounced(false)
     // The device token is revoked with the outgoing bearer before the session is dropped.
     await revokePush()
     session.current = undefined
@@ -356,6 +410,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   return (
     <>
       <AppUrlListener nativeApp={nativeApp} onNavigate={() => { deepLinkReceived.current = true }} onReady={() => setLaunchChecked(true)} />
+      {hasSession && noticeAnnounced && location.pathname !== '/notifications'
+        ? <Feedback variant="info">Tenés un aviso nuevo. <Link to="/notifications">Ver avisos</Link> <Button onClick={() => setNoticeAnnounced(false)}>Descartar</Button></Feedback>
+        : null}
       <Routes>
         <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
@@ -426,6 +483,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           <Route path=":postId/edit/expense/split" element={<ExpenseSplitForm posts={tripPosts} members={tripMembers} />} />
         </Route>
         </Route>
+        <Route path="/notifications" element={
+          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
+            <NotificationsScreen notifications={tripNotifications} refreshSignal={noticeSignal} />
+          </TripRoute>
+        } />
         <Route path="/profile" element={
           !sessionReady
             ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>

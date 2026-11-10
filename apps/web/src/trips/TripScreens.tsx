@@ -94,6 +94,8 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
 
         <nav className="trips-secondary" aria-label="Cuenta">
           <Link to="/profile">Mi perfil</Link>
+          {/* Provisional entry to the notices center: T98 gives it its place in the final navigation. */}
+          <Link to="/notifications">Avisos</Link>
           <Button onClick={() => void logout()} aria-disabled={closingSession || undefined}>
             {closingSession ? "Cerrando sesión…" : "Cerrar sesión"}
           </Button>

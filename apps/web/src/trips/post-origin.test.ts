@@ -136,3 +136,28 @@ describe("post origin: photo gallery", () => {
     for (const state of [null, undefined, {}, { photo: "x" }, { photo: 5 }, { photo: `${photoId}0` }, { photo: photoId.toUpperCase() }]) expect(readPhoto(state)).toBeUndefined();
   });
 });
+
+describe("post origin: avisos", () => {
+  const avisos = { path: "/notifications", label: "avisos" };
+  it("accepts exactly the notifications center as an origin of any Trip", () => {
+    expect(readOrigin({ origin: avisos }, tripId)).toEqual(avisos);
+    expect(readOrigin({ origin: avisos }, "000000000000000000000009")).toEqual(avisos);
+    expect(originHref(readOrigin({ origin: avisos }, tripId))).toBe("/notifications");
+    expect(originLabel("avisos")).toBe("Volver a avisos");
+  });
+  it("rejects anything else that looks like it", () => {
+    const bad: Record<string, unknown>[] = [
+      { path: "/notifications?x", label: "avisos" }, { path: "/notificationsX", label: "avisos" }, { path: "/notifications/", label: "avisos" }, { path: "//notifications", label: "avisos" },
+      { path: "//evil.test", label: "avisos" }, { path: "/trips", label: "avisos" }, { path: "/notifications", label: "otro" }, { path: "/notifications", label: "diario" },
+      { path: "/notifications", label: "avisos", search: "?x=1" }, { path: "/notifications", label: "avisos", anchor: `data-memory=${"0".repeat(24)}` },
+      { path: "/notifications", label: "avisos", scrollY: 10 }, { path: "/notifications#x", label: "avisos" }, { path: "https://evil.test/notifications", label: "avisos" },
+    ];
+    for (const origin of bad) expect(readOrigin({ origin }, tripId), JSON.stringify(origin)).toEqual(diary);
+  });
+  it("keeps the previous origins unchanged", () => {
+    const itinerary = { path: `/trips/${tripId}/itinerary`, label: "itinerario" };
+    expect(readOrigin({ origin: itinerary }, tripId)).toEqual(itinerary);
+    expect(readOrigin({ origin: { path: "/trips", label: "diario" } }, tripId)).toEqual(diary);
+    expect(originLabel("diario")).toBe("Volver al diario");
+  });
+});

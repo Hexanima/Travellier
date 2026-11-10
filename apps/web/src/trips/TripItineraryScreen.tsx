@@ -15,7 +15,7 @@ import { ActivityParticipationControls } from "./ActivityParticipationControls.j
 import { useActivityParticipations } from "./use-activity-participations.js";
 import { PostLink } from "./post-navigation.js";
 import { useRestorePosition } from "./use-restore-position.js";
-import { itineraryAnchor } from "./post-origin.js";
+import { itineraryAnchor, noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import { ActivityMemories } from "./ActivityMemories.js";
 import { readActivityParams, type ActivityTab } from "./activity-memories.js";
 import type { TripMembersApi } from "./trip-members-api.js";
@@ -180,7 +180,10 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
-      <Link className="trips-back" to="/trips">Volver a mis viajes</Link>
+      {/* Opened from the notices center (state kept by the `?activity` changes): the way back is that center, never another Trip. */}
+      {readOrigin(location.state, tripId ?? "").label === "avisos"
+        ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
+        : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
       <header className="itinerary-header">
         <h1>Itinerario</h1>
         <p>El viaje, día a día. Horarios en tu zona local.</p>
