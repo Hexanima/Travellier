@@ -25,7 +25,7 @@ export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "publ
 export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type PublicTripJoinResult = { tripId: string; joined: boolean };
 export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination" | "participation-conflict";
-  fields?: readonly { field: string; message: string; code?: string }[]; confirmation?: ParticipationConfirmation };
+  fields?: readonly { field: string; message: string; code?: string }[]; confirmation?: ParticipationConfirmation; code?: string };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {
   list: () => Promise<TripResult<TripSummary[]>>;

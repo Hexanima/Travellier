@@ -37,6 +37,7 @@
 }
 
 .ui-button:disabled,
+.ui-button[aria-disabled="true"],
 .ui-control:disabled,
 .ui-modal__close:disabled {
   cursor: not-allowed;

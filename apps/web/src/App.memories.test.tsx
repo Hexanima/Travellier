@@ -89,6 +89,72 @@ describe("App memories integration", () => {
   });
 });
 
+describe("App memories comments and likes", () => {
+  const childId = itineraryId(31), me = itineraryId(20);
+  const detailOf = (id: string, extra: Record<string, unknown> = {}) => ({ post: saved({ id }), parent: null, children: [], rootActivityId: null, ...extra });
+  const comment = (id: number, text: string) => ({ id: itineraryId(id), tripId, postId, authorId: me, text, createdAt: "2026-01-02T16:00:00.000Z", authorIsFormerMember: false });
+  const members = () => ({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [{ id: itineraryId(60), userId: me, name: "Yo", role: "admin", joinedAt: "2026-01-01T00:00:00.000Z" }] } }) });
+  const byLabel = (container: HTMLElement, selector: string, text: string) => Array.from(container.querySelectorAll(selector)).find((item) => item.textContent === text) ?? null;
+  it("comments, likes, goes to another memory and comes back keeping the unsent text", async () => {
+    const get = vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: id === postId
+      ? detailOf(postId, { children: [{ id: childId, authorId: me, createdAt: "2026-01-02T16:30:00.000Z", description: "Siguiente" }] })
+      : detailOf(childId, { post: saved({ id: childId, parentPostId: postId }), parent: { id: postId, authorId: me, createdAt: "2026-01-02T15:30:00.000Z", description: "Atardecer" } }) }));
+    const created = comment(70, "Qué lindo");
+    const comments = { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), create: vi.fn().mockResolvedValue({ ok: true, value: created }) };
+    const likes = { summary: vi.fn().mockResolvedValue({ ok: true, value: { post: { count: 1, likedByMe: false }, comments: {} } }),
+      setPostLike: vi.fn().mockResolvedValue({ ok: true, value: { liked: true, count: 2 } }) };
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get }, members: members(), comments, likes });
+    expect(comments.list).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    await click(container.querySelector('[data-like="post"]'));
+    expect(likes.setPostLike).toHaveBeenCalledExactlyOnceWith(tripId, postId, true);
+    expect(container.querySelector('[data-like="post"]')?.textContent).toBe("Quitar me gusta 2");
+    await click(byLabel(container, '[role="tab"]', "Comentarios"));
+    await type(container, "comment-new", "Qué lindo"); await submit(container);
+    expect(comments.create).toHaveBeenCalledExactlyOnceWith(tripId, postId, "Qué lindo");
+    expect(container.querySelector("#memory-panel-comments")?.textContent).toContain("Qué lindo");
+    await type(container, "comment-new", "Sin enviar");
+    await click(container.querySelector(`a[href="/trips/${tripId}/memories/${childId}"]`));
+    expect(get).toHaveBeenLastCalledWith(tripId, childId);
+    await click(byLabel(container, '[role="tab"]', "Comentarios"));
+    expect((container.querySelector('[name="comment-new"]') as HTMLTextAreaElement).value).toBe("");
+    await click(byLabel(container, "button", "Volver"));
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    expect(comments.list).toHaveBeenCalledTimes(3);
+    await click(byLabel(container, '[role="tab"]', "Comentarios"));
+    expect((container.querySelector('[name="comment-new"]') as HTMLTextAreaElement).value).toBe("Sin enviar");
+  });
+  it("sends the real HTTP requests of comments and likes with the renewed token", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: "renewed", refreshToken: "renewed-refresh" })))
+      .mockImplementation(async (url: string, init: RequestInit) => {
+        const path = new URL(url).pathname, method = init.method ?? "GET";
+        if (path.endsWith("/likes")) return new Response(JSON.stringify({ post: { count: 0, likedByMe: false }, comments: [] }));
+        if (path.endsWith("/like")) return new Response(JSON.stringify({ like: { liked: method === "PUT", count: method === "PUT" ? 1 : 0 } }));
+        if (path.endsWith("/comments") && method === "POST") return new Response(JSON.stringify({ comment: comment(70, "Hola") }), { status: 201 });
+        if (path.endsWith("/comments")) return new Response(JSON.stringify({ comments: [] }));
+        if (path.endsWith("/members")) return new Response(JSON.stringify({ currentUserId: me, members: [] }));
+        return new Response(JSON.stringify({ post: saved(), parent: null, children: [] }));
+      });
+    vi.stubGlobal("fetch", fetch);
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { apiBaseUrl: "https://api.example.test", sessionStorage: storage(true) });
+    await click(container.querySelector('[data-like="post"]'));
+    await click(byLabel(container, '[role="tab"]', "Comentarios"));
+    await type(container, "comment-new", "Hola"); await submit(container);
+    const calls = fetch.mock.calls.slice(1).map(([url, init]) => `${(init as RequestInit).method ?? "GET"} ${new URL(url as string).pathname}`);
+    const base = `/trips/${tripId}/posts/${postId}`;
+    expect(calls).toEqual(expect.arrayContaining([`GET ${base}/comments`, `GET ${base}/likes`, `PUT ${base}/like`, `POST ${base}/comments`, `GET /trips/${tripId}/members`]));
+    const post = fetch.mock.calls.find(([url, init]) => (init as RequestInit).method === "POST" && String(url).endsWith("/comments"))!;
+    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ text: "Hola" });
+    expect((post[1] as RequestInit).headers).toEqual(expect.objectContaining({ Authorization: "Bearer renewed" }));
+    expect(container.querySelector("#memory-panel-comments")?.textContent).toContain("Hola");
+  });
+  it("shows the comment error inside the panel when the API is not configured for it", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detailOf(postId) });
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get } });
+    expect(container.textContent).toContain("Atardecer");
+    expect(container.querySelector("#memory-panel-comments")?.textContent).toContain("No pudimos cargar los comentarios.");
+  });
+});
+
 describe("App memories link routes", () => {
   const activityId = itineraryId(40), transportId = itineraryId(50);
   const buttonOf = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) ?? null;

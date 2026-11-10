@@ -7,6 +7,7 @@ import { PostLink } from "./post-navigation.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
+import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
@@ -21,7 +22,7 @@ const noticeText = ({ notice, going }: Saved) => notice === "created" ? "Recuerd
 /** Layout of `memories/*`: drafts live here, keyed by Trip, so they are shared by the child routes and dropped when leaving the Trip. */
 export function MemoriesLayout() {
   const { tripId } = useParams();
-  return <PostDraftsProvider key={tripId}><Outlet /></PostDraftsProvider>;
+  return <PostDraftsProvider key={tripId}><CommentDraftsProvider key={tripId}><Outlet /></CommentDraftsProvider></PostDraftsProvider>;
 }
 
 /** Newest first; the id breaks ties so the order is stable. Repeated ids keep their first occurrence. */

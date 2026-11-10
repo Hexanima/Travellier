@@ -13,6 +13,13 @@ describe("feedback states", () => {
     expect(markup).toContain("No se pudo guardar el viaje");
   });
 
+  it("lets an error opt into a polite status role", () => {
+    const markup = renderToStaticMarkup(<Feedback variant="error" role="status">Aviso</Feedback>);
+
+    expect(markup).toContain("role=\"status\"");
+    expect(markup).not.toContain("role=\"alert\"");
+  });
+
   it("renders loading feedback as a busy status", () => {
     const markup = renderToStaticMarkup(<LoadingState label="Cargando viajes" />);
 
