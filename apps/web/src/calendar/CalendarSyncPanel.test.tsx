@@ -63,6 +63,15 @@ describe("CalendarSyncPanel", () => {
     expect(spies.onRestore).toHaveBeenCalledTimes(1);
     expect(spies.onRemove).not.toHaveBeenCalled();
   });
+  it("tells, inside the persistent status and without an alert, how many duplicated or edited events were left untouched", async () => {
+    const one = await render({ state: "synced", at: "2026-11-10T15:30:00.000Z", ignoredCopies: 1 });
+    expect(one.container.querySelector('[role="status"]')?.textContent).toContain("Hay 1 evento duplicado o editado en tu calendario que no tocamos.");
+    expect(one.container.querySelector('[role="alert"]')).toBeNull();
+    const many = await render({ state: "synced", at: "2026-11-10T15:30:00.000Z", ignoredCopies: 3 });
+    expect(many.container.querySelector('[role="status"]')?.textContent).toContain("Hay 3 eventos duplicados o editados en tu calendario que no tocamos.");
+    const none = await render({ state: "synced", at: "2026-11-10T15:30:00.000Z" });
+    expect(none.container.querySelector('[role="status"]')?.textContent).not.toContain("no tocamos");
+  });
   it("asks for confirmation before removing the events from the calendar, and cancelling changes nothing", async () => {
     const { container, spies } = await render({ state: "synced", at: "2026-11-10T15:30:00.000Z" });
     await click(button(container, "Quitar del calendario")!);

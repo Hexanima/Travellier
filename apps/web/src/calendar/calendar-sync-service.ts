@@ -1,5 +1,6 @@
 import type { CalendarAccess, CalendarAccessPort, CalendarEventSpec, CalendarEventsPort, NativeCalendarEvent, NativePermissionState } from "app-domain";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
+import { isIdenticalCopy, plannedComparable } from "../native/calendar-events.js";
 import { buildCalendarEvents } from "./calendar-events.js";
 import type { CalendarRefStore } from "./calendar-ref-store.js";
 import { eventMarker, specFingerprint, toNativeEventSpec } from "./native-event-spec.js";
@@ -134,6 +135,17 @@ export function createCalendarSyncService({ access, events, store, accountId, no
       return false;
     };
 
+    /** Deletes the copies identical to the plan or to `keep`; answers how many other copies were left untouched. */
+    const removeIdentical = async (found: readonly NativeCalendarEvent[], keep: NativeCalendarEvent, spec: CalendarEventSpec) => {
+      const plan = plannedComparable(spec);
+      let left = 0;
+      for (const copy of found) {
+        if (copy.id === keep.id) continue;
+        if (isIdenticalCopy(copy, plan) || isIdenticalCopy(copy, keep)) await events.remove(copy.id); else left += 1;
+      }
+      return left;
+    };
+
     if (verify) {
       for (const item of desired) {
         const ref = refs[item.key];
@@ -142,8 +154,13 @@ export function createCalendarSyncService({ access, events, store, accountId, no
         if (!settle(found, item.key)) continue;
         if (!found.ok) continue;
         if (found.value.length === 0) delete refs[item.key];
-        // The referenced event is still there: keep it, whatever else carries the marker. Reassign only when it is gone.
-        else if (!found.value.some((event) => event.id === ref.eventId)) refs[item.key] = { ...ref, eventId: choose(found.value, item.spec, ref).id };
+        else {
+          const referenced = found.value.find((event) => event.id === ref.eventId);
+          // The referenced event is still there: keep it and only delete the copies identical to it (a crash between create and delete can leave one); edited ones stay.
+          if (referenced) { countIgnored(item.key, await removeIdentical(found.value, referenced, item.spec)); continue; }
+          // Reassign only when it is gone.
+          refs[item.key] = { ...ref, eventId: choose(found.value, item.spec, ref).id };
+        }
       }
       await persist();
     }
@@ -157,14 +174,8 @@ export function createCalendarSyncService({ access, events, store, accountId, no
         const keep = choose(found.value, item.spec);
         refs[item.key] = { eventId: keep.id, fingerprint: "adopted", startMs: keep.startMs, endMs: keep.endMs };
         await persist();
-        // Only identical copies (title and window) of the plan or of the adopted event are deleted; the ones the person edited stay, ignored.
-        let left = 0;
-        for (const copy of found.value) {
-          if (copy.id === keep.id) continue;
-          if (sameSlot(copy, item.spec.title, item.spec.startDate, item.spec.endDate) || sameSlot(copy, keep.title, keep.startMs, keep.endMs)) await events.remove(copy.id);
-          else left += 1;
-        }
-        countIgnored(item.key, left);
+        // Only copies identical (title, window, notes and place) to the plan or to the adopted event are deleted; the ones the person edited stay, ignored.
+        countIgnored(item.key, await removeIdentical(found.value, keep, item.spec));
         return;
       }
       const created = await events.create(item.spec);

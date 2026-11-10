@@ -6,7 +6,7 @@ const marker = `travellier:activity-${"b".repeat(24)}@${"a".repeat(24)}`;
 const spec = { title: "Paseo", notes: `Notas\n${marker}`, location: "Plaza", url: "https://maps.example/x", startDate: 1_000, endDate: 2_000 };
 const window = { startMs: 500, endMs: 2_500 };
 const code = (value: string) => Object.assign(new Error("native detail with Paseo content"), { code: value });
-type Found = { id: string; notes?: string; location?: string; startDate: number; endDate: number; calendarId?: string };
+type Found = { id: string; title?: string; notes?: string; location?: string; startDate: number; endDate: number; calendarId?: string };
 
 function plugin() {
   return {
@@ -36,8 +36,8 @@ describe("calendar events adapter", () => {
       { id: "6", notes: `Notas\n${marker} https://maps.example/x`, startDate: 12, endDate: 22 },
       { id: "7", notes: `${marker}\thttps://x`, startDate: 13, endDate: 23 },
     ] });
-    expect(await port.find(marker, window)).toEqual({ ok: true, value: [{ id: "1", startMs: 10, endMs: 20, calendarId: "c1" }, { id: "5", startMs: 11, endMs: 21 },
-      { id: "6", startMs: 12, endMs: 22 }, { id: "7", startMs: 13, endMs: 23 }] });
+    expect(await port.find(marker, window)).toEqual({ ok: true, value: [{ id: "1", startMs: 10, endMs: 20, calendarId: "c1", notes: `Notas\n${marker}` }, { id: "5", startMs: 11, endMs: 21, notes: `${marker}\r\n` },
+      { id: "6", startMs: 12, endMs: 22, notes: `Notas\n${marker} https://maps.example/x` }, { id: "7", startMs: 13, endMs: 23, notes: `${marker}\thttps://x` }] });
     expect(calendar.findEvents).toHaveBeenCalledWith({ notes: marker, startDate: 500, endDate: 2_500 });
   });
   it("never mistakes the marker of another key for this one (strict delimitation)", async () => {
@@ -99,12 +99,43 @@ describe("calendar events adapter", () => {
     expect(calendar.deleteEvent).toHaveBeenCalledExactlyOnceWith({ id: "ev-9" });
     expect(calendar.createEvent).toHaveBeenCalledWith(expect.objectContaining({ title: "Paseo", calendarId: "c1" }));
   });
-  it("removes copies that carry the marker and then updates the referenced event in place", async () => {
+  it("removes only copies identical in title, window, notes and place, then updates the referenced event in place", async () => {
     const { calendar, port } = adapter();
-    exists(calendar, { id: "copy", notes: marker }, { id: "ev-9", notes: marker });
+    const mine = { notes: `Notas\nhttps://maps.example/x\n${marker}`, location: "Plaza" };
+    exists(calendar, { id: "copy", ...mine }, { id: "ev-9", ...mine });
     expect(await port.update("ev-9", marker, window, spec)).toEqual({ ok: true, value: { id: "ev-9" } });
     expect(calendar.deleteEvent).toHaveBeenCalledExactlyOnceWith({ id: "copy" });
     expect(calendar.modifyEvent).toHaveBeenCalledTimes(1);
+  });
+  it("does not delete a copy whose notes or place the person edited (it is ignored and counted), nor one that differs in anything else", async () => {
+    const { calendar, port } = adapter();
+    const mine = { title: "Paseo", notes: `Notas\nhttps://maps.example/x\n${marker}`, location: "Plaza" };
+    const copies = [
+      { id: "notes-above", ...mine, notes: `Mi nota\n${mine.notes}` },
+      { id: "notes-below", ...mine, notes: `${mine.notes}\nmás` },
+      { id: "place", ...mine, location: "Otro lugar" },
+      { id: "no-place", ...mine, location: undefined },
+      { id: "title", ...mine, title: "Mío" },
+    ];
+    calendar.findEvents.mockResolvedValue({ events: [...copies, { id: "ev-9", ...mine }].map((event) => ({ startDate: 1_000, endDate: 2_000, ...event })) });
+    const result = await port.update("ev-9", marker, window, spec);
+    // With other candidates modifyEvent is unsafe: the plan is created anew and only the old referenced event is deleted; no copy is.
+    expect(result).toEqual({ ok: true, value: { id: "ev-1", ignoredCopies: 5 } });
+    expect(calendar.deleteEvent).toHaveBeenCalledExactlyOnceWith({ id: "ev-9" });
+  });
+  it("treats notes that only differ in line endings or trailing spaces as identical, and an absent place as empty", async () => {
+    const { calendar, port } = adapter();
+    const plain = { title: "Paseo", notes: marker, startDate: 1_000, endDate: 2_000 };
+    calendar.findEvents.mockResolvedValue({ events: [
+      { id: "copy", title: "Paseo", notes: `${marker}  \r\n`, startDate: 1_000, endDate: 2_000 },
+      { id: "ev-9", title: "Paseo", notes: marker, startDate: 1_000, endDate: 2_000 }] });
+    await port.update("ev-9", marker, window, plain);
+    expect(calendar.deleteEvent).toHaveBeenCalledExactlyOnceWith({ id: "copy" });
+  });
+  it("exposes notes and place when finding", async () => {
+    const { calendar, port } = adapter();
+    exists(calendar, { id: "1", notes: `Hola\n${marker}`, location: "Plaza" });
+    expect(await port.find(marker, window)).toEqual({ ok: true, value: [expect.objectContaining({ id: "1", notes: `Hola\n${marker}`, location: "Plaza" })] });
   });
   it("answers missing, touching nothing, when the referenced event is not found or lost its marker", async () => {
     const { calendar, port } = adapter();

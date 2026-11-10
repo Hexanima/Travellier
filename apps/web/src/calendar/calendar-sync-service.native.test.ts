@@ -219,6 +219,35 @@ describe.each(["android", "ios"] as const)("copies carrying the marker: conserva
     expect(again.service.getStatus(tripId)).toMatchObject({ state: "synced" });
     expect(again.service.getStatus(tripId)).not.toHaveProperty("ignoredCopies");
   });
+  it("a copy with the marker whose notes (text above the marker) or place the person edited is never deleted, only counted as ignored", async () => {
+    const { service, calendar } = setup(platform);
+    await service.enable(tripId, plain());
+    const [, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("notes", { ...original, notes: `Llevar abrigo\n${original.notes}` });
+    calendar.events.set("place", { ...original, location: "Otro lugar" });
+    const again = setup(platform, { calendar });
+    await again.service.enable(tripId, plain());
+    expect(calendar.events.has("notes")).toBe(true);
+    expect(calendar.events.has("place")).toBe(true);
+    expect(again.service.getStatus(tripId)).toMatchObject({ state: "synced", ignoredCopies: 2 });
+    // The same on an update of the plan: the referenced event is rewritten, the edited copies stay.
+    const edited = plain();
+    edited.activities[0]!.title = "Paseo v3";
+    await again.service.sync(tripId, edited);
+    expect(calendar.events.has("notes")).toBe(true);
+    expect(calendar.events.has("place")).toBe(true);
+  });
+  it("«add again» deletes a duplicate identical to the referenced event (title, window, notes and place) and keeps edited ones", async () => {
+    const { service, calendar, prefs } = setup(platform);
+    await service.enable(tripId, plain());
+    const [id, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("dup", { ...original });
+    calendar.events.set("edited", { ...original, notes: `Mío\n${original.notes}` });
+    await service.restore(tripId, plain());
+    expect(refsOf(prefs)[activityKey]!.eventId).toBe(id);
+    expect(calendar.events.has("dup")).toBe(false);
+    expect(calendar.events.has("edited")).toBe(true);
+  });
   it("without reference, the event that matches the plan is adopted instead of the first one, and the edited copy stays", async () => {
     const { service, calendar } = setup(platform);
     await service.enable(tripId, plain());

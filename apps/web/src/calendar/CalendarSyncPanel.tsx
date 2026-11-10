@@ -57,10 +57,13 @@ export function CalendarSyncPanel({ status, busy, onEnable, onRetry, onStop, onR
               : state === "denied" ? `El acceso al calendario está desactivado para Travellier. Para activarlo, abrí Ajustes del sistema > Travellier > Calendarios. ${exportHint}`
                 : status.state === "removing-partial" ? `No se pudieron quitar ${status.remaining === 1 ? "1 evento" : `${status.remaining} eventos`} del calendario. Mientras tanto no se sincroniza nada. Podés reintentar quitarlos o dejar de sincronizar (los eventos que quedan se conservan).`
                   : "";
+  const ignoredNote = status.state === "synced" && (status.ignoredCopies ?? 0) > 0
+    ? (status.ignoredCopies === 1 ? "Hay 1 evento duplicado o editado en tu calendario que no tocamos." : `Hay ${status.ignoredCopies} eventos duplicados o editados en tu calendario que no tocamos.`)
+    : "";
   return (
     <div className="calendar-sync" ref={panel} tabIndex={-1}>
       {state === "off" || state === "needs-permission" ? <p>Mantené este itinerario al día en el calendario de tu dispositivo. Es opcional: podés usar Travellier sin esto.</p> : null}
-      <div role="status">{message ? <p>{message}</p> : null}</div>
+      <div role="status">{message ? <p>{message}</p> : null}{ignoredNote ? <p>{ignoredNote}</p> : null}</div>
       {state === "error" ? <p role="alert" className="ui-feedback ui-feedback--error">No pudimos sincronizar con el calendario. Podés reintentar; el resto de la app funciona igual. {exportHint}</p> : null}
       {state === "needs-account" ? <p role="alert" className="ui-feedback ui-feedback--error">No pudimos identificar tu cuenta para sincronizar el calendario. Volvé a iniciar sesión. {exportHint}</p> : null}
       {canEnable ? action("Mantener sincronizado con el calendario", onEnable) : null}

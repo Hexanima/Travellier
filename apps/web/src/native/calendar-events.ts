@@ -26,10 +26,25 @@ function notesOf(spec: CalendarEventSpec) {
   const at = spec.notes.lastIndexOf("\n");
   return `${at < 0 ? "" : spec.notes.slice(0, at + 1)}${spec.url}\n${spec.notes.slice(at + 1)}`;
 }
-/** Same title and same window, compared to the second (the plugin may truncate milliseconds). */
 const seconds = (ms: number) => Math.floor(ms / 1000);
-const same = (event: { title?: string; startDate: number; endDate: number }, other: { title?: string; startDate: number; endDate: number }) =>
-  event.title === other.title && seconds(event.startDate) === seconds(other.startDate) && seconds(event.endDate) === seconds(other.endDate);
+/** Line endings and trailing spaces are not content: platforms may rewrite them. */
+const plainNotes = (notes: string | undefined) => lines(notes).map((line) => line.trimEnd()).join("\n").trimEnd();
+type Comparable = { title?: string; startMs: number; endMs: number; notes?: string; location?: string };
+/**
+ * «Identical» (the only copies ever deleted): same title, same window to the second (the plugin may truncate milliseconds), same notes without
+ * line-ending/trailing-space differences (the marker line included, so an edit above, below or on it makes the copy different) and same place
+ * (`location ?? ""`: an absent place is an empty one). Any difference, or a platform that normalizes something else, counts as NOT identical:
+ * the copy is ignored, never deleted. Android never receives `url`, so the notes it returns are exactly the ones sent.
+ */
+export const isIdenticalCopy = (event: Comparable, other: Comparable) => event.title === other.title && seconds(event.startMs) === seconds(other.startMs) && seconds(event.endMs) === seconds(other.endMs)
+  && plainNotes(event.notes) === plainNotes(other.notes) && (event.location ?? "") === (other.location ?? "");
+type Found = { title?: string; startDate: number; endDate: number; notes?: string; location?: string };
+const comparableOf = (event: Found): Comparable => ({ ...(event.title !== undefined ? { title: event.title } : {}), startMs: event.startDate, endMs: event.endDate,
+  ...(event.notes !== undefined ? { notes: event.notes } : {}), ...(event.location !== undefined ? { location: event.location } : {}) });
+/** What the spec writes into the calendar, as comparable data. */
+export const plannedComparable = (spec: CalendarEventSpec): Comparable => ({ title: spec.title, startMs: spec.startDate, endMs: spec.endDate, notes: notesOf(spec), ...(spec.location ? { location: spec.location } : {}) });
+const same = (event: Found, other: Found) => isIdenticalCopy(comparableOf(event), comparableOf(other));
+const sameAsPlan = (event: Found, spec: CalendarEventSpec) => isIdenticalCopy(comparableOf(event), plannedComparable(spec));
 const managed = (spec: CalendarEventSpec) => ({ title: spec.title, notes: notesOf(spec), ...(spec.location ? { location: spec.location } : {}), startDate: spec.startDate, endDate: spec.endDate });
 
 /**
@@ -51,20 +66,21 @@ export function createCalendarEvents(calendar: NativeDependencies["calendar"], p
   };
   return {
     find: (marker, window) => nativeResult(platform, async () => (await search(marker, window)).filter((event) => carriesMarker(event.notes, marker))
-      .map((event) => ({ id: event.id, ...(event.title !== undefined ? { title: event.title } : {}), startMs: event.startDate, endMs: event.endDate, ...(event.calendarId !== undefined ? { calendarId: event.calendarId } : {}) }))),
+      .map((event) => ({ id: event.id, ...(event.title !== undefined ? { title: event.title } : {}), startMs: event.startDate, endMs: event.endDate, ...(event.calendarId !== undefined ? { calendarId: event.calendarId } : {}),
+        ...(event.notes !== undefined ? { notes: event.notes } : {}), ...(event.location !== undefined ? { location: event.location } : {}) }))),
     create: (spec) => nativeResult(platform, () => created(spec)),
     update: (eventId, marker, window, spec) => nativeResult(platform, async () => {
       const found = await search(marker, window);
       const target = found.find((event) => event.id === eventId && carriesMarker(event.notes, marker));
       // The referenced event is not where it was (or lost its marker): the caller forgets the reference.
       if (!target) throw new NativeCapabilityError("missing");
-      // Conservative: only copies that carry the marker AND equal the plan or the referenced event (title and window to the second) are removed.
+      // Conservative: only copies that carry the marker AND are identical (title, window, notes and place) to the plan or to the referenced event are removed.
       // Copies the person edited are left alone; they are counted, never adopted here.
       const gone = new Set<string>();
       let ignoredCopies = 0;
       for (const copy of found) {
         if (copy.id === eventId || !carriesMarker(copy.notes, marker)) continue;
-        if (!(same(copy, spec) || same(copy, target))) { ignoredCopies += 1; continue; }
+        if (!(sameAsPlan(copy, spec) || same(copy, target))) { ignoredCopies += 1; continue; }
         try { await calendar.deleteEvent({ id: copy.id }); gone.add(copy.id); } catch { /* it is still there: the plugin could then edit it instead of the referenced one */ }
       }
       const others = found.filter((event) => event.id !== eventId && !gone.has(event.id));

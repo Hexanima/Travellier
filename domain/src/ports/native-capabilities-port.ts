@@ -73,6 +73,9 @@ export interface NativeCalendarEvent {
   calendarId?: string;
   /** Lets callers tell an identical copy from one the person edited. */
   title?: string;
+  /** As the platform returns them (the plugin answers both on Android and iOS): with them an identical copy is told from one the person edited. */
+  notes?: string;
+  location?: string;
 }
 /** Answer of `update`: the id to keep; `staleCopy` when the previous event could not be deleted after re-creating it; `ignoredCopies` counts other copies with the marker that were left untouched. */
 export interface CalendarUpdateResult {
