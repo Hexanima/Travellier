@@ -60,6 +60,7 @@ import {
   type LinkTripPostToNewActivityResult,
   type PostConfirmationRequired,
   type UpdateTripPostPayload,
+  type UpdateTripPostResult,
   type TripPostPayload,
   type PostDetailPayload,
   type TripPostChainResult,
@@ -142,7 +143,7 @@ export interface TripApi extends TripInvitationApi {
   listPosts?: (payload: TripPostPayload) => AsyncResult<Post[]>;
   getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
   getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
-  updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<Post>;
+  updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<UpdateTripPostResult>;
   linkPostToNewActivity?: (payload: LinkTripPostToNewActivityPayload) => AsyncResult<LinkTripPostToNewActivityResult>;
   createPhotoUploads?: (payload: PhotoUploadPayload) => AsyncResult<{ uploads: PhotoUploadView[] }>;
   getPostPhotos?: (payload: PostPhotoPayload) => AsyncResult<PostPhotoView[]>;
@@ -290,6 +291,9 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "PhotoConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "A photo of this upload is already registered in another post." } });
+  }
+  if (error.tag === "ExpenseConflictError") {
+    return jsonResponse(409, { error: { code: error.tag, message: "The post already has an expense." } });
   }
   if (error.tag === "PostNotFoundError") {
     return jsonResponse(404, { error: { code: error.tag, message: "Post not found." } });
@@ -560,13 +564,18 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
 };
 
 const postPayload = (payload: Record<string, unknown>):
-  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos">, ValidationError> => {
+  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense">, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
   ]));
-  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos"> = {};
+  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense"> = {};
   // Photo references are validated by the domain (all failures are reported together with the storage checks).
   if (Object.hasOwn(payload, "photos")) fields.photos = payload.photos;
+  // Only the JSON type is checked here; the amount, currency and unsupported keys are domain rules.
+  if (Object.hasOwn(payload, "expense")) {
+    if (typeof payload.expense !== "object" || payload.expense === null || Array.isArray(payload.expense)) return invalid("expense");
+    fields.expense = payload.expense;
+  }
   // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, and it is optional:
   // when absent the domain derives the slice from scheduledAt.
   if (Object.hasOwn(payload, "newActivity") && payload.dayId != null) {
@@ -810,8 +819,9 @@ export const handleApiRequest = async (
         confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity } as CreateTripPostPayload);
       if (!result.ok) return errorResponse(result.error);
       if (result.value.outcome === "confirmation_required") return participationConflictResponse(result.value);
-      const { post, activity, participation, photos } = result.value;
-      return jsonResponse(201, { post, ...(activity ? { activity, participation } : {}), ...(photos ? { photos } : {}) });
+      const { post, activity, participation, photos, expense } = result.value;
+      return jsonResponse(201, { post, ...(activity ? { activity, participation } : {}), ...(photos ? { photos } : {}),
+        ...(expense ? { expense } : {}) });
     }
     if (postId?.ok) {
       const detail = { ...context, postId: postId.value };
@@ -835,15 +845,15 @@ export const handleApiRequest = async (
             confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
           if (!linked.ok) return errorResponse(linked.error);
           if (linked.value.outcome === "confirmation_required") return participationConflictResponse(linked.value);
-          const { post, activity, participation, photos } = linked.value;
-          return jsonResponse(200, { post, activity, participation, ...(photos ? { photos } : {}) });
+          const { post, activity, participation, photos, expense } = linked.value;
+          return jsonResponse(200, { post, activity, participation, ...(photos ? { photos } : {}), ...(expense ? { expense } : {}) });
         }
         if (!trips?.updatePost) return unavailableResponse();
         const result = await trips.updatePost({ ...detail, ...parsed.value });
         if (!result.ok) return errorResponse(result.error);
-        // `photos` only exists when the edit carried photos; it is not part of the post.
-        const { photos, ...post } = result.value as Post & { photos?: unknown };
-        return jsonResponse(200, { post, ...(photos ? { photos } : {}) });
+        // `photos` and `expense` only exist when the edit carried them; they are not part of the post.
+        const { photos, expense, ...post } = result.value as Post & { photos?: unknown; expense?: unknown };
+        return jsonResponse(200, { post, ...(photos ? { photos } : {}), ...(expense ? { expense } : {}) });
       }
     }
   }
