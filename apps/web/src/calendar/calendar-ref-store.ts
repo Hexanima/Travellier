@@ -6,8 +6,9 @@ import { hashText } from "./native-event-spec.js";
  * Per account, per Trip and per device: whether the user opted in and the native event each plan key maps to.
  * Preferences is not encrypted, so only opaque ids, fingerprints and times are stored: no tokens, titles or content.
  * The account is scrambled in the key; nothing is deleted on logout (another account has other keys).
+ * `removing`: a «remove from calendar» left events behind; `deviceRefs` holds only those and nothing syncs until it is retried or sync is stopped.
  */
-export type CalendarTripState = { enabled: boolean; deviceRefs: Record<string, DeviceRef>; syncedAt: string | null };
+export type CalendarTripState = { enabled: boolean; deviceRefs: Record<string, DeviceRef>; syncedAt: string | null; removing?: boolean };
 
 export const emptyCalendarState = (): CalendarTripState => ({ enabled: false, deviceRefs: {}, syncedAt: null });
 export const calendarStoreKey = (accountId: string, tripId: string) => `travellier.calendar.v1.${hashText(accountId)}.${tripId}`;
@@ -26,7 +27,7 @@ function parse(raw: string | null): CalendarTripState {
       if (!isRecord(ref) || !text(ref.eventId) || !text(ref.fingerprint) || !time(ref.startMs) || !time(ref.endMs)) return emptyCalendarState();
       entries.push([key, { eventId: ref.eventId, fingerprint: ref.fingerprint, startMs: ref.startMs, endMs: ref.endMs }]);
     }
-    return { enabled: value.enabled, deviceRefs: Object.fromEntries(entries), syncedAt: value.syncedAt };
+    return { enabled: value.enabled, deviceRefs: Object.fromEntries(entries), syncedAt: value.syncedAt, ...(value.removing === true ? { removing: true } : {}) };
   } catch {
     return emptyCalendarState();
   }
@@ -42,6 +43,6 @@ export const createCalendarRefStore = (preferences: PreferencesApi): CalendarRef
   read: async (accountId, tripId) => parse((await preferences.get({ key: calendarStoreKey(accountId, tripId) })).value),
   // Only the known fields are persisted, whatever the caller passes.
   write: (accountId, tripId, state) => preferences.set({ key: calendarStoreKey(accountId, tripId),
-    value: JSON.stringify({ enabled: state.enabled, deviceRefs: state.deviceRefs, syncedAt: state.syncedAt }) }),
+    value: JSON.stringify({ enabled: state.enabled, deviceRefs: state.deviceRefs, syncedAt: state.syncedAt, ...(state.removing === true ? { removing: true } : {}) }) }),
   clear: (accountId, tripId) => preferences.remove({ key: calendarStoreKey(accountId, tripId) }),
 });

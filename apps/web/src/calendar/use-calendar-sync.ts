@@ -6,7 +6,7 @@ import type { CalendarSyncService } from "./calendar-sync-service.js";
 type Options = { service: CalendarSyncService; tripId: string; itinerary: Pick<TripItineraryApi, "get">; loaded: TripItineraryResponse };
 
 /** States in which a periodic or resume trigger has nothing to keep up to date (not enabled, or waiting for the user). */
-const idle = ["checking", "off", "needs-account", "needs-permission", "denied", "syncing"];
+const idle = ["checking", "off", "needs-account", "needs-permission", "denied", "syncing", "removing-partial"];
 
 /**
  * Connects the screen to the sync service. Opening only reads what was saved (silent: no permission dialog, no calendar access).

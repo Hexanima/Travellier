@@ -289,12 +289,12 @@ describe("calendar sync service", () => {
     await service.sync(tripId, fixture());
     expect(calendar.events.size).toBe(1);
   });
-  it("«remove from calendar» with a failure keeps what could not be deleted and reports an error", async () => {
+  it("«remove from calendar» with a failure keeps what could not be deleted and reports the unfinished removal", async () => {
     const { service, calendar } = setup();
     await service.enable(tripId, fixture());
     calendar.failing.set("remove", () => true);
     expect(await service.removeAll(tripId)).toEqual({ removed: 0, failed: 5 });
-    expect(stateOf(service)).toBe("error");
+    expect(service.getStatus(tripId)).toEqual({ state: "removing-partial", remaining: 5 });
     expect(calendar.events.size).toBe(5);
   });
   it("revoked permission in the middle of the run ends as denied, not synced", async () => {

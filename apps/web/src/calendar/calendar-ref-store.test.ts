@@ -73,4 +73,13 @@ describe("calendar ref store", () => {
     expect(stored).not.toMatch(/tok|Cena secreta/);
     expect(Object.keys(JSON.parse(stored) as object).sort()).toEqual(["deviceRefs", "enabled", "syncedAt"]);
   });
+  it("keeps the removal-in-progress mark only when it is true and starts without it", async () => {
+    const { preferences } = memory();
+    const store = createCalendarRefStore(preferences);
+    await store.write("user-1", trip, { ...state(), removing: true });
+    expect(await store.read("user-1", trip)).toEqual({ ...state(), removing: true });
+    await store.write("user-1", other, { ...state(), removing: false });
+    expect(await store.read("user-1", other)).toEqual(state());
+    expect("removing" in emptyCalendarState()).toBe(false);
+  });
 });

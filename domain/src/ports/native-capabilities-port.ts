@@ -75,11 +75,12 @@ export interface NativeCalendarEvent {
 /**
  * Events of the device calendar, identified by a marker kept in their notes (the installed plugin cannot target an update by id).
  * Never requests permissions: callers check them first. Needs read and write access (find, update, remove).
- * `remove` and `update` fail with kind `missing` when no event matches.
+ * `remove` fails with kind `missing` when no event matches. `update` is tied to `eventId`: it fails with `missing` when that event is not found by marker in the window,
+ * never modifies another event, and answers the id to keep (it changes when the event had to be deleted and created again).
  */
 export interface CalendarEventsPort {
   find(marker: string, window: CalendarEventWindow): AsyncResult<readonly NativeCalendarEvent[], NativeCapabilityError>;
   create(spec: CalendarEventSpec): AsyncResult<{ id: string }, NativeCapabilityError>;
-  update(marker: string, window: CalendarEventWindow, spec: CalendarEventSpec): AsyncResult<void, NativeCapabilityError>;
+  update(eventId: string, marker: string, window: CalendarEventWindow, spec: CalendarEventSpec): AsyncResult<{ id: string }, NativeCapabilityError>;
   remove(id: string): AsyncResult<void, NativeCapabilityError>;
 }
