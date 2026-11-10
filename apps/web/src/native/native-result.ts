@@ -8,7 +8,7 @@ export function nativeError(error: unknown): NativeCapabilityError {
     ? "cancelled"
     : code === "OS-PLUG-CAMR-0003" || code === "OS-PLUG-CAMR-0005" || code === "OS-PLUG-CLDR-0020"
       ? "denied"
-      : code === "OS-PLUG-CLDR-0005" ? "unsupported" : "native";
+      : code === "OS-PLUG-CLDR-0005" ? "unsupported" : code === "OS-PLUG-CLDR-0001" ? "missing" : "native";
   return new NativeCapabilityError(kind);
 }
 export async function nativeResult<T>(platform: NativePlatform, operation: () => Promise<T>): AsyncResult<T, NativeCapabilityError> {

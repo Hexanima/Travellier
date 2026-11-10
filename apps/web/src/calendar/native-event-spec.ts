@@ -1,3 +1,4 @@
+import type { CalendarEventSpec } from "app-domain";
 import { wholeSeconds, type CalendarEvent } from "./calendar-events.js";
 
 /** Native event limits, counted in code points so a pair is never split. Provisional values: the platforms do not publish a strict limit. */
@@ -5,7 +6,7 @@ export const maxTitleLength = 200;
 export const maxNotesLength = 2000;
 
 /** What the app manages in a native calendar event. Nothing else (expenses, participants, tokens, costs, flight data) is ever sent. */
-export type NativeEventSpec = { title: string; notes: string; location?: string; url?: string; startDate: number; endDate: number };
+export type NativeEventSpec = CalendarEventSpec;
 
 /** Visible, stable identity written as the last line of the notes: `travellier:<kind>-<id>@<tripId>`. */
 export const eventMarker = (key: string, tripId: string) => `travellier:${key}@${tripId}`;

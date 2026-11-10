@@ -30,6 +30,10 @@ function fixture(platform = "ios") {
     calendar: {
       checkPermissions: vi.fn(async () => ({ readCalendar: permission, writeCalendar: permission })),
       requestPermissions: vi.fn(async () => ({ readCalendar: "granted" as NativePermissionState, writeCalendar: "granted" as NativePermissionState })),
+      findEvents: vi.fn(async () => ({ events: [] })),
+      createEvent: vi.fn(async () => ({ id: "ev-1" })),
+      modifyEvent: vi.fn(async () => undefined),
+      deleteEvent: vi.fn(async () => undefined),
     },
     externalLink: { open: vi.fn(() => ({})) },
   };
@@ -47,6 +51,7 @@ describe("native capabilities", () => {
     }
     expect(spies.push.register).not.toHaveBeenCalled();
     expect(spies.push.addListener).not.toHaveBeenCalled();
+    for (const spy of [spies.calendar.findEvents, spies.calendar.createEvent, spies.calendar.modifyEvent, spies.calendar.deleteEvent]) expect(spy).not.toHaveBeenCalled();
   });
 
   it("returns unsupported in browser without invoking native APIs", async () => {

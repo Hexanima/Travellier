@@ -43,7 +43,6 @@ export interface CalendarAccess {
   read: NativePermissionState;
   write: NativePermissionState;
 }
-/** Event projection and reconciliation are implemented separately in T96. */
 export interface CalendarAccessPort {
   checkAccess(): AsyncResult<CalendarAccess, NativeCapabilityError>;
   requestAccess(access: "write" | "manage"): AsyncResult<CalendarAccess, NativeCapabilityError>;
@@ -51,4 +50,36 @@ export interface CalendarAccessPort {
 /** Opens a location link outside the app (maps app or browser). Never resolves or reads the destination. */
 export interface ExternalLinkPort {
   open(url: string): AsyncResult<void, NativeCapabilityError>;
+}
+
+/** Fields of a native calendar event managed by the app. `notes` carries the stable marker as its last line; times are epoch milliseconds. */
+export interface CalendarEventSpec {
+  title: string;
+  notes: string;
+  location?: string;
+  url?: string;
+  startDate: number;
+  endDate: number;
+}
+/** Time range in epoch milliseconds used to search or target native events. */
+export interface CalendarEventWindow {
+  startMs: number;
+  endMs: number;
+}
+export interface NativeCalendarEvent {
+  id: string;
+  startMs: number;
+  endMs: number;
+  calendarId?: string;
+}
+/**
+ * Events of the device calendar, identified by a marker kept in their notes (the installed plugin cannot target an update by id).
+ * Never requests permissions: callers check them first. Needs read and write access (find, update, remove).
+ * `remove` and `update` fail with kind `missing` when no event matches.
+ */
+export interface CalendarEventsPort {
+  find(marker: string, window: CalendarEventWindow): AsyncResult<readonly NativeCalendarEvent[], NativeCapabilityError>;
+  create(spec: CalendarEventSpec): AsyncResult<{ id: string }, NativeCapabilityError>;
+  update(marker: string, window: CalendarEventWindow, spec: CalendarEventSpec): AsyncResult<void, NativeCapabilityError>;
+  remove(id: string): AsyncResult<void, NativeCapabilityError>;
 }

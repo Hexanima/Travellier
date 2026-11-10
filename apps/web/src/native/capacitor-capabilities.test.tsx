@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 const native = vi.hoisted(() => ({
   camera: { requestPermissions: vi.fn(), checkPermissions: vi.fn() },
   push: { requestPermissions: vi.fn(), checkPermissions: vi.fn(), register: vi.fn(), addListener: vi.fn() },
-  calendar: { requestPermissions: vi.fn(), checkPermissions: vi.fn() },
+  calendar: { requestPermissions: vi.fn(), checkPermissions: vi.fn(), findEvents: vi.fn(), createEvent: vi.fn(), modifyEvent: vi.fn(), deleteEvent: vi.fn() },
 }));
 vi.mock("@capacitor/camera", async (original) => ({ ...await original<typeof import("@capacitor/camera")>(), Camera: native.camera }));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: native.push }));
@@ -30,6 +30,11 @@ describe("Capacitor composition", () => {
     if (services) expect(await services.calendar.checkAccess()).toEqual({ ok: true, value: { read: "denied", write: "granted" } });
     for (const plugin of [native.camera, native.push, native.calendar]) expect(plugin.requestPermissions).not.toHaveBeenCalled();
     expect(native.push.register).not.toHaveBeenCalled();
+  });
+
+  it("exposes the calendar events port over the same plugin without calling it at creation", () => {
+    expect(typeof createCapacitorCapabilities().calendarEvents.update).toBe("function");
+    for (const name of ["findEvents", "createEvent", "modifyEvent", "deleteEvent"] as const) expect(native.calendar[name]).not.toHaveBeenCalled();
   });
 
   it("mounts and remounts the app under StrictMode without native permission dialogs", async () => {
