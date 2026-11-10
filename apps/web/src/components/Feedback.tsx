@@ -14,6 +14,7 @@ export function Feedback({
   className,
   disabled = false,
   loading = false,
+  role,
   variant = "info",
   ...props
 }: FeedbackProps) {
@@ -23,7 +24,7 @@ export function Feedback({
     <div
       {...props}
       className={["ui-feedback", `ui-feedback--${variant}`, className].filter(Boolean).join(" ")}
-      role={isError ? "alert" : "status"}
+      role={role ?? (isError ? "alert" : "status")}
       aria-busy={loading || undefined}
       aria-disabled={disabled || undefined}
     >

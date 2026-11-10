@@ -48,11 +48,15 @@ export function useLikes(tripId: string, postId: string, api: Pick<TripLikeApi, 
   const busyRef = useRef(new Set<string>());
   const alive = useRef(true);
   const requests = useRef(0);
+  /** Order of the toggles: launching and confirming one stamps its key, so a summary asked before that stamp cannot undo it. */
+  const epoch = useRef(0);
+  const stamps = useRef(new Map<string, number>());
   const latest = useRef({ api, known: { summary, confirmed, seeded } as Known, blocked });
   latest.current = { api, known: { summary, confirmed, seeded }, blocked };
 
   const refresh = useCallback(async () => {
     const id = requests.current += 1;
+    const started = epoch.current;
     setSummary((current) => current.kind === "ready" ? current : { kind: "loading" });
     const failed = (error: TripFailure) => {
       if (unreachable(error)) setBlocked(true);
@@ -61,7 +65,11 @@ export function useLikes(tripId: string, postId: string, api: Pick<TripLikeApi, 
     try {
       const result = await latest.current.api.summary(tripId, postId);
       if (!alive.current || id !== requests.current) return;
-      if (result.ok) { setSummary({ kind: "ready", value: result.value }); setConfirmed({}); setSeeded({}); setBlocked(false); } else failed(result.error);
+      if (result.ok) {
+        setSummary({ kind: "ready", value: result.value });
+        setConfirmed((all) => Object.fromEntries(Object.entries(all).filter(([key]) => (stamps.current.get(key) ?? 0) > started)));
+        setSeeded({}); setBlocked(false);
+      } else failed(result.error);
     } catch {
       if (alive.current && id === requests.current) failed({ kind: "network" });
     }
@@ -74,6 +82,7 @@ export function useLikes(tripId: string, postId: string, api: Pick<TripLikeApi, 
     const state = stateOf(known, key);
     if (closed || known.summary.kind !== "ready" || !state) return;
     busyRef.current.add(key); setBusy(new Set(busyRef.current));
+    stamps.current.set(key, epoch.current += 1);
     setNotices((all) => { if (!(key in all)) return all; const next = { ...all }; delete next[key]; return next; });
     const liked = !state.liked;
     const fail = (error: TripFailure) => {
@@ -83,7 +92,7 @@ export function useLikes(tripId: string, postId: string, api: Pick<TripLikeApi, 
     try {
       const result = key === "post" ? await current.setPostLike(tripId, postId, liked) : await current.setCommentLike(tripId, postId, key.slice("comment:".length), liked);
       if (!alive.current) return;
-      if (result.ok) setConfirmed((all) => ({ ...all, [key]: result.value })); else fail(result.error);
+      if (result.ok) { stamps.current.set(key, epoch.current += 1); setConfirmed((all) => ({ ...all, [key]: result.value })); } else fail(result.error);
     } catch {
       if (alive.current) fail({ kind: "network" });
     } finally {

@@ -210,7 +210,7 @@ describe("comments panel: create", () => {
     await clickTwice(button(container, "Comentar"));
     expect(api.comments.create).toHaveBeenCalledTimes(1);
     const busy = container.querySelector("form button[type=submit]") as HTMLButtonElement;
-    expect(busy.disabled).toBe(true); expect(busy.getAttribute("aria-busy")).toBe("true");
+    expect(busy.getAttribute("aria-disabled")).toBe("true"); expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(field(container, NEW)?.disabled).toBe(false);
     await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
     expect(api.comments.create).toHaveBeenCalledTimes(1);
@@ -442,11 +442,12 @@ describe("likes", () => {
     expect(api.likes.setPostLike).toHaveBeenCalledTimes(1);
     expect(likeOf(container, "post").textContent).toBe("Me gusta 3");
     expect(likeOf(container, "post").getAttribute("aria-pressed")).toBe("false");
-    expect(likeOf(container, "post").disabled).toBe(true);
+    expect(likeOf(container, "post").getAttribute("aria-disabled")).toBe("true");
     expect(likeOf(container, "post").getAttribute("aria-busy")).toBe("true");
     await act(async () => pending.resolve(ok({ liked: true, count: 4 })));
     expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 4");
     expect(likeOf(container, "post").disabled).toBe(false);
+    expect(likeOf(container, "post").getAttribute("aria-disabled")).toBeNull();
     expect(likeOf(container, "post").getAttribute("aria-busy")).toBeNull();
   });
   it("keeps the state on error, warns next to the button and retries the same operation", async () => {
@@ -494,5 +495,120 @@ describe("likes", () => {
     await click(button(container, "Actualizar comentarios"));
     expect(likeOf(container, `comment:${itineraryId(5)}`).disabled).toBe(false);
     expect(likeOf(container, `comment:${itineraryId(5)}`).textContent).toBe("Quitar me gusta 1");
+  });
+});
+
+describe("focus stays on the pressed button while busy and afterwards", () => {
+  const focused = (element: HTMLElement | undefined | null) => { expect(element).toBeTruthy(); element!.focus(); expect(document.activeElement).toBe(element); return element!; };
+  const stays = (element: HTMLElement) => { expect(document.activeElement).toBe(element); expect(element.getAttribute("aria-disabled")).toBe("true"); expect(element.hasAttribute("disabled")).toBe(false); };
+  const withLikes = (over: Record<string, unknown>) => apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false },
+    comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }))), ...over } });
+  it.each([["post", "setPostLike"], [`comment:${itineraryId(5)}`, "setCommentLike"]])("like %s: pending, error and confirmation", async (key, method) => {
+    const pending = deferred<unknown>();
+    const set = vi.fn().mockReturnValueOnce(pending.promise).mockReturnValueOnce(Promise.resolve(fail("network"))).mockResolvedValue(ok({ liked: true, count: 9 }));
+    const container = await render(withLikes({ [method]: set }));
+    const like = focused(likeOf(container, key));
+    await click(like);
+    stays(like);
+    await act(async () => pending.resolve(fail("network")));
+    expect(document.activeElement).toBe(like); expect(like.hasAttribute("disabled")).toBe(false); expect(like.getAttribute("aria-disabled")).toBeNull();
+    await click(like);
+    expect(document.activeElement).toBe(like);
+    await click(like);
+    expect(likeOf(container, key).textContent).toBe("Quitar me gusta 9");
+    expect(document.activeElement).toBe(likeOf(container, key));
+  });
+  it("Comentar: pending and after a failure", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(apis([], { comments: { create: vi.fn().mockReturnValueOnce(pending.promise) } }));
+    await type(container, NEW, "hola");
+    const submit = focused(button(container, "Comentar"));
+    await click(submit);
+    stays(submit);
+    await act(async () => pending.resolve(fail("validation", { fields: [{ field: "text", code: "required", message: "x" }] })));
+    expect(document.activeElement).toBe(button(container, "Comentar"));
+    expect(button(container, "Comentar")?.getAttribute("aria-disabled")).toBeNull();
+  });
+  it("Guardar: pending and after a failure", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(apis([comment(5)], { comments: { update: vi.fn().mockReturnValueOnce(pending.promise) } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    const save = focused(button(item(container, 5), "Guardar"));
+    await click(save);
+    stays(save);
+    await act(async () => pending.resolve(fail("network")));
+    expect(document.activeElement).toBe(button(item(container, 5), "Guardar"));
+    expect(button(item(container, 5), "Guardar")?.getAttribute("aria-disabled")).toBeNull();
+  });
+});
+
+describe("a single assertive announcement", () => {
+  const alerts = (container: HTMLElement) => Array.from(container.querySelectorAll('[role="alert"]'));
+  const noLiveAlert = (container: HTMLElement) => expect(container.querySelectorAll('[role="alert"][aria-live]')).toHaveLength(0);
+  it("summary error plus failed update: at most one alert", async () => {
+    const list = vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValue(fail("network"));
+    const container = await render(apis([], { comments: { list }, likes: { summary: vi.fn().mockResolvedValue(fail("network")) } }));
+    await click(button(container, "Actualizar comentarios"));
+    expect(container.textContent).toContain("No pudimos cargar los me gusta.");
+    expect(container.textContent).toContain("No pudimos actualizar los comentarios.");
+    expect(alerts(container).length).toBeLessThanOrEqual(1);
+    noLiveAlert(container);
+  });
+  it("like notice, failed update and form error together: one alert, messages tied to their control", async () => {
+    const list = vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValue(fail("network"));
+    const create = vi.fn().mockResolvedValue(fail("validation", { fields: [{ field: "text", code: "too_long", message: "x" }] }));
+    const container = await render(apis([], { comments: { list, create }, likes: { summary: vi.fn().mockResolvedValue(ok(summary({ comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }))),
+      setPostLike: vi.fn().mockResolvedValue(fail("network")) } }));
+    await click(likeOf(container, "post"));
+    await click(button(container, "Actualizar comentarios"));
+    await type(container, NEW, "hola");
+    await click(button(container, "Comentar"));
+    expect(container.textContent).toContain("No pudimos actualizar el me gusta.");
+    expect(container.textContent).toContain("No pudimos actualizar los comentarios.");
+    expect(container.textContent).toContain("El comentario supera el máximo de 2000 caracteres.");
+    expect(alerts(container)).toHaveLength(1);
+    noLiveAlert(container);
+    const described = document.getElementById(likeOf(container, "post").getAttribute("aria-describedby") ?? "");
+    expect(described?.textContent).toContain("No pudimos actualizar el me gusta.");
+  });
+});
+
+describe("a summary read before a confirmed like does not undo it", () => {
+  const harness = () => {
+    const first = deferred<unknown>(), second = deferred<unknown>();
+    const set = vi.fn().mockResolvedValue(ok({ liked: true, count: 4 }));
+    const api = apis([], { likes: { summary: vi.fn().mockResolvedValueOnce(ok(summary({ post: { count: 3, likedByMe: false } }))).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise), setPostLike: set } });
+    return { api, first, second };
+  };
+  it("keeps the confirmed count when the older GET answers after the PUT", async () => {
+    const { api, first } = harness();
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    await click(likeOf(container, "post"));
+    expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 4");
+    await act(async () => first.resolve(ok(summary({ post: { count: 3, likedByMe: false } }))));
+    expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 4");
+  });
+  it("keeps the confirmed count when the GET started before the PUT and answers while it is still pending", async () => {
+    const { api, first } = harness();
+    const pending = deferred<unknown>();
+    api.likes.setPostLike.mockReturnValueOnce(pending.promise);
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    await click(likeOf(container, "post"));
+    await act(async () => first.resolve(ok(summary({ post: { count: 3, likedByMe: false } }))));
+    await act(async () => pending.resolve(ok({ liked: true, count: 4 })));
+    expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 4");
+  });
+  it("applies a summary requested after the PUT", async () => {
+    const { api, first, second } = harness();
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    await act(async () => first.resolve(ok(summary({ post: { count: 3, likedByMe: false } }))));
+    await click(likeOf(container, "post"));
+    await click(button(container, "Actualizar comentarios"));
+    await act(async () => second.resolve(ok(summary({ post: { count: 6, likedByMe: true } }))));
+    expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 6");
   });
 });

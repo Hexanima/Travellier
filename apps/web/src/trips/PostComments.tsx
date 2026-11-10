@@ -23,18 +23,21 @@ const definiteFailure = (error: TripFailure, access: string): Message | undefine
   if (error.kind === "forbidden" || error.kind === "not-found") return { variant: "error", text: access };
   return undefined;
 };
-const MessageView = ({ message }: { message: Message | undefined }) => message ? <Feedback variant={message.variant} aria-live="polite">
+/** The only assertive announcement of the panel is the form's own error: the rest (like notices, update warnings) are polite `status`, never `alert` + `aria-live`. */
+const MessageView = ({ message }: { message: Message | undefined }) => message ? <Feedback variant={message.variant} role={message.variant === "error" ? "alert" : "status"}>
   {message.text}{message.login ? <> <Link to="/login">Iniciar sesión</Link></> : null}</Feedback> : null;
 
 /** Like of the post or of a comment: `aria-pressed`, the count visible, and nothing shown for an unknown counter. */
 export function LikeButton({ likeKey, state, busy, disabled, notice, onToggle }: { likeKey: LikeKey; state: LikeState | undefined; busy: boolean; disabled: boolean;
   notice: string | undefined; onToggle: () => void }) {
+  const noticeId = `like-notice-${likeKey.replace(":", "-")}`;
+  /* While busy the button stays focusable (`aria-disabled`, not `disabled`) so the focus is never lost; the press is ignored. */
   return <div className="like-control">
     <button type="button" className="ui-button like-button" data-like={likeKey} aria-pressed={state?.liked ?? false} aria-busy={busy || undefined}
-      disabled={disabled || busy || !state} onClick={onToggle}>
+      aria-disabled={busy || undefined} aria-describedby={notice ? noticeId : undefined} disabled={disabled || !state} onClick={() => { if (!busy) onToggle(); }}>
       {state?.liked ? "Quitar me gusta" : "Me gusta"}{state ? <> <span className="like-count">{state.count}</span></> : null}
     </button>
-    {notice ? <Feedback variant="error">{notice}</Feedback> : null}
+    {notice ? <Feedback id={noticeId} variant="error" role="status">{notice}</Feedback> : null}
   </div>;
 }
 
@@ -46,7 +49,7 @@ export function PostLikeControl({ likes }: { likes: LikesController }) {
       onToggle={() => void likes.toggle("post")} />
     {likes.status === "loading" ? <LoadingState label="Cargando me gusta…" /> : null}
     {likes.status === "error" ? <div className="like-error">
-      <Feedback variant="error">{unavailable ? "Ya no podés ver los me gusta de este recuerdo."
+      <Feedback variant="error" role="status">{unavailable ? "Ya no podés ver los me gusta de este recuerdo."
         : likes.error?.kind === "unauthorized" ? sessionExpired : "No pudimos cargar los me gusta. Los comentarios se muestran sin contadores."}</Feedback>
       {likes.error?.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
         : !unavailable ? <Button onClick={() => void likes.refresh()}>Reintentar me gusta</Button> : null}
@@ -65,7 +68,9 @@ export function CommentComposer({ name, label, text, onText, onSubmit, submitLab
     <p className="comment-count">{commentLength(text)} / {COMMENT_MAX}</p>
     {children}
     <div className="comment-actions">
-      <Button type="submit" disabled={problem !== undefined} loading={busy} loadingLabel={busyLabel}>{submitLabel}</Button>
+      {/* Busy uses `aria-disabled` (not `disabled`) so the pressed button keeps the focus; `onSubmit` of the owner ignores a second send. */}
+      <button type="submit" className="ui-button" disabled={problem !== undefined} aria-disabled={busy || undefined} aria-busy={busy || undefined}
+        onClick={(event) => { if (busy) event.preventDefault(); }}>{busy ? busyLabel : submitLabel}</button>
       {onCancel ? <Button onClick={onCancel}>Cancelar</Button> : null}
     </div>
   </form>;
@@ -233,7 +238,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
     </div> : null}
     {list.kind === "ready" ? <>
       {updating ? <LoadingState label="Actualizando comentarios…" /> : null}
-      {updateFailed ? <Feedback variant="error">No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.</Feedback> : null}
+      {updateFailed ? <Feedback variant="error" role="status">No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.</Feedback> : null}
       <Button onClick={() => void reload()} disabled={updating}>Actualizar comentarios</Button>
       {list.items.length === 0 ? <p className="itinerary-secondary">Todavía no hay comentarios.</p> : <ul className="comment-list" aria-label="Comentarios">
         {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} format={format} likes={likes} update={update} onSaved={saved} />)}
