@@ -156,7 +156,7 @@ describe("post expense persistence and transactions (T79)", () => {
   });
 
   describe("atomicity", () => {
-    const failOn = (name: string, method: "insertOne" | "updateOne") => {
+    const failOn = (name: string, method: "insertOne" | "updateOne" | "findOneAndUpdate") => {
       const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
       const spy = vi.spyOn(collection, method).mockRejectedValueOnce(new Error("forced failure") as never);
       vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
@@ -188,6 +188,52 @@ describe("post expense persistence and transactions (T79)", () => {
         newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
       expect(spy).toHaveBeenCalledTimes(1);
       expect(await snapshot()).toEqual(before);
+    });
+
+    // The author's participation is saved AFTER the expense in the same transaction: forcing it to fail proves the expense write
+    // (insert or $set) joined the session and is rolled back. `expenseWrites` proves the expense write really ran first.
+    const failAfterExpense = (expenseMethod: "insertOne" | "updateOne") => {
+      const expenseCollection = f.db.collection("postExpenses"), participations = f.db.collection("activityParticipations");
+      const original = f.db.collection.bind(f.db);
+      const expenseWrites = vi.spyOn(expenseCollection, expenseMethod);
+      const participationFailure = vi.spyOn(participations, "findOneAndUpdate").mockRejectedValueOnce(new Error("forced failure") as never);
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) =>
+        key === "postExpenses" ? expenseCollection : key === "activityParticipations" ? participations : original(key, options));
+      return { expenseWrites, participationFailure };
+    };
+
+    it("rolls back the expense insert when the author's participation fails after it on POST with a new activity", async () => {
+      const before = await snapshot();
+      const { expenseWrites, participationFailure } = failAfterExpense("insertOne");
+      expect(await createPost({ newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense }))
+        .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(expenseWrites).toHaveBeenCalledTimes(1);
+      expect(participationFailure).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect(await expenses()).toEqual([]);
+    });
+
+    it("rolls back the expense insert when the author's participation fails after it while linking a post to a new activity", async () => {
+      const { post } = await created(), before = await snapshot();
+      const { expenseWrites, participationFailure } = failAfterExpense("insertOne");
+      expect(await f.api.linkPostToNewActivity!({ ...f.context(), postId: domainId(new ObjectId(post.id)),
+        newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(expenseWrites).toHaveBeenCalledTimes(1);
+      expect(participationFailure).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect(await expenses()).toEqual([]);
+    });
+
+    it("rolls back the expense $set when the author's participation fails after it while linking a post with a stored expense", async () => {
+      const { post } = await created({ expense }), before = await snapshot();
+      const { expenseWrites, participationFailure } = failAfterExpense("updateOne");
+      expect(await f.api.linkPostToNewActivity!({ ...f.context(), postId: domainId(new ObjectId(post.id)),
+        newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense: { totalAmount: 9, breakdown: "otro" } }))
+        .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(expenseWrites).toHaveBeenCalledTimes(1);
+      expect(participationFailure).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect((await expenses())[0]).toMatchObject(expense);
     });
 
     it("writes no expense when posts.insertOne fails", async () => {
