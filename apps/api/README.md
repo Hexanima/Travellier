@@ -226,7 +226,7 @@ No emiten: editar un post o un comentario, «Voy / No voy», likes, votos (retir
 - Orden: `createdAt` descendente y `_id` descendente. `limit` entero de 1 a 60 (30 por defecto); `cursor` opaco como el de fotos (posición `createdAt`+`_id`); `limit` o `cursor` inválidos → 422 con el campo. `nextCursor` es `null` en la última página; un aviso nuevo no desplaza las páginas siguientes.
 - Autorización en cada lectura: solo avisos propios de los Trips de los que el usuario es integrante **hoy**, más el aviso `member.expelled` de su propia expulsión (mientras exista el Trip). Quien sale o es expulsado deja de ver los demás avisos de ese Trip. La respuesta lleva IDs exactos y fechas; sin títulos, descripciones, textos de comentarios ni tokens.
 - Al eliminar un Trip se borran sus documentos de `outboxEvents` (cascada). No hay TTL ni retención definida.
-- `lambda.ts` ahora entrega a la ruta el `rawQueryString` de API Gateway (antes se descartaba: `limit` y `cursor` no llegaban a ninguna ruta con parámetros, incluida la lista de fotos).
+- `lambda.ts` ahora entrega a la ruta el `rawQueryString` de API Gateway (antes se descartaba: `limit` y `cursor` no llegaban a ninguna ruta con parámetros, incluida la lista de fotos). Solo `/notifications` y `/trips/:id/photos` leen la query; las demás rutas la ignoran porque `handleApiRequest` las matchea sobre el pathname.
 - Verificado con MongoDB efímero (`mongodb-memory-server`); no se probó con Atlas, push real (T92), volumen del fan-out ni textos finales del cliente.
 
 ## API de participación (T38)
