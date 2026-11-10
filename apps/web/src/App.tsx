@@ -40,6 +40,7 @@ import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
 import { SpontaneousActivityForm } from './trips/SpontaneousActivityForm.js'
 import { MemoriesLayout, TripMemoriesScreen } from './trips/TripMemoriesScreen.js'
+import { TripContentLayout } from './trips/TripContentLayout.js'
 import { PostDetailScreen } from './trips/PostDetailScreen.js'
 
 type AppProps = {
@@ -347,16 +348,15 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
             <TripJourneyScreen trips={tripManagement} journey={tripJourney} />
           </TripRoute>
         } />
-        <Route path="/trips/:tripId/itinerary" element={
+        <Route element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} />
-          </TripRoute>
-        } />
-        <Route path="/trips/:tripId/memories" element={
-          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <MemoriesLayout gallery={galleryProvider} />
+            <TripContentLayout gallery={galleryProvider} />
           </TripRoute>
         }>
+        <Route path="/trips/:tripId/itinerary" element={
+          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} />
+        } />
+        <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
           <Route path="photos" element={<TripPhotosScreen members={tripMembers} />} />
@@ -366,6 +366,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
           <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
           <Route path=":postId/edit/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
+        </Route>
         </Route>
         <Route path="/profile" element={
           !sessionReady
