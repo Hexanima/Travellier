@@ -272,6 +272,48 @@ describe("storage cleanup: Trip deletion jobs and abandoned uploads", () => {
       expect(cleanup.keys()).toEqual([key]);
     });
 
+    describe("rolled-back joint save (T87)", () => {
+      const failingJointSave = async (photos: string[], postId = new ObjectId()) => {
+        const collection = f.db.collection("activities"), original = f.db.collection.bind(f.db);
+        const spy = vi.spyOn(collection, "insertOne").mockRejectedValueOnce(new Error("forced failure"));
+        const spyCollection = vi.spyOn(f.db, "collection").mockImplementation((name, options) => name === "activities" ? collection : original(name, options));
+        const result = await f.api.createPost!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor), postId: domainId(postId),
+          description: "Recuerdo", newActivity: { title: "Cena", scheduledAt: f.occurrence }, photos: photos.map((key) => ({ key })) });
+        spy.mockRestore(); spyCollection.mockRestore();
+        return { result, postId };
+      };
+      const uploaded = (count: number) => {
+        const keys = Array.from({ length: count }, () => keyOf(f.trip));
+        for (const key of keys) { fake.put(key, "image/jpeg"); cleanup.put(key, ago(OLD)); }
+        return keys;
+      };
+
+      it("leaves no post, activity, photo record or reference, and the old unreferenced keys are swept", async () => {
+        const keys = uploaded(2);
+        const { result } = await failingJointSave(keys);
+        expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        for (const name of ["posts", "activities", "activityParticipations", "postPhotos", "postExpenses"]) expect(await f.db.collection(name).countDocuments({})).toBe(0);
+        expect(await sweep()).toMatchObject({ ok: true, value: { deleted: 2, keptLinked: 0 } });
+        expect(cleanup.keys()).toEqual([]);
+      });
+
+      it("a retry of the failed save with the same id registers only its keys; the sweep then keeps them and removes the rest", async () => {
+        const keys = uploaded(2);
+        const { result, postId } = await failingJointSave(keys);
+        expect(result.ok).toBe(false);
+        const retry = await f.api.createPost!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor), postId: domainId(postId),
+          description: "Recuerdo", newActivity: { title: "Cena", scheduledAt: f.occurrence }, photos: [{ key: keys[0]! }] });
+        expect(retry.ok).toBe(true);
+        expect(await sweep()).toMatchObject({ ok: true, value: { deleted: 1, keptLinked: 1 } });
+        expect(cleanup.keys()).toEqual([keys[0]!]);
+        // A second retry of the committed save references the same key and registers nothing new.
+        const again = await f.api.createPost!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor), postId: domainId(postId),
+          description: "Recuerdo", newActivity: { title: "Cena", scheduledAt: f.occurrence }, photos: [{ key: keys[0]! }] });
+        expect(again).toEqual(retry);
+        expect(await f.db.collection("postPhotos").countDocuments({})).toBe(1);
+      });
+    });
+
     it("a failing bucket listing or delete does not change any record", async () => {
       const orphan = keyOf(f.trip);
       cleanup.put(orphan, ago(OLD));
