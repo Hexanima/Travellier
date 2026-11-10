@@ -10,8 +10,16 @@ describe("comment persistence and transactions", () => {
   afterAll(() => f.stop());
   // Releases of every pause created by a test. afterEach always frees them (idempotent), so a failed assertion never leaves
   // a transaction open that would block the next reset until the server aborts it.
+  // It also waits for every operation the test launched (never launched before `reached` is confirmed, except the one
+  // that holds the pause), so none can still run during the next test's reset().
   let pendingReleases: Array<() => void> = [];
-  afterEach(() => { for (const release of pendingReleases) release(); pendingReleases = []; });
+  let launched: Array<Promise<unknown>> = [];
+  afterEach(async () => {
+    for (const release of pendingReleases) release();
+    pendingReleases = [];
+    await Promise.allSettled(launched);
+    launched = [];
+  });
   beforeEach(async () => { vi.restoreAllMocks(); await f.reset(); });
 
   const createPost = async (tripId = domainId(f.trip), user = domainId(f.actor)) => {
@@ -106,7 +114,7 @@ describe("comment persistence and transactions", () => {
     const gate = new Promise<void>((resolve) => { release = resolve; });
     pendingReleases.push(() => release());
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`The first ${name}.${method} never ran.`)), 5_000); });
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`The first ${name}.${method} never ran.`)), 3_000); });
     const reachedOrTimeout = Promise.race([reachedPromise, timeout]).finally(() => clearTimeout(timer));
     reachedOrTimeout.catch(() => undefined);
     vi.spyOn(collection, method).mockImplementation((async (...args: unknown[]) => {
@@ -117,19 +125,22 @@ describe("comment persistence and transactions", () => {
     vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
     return { reached: reachedOrTimeout, release: () => release() };
   };
+  const launch = <T>(promise: Promise<T>) => { launched.push(promise); return promise; };
   const track = <T>(promise: Promise<T>) => { const state = { settled: false }; void promise.finally(() => { state.settled = true; }); return state; };
+  // Real timeout (15 s) above Vitest's 5 s default and above the 3 s `reached` limit, so the clear message wins.
+  const concurrent = (name: string, fn: () => Promise<void>) => it(name, fn, 15_000);
   const pause = () => new Promise((resolve) => setTimeout(resolve, 500));
   const expel = (admin: ObjectId) => f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) });
   const deleteTrip = () => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) });
 
-  it("makes an expulsion wait for an in-flight comment, which is kept as former-member", async () => {
+  concurrent("makes an expulsion wait for an in-flight comment, which is kept as former-member", async () => {
     const post = await createPost(); const admin = await addMember("admin");
     const paused = pauseAfterFirst("comments", "insertOne");
-    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
+    const creating = launch(f.api.createComment!({ ...payload(post.id), text: "Hola" }));
     let expelling!: ReturnType<typeof expel>;
     try {
       await paused.reached;
-      expelling = expel(admin); const expulsion = track(expelling);
+      expelling = launch(expel(admin)); const expulsion = track(expelling);
       await pause();
       expect(expulsion.settled, "expulsion finished while the comment transaction was open").toBe(false);
     } finally { paused.release(); }
@@ -140,14 +151,14 @@ describe("comment persistence and transactions", () => {
     expect(await f.api.listComments!(payload(post.id, admin))).toMatchObject({ ok: true, value: [{ authorIsFormerMember: true }] });
   });
 
-  it("makes a comment wait for an in-flight expulsion and then fail without writing", async () => {
+  concurrent("makes a comment wait for an in-flight expulsion and then fail without writing", async () => {
     const post = await createPost(); const admin = await addMember("admin");
     const paused = pauseAfterFirst("trips", "updateOne");
-    const expelling = expel(admin);
+    const expelling = launch(expel(admin));
     let creating!: ReturnType<NonNullable<typeof f.api.createComment>>;
     try {
       await paused.reached;
-      creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+      creating = launch(f.api.createComment!({ ...payload(post.id), text: "Hola" })); const creation = track(creating);
       await pause();
       expect(creation.settled, "comment finished while the expulsion transaction was open").toBe(false);
     } finally { paused.release(); }
@@ -157,15 +168,15 @@ describe("comment persistence and transactions", () => {
     expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
   });
 
-  it("makes Trip deletion wait for an in-flight comment and leaves no orphan comment", async () => {
+  concurrent("makes Trip deletion wait for an in-flight comment and leaves no orphan comment", async () => {
     await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
     const post = await createPost();
     const paused = pauseAfterFirst("comments", "insertOne");
-    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
+    const creating = launch(f.api.createComment!({ ...payload(post.id), text: "Hola" }));
     let deleting!: ReturnType<typeof deleteTrip>;
     try {
       await paused.reached;
-      deleting = deleteTrip(); const deletion = track(deleting);
+      deleting = launch(deleteTrip()); const deletion = track(deleting);
       await pause();
       expect(deletion.settled, "deletion finished while the comment transaction was open").toBe(false);
     } finally { paused.release(); }
@@ -175,15 +186,15 @@ describe("comment persistence and transactions", () => {
     expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
   });
 
-  it("makes a comment wait for an in-flight Trip deletion and then fail without writing", async () => {
+  concurrent("makes a comment wait for an in-flight Trip deletion and then fail without writing", async () => {
     await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
     const post = await createPost();
     const paused = pauseAfterFirst("trips", "updateOne");
-    const deleting = deleteTrip();
+    const deleting = launch(deleteTrip());
     let creating!: ReturnType<NonNullable<typeof f.api.createComment>>;
     try {
       await paused.reached;
-      creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+      creating = launch(f.api.createComment!({ ...payload(post.id), text: "Hola" })); const creation = track(creating);
       await pause();
       expect(creation.settled, "comment finished while the deletion transaction was open").toBe(false);
     } finally { paused.release(); }
