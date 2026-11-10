@@ -128,6 +128,34 @@ describe("checkSplit", () => {
   });
 });
 
+describe("checkSplit summary", () => {
+  it("covers the total when everyone is on remainder", () => {
+    const check = checkSplit(total(10000), { payments: [], shares: [share("a", ana, "remainder"), share("b", beto, "remainder")] });
+    expect(check.shares.summary).toMatchObject({ coveredCents: 10000, missingCents: 0, excessCents: 0 });
+  });
+  it("covers the total with remainder plus fixed amounts", () => {
+    const check = checkSplit(total(10000), { payments: [], shares: [share("a", ana, "amount", "20"), share("b", beto, "remainder")] });
+    expect(check.shares.summary).toMatchObject({ coveredCents: 10000, missingCents: 0, excessCents: 0 });
+  });
+  it("absorbs the percentage residue of a total that is not a multiple (10,00 with 33,34 / 33,33 / 33,33)", () => {
+    const check = checkSplit(total(1000), { payments: [], shares: [share("a", ana, "percent", "33,34"), share("b", beto, "percent", "33,33"), share("c", caro, "percent", "33,33")] });
+    expect(check.shares.valid).toBe(true);
+    expect(check.shares.summary).toMatchObject({ coveredCents: 1000, missingCents: 0, excessCents: 0 });
+  });
+  it("reports the real shortfall of incomplete payments", () => {
+    const check = checkSplit(total(10000), { payments: [pay("a", ana, "amount", "25,50")], shares: [] });
+    expect(check.payments.summary).toMatchObject({ coveredCents: 2550, missingCents: 7450, excessCents: 0 });
+  });
+  it("reports the excess", () => {
+    const check = checkSplit(total(10000), { payments: [pay("a", ana, "amount", "100,01")], shares: [] });
+    expect(check.payments.summary).toMatchObject({ excessCents: 1, missingCents: 0 });
+  });
+  it("reads cents exactly, without floating point (1,15 is 115 cents)", () => {
+    const check = checkSplit(total(10000), { payments: [pay("a", ana, "amount", "1,15"), pay("b", beto, "amount", "4,35")], shares: [] });
+    expect(check.payments.summary).toMatchObject({ coveredCents: 550, missingCents: 9450 });
+  });
+});
+
 describe("proposal and explicit inclusion", () => {
   it("proposes one remainder row per current member (no payer) only for a new or empty split", () => {
     const rows = proposeShares([ana, beto]);

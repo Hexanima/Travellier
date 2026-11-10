@@ -71,7 +71,15 @@ export type Summary = { totalCents: number; coveredCents: number; missingCents: 
 export type SectionCheck<Row> = { valid: boolean; rowErrors: RowErrors; listError?: string; summary?: Summary; rows?: Row[]; remainderCents?: Record<string, number> };
 export type SplitCheck = { valid: boolean; payments: SectionCheck<ExpensePayment>; shares: SectionCheck<ExpenseShare>; incomplete: { payments?: string[]; shares?: string[] } };
 
-const hundredths = (text: string): bigint => BigInt(Math.round(Number(text.replace(",", ".")) * 100));
+const hundredths = (text: string): bigint => {
+  const parsed = parseAmount(text, { allowZero: true });
+  return parsed.ok ? BigInt(parsed.cents) : 0n;
+};
+const toSummary = (totalCents: number, covered: bigint): Summary => {
+  const total = BigInt(totalCents);
+  return { totalCents, coveredCents: Number(covered), missingCents: covered < total ? Number(total - covered) : 0, excessCents: covered > total ? Number(covered - total) : 0 };
+};
+/** Own estimate (rows rounded one by one): only for sections the shared rules cannot resolve, such as the ones still missing data. */
 const summarize = (totals: SplitTotals, rows: readonly { unit: string; value: string }[]): Summary => {
   let covered = 0n;
   for (const row of rows) {
@@ -79,9 +87,11 @@ const summarize = (totals: SplitTotals, rows: readonly { unit: string; value: st
     const h = hundredths(row.value);
     covered += row.unit === "amount" ? h : (h * BigInt(totals.totalCents) + 5000n) / 10000n;
   }
-  const total = BigInt(totals.totalCents);
-  return { totalCents: totals.totalCents, coveredCents: Number(covered), missingCents: covered < total ? Number(total - covered) : 0, excessCents: covered > total ? Number(covered - total) : 0 };
+  return toSummary(totals.totalCents, covered);
 };
+/** Cents per row already resolved by the shared rules (rest and percentage residue included): what is covered is their sum. */
+const resolvedSummary = (totalCents: number, resolved: readonly { cents: number }[]): Summary =>
+  toSummary(totalCents, resolved.reduce((sum, row) => sum + BigInt(row.cents), 0n));
 
 const parseRows = (rows: readonly (PaymentRow | ShareRow)[], isShares: boolean): { rows: { userId: string; unit: string; value: number | null }[]; errors: RowErrors } => {
   const errors: RowErrors = {}, parsed: { userId: string; unit: string; value: number | null }[] = [], seen = new Set<string>();
@@ -123,7 +133,9 @@ export const checkSplit = (totals: SplitTotals, split: WorkingSplit): SplitCheck
       const excess = summary.excessCents > 0 ? `Sobran ${formatCents(summary.excessCents, totals.currency)}.` : "Los valores superan el total.";
       return { valid: false, rowErrors: errors, listError: excess, summary };
     }
-    return { valid: true, rowErrors: errors, summary, rows: parsed as Row[] };
+    const own = resolveExpense({ ...base, [isShares ? "shares" : "payments"]: parsed });
+    const resolved = isShares ? own.shares : own.payments;
+    return { valid: true, rowErrors: errors, summary: resolved ? resolvedSummary(totals.totalCents, resolved) : summary, rows: parsed as Row[] };
   };
   const payments = section<ExpensePayment>(split.payments, false), shares = section<ExpenseShare>(split.shares, true);
   const resolution = resolveExpense({ ...base, payments: payments.rows ?? [], shares: shares.rows ?? [] });
