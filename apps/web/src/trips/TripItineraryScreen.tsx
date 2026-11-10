@@ -186,6 +186,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         <p>El viaje, día a día. Horarios en tu zona local.</p>
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/memories`}>Recuerdos</Link> : null}
+        {/* Provisional entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses): T98 gives it its place. */}
+        {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/balance`}>Balance</Link> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
       {state.kind === "ready" && notice ? <div ref={noticeRef} tabIndex={-1}><Feedback variant={notice.variant}>{notice.text}</Feedback></div> : null}

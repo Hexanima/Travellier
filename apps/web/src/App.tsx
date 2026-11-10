@@ -32,6 +32,8 @@ import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
 import { createTripCommentApi, type TripCommentApi } from './trips/trip-comment-api.js'
 import { createTripLikeApi, type TripLikeApi } from './trips/trip-like-api.js'
+import { createTripBalanceApi, type TripBalanceApi } from './trips/trip-balance-api.js'
+import { TripBalanceScreen } from './trips/TripBalanceScreen.js'
 import { createTripPhotoApi, type TripPhotoApi } from './trips/trip-photo-api.js'
 import { createTripGalleryApi, type TripGalleryApi } from './trips/trip-gallery-api.js'
 import { TripPhotosScreen } from './trips/TripPhotosScreen.js'
@@ -59,6 +61,8 @@ type AppProps = {
   posts?: Partial<TripPostApi>
   comments?: Partial<TripCommentApi>
   likes?: Partial<TripLikeApi>
+  /** Balance of the Trip computed by the backend; the default uses the authenticated client. */
+  balance?: Partial<TripBalanceApi>
   /** Reservation of photo uploads; the default uses the authenticated client. */
   photos?: Partial<TripPhotoApi>
   /** Gallery of the Trip photos (signed read urls); the default uses the authenticated client. */
@@ -87,7 +91,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, photos, gallery, devicePhotos }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -107,6 +111,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultPosts = useRef<TripPostApi | undefined>(undefined)
   const defaultComments = useRef<TripCommentApi | undefined>(undefined)
   const defaultLikes = useRef<TripLikeApi | undefined>(undefined)
+  const defaultBalance = useRef<TripBalanceApi | undefined>(undefined)
   const defaultPhotos = useRef<TripPhotoApi | undefined>(undefined)
   const defaultGallery = useRef<TripGalleryApi | undefined>(undefined)
   const defaultDevicePhotos = useRef<Partial<Omit<PostPhotoDeps, 'api'>>>({})
@@ -143,6 +148,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultPosts.current = createTripPostApi(client)
     defaultComments.current = createTripCommentApi(client)
     defaultLikes.current = createTripLikeApi(client)
+    defaultBalance.current = createTripBalanceApi(client)
     defaultPhotos.current = createTripPhotoApi(client)
     defaultGallery.current = createTripGalleryApi(client)
   }
@@ -157,6 +163,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activePosts = posts ?? defaultPosts.current
   const activeComments = comments ?? defaultComments.current
   const activeLikes = likes ?? defaultLikes.current
+  const activeBalance = balance ?? defaultBalance.current
   const activePhotos = photos ?? defaultPhotos.current
   const activeGallery = gallery ?? defaultGallery.current
   // Stable reference: the gallery hook depends on it.
@@ -173,6 +180,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     setPostLike: activeLikes?.setPostLike ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     setCommentLike: activeLikes?.setCommentLike ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeLikes])
+  const tripBalance = useMemo<TripBalanceApi>(() => ({
+    get: activeBalance?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeBalance])
   const tripPosts = useMemo<TripPostApi>(() => ({
     list: activePosts?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     get: activePosts?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -358,6 +368,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/trips/:tripId/itinerary" element={
           <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} />
         } />
+        <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
