@@ -221,7 +221,7 @@ describe("MongoDB push device repository", () => {
       expect(JSON.stringify(result)).not.toContain(SENTINEL);
     }
   });
-
+
   it("lists only the devices of the user with their token, most recently registered first", async () => {
     const user = new ObjectId(), other = new ObjectId();
     await repo().register(input(user, "tok-old", { now: at(-60) }));
