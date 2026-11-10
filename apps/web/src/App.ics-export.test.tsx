@@ -8,7 +8,13 @@ import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
-afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks(); });
+const urlKeys = ["createObjectURL", "revokeObjectURL"] as const;
+/** jsdom may not define these; keep the original descriptors (or their absence) to restore them exactly. */
+const originalUrl = urlKeys.map((key) => [key, Object.getOwnPropertyDescriptor(URL, key)] as const);
+afterEach(async () => {
+  await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks();
+  for (const [key, descriptor] of originalUrl) { if (descriptor) Object.defineProperty(URL, key, descriptor); else Reflect.deleteProperty(URL, key); }
+});
 const storage = () => ({ read: vi.fn().mockResolvedValue({ accessToken: "old", refreshToken: "refresh" }), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) });
 const blobText = (blob: Blob) => new Promise<string>((resolve, reject) => {
   const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsText(blob);
@@ -39,5 +45,10 @@ describe("App .ics export", () => {
     expect(text).toContain("X-WR-CALNAME:Córdoba 2026\r\n");
     expect(text).toContain("SUMMARY:Visita al museo");
     expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Se generó la exportación el .*Si no aparece el archivo, probá de nuevo\.$/);
+  });
+  it("leaves no global URL patch behind (checked after the previous test's cleanup)", () => {
+    for (const [key, descriptor] of originalUrl) expect(Object.getOwnPropertyDescriptor(URL, key)?.value).toBe(descriptor?.value);
+    expect(vi.isMockFunction(URL.createObjectURL)).toBe(false);
+    expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(false);
   });
 });
