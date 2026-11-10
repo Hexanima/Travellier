@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { itineraryFixture, itineraryId } from "../trips/itinerary-test-fixture.js";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
 import { buildItineraryIcs, icsEventCount } from "./ics.js";
@@ -20,8 +20,46 @@ const withActivity = (patch: Record<string, unknown>, n = 8) => {
   return value;
 };
 
+/**
+ * Runs `task` while every local-time accessor of Date answers as if the process were in a zone `offset` minutes behind UTC
+ * (like `getTimezoneOffset`) and the locale formatters return a marker. No environment variable involved: the zones are
+ * simulated, and `localCalls` reports how many times the code under test touched a local-time function.
+ */
+const localAccessors = ["getHours", "getMinutes", "getSeconds", "getMilliseconds", "getDate", "getDay", "getMonth", "getFullYear"] as const;
+const utcOf = { getHours: "getUTCHours", getMinutes: "getUTCMinutes", getSeconds: "getUTCSeconds", getMilliseconds: "getUTCMilliseconds",
+  getDate: "getUTCDate", getDay: "getUTCDay", getMonth: "getUTCMonth", getFullYear: "getUTCFullYear" } as const;
+function underZone<T>(offset: number, task: () => T): { value: T; localCalls: number } {
+  let localCalls = 0;
+  try {
+    for (const name of localAccessors) {
+      vi.spyOn(Date.prototype, name).mockImplementation(function (this: Date) { localCalls += 1; return new Date(this.getTime() - offset * 60000)[utcOf[name]](); });
+    }
+    vi.spyOn(Date.prototype, "getTimezoneOffset").mockImplementation(() => { localCalls += 1; return offset; });
+    for (const name of ["toString", "toDateString", "toTimeString", "toLocaleString", "toLocaleDateString", "toLocaleTimeString"] as const) {
+      vi.spyOn(Date.prototype, name).mockImplementation(() => { localCalls += 1; return `LOCAL(${offset})`; });
+    }
+    return { value: task(), localCalls };
+  } finally {
+    vi.restoreAllMocks();
+  }
+}
+const zones = [0, 180, -540, 720]; // UTC, Buenos Aires, Tokyo, a far zone
+
 describe("ics events", () => {
-  it("emits the whole fixture byte for byte in UTC, independent of the process zone (run under TZ=UTC and TZ=America/Argentina/Buenos_Aires)", () => {
+  it("simulated zones really change the local time of a Date (so the independence tests below can fail)", () => {
+    const instant = new Date("2026-09-25T12:00:00.000Z");
+    const hours = zones.map((offset) => underZone(offset, () => instant.getHours()).value);
+    expect(new Set(hours).size).toBe(zones.length);
+  });
+  it("emits the same bytes under different simulated process zones and never reads local time", () => {
+    const baseline = build();
+    for (const offset of zones) {
+      const result = underZone(offset, () => build());
+      expect(result.localCalls).toBe(0);
+      expect(result.value).toBe(baseline);
+    }
+  });
+  it("emits the whole fixture byte for byte in UTC", () => {
     const stamp = "DTSTAMP:20261110T123456Z";
     expect(build()).toBe([
       "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Travellier//Export ICS//ES", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Viaje a Córdoba",
@@ -117,7 +155,11 @@ describe("ics events", () => {
     });
   });
   describe("identity and order", () => {
-    it("keeps the UID when title, time, destination name or process zone change; UIDs follow type and ObjectId", () => {
+    it("keeps the UID under every simulated process zone", () => {
+      const before = events(build()).map((event) => event.UID);
+      for (const offset of zones) expect(events(underZone(offset, () => build()).value).map((event) => event.UID)).toEqual(before);
+    });
+    it("keeps the UID when title, time or destination name change; UIDs follow type and ObjectId", () => {
       const before = events(build()).map((event) => event.UID);
       expect(before).toHaveLength(5);
       const value = fixture();
@@ -128,12 +170,21 @@ describe("ics events", () => {
       expect(before.every((value) => /^(activity|transport|day)-[0-9a-f]{24}@travellier$/.test(value))).toBe(true);
       expect(new Set(before).size).toBe(before.length);
     });
-    it("gives different UIDs to different ids, even across types", () => {
+    it("gives different UIDs to different ids", () => {
       const value = fixture();
       value.activities[1].id = itineraryId(40);
       const uids = events(build(value)).map((event) => event.UID);
       expect(uids).toContain(uid("activity", 40));
       expect(uids).not.toContain(uid("activity", 9));
+    });
+    it("gives different UIDs to a transport and an activity sharing the same ObjectId", () => {
+      const value = fixture();
+      value.activities[0].id = value.transports[0].id;
+      const uids = events(build(value)).map((event) => event.UID);
+      expect(uids).toContain(`transport-${value.transports[0].id}@travellier`);
+      expect(uids).toContain(`activity-${value.transports[0].id}@travellier`);
+      expect(new Set(uids).size).toBe(uids.length);
+      expect(uids).toHaveLength(5);
     });
     it("orders by DTSTART, then type, then id, whatever the input order", () => {
       const value = fixture();
