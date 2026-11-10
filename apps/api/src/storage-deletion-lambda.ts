@@ -8,10 +8,9 @@ import { readStorageDeletionRuntimeConfig, type StorageDeletionRuntimeConfig } f
 import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
 import { createMongoPhotoLinkRepository } from "./adapters/mongodb/photo-link-repository.js";
 import { createMongoStorageDeletionJobRepository } from "./adapters/mongodb/storage-deletion-job-repository.js";
+import { isTick, parseBody, type SqsBatchResponse, type SqsEvent } from "./sqs-tick.js";
 
-export interface SqsRecord { messageId: string; body: string }
-export interface SqsEvent { Records: SqsRecord[] }
-export interface SqsBatchResponse { batchItemFailures: { itemIdentifier: string }[] }
+export type { SqsBatchResponse, SqsEvent, SqsRecord } from "./sqs-tick.js";
 
 const DEADLINE_MS = 45_000;
 const MAX_JOBS_PER_RUN = 5;
@@ -26,18 +25,6 @@ export interface StorageDeletionHandlerDependencies {
   /** Receives counters only: never keys, secrets or raw errors. */
   log: (entry: Record<string, unknown>) => void;
 }
-
-/** A tick is exactly `{ kind, stage }`: it carries no keys or business payload, and nothing else is accepted. */
-const isTick = (value: unknown, kind: string, expectedStage: string): boolean => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const entries = Object.entries(value);
-  const { kind: tickKind, stage } = value as { kind?: unknown; stage?: unknown };
-  return expectedStage !== "" && entries.length === 2 && tickKind === kind && stage === expectedStage;
-};
-
-const parseBody = (body: string): unknown => {
-  try { return JSON.parse(body); } catch { return undefined; }
-};
 
 /** SQS consumer (batch of 1, `ReportBatchItemFailures`): an invalid tick or an infrastructure failure fails the item; partial job failures keep their own retry state. */
 export const createStorageDeletionHandler = (deps: StorageDeletionHandlerDependencies) =>
