@@ -13,3 +13,4 @@ export * from "./manage-activities.js";
 export * from "./manage-activity-participations.js";
 export * from "./manage-posts.js";
 export * from "./manage-comments.js";
+export * from "./manage-likes.js";

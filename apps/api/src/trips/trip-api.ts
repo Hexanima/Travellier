@@ -36,6 +36,11 @@ import {
   createTripPostComment,
   listTripPostComments,
   updateTripPostComment,
+  likeTripPost,
+  unlikeTripPost,
+  likeTripComment,
+  unlikeTripComment,
+  getTripPostLikes,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -50,6 +55,7 @@ import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-acti
 import { createMongoTripParticipationRepository } from "../adapters/mongodb/trip-participation-repository.js";
 import { createMongoTripPostRepository } from "../adapters/mongodb/trip-post-repository.js";
 import { createMongoTripCommentRepository } from "../adapters/mongodb/trip-comment-repository.js";
+import { createMongoTripLikeRepository } from "../adapters/mongodb/trip-like-repository.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -77,6 +83,7 @@ export const createTripApi = (database: Db): TripApi => {
   const participationDependencies = { participations: createMongoTripParticipationRepository(database), createId, now: () => new Date() };
   const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date() };
   const commentDependencies = { comments: createMongoTripCommentRepository(database), createId, now: () => new Date() };
+  const likeDependencies = { likes: createMongoTripLikeRepository(database), createId, now: () => new Date() };
   return {
     ...createTripInvitationApi(database),
     createPost: (payload) => createTripPost.execute(postDependencies, payload),
@@ -88,6 +95,11 @@ export const createTripApi = (database: Db): TripApi => {
     listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
     createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),
     updateComment: (payload) => updateTripPostComment.execute(commentDependencies, payload),
+    likePost: (payload) => likeTripPost.execute(likeDependencies, payload),
+    unlikePost: (payload) => unlikeTripPost.execute(likeDependencies, payload),
+    likeComment: (payload) => likeTripComment.execute(likeDependencies, payload),
+    unlikeComment: (payload) => unlikeTripComment.execute(likeDependencies, payload),
+    getPostLikes: (payload) => getTripPostLikes.execute(likeDependencies, payload),
     getActivityParticipation: (payload) => getTripActivityParticipation.execute(participationDependencies, payload),
     setActivityParticipation: (payload) => setTripActivityParticipation.execute(participationDependencies, payload),
     createActivity: (payload) => createTripActivity.execute(activityDependencies, payload),

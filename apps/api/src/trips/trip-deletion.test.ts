@@ -108,6 +108,30 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     expect(remaining[0]!.tripId).toEqual(otherTripId);
   });
 
+  it("deletes only the real likes of the deleted Trip, created through the likes API", async () => {
+    await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
+    const otherTripId = new ObjectId(), otherUser = new ObjectId();
+    await database.collection("trips").insertOne({ _id: otherTripId, inviteCode: "VIAJE-OTHER" });
+    await database.collection("tripMembers").insertOne({ tripId: otherTripId, userId: otherUser, role: "participant", joinedAt: new Date() });
+    const api = createTripApi(database);
+    for (const [trip, user] of [[tripId, userId], [otherTripId, otherUser]] as const) {
+      const post = await api.createPost!({ tripId: domainId(trip), authenticatedUserId: domainId(user), description: "Recuerdo" });
+      if (!post.ok || post.value.outcome !== "created") throw new Error("Post not created.");
+      const context = { tripId: domainId(trip), authenticatedUserId: domainId(user), postId: post.value.post.id };
+      const comment = await api.createComment!({ ...context, text: "Hola" });
+      if (!comment.ok) throw comment.error;
+      expect((await api.likePost!(context)).ok).toBe(true);
+      expect((await api.likeComment!({ ...context, commentId: comment.value.id })).ok).toBe(true);
+    }
+    expect(await database.collection("postLikes").countDocuments({})).toBe(2);
+    expect(await database.collection("commentLikes").countDocuments({})).toBe(2);
+    expect((await deleteTripRequest()).statusCode).toBe(204);
+    for (const name of ["postLikes", "commentLikes"]) {
+      expect(await database.collection(name).countDocuments({ tripId }), name).toBe(0);
+      expect(await database.collection(name).find({}).toArray(), name).toMatchObject([{ tripId: otherTripId, userId: otherUser }]);
+    }
+  });
+
   it("does not allow a participant or an outsider to delete the group", async () => {
     expect((await deleteTripRequest()).statusCode).toBe(403);
     expect((await deleteTripRequest(new ObjectId())).statusCode).toBe(404);

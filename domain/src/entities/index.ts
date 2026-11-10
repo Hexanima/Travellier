@@ -11,3 +11,5 @@ export * from "./activity.js";
 export * from "./activity-participation.js";
 export * from "./post.js";
 export * from "./comment.js";
+export * from "./post-like.js";
+export * from "./comment-like.js";
