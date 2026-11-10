@@ -82,6 +82,7 @@ import {
   type TripCommentLikePayload,
   type LikeState,
   type TripPostLikesView,
+  type PushDeviceView,
   type Result,
   type ValidationIssue,
   createObjectId,
@@ -133,6 +134,14 @@ export interface AuthenticationApi {
 export interface ApiDependencies {
   auth?: AuthenticationApi;
   trips?: TripApi;
+  pushDevices?: PushDeviceApi;
+}
+
+/** Push device registration (T89). `input` is the untrusted body; the user always comes from the authenticated request. */
+export interface PushDeviceApi {
+  register: (payload: { authenticatedUserId: ObjectId; input: unknown }) => AsyncResult<PushDeviceView>;
+  revoke: (payload: { authenticatedUserId: ObjectId; deviceId: string }) => AsyncResult<void>;
+  revokeByToken: (payload: { authenticatedUserId: ObjectId; input: unknown }) => AsyncResult<void>;
 }
 
 export interface TripInvitationApi {
@@ -323,6 +332,11 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "ItineraryConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "Transport changes would invalidate activities or remove days with linked data." } });
+  }
+
+  if (error.tag === "PushDeviceLimitError") {
+    // Generic on purpose: no token data.
+    return jsonResponse(409, { error: { code: error.tag, message: "The maximum number of push devices was reached; revoke one first." } });
   }
 
   if (error.tag === "UnauthorizedError") {
@@ -1225,6 +1239,30 @@ export const handleApiRequest = async (
     return result.ok
       ? { statusCode: 204, headers: {}, body: "" }
       : errorResponse(result.error);
+  }
+
+  if (request.url === "/push-devices" && request.method === "PUT") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (payload === undefined) return invalidRequestResponse();
+    if (dependencies.pushDevices === undefined) return unavailableResponse();
+    const result = await dependencies.pushDevices.register({ authenticatedUserId: request.authenticatedUserId, input: payload });
+    return result.ok ? jsonResponse(200, { device: result.value }) : errorResponse(result.error);
+  }
+
+  if (request.url === "/push-devices/revoke" && request.method === "POST") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (payload === undefined) return invalidRequestResponse();
+    if (dependencies.pushDevices === undefined) return unavailableResponse();
+    const result = await dependencies.pushDevices.revokeByToken({ authenticatedUserId: request.authenticatedUserId, input: payload });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+  }
+
+  const pushDeviceMatch = request.url?.match(/^\/push-devices\/([^/?]+)$/);
+  if (pushDeviceMatch !== null && pushDeviceMatch !== undefined && request.method === "DELETE") {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    if (dependencies.pushDevices === undefined) return unavailableResponse();
+    const result = await dependencies.pushDevices.revoke({ authenticatedUserId: request.authenticatedUserId, deviceId: pushDeviceMatch[1] });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
   }
 
   return jsonResponse(404, { error: "NotFound" });
