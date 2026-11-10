@@ -19,8 +19,14 @@ describe("parseMapsLink", () => {
     "https://maps.apple.com/?ll=1,2&q=Caf%C3%A9",
     "https://maps.app.goo.gl/abc",
     "https://goo.gl/maps/abc",
-    "https://maps.google.com:443/x",
-    "  https://maps.google.com/x  ",
+    "https://maps.google.com:443/maps/x",
+    "  https://maps.google.com/maps/x  ",
+    "https://maps.google.com/?q=Paris",
+    "https://maps.google.com/maps?q=x",
+    "https://maps.google.com/maps/place/Torre",
+    "https://maps.apple.com/place?ll=1,2",
+    "https://maps.apple.com/directions?daddr=x",
+    "https://maps.apple.com/search/x",
   ])("accepts an allowed https location (%s)", (raw) => {
     expect(parseMapsLink(raw).kind).toBe("valid");
   });
@@ -155,6 +161,53 @@ describe("parseMapsLink", () => {
 
   it.each(["https://maps.google.com/a b", "https://maps.google.com/\tx", "https://maps.google.com/\u0000x", "https://maps.google.com/\u007fx"])("rejects whitespace and control characters (%j)", (raw) => {
     expect(parseMapsLink(raw)).toEqual({ kind: "invalid" });
+  });
+
+  it.each([
+    "https://maps.google.com/url?q=https://evil.example",
+    "https://maps.google.com/mapsfoo",
+    "https://maps.google.com/other",
+    "https://maps.apple.com/redirect?to=x",
+    "https://maps.apple.com/other",
+    "https://maps.apple.com/placefoo",
+    "https://maps.google.com/maps/../x",
+    "https://goo.gl/maps/../x",
+  ])("restricts maps.google.com and maps.apple.com to known paths (%s)", (raw) => {
+    expect(parseMapsLink(raw)).toEqual({ kind: "invalid" });
+  });
+
+  describe("edge characters", () => {
+    it("trims a trailing or leading newline/tab from the raw string", () => {
+      expect(valid("https://maps.google.com/\n").url).toBe("https://maps.google.com/");
+      expect(valid("\t https://maps.google.com/\n").url).toBe("https://maps.google.com/");
+    });
+    it.each(["https://maps.google.com/\nx", "https://maps.google.com/?q=a\tb", "https://maps.google.com/\n?q=a", "https://maps.google.com\n/maps"])("rejects internal newline/tab (%j)", (raw) => {
+      expect(parseMapsLink(raw)).toEqual({ kind: "invalid" });
+    });
+    it("rejects an encoded @ in the host", () => {
+      expect(parseMapsLink("https://maps.google.com%40evil.com/")).toEqual({ kind: "invalid" });
+    });
+    it("normalizes an encoded dot to the real allowlisted host (current behavior)", () => {
+      const result = valid("https://maps%2egoogle.com/");
+      expect(result.host).toBe("maps.google.com");
+      expect(result.url).toBe("https://maps.google.com/");
+    });
+    it("normalizes full-width host characters to the real allowlisted host (current behavior)", () => {
+      const result = valid("https://\uFF4D\uFF41\uFF50\uFF53.google.com/");
+      expect(result.host).toBe("maps.google.com");
+      expect(result.url).toBe("https://maps.google.com/");
+    });
+    it("rejects full-width separators and lookalike full-width hosts", () => {
+      expect(parseMapsLink("https://maps.google.com\uFF0Fx")).toEqual({ kind: "invalid" });
+      expect(parseMapsLink("https://maps.google.com\uFF20evil.com")).toEqual({ kind: "invalid" });
+    });
+  });
+
+  it("applies the length cap to the normalized href too", () => {
+    const base = "https://maps.google.com/?q=";
+    const wide = parseMapsLink(`${base}${"é".repeat(1000)}`);
+    expect(wide).toEqual({ kind: "invalid" });
+    expect(parseMapsLink(`${base}${"a".repeat(2048 - base.length)}`).kind).toBe("valid");
   });
 
   it("rejects values longer than 2048 characters", () => {

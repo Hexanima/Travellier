@@ -16,15 +16,18 @@ const number = "-?\\d{1,3}(?:\\.\\d{1,15})?";
 const pair = new RegExp(`^(${number}),\\s*(${number})$`);
 const atPair = new RegExp(`@(${number}),(${number})(?:[,/]|$)`);
 
-const underMaps = (path: string) => path === "/maps" || path.startsWith("/maps/");
+/** Path equals `root` or is a sub-path of it, with a segment boundary (`/maps`, `/maps/x`; never `/mapsfoo`). */
+const atSegment = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
+const underMaps = (path: string) => atSegment(path, "/maps");
+const appleRoots = ["/place", "/directions", "/search"];
 /** Exact host allowlist; a host never matches by suffix or substring. Each rule can also restrict the path. */
 const hosts: Record<string, { shortener: boolean; path?: (path: string) => boolean }> = {
-  "maps.google.com": { shortener: false },
+  "maps.google.com": { shortener: false, path: (path) => path === "/" || underMaps(path) },
   "www.google.com": { shortener: false, path: underMaps },
   "google.com": { shortener: false, path: underMaps },
   "maps.app.goo.gl": { shortener: true },
   "goo.gl": { shortener: true, path: (path) => path.startsWith("/maps/") && path.length > "/maps/".length },
-  "maps.apple.com": { shortener: false },
+  "maps.apple.com": { shortener: false, path: (path) => path === "/" || appleRoots.some((root) => atSegment(path, root)) },
 };
 
 function coordinatesFrom(lat: string | undefined, lng: string | undefined): MapsCoordinates | undefined {
@@ -53,6 +56,7 @@ export function parseMapsLink(raw: string | null | undefined): MapsLink {
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.port !== "") return invalid;
   const rule = Object.hasOwn(hosts, url.hostname) ? hosts[url.hostname] : undefined;
   if (!rule || (rule.path && !rule.path(url.pathname))) return invalid;
+  if (url.href.length > maxLength) return invalid;
   const base = { kind: "valid" as const, url: url.href, host: url.hostname, shortener: rule.shortener };
   if (rule.shortener) return base;
 
