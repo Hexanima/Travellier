@@ -24,7 +24,7 @@ export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" |
 type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfirmation; stale: boolean };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse } | { kind: "error"; error: TripFailure };
 /** The stored expense (and the dates it is attributed to) as read from the itinerary, which is where a post carries it. */
-type ExpenseLoad = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpense; attribution?: { occurredAt: string; publishedAt: string } };
+type ExpenseLoad = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpense; attribution?: { source: "activity" | "publication"; occurredAt: string; publishedAt: string } };
 const expenseNotice = "El gasto guardado no se puede quitar: solo se puede editar.";
 const expenseWaitMessage = "Esperá a que cargue el gasto guardado para guardar los cambios.";
 const exceedsMessage = "El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en pagos y reparto (próximamente).";
@@ -186,7 +186,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         const stored = [...value.posts, ...value.unplacedPosts].find((item) => item.id === postId)?.expense;
         const row = value.expenses.find((item) => item.postId === postId);
         setExpenseLoad({ kind: "ready", ...(stored ? { saved: { totalAmount: stored.totalAmount, currency: stored.currency, breakdown: stored.breakdown } } : {}),
-          ...(row ? { attribution: { occurredAt: row.occurredAt, publishedAt: row.publishedAt } } : {}) });
+          ...(row ? { attribution: { source: row.source, occurredAt: row.occurredAt, publishedAt: row.publishedAt } } : {}) });
       } catch { setExpenseLoad({ kind: "error" }); }
     });
     return () => { cancelled = true; };
@@ -346,8 +346,13 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const typed = draft.extras.expense !== null ? validateExpense(draft.extras.expense) : undefined;
   const expenseText = typed?.ok ? `${formatCents(typed.cents, typed.value.currency)}${typed.value.breakdown ? ` · ${typed.value.breakdown}` : ""}`
     : typed ? "sin completar" : savedExpense ? `${formatExpenseAmount(savedExpense)}${savedExpense.breakdown ? ` · ${savedExpense.breakdown}` : ""}` : undefined;
-  const attribution = expenseLoad.kind === "ready" && savedExpense && expenseLoad.attribution
+  // The stored attribution only describes the stored link: if the draft changed the parent, activity or transport it is recalculated on save.
+  const linkChanged = draft.extras.link?.kind !== saved.extras.link?.kind || draft.extras.link?.id !== saved.extras.link?.id
+    || draft.extras.transportId !== saved.extras.transportId || draft.extras.newActivity !== null;
+  const storedAttribution = expenseLoad.kind === "ready" && savedExpense && expenseLoad.attribution?.source === "activity"
     && localDayKey(expenseLoad.attribution.occurredAt, timeZone) !== localDayKey(expenseLoad.attribution.publishedAt, timeZone) ? expenseLoad.attribution : undefined;
+  const attribution = linkChanged ? undefined : storedAttribution;
+  const attributionStale = linkChanged && storedAttribution !== undefined;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <header className="itinerary-header">
@@ -404,6 +409,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         </section>
         <section className="post-expense-section" aria-label="Gasto">
           <p id="post-expense-summary">{expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
+          {attributionStale ? <p id="post-expense-attribution" className="itinerary-secondary">Se recalcula al guardar</p> : null}
           {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al {formatLocalDate(attribution.occurredAt, timeZone)} (actividad) · Publicado el {formatLocalDate(attribution.publishedAt, timeZone)}</p> : null}
           {existing && savedExpense ? <p className="itinerary-secondary">{expenseNotice}</p> : null}
           {expenseLoad.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
@@ -412,7 +418,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
             <Button onClick={() => setExpenseAttempt((value) => value + 1)}>Reintentar</Button>
           </div> : null}
           <button ref={expenseRef} name="expense" type="button" className="ui-button" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
-            aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
+            aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution || attributionStale ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
             {draft.extras.expense !== null || savedExpense ? "Editar gasto" : "Agregar gasto"}</button>
           {draft.extras.expense !== null && !savedExpense ? <Button disabled={saving} onClick={removeExpense}>Quitar gasto</Button> : null}
           {errors.expense ? <p className="ui-field__error" id="post-expense-error" role="alert">{errors.expense}</p> : null}

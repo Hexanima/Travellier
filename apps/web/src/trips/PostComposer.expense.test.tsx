@@ -5,6 +5,7 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExpenseForm } from "./ExpenseForm.js";
 import { PostComposer } from "./PostComposer.js";
+import { PostLinkPicker } from "./PostLinkPicker.js";
 import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
@@ -27,6 +28,7 @@ async function render(path: string, mocks: Mocks = {}) {
   const get = vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null } }));
   const composer = <PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone={zone} />;
   const expenseForm = <ExpenseForm itinerary={itinerary} />;
+  const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={zone} spontaneousActivity />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
@@ -34,6 +36,7 @@ async function render(path: string, mocks: Mocks = {}) {
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path="new" element={composer} /><Route path=":postId/edit" element={composer} />
+      <Route path="new/link" element={picker} /><Route path=":postId/edit/link" element={picker} />
       <Route path="new/expense" element={expenseForm} /><Route path=":postId/edit/expense" element={expenseForm} />
       <Route path="new/activity" element={<SpontaneousActivityForm itinerary={itinerary} timeZone={zone} />} />
     </Route></Routes></MemoryRouter>));
@@ -309,6 +312,20 @@ describe("PostComposer expense (edit)", () => {
     it("compares the local day, not the UTC one: 01:30Z and 23:00Z of the day before are the same local day", async () => {
       const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("activity", "2026-09-26T01:30:00.000Z", "2026-09-25T13:00:00.123Z") });
       expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
+    });
+    it("shows nothing when the attribution is by publication, even if the days differ", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("publication", "2026-09-26T15:00:00.000Z", "2026-09-25T13:00:00.123Z") });
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
+    });
+    it("stops showing the saved attribution once the draft changes the link, since it is recalculated on save", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("activity", "2026-09-26T15:00:00.000Z", "2026-09-25T13:00:00.123Z") });
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).toContain("Gasto atribuido");
+      await click(button(container, "Vincular a"));
+      const radio = (label: string) => Array.from(container.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector('input[type="radio"]');
+      await click(radio("Actividad")); await click(radio("Paseo por el centro")); await click(button(container, "Aceptar"));
+      const section = container.querySelector('section[aria-label="Gasto"]')!.textContent!;
+      expect(section).not.toContain("Gasto atribuido");
+      expect(section).toContain("Se recalcula al guardar");
     });
     it("shows nothing when both dates are the same day", async () => {
       const { container } = await render(editPath(withExpenseId));
