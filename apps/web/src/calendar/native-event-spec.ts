@@ -31,9 +31,8 @@ export function toNativeEventSpec(event: CalendarEvent, tripId: string): NativeE
   };
 }
 
-/** Two FNV-1a 32-bit passes with different bases: a change detector, not security. Depends only on the spec values (epoch numbers, no zone). */
-export function specFingerprint(spec: NativeEventSpec): string {
-  const text = JSON.stringify([spec.title, spec.notes, spec.location ?? "", spec.url ?? "", spec.startDate, spec.endDate]);
+/** Two FNV-1a 32-bit passes with different bases (16 hex chars): a change detector and key scrambler, not security. */
+export function hashText(text: string): string {
   const hash = (basis: number) => {
     let value = basis;
     for (let index = 0; index < text.length; index += 1) { value ^= text.charCodeAt(index); value = Math.imul(value, 0x01000193) >>> 0; }
@@ -41,3 +40,7 @@ export function specFingerprint(spec: NativeEventSpec): string {
   };
   return hash(0x811c9dc5) + hash(0x9747b28c);
 }
+
+/** Depends only on the spec values (epoch numbers, no zone). */
+export const specFingerprint = (spec: NativeEventSpec): string =>
+  hashText(JSON.stringify([spec.title, spec.notes, spec.location ?? "", spec.url ?? "", spec.startDate, spec.endDate]));
