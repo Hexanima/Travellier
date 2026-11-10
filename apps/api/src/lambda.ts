@@ -166,7 +166,9 @@ const createRuntimeAuthenticationApi = async (
 };
 
 const createRuntimeTripApi = async (configuration: LambdaRuntimeConfig): Promise<TripApi> => {
-  tripApi ??= loadDatabase(configuration).then(({ database }) => createTripApi(database));
+  tripApi ??= loadDatabase(configuration).then(({ database }) => createTripApi(database, {
+    storage: createS3ObjectStorage({ bucketName: configuration.photoBucketName }),
+  }));
   return tripApi;
 };
 

@@ -6,6 +6,7 @@ import {
   MONGO_MIGRATION_ID,
   JOURNEY_MIGRATION_ID,
   ITINERARY_MIGRATION_ID,
+  POST_PHOTO_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
 import { OUTBOX_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID } from "./pending-contract-migrations.js";
@@ -84,7 +85,11 @@ const expectedIndexes: Record<string, IndexDescription[]> = {
     { key: { parentPostId: 1 }, name: "parentPostId" },
     { key: { transportId: 1 }, name: "transportId" },
   ],
-  postPhotos: [{ key: { postId: 1 }, name: "postId" }],
+  postPhotos: [
+    { key: { postId: 1 }, name: "postId" },
+    { key: { s3Key: 1 }, name: "s3Key_unique", unique: true },
+    { key: { postId: 1, order: 1 }, name: "postId_order_unique", unique: true },
+  ],
   postExpenses: [
     { key: { postId: 1 }, name: "postId_unique", unique: true },
   ],
@@ -137,7 +142,7 @@ describe("MongoDB schema migration", () => {
       [...prdCollections, "outboxEvents", "_migrations"].sort(),
     );
     expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
-      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID].sort(),
+      [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, POST_PHOTO_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID].sort(),
     );
   });
 
@@ -182,6 +187,26 @@ describe("MongoDB schema migration", () => {
     ).toBe(1);
     expect(await database.collection("_migrations").countDocuments({ id: JOURNEY_MIGRATION_ID })).toBe(1);
     expect(await database.collection("_migrations").countDocuments({ id: ITINERARY_MIGRATION_ID })).toBe(1);
+    expect(await database.collection("_migrations").countDocuments({ id: POST_PHOTO_MIGRATION_ID })).toBe(1);
+  });
+
+  it("adds the post photo indexes to a database migrated before them, keeping the postId index", async () => {
+    await migrateMongoSchema(database);
+    const photos = database.collection("postPhotos");
+    await photos.dropIndex("s3Key_unique");
+    await photos.dropIndex("postId_order_unique");
+    await database.collection("_migrations").deleteOne({ id: POST_PHOTO_MIGRATION_ID });
+    await migrateMongoSchema(database);
+    const indexes = await photos.listIndexes().toArray();
+    expect(indexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ key: { postId: 1 }, name: "postId" }),
+      expect.objectContaining({ key: { s3Key: 1 }, name: "s3Key_unique", unique: true }),
+      expect.objectContaining({ key: { postId: 1, order: 1 }, name: "postId_order_unique", unique: true }),
+    ]));
+    await photos.insertOne({ postId: "p", order: 1, s3Key: "a" });
+    await expect(photos.insertOne({ postId: "q", order: 1, s3Key: "a" })).rejects.toMatchObject({ code: 11000 });
+    await expect(photos.insertOne({ postId: "p", order: 1, s3Key: "b" })).rejects.toMatchObject({ code: 11000 });
+    await photos.insertOne({ postId: "p", order: 2, s3Key: "b" });
   });
 
   it("enforces itinerary identity while allowing different types and destinations on one date", async () => {

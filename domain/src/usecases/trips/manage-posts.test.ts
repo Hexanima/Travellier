@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, TripPostPort, TripPostScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostPhoto, TripPostPort, TripPostScope, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -19,11 +19,11 @@ const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, au
 
 describe("Trip post use cases", () => {
   let role: TripRole | undefined, votingEnabled: boolean, tripExists: boolean;
-  let listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
+  let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; tripExists = true; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
+    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
@@ -35,6 +35,10 @@ describe("Trip post use cases", () => {
       list: async () => domain.ok(records),
       listChildren: async (id) => domain.ok(records.filter((p) => p.tripId === tripId && p.parentPostId === id)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))),
+      listPhotos: async (id) => domain.ok(photoRecords.filter((p) => p.postId === id && p.tripId === tripId).sort((a, b) => a.order - b.order)),
+      findPhoto: async (id) => domain.ok(photoRecords.find((p) => p.id === id)),
+      findPhotosByKeys: async (keys) => domain.ok(photoRecords.filter((p) => keys.includes(p.s3Key))),
+      insertPhotos: async (photos) => { photoRecords.push(...photos); return domain.ok(undefined); },
       insert: async (post) => { records.push(post); return domain.ok(undefined); },
       replace: async (post) => { records = records.map((p) => p.id === post.id ? post : p); return domain.ok(undefined); },
       insertActivity: async (activity) => { activities.push(activity); return domain.ok(undefined); },
@@ -49,9 +53,9 @@ describe("Trip post use cases", () => {
     posts = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone({ records, activities, participations });
+        const before = structuredClone({ records, activities, participations, photoRecords });
         const result = await work(scope);
-        if (!result.ok) { records = before.records; activities = before.activities; participations = before.participations; }
+        if (!result.ok) { photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
         return result;
       },
     };
@@ -551,6 +555,233 @@ describe("Trip post use cases", () => {
         scope[method] = async () => domain.err(new domain.UnknownError("failed"));
         expect(await link({ ...confirmation })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
         expect(snapshot()).toEqual(before);
+      });
+    });
+
+    describe("photos of the post (T72)", () => {
+      const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+      const key = (n: number, ext: "jpg" | "png" | "webp" = "jpg", user = actor, trip = tripId) => `trips/${trip}/photos/${user}/${uuid(n)}.${ext}`;
+      const refs = (...ns: number[]) => ns.map((n) => ({ key: key(n) }));
+      let heads: Record<string, { contentType: string | null; sizeBytes: number } | "fail" | undefined>;
+      let headCalls: string[], inTransaction: boolean, headInsideTransaction: boolean, afterHead: (() => void) | undefined;
+      let storage: domain.ObjectStoragePort;
+      const stored = (n: number, order: number, postRef = postId, fields: Partial<PostPhoto> = {}): PostPhoto =>
+        ({ id: id(300 + n), postId: postRef, tripId, uploaderId: actor, s3Key: key(n), order, uploadedAt: createdAt, ...fields });
+      const uploaded = (...ns: number[]) => { for (const n of ns) heads[key(n)] = { contentType: "image/jpeg", sizeBytes: 1000 }; };
+      beforeEach(() => {
+        heads = {}; headCalls = []; inTransaction = false; headInsideTransaction = false; afterHead = undefined;
+        const original = posts.withTransaction;
+        posts = { ...posts, withTransaction: async (tripRef, work) => {
+          inTransaction = true;
+          try { return await original(tripRef, work); } finally { inTransaction = false; }
+        } };
+        storage = {
+          createUploadTarget: async () => domain.err(new domain.UnknownError("unused")),
+          createDownloadTarget: async () => domain.err(new domain.UnknownError("unused")),
+          headObject: async ({ objectKey }) => {
+            headCalls.push(objectKey);
+            if (inTransaction) headInsideTransaction = true;
+            const head = heads[objectKey];
+            afterHead?.();
+            return head === "fail" ? domain.err(new domain.UnknownError("s3 down")) : domain.ok(head);
+          },
+        };
+      });
+      const withStorage = () => ({ ...dependencies(), storage });
+      const createWith = (fields = {}) => domain.createTripPost.execute(withStorage(), { ...context, ...fields });
+      const updateWith = (fields = {}) => domain.updateTripPost.execute(withStorage(), { ...context, postId, ...fields });
+      const linkWith = (fields = {}) => domain.linkTripPostToNewActivity.execute(withStorage(), { ...context, postId, newActivity: withDuration, ...fields });
+      const state = () => structuredClone({ records, activities, participations, photoRecords });
+      const failures = (result: { ok: boolean; error?: unknown }) =>
+        result.ok ? [] : (result.error as domain.ValidationError).issues.map(({ field, code }) => `${field}/${code}`);
+
+      it("creates the post with its photos in order, verifying each object before the transaction", async () => {
+        uploaded(1, 2);
+        const result = await createWith({ description: "Fotos", photos: refs(1, 2) });
+        expect(result).toMatchObject({ ok: true, value: { outcome: "created", post: { id: id(20), description: "Fotos" },
+          photos: [{ id: id(21), order: 1 }, { id: id(22), order: 2 }] } });
+        expect(photoRecords).toEqual([
+          { id: id(21), postId: id(20), tripId, uploaderId: actor, s3Key: key(1), order: 1, uploadedAt: createdAt },
+          { id: id(22), postId: id(20), tripId, uploaderId: actor, s3Key: key(2), order: 2, uploadedAt: createdAt }]);
+        expect(headCalls.sort()).toEqual([key(1), key(2)]);
+        expect(headInsideTransaction, "headObject ran while the Trip lock was held").toBe(false);
+      });
+
+      it("answers exactly as before when no photos are sent and never touches the storage", async () => {
+        const result = await createWith({ description: "Sin fotos" });
+        expect(result.ok && Object.keys(result.value).sort()).toEqual(["outcome", "post"]);
+        expect(headCalls).toEqual([]); expect(photoRecords).toEqual([]);
+        records = [seedPost()];
+        expect(await updateWith({ description: "Editado" })).toEqual(domain.ok(seedPost({ description: "Editado" })));
+        expect(await update({ description: "Otro" })).toEqual(domain.ok(seedPost({ description: "Otro" })));
+      });
+
+      it("fails with UnknownError when photos arrive but no storage is configured", async () => {
+        uploaded(1);
+        expect(await domain.createTripPost.execute(dependencies(), { ...context, photos: refs(1) }))
+          .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        records = [seedPost()];
+        expect(await domain.updateTripPost.execute(dependencies(), { ...context, postId, photos: refs(1) }))
+          .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(state()).toEqual({ records: [seedPost()], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it("lists every object problem by index and writes nothing", async () => {
+        heads[key(2)] = { contentType: "image/jpeg", sizeBytes: 10 * 1024 * 1024 + 1 };
+        heads[key(3)] = { contentType: "image/png", sizeBytes: 5 };
+        uploaded(4);
+        const insert = vi.spyOn(scope, "insertPhotos"), insertPost = vi.spyOn(scope, "insert");
+        const result = await createWith({ photos: refs(1, 2, 3, 4) });
+        expect(failures(result)).toEqual(["photos[0].key/not_uploaded", "photos[1].key/too_large", "photos[2].key/content_type_mismatch"]);
+        expect(insert).not.toHaveBeenCalled(); expect(insertPost).not.toHaveBeenCalled();
+        expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it.each([
+        ["another user", { photos: [{ key: key(1, "jpg", id(77)) }] }, "photos[0].key/invalid"],
+        ["another Trip", { photos: [{ key: key(1, "jpg", actor, id(88)) }] }, "photos[0].key/invalid"],
+        ["a repeated key", { photos: refs(1, 1) }, "photos[1].key/duplicate"],
+        ["an avatar key", { photos: [{ key: `avatars/${actor}/${uuid(1)}.jpg` }] }, "photos[0].key/invalid"],
+        ["a malformed list", { photos: "x" }, "photos/invalid"],
+        ["too many photos", { photos: refs(...Array.from({ length: 11 }, (_, i) => i + 1)) }, "photos/too_many"],
+      ])("rejects %s before any storage call", async (_, fields, expected) => {
+        uploaded(1);
+        expect(failures(await createWith(fields))).toEqual([expected]);
+        expect(headCalls).toEqual([]);
+        expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it("writes nothing when the storage check fails for another reason than a missing object", async () => {
+        uploaded(1); heads[key(2)] = "fail";
+        expect(await createWith({ photos: refs(1, 2) })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it("revalidates membership under the lock: a member expelled between the object check and the save gets 404 and no photos", async () => {
+        uploaded(1);
+        afterHead = () => { role = undefined; };
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        records = [seedPost()]; role = "participant"; afterHead = () => { role = undefined; };
+        expect(await updateWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(photoRecords).toEqual([]);
+      });
+
+      it("answers 404 to a non-member (outsider or former member) with valid photos without calling the storage", async () => {
+        uploaded(1); role = undefined; records = [seedPost()];
+        const before = state();
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await updateWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await linkWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(headCalls).toEqual([]); expect(state()).toEqual(before);
+      });
+
+      it("answers 404 (not 500) to a non-member when no storage is configured", async () => {
+        role = undefined; records = [seedPost()];
+        expect(await domain.createTripPost.execute(dependencies(), { ...context, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await domain.updateTripPost.execute(dependencies(), { ...context, postId, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await domain.linkTripPostToNewActivity.execute(dependencies(), { ...context, postId, newActivity: withDuration, photos: refs(1) }))
+          .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      });
+
+      it("adds no snapshot read when the save carries no photos", async () => {
+        const snapshot = vi.spyOn(posts, "withReadSnapshot");
+        await createWith({ description: "Sin fotos" });
+        records = [seedPost()];
+        await updateWith({ description: "Editado" });
+        expect(snapshot).not.toHaveBeenCalled();
+      });
+
+      it("treats the same key retried in the same post as a no-op and never duplicates or reorders", async () => {
+        records = [seedPost()]; uploaded(1, 2);
+        const first = await updateWith({ photos: refs(1, 2) });
+        const again = await updateWith({ photos: refs(2, 1) });
+        const expected = { ...seedPost(), photos: [{ id: id(20), order: 1 }, { id: id(21), order: 2 }] };
+        expect(first).toEqual(domain.ok(expected));
+        expect(again).toEqual(domain.ok(expected));
+        expect(photoRecords.map((p) => [p.s3Key, p.order])).toEqual([[key(1), 1], [key(2), 2]]);
+      });
+
+      it("rejects a key already registered in another post with PhotoConflictError and writes nothing", async () => {
+        records = [seedPost()]; uploaded(1, 2);
+        photoRecords = [stored(1, 1, id(50))];
+        const before = state();
+        expect(await updateWith({ photos: refs(2, 1) })).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+        expect(state()).toEqual(before);
+      });
+
+      it("answers 409 to the retry of a POST that did save, never duplicating photos", async () => {
+        uploaded(1);
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: true });
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+        expect(records).toHaveLength(1); expect(photoRecords).toHaveLength(1);
+      });
+
+      it("does not write photos when the agenda needs confirmation and saves them with the confirmation", async () => {
+        seedAgenda(); uploaded(1);
+        const before = state();
+        const insert = vi.spyOn(scope, "insertPhotos");
+        const first = await createWith({ newActivity: withDuration, photos: refs(1) });
+        expect(first).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+        expect(insert).not.toHaveBeenCalled(); expect(state()).toEqual(before);
+        sequence = 20;
+        expect(await createWith({ newActivity: withDuration, photos: refs(1), ...confirmationFrom(first) }))
+          .toMatchObject({ ok: true, value: { outcome: "created", photos: [{ order: 1 }] } });
+        expect(photoRecords).toHaveLength(1);
+      });
+
+      it("accepts a PATCH with only photos without touching the post fields", async () => {
+        records = [seedPost({ description: "Intacta", activityId: links.activityId })]; uploaded(1);
+        const replace = vi.spyOn(scope, "replace");
+        expect(await updateWith({ photos: refs(1) })).toEqual(domain.ok({ ...seedPost({ description: "Intacta", activityId: links.activityId }),
+          photos: [{ id: id(20), order: 1 }] }));
+        expect(replace).not.toHaveBeenCalled();
+        expect(records).toEqual([seedPost({ description: "Intacta", activityId: links.activityId })]);
+      });
+
+      it("keeps rejecting a PATCH without editable fields or photos", async () => {
+        records = [seedPost()];
+        expect(await updateWith()).toMatchObject({ ok: false, error: { issues: [{ field: "post", code: "required" }] } });
+        expect(await updateWith({ photos: [] })).toMatchObject({ ok: false, error: { issues: [{ field: "photos", code: "invalid" }] } });
+      });
+
+      it("appends after the existing photos with contiguous order and caps the post at 10", async () => {
+        records = [seedPost()]; uploaded(3, 4, 20, 21);
+        photoRecords = [stored(1, 1), stored(2, 2)];
+        expect(await updateWith({ photos: refs(3, 4) })).toMatchObject({ ok: true, value: { photos: [
+          { id: id(301), order: 1 }, { id: id(302), order: 2 }, { id: id(20), order: 3 }, { id: id(21), order: 4 }] } });
+        expect(photoRecords.map((p) => p.order)).toEqual([1, 2, 3, 4]);
+        photoRecords = Array.from({ length: 9 }, (_, i) => stored(i + 1, i + 1));
+        const before = state();
+        expect(failures(await updateWith({ photos: refs(20, 21) }))).toEqual(["photos/too_many"]);
+        expect(state()).toEqual(before);
+        expect(await updateWith({ photos: refs(20) })).toMatchObject({ ok: true, value: { photos: expect.arrayContaining([{ id: id(22), order: 10 }]) } });
+      });
+
+      it("denies a PATCH to a missing post or a former member without writing photos", async () => {
+        uploaded(1);
+        expect(await updateWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+        records = [seedPost()]; role = undefined;
+        expect(await updateWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(photoRecords).toEqual([]);
+      });
+
+      it("adds photos while linking the post to a new activity and rolls everything back when saving them fails", async () => {
+        records = [seedPost()]; uploaded(1);
+        expect(await linkWith({ photos: refs(1) })).toMatchObject({ ok: true, value: { outcome: "linked", photos: [{ id: id(21), order: 1 }] } });
+        expect(photoRecords).toHaveLength(1);
+        records = [seedPost()]; photoRecords = []; activities = []; participations = []; sequence = 20; uploaded(2);
+        const before = state();
+        scope.insertPhotos = async () => domain.err(new domain.UnknownError("failed"));
+        expect(await linkWith({ photos: refs(2) })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(state()).toEqual(before);
+      });
+
+      it("rolls back the new post and activity when the photo insert fails on creation", async () => {
+        uploaded(1);
+        scope.insertPhotos = async () => domain.err(new domain.UnknownError("failed"));
+        expect(await createWith({ newActivity: withDuration, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
       });
     });
   });

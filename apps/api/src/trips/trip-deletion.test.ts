@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
-import { createObjectId, err, UnknownError } from "app-domain";
+import { randomUUID } from "node:crypto";
+import { createObjectId, createPhotoUploadKey, err, UnknownError } from "app-domain";
+import { FakeObjectStorage } from "../../test/fake-object-storage.js";
 import { handleApiRequest } from "../app.js";
 import { migrateMongoSchema } from "../adapters/mongodb/migrations.js";
 import { createTripApi } from "./trip-api.js";
@@ -71,7 +73,8 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     await database.collection("refreshTokens").insertOne({ userId, token: "keep-session" });
     for (const name of tripCollections) {
       const fields = () => ({ userId: new ObjectId(), destinationId: new ObjectId(), direction: "outbound",
-        activityId: new ObjectId(), postId: new ObjectId(), commentId: new ObjectId(), date: new Date(), type: "activity", order: 1 });
+        activityId: new ObjectId(), postId: new ObjectId(), commentId: new ObjectId(), date: new Date(), type: "activity", order: 1,
+        s3Key: `trips/seed/${new ObjectId().toHexString()}.jpg` });
       if (name !== "destinations" && name !== "tripMembers") await database.collection(name).insertOne({ tripId, ...fields() });
       await database.collection(name).insertOne({ tripId: otherTripId, ...fields() });
     }
@@ -159,15 +162,32 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
   it("retains S3 cleanup keys durably without blocking group deletion", async () => {
     await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
     await database.collection("postPhotos").insertMany([
-      { tripId, s3Key: "trips/test/photo.jpg" }, { tripId, s3Key: "trips/test/photo.jpg" },
-      { tripId: new ObjectId(), s3Key: "trips/other/keep.jpg" },
+      { tripId, postId: new ObjectId(), order: 1, s3Key: "trips/test/photo.jpg" },
+      { tripId, postId: new ObjectId(), order: 1, s3Key: "trips/test/photo-2.jpg" },
+      { tripId: new ObjectId(), postId: new ObjectId(), order: 1, s3Key: "trips/other/keep.jpg" },
     ]);
     expect((await deleteTripRequest()).statusCode).toBe(204);
     expect(await database.collection("storageDeletionJobs").find({ tripId }).toArray()).toMatchObject([
-      { objectKeys: ["trips/test/photo.jpg"], createdAt: expect.any(Date) },
+      { objectKeys: ["trips/test/photo.jpg", "trips/test/photo-2.jpg"], createdAt: expect.any(Date) },
     ]);
     expect(await database.collection("postPhotos").countDocuments({ tripId })).toBe(0);
     expect(await database.collection("postPhotos").countDocuments({ s3Key: "trips/other/keep.jpg" })).toBe(1);
+  });
+
+  it("keeps a cleanup job with the S3 keys of photos registered through the upload protocol", async () => {
+    await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
+    const storage = new FakeObjectStorage(), api = createTripApi(database, { storage });
+    const keys = ["jpg", "png"].map((extension) => createPhotoUploadKey({ tripId: domainId(tripId), userId: domainId(userId),
+      uploadId: randomUUID(), extension: extension as "jpg" | "png" }));
+    storage.put(keys[0]!, "image/jpeg"); storage.put(keys[1]!, "image/png");
+    const post = await api.createPost!({ tripId: domainId(tripId), authenticatedUserId: domainId(userId), photos: keys.map((key) => ({ key })) });
+    expect(post).toMatchObject({ ok: true, value: { photos: [{ order: 1 }, { order: 2 }] } });
+    expect(await database.collection("postPhotos").countDocuments({ tripId })).toBe(2);
+    expect((await deleteTripRequest()).statusCode).toBe(204);
+    const jobs = await database.collection("storageDeletionJobs").find({ tripId }).toArray();
+    expect(jobs).toHaveLength(1);
+    expect([...jobs[0]!.objectKeys].sort()).toEqual([...keys].sort());
+    expect(await database.collection("postPhotos").countDocuments({ tripId })).toBe(0);
   });
 
   it("rolls back the complete cascade when its transaction returns an error", async () => {

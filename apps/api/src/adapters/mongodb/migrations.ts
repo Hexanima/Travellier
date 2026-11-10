@@ -8,6 +8,7 @@ import { migratePendingContracts } from "./pending-contract-migrations.js";
 export const MONGO_MIGRATION_ID = "0001-create-prd-schema";
 export const JOURNEY_MIGRATION_ID = "0002-unique-journey-order-and-direction";
 export const ITINERARY_MIGRATION_ID = "0003-unique-itinerary-identity";
+export const POST_PHOTO_MIGRATION_ID = "0004-unique-post-photo-keys";
 
 type CollectionSchema = {
   name: string;
@@ -205,6 +206,14 @@ export const migrateMongoSchema = async (database: Db): Promise<void> => {
     if (duplicates !== null) throw new Error("Duplicate itinerary identities must be resolved before migration.");
     await days.createIndex({ tripId: 1, destinationId: 1, date: 1, type: 1 }, { name: "itinerary_identity_unique", unique: true });
     await migrations.insertOne({ id: ITINERARY_MIGRATION_ID, appliedAt: new Date() });
+  }
+
+  if (!(await migrations.findOne({ id: POST_PHOTO_MIGRATION_ID }))) {
+    // Additive: no photo records existed before the upload protocol, so there is nothing to deduplicate.
+    const photos = database.collection("postPhotos");
+    await photos.createIndex({ s3Key: 1 }, { name: "s3Key_unique", unique: true });
+    await photos.createIndex({ postId: 1, order: 1 }, { name: "postId_order_unique", unique: true });
+    await migrations.insertOne({ id: POST_PHOTO_MIGRATION_ID, appliedAt: new Date() });
   }
 
   await migratePendingContracts(database);

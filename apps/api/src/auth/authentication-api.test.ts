@@ -251,6 +251,7 @@ describe("authentication API", () => {
         uploadUrl: "https://s3.example.test/upload", headers: { "content-type": "image/jpeg" }, expiresAt: new Date(),
       } }),
       createDownloadTarget: vi.fn().mockResolvedValue({ ok: true, value: { downloadUrl: "https://s3.example.test/view" } }),
+      headObject: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
     };
     const auth = createAuthenticationApi({ database, jwtSecret, storage });
     const registered = await auth.register({ email: "avatar@example.test", name: "Avatar", password: "secret-pass" });

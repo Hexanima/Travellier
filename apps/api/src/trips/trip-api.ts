@@ -1,4 +1,4 @@
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { ObjectId as MongoObjectId, type Db } from "mongodb";
 
 import {
@@ -28,6 +28,12 @@ import {
   getTripActivityParticipation,
   setTripActivityParticipation,
   createTripPost,
+  createTripPhotoUploads,
+  getTripPostPhotos,
+  getTripPhoto,
+  err,
+  UnknownError,
+  type ObjectStoragePort,
   listTripPosts,
   getTripPost,
   getTripPostChain,
@@ -71,7 +77,12 @@ const createId = () => {
   return id.value;
 };
 
-export const createTripApi = (database: Db): TripApi => {
+export interface TripApiOptions {
+  /** Private photo bucket; without it photo endpoints answer 500 and posts without photos keep working. */
+  storage?: ObjectStoragePort;
+}
+
+export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): TripApi => {
   const trips = createMongoTripManagementRepository(database);
   const members = createMongoTripMemberRepository(database);
   const publicJoinMembers = createMongoTripInvitationRepositories(database).members;
@@ -81,7 +92,9 @@ export const createTripApi = (database: Db): TripApi => {
   const deletion = createMongoTripDeletionRepository(database);
   const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
   const participationDependencies = { participations: createMongoTripParticipationRepository(database), createId, now: () => new Date() };
-  const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date() };
+  const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date(), ...(storage ? { storage } : {}) };
+  const missingStorage = () => Promise.resolve(err(new UnknownError("Object storage is not configured.")));
+  const photoDependencies = storage ? { posts: postDependencies.posts, storage } : undefined;
   const commentDependencies = { comments: createMongoTripCommentRepository(database), createId, now: () => new Date() };
   const likeDependencies = { likes: createMongoTripLikeRepository(database), createId, now: () => new Date() };
   return {
@@ -91,6 +104,12 @@ export const createTripApi = (database: Db): TripApi => {
     getPost: (payload) => getTripPost.execute(postDependencies, payload),
     getPostChain: (payload) => getTripPostChain.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
+    createPhotoUploads: (payload) => photoDependencies
+      ? createTripPhotoUploads.execute({ ...photoDependencies, createUploadId: randomUUID }, payload) : missingStorage(),
+    getPostPhotos: (payload) => photoDependencies
+      ? getTripPostPhotos.execute({ ...photoDependencies, now: () => new Date() }, payload) : missingStorage(),
+    getPhoto: (payload) => photoDependencies
+      ? getTripPhoto.execute({ ...photoDependencies, now: () => new Date() }, payload) : missingStorage(),
     linkPostToNewActivity: (payload) => linkTripPostToNewActivity.execute(postDependencies, payload),
     listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
     createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),

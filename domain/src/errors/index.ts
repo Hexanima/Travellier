@@ -19,5 +19,7 @@ export * from "./itinerary-conflict-error.js";
 export * from "./deletion-conflict-error.js";
 export * from "./activity-not-found-error.js";
 export * from "./post-not-found-error.js";
+export * from "./photo-not-found-error.js";
+export * from "./photo-conflict-error.js";
 export * from "./native-capability-error.js";
 export * from "./comment-not-found-error.js";
