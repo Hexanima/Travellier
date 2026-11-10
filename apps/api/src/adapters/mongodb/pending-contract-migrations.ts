@@ -26,15 +26,19 @@ const pendingMigrations: {
 /**
  * Legacy `paidBy` (a valid ObjectId) with `payments` absent or null becomes one payment of 100 percent by that person: the same
  * single gap rule as `hasLegacyPaymentsGap`/`adaptLegacyPaidBy` on the read path (a parity test pins both) and as the contract audit.
- * The filter compares the BSON type of the WHOLE field with `$expr` (`missing` or `null`): `{payments: null}` would also match an
- * array holding a null element (`[null]`, `[row, null]`) and overwrite valid rows. It makes the update idempotent by itself:
+ * The filter compares the BSON type of the WHOLE fields with `$expr` (`paidBy` is `objectId`; `payments` is `missing` or `null`):
+ * the query forms `{payments: null}` / `{paidBy: {$type: "objectId"}}` also match arrays holding a null element or an ObjectId
+ * (`[null]`, `[row, null]`, `[ObjectId]`) and would overwrite valid rows or write a malformed one. It makes the update idempotent by itself:
  * a document that already has `payments` (even `[]`, cleared on purpose) never matches,
  * so a rerun or a concurrent save cannot duplicate or resurrect the payment. `paidBy` is kept; `currency`, `shares` and
  * `totalAmount` are never written, and a null, missing or invalid `paidBy` is left alone.
  */
 export const EXPENSE_PAYMENTS_MIGRATION_ID = "0006-adapt-legacy-expense-paid-by";
 const adaptLegacyExpensePayers = (database: Db) => database.collection("postExpenses").updateMany(
-  { paidBy: { $type: "objectId" }, $expr: { $in: [{ $type: "$payments" }, ["missing", "null"]] } },
+  { $expr: { $and: [
+    { $eq: [{ $type: "$paidBy" }, "objectId"] },
+    { $in: [{ $type: "$payments" }, ["missing", "null"]] },
+  ] } },
   [{ $set: { payments: [{ userId: "$paidBy", unit: "percent", value: 100 }] } }],
 );
 

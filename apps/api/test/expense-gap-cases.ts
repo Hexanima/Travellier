@@ -21,4 +21,10 @@ export const expenseGapCases: ExpenseGapCase[] = [
   { name: "payments object", fields: { paidBy: gapPayer, payments: { userId: gapOwnPayer } }, legacy: false },
   { name: "payments number", fields: { paidBy: gapPayer, payments: 5 }, legacy: false },
   { name: "paidBy null with payments null", fields: { paidBy: null, payments: null }, legacy: false },
+  // `paidBy` is legacy only when it is a BSON ObjectId (type objectId), nothing else: a query `$type` would also match an array holding one.
+  { name: "paidBy array with an ObjectId and payments absent", fields: { paidBy: [gapPayer] }, legacy: false },
+  { name: "paidBy array with an ObjectId and payments null", fields: { paidBy: [gapPayer], payments: null }, legacy: false },
+  { name: "paidBy empty array and payments absent", fields: { paidBy: [] }, legacy: false },
+  { name: "paidBy 24-hex string and payments absent", fields: { paidBy: gapPayer.toHexString() }, legacy: false },
+  { name: "paidBy object and payments absent", fields: { paidBy: { id: gapPayer } }, legacy: false },
 ];
