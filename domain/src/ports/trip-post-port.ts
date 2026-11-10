@@ -1,6 +1,7 @@
 import type { ActivityParticipation } from "../entities/activity-participation.js";
 import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
+import type { PostPhoto } from "../entities/post-photo.js";
 import type { Post } from "../entities/post.js";
 import type { Transport } from "../entities/transport.js";
 import type { TripRole } from "../entities/trip-member.js";
@@ -19,11 +20,19 @@ export interface TripPostReadScope {
   list: () => AsyncResult<Post[]>;
   /** Direct children of a post in this Trip, newest publication first (id descending on ties). */
   listChildren: (postId: ObjectId) => AsyncResult<Post[]>;
+  /** Photos of a post of this Trip, `order` ascending. */
+  listPhotos: (postId: ObjectId) => AsyncResult<PostPhoto[]>;
+  /** Photo by id whatever its Trip: the caller compares `tripId` with the Trip it authorized. */
+  findPhoto: (photoId: ObjectId) => AsyncResult<PostPhoto | undefined>;
 }
 
 export interface TripPostScope extends TripPostReadScope {
   insert: (post: Post) => AsyncResult<void>;
   replace: (post: Post) => AsyncResult<void>;
+  /** Registered photos with any of these S3 keys, in any Trip. */
+  findPhotosByKeys: (keys: readonly string[]) => AsyncResult<PostPhoto[]>;
+  /** Writes the photo records; a key already registered fails with `PhotoConflictError`. */
+  insertPhotos: (photos: readonly PostPhoto[]) => AsyncResult<void>;
   insertActivity: (activity: Activity) => AsyncResult<void>;
   /** Complete activities of the Trip, to review the author's agenda in the same snapshot. */
   listActivities: () => AsyncResult<Activity[]>;

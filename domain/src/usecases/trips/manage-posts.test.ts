@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, TripPostPort, TripPostScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostPhoto, TripPostPort, TripPostScope, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -19,11 +19,11 @@ const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, au
 
 describe("Trip post use cases", () => {
   let role: TripRole | undefined, votingEnabled: boolean, tripExists: boolean;
-  let listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
+  let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; tripExists = true; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
+    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
@@ -35,6 +35,10 @@ describe("Trip post use cases", () => {
       list: async () => domain.ok(records),
       listChildren: async (id) => domain.ok(records.filter((p) => p.tripId === tripId && p.parentPostId === id)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))),
+      listPhotos: async (id) => domain.ok(photoRecords.filter((p) => p.postId === id && p.tripId === tripId).sort((a, b) => a.order - b.order)),
+      findPhoto: async (id) => domain.ok(photoRecords.find((p) => p.id === id)),
+      findPhotosByKeys: async (keys) => domain.ok(photoRecords.filter((p) => keys.includes(p.s3Key))),
+      insertPhotos: async (photos) => { photoRecords.push(...photos); return domain.ok(undefined); },
       insert: async (post) => { records.push(post); return domain.ok(undefined); },
       replace: async (post) => { records = records.map((p) => p.id === post.id ? post : p); return domain.ok(undefined); },
       insertActivity: async (activity) => { activities.push(activity); return domain.ok(undefined); },
@@ -49,9 +53,9 @@ describe("Trip post use cases", () => {
     posts = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone({ records, activities, participations });
+        const before = structuredClone({ records, activities, participations, photoRecords });
         const result = await work(scope);
-        if (!result.ok) { records = before.records; activities = before.activities; participations = before.participations; }
+        if (!result.ok) { photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
         return result;
       },
     };
