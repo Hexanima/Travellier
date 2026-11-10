@@ -17,3 +17,5 @@ export * from "./comment.js";
 export * from "./post-like.js";
 export * from "./comment-like.js";
 export * from "./storage-deletion-job.js";
+export { resolveExpense, validateExpenseRules } from "./expense.js";
+export type { ExpenseIncompleteReason, ExpensePayment, ExpenseResolution, ExpenseRules, ExpenseShare } from "./expense.js";
