@@ -161,6 +161,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         if (requestAccessToken !== (session.current?.accessToken ?? null)) return
         // A 401 leaves no authentication to revoke with: forget the push registration locally.
         pushRef.current?.reset()
+        // The rejected session is over: neither its foreground announcement nor an action waiting for a session survives it (it could be opened by another account).
+        opener.current?.discard()
+        setNoticeAnnounced(false)
         session.current = undefined
         setHasSession(false)
       },
@@ -375,6 +378,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     sessionRevision.current += 1
     // With a previous session (possibly another account) a notice waiting for a session is not retaken.
     if (session.current !== undefined) opener.current?.discard()
+    setNoticeAnnounced(false)
     // With a previous session, revoke its device registration while its bearer is still the active one.
     if (session.current !== undefined) await revokePush()
     await queueStorageOperation(() => storage.save(authenticatedSession))
@@ -388,6 +392,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const onLocalLogout = async () => {
     sessionRevision.current += 1
     opener.current?.discard()
+    setNoticeAnnounced(false)
     // The device token is revoked with the outgoing bearer before the session is dropped.
     await revokePush()
     session.current = undefined
@@ -403,7 +408,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   return (
     <>
       <AppUrlListener nativeApp={nativeApp} onNavigate={() => { deepLinkReceived.current = true }} onReady={() => setLaunchChecked(true)} />
-      {noticeAnnounced && location.pathname !== '/notifications'
+      {hasSession && noticeAnnounced && location.pathname !== '/notifications'
         ? <Feedback variant="info">Tenés un aviso nuevo. <Link to="/notifications">Ver avisos</Link> <Button onClick={() => setNoticeAnnounced(false)}>Descartar</Button></Feedback>
         : null}
       <Routes>

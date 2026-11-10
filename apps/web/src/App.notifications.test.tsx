@@ -202,6 +202,78 @@ describe("App notices: reading never changes the participation", () => {
   });
 });
 
+describe("App notices tied to the session", () => {
+  const data = (type: string, extra: Record<string, unknown> = {}, id = 1) => ({ notificationId: itineraryId(900 + id), type, tripId, ...extra });
+  const fakePort = () => {
+    let handlers: NativePushHandlers = {};
+    const listen = vi.fn<PushRegistrationPort["listen"]>(async (value) => { handlers = value; return ok(async () => ok(undefined)); });
+    const emit = (kind: "onAction" | "onNotification", values: Record<string, unknown>) => act(async () => { handlers[kind]?.({ id: "native", data: values } as NativePushNotification); });
+    return { port: { listen }, action: (values: Record<string, unknown>) => emit("onAction", values), foreground: (values: Record<string, unknown>) => emit("onNotification", values) };
+  };
+  const trips = { trips: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as never };
+  const type = async (name: string, value: string) => {
+    const element = document.querySelector(`[name=${name}]`) as HTMLInputElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
+  };
+  const submitLogin = async (email: string) => {
+    await type("email", email); await type("password", "secret-pass");
+    await act(async () => { document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  };
+  const announced = () => document.body.textContent?.includes("Tenés un aviso nuevo");
+
+  it("a foreground announcement disappears on logout and is not shown at the login nor to the next account", async () => {
+    const t = fakePort();
+    await render("/trips", makeFetch(), { noticePort: t.port, ...trips });
+    await t.foreground(data("post.created", { postId }));
+    expect(announced()).toBe(true);
+    await click(find("button", "Cerrar sesión"));
+    expect(pathOf()).toBe("/login");
+    expect(announced()).toBe(false);
+    await submitLogin("b@example.test");
+    expect(pathOf()).toBe("/trips");
+    expect(announced()).toBe(false);
+  });
+
+  it("a foreground announcement disappears when the session expires (401)", async () => {
+    const t = fakePort();
+    let tripsStatus = 500;
+    const base = makeFetch();
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) =>
+      new URL(url).pathname === "/trips" ? (tripsStatus === 500 ? json({ error: { code: "Server", message: "x" } }, 500) : denied(401)) : base(url, request));
+    await render("/trips", fetch, { noticePort: t.port });
+    await t.foreground(data("post.created", { postId }));
+    expect(announced()).toBe(true);
+    tripsStatus = 401;
+    await click(find("button", "Reintentar"));
+    expect(pathOf()).toBe("/login");
+    expect(announced()).toBe(false);
+  });
+
+  it("an action pending when the session is rejected (401) is dropped: another account does not open it", async () => {
+    const t = fakePort();
+    let refreshes = 0;
+    let release!: () => void;
+    const base = makeFetch();
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (new URL(url).pathname === "/auth/refresh") {
+        refreshes += 1;
+        await new Promise<void>((resolve) => { release = resolve; });
+        return denied(401);
+      }
+      return base(url, request);
+    });
+    await render("/", fetch, { noticePort: t.port });
+    await t.action(data("activity.created", { activityId }));
+    await act(async () => release());
+    expect(refreshes).toBe(1);
+    // Dropped, not queued: nothing sends the user to the login by itself any more.
+    expect(pathOf()).toBe("/");
+    await click(find("a", "Iniciar sesión"));
+    await submitLogin("b@example.test");
+    expect(pathOf()).toBe("/trips");
+  });
+});
+
 describe("App opening notices from a push", () => {
   const data = (type: string, extra: Record<string, unknown> = {}, id = 1) => ({ notificationId: itineraryId(900 + id), type, tripId, ...extra });
   const fakePort = () => {
