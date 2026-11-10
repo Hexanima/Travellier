@@ -21,6 +21,8 @@ async function render(get = vi.fn().mockResolvedValue({ ok: true, value: fixture
   </MemoryRouter>));
   return { container, get };
 }
+/** One day is shown at a time: pick it in the strip. */
+const showDay = async (container: HTMLElement, date: string) => act(async () => container.querySelector<HTMLElement>(`[data-day="${date}"]`)!.click());
 const clickText = async (container: HTMLElement, text: string) => act(async () => {
   Array.from(container.querySelectorAll("button,a")).find((item) => item.textContent === text)?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 });
@@ -144,8 +146,10 @@ describe("itinerary screen", () => {
     expect(post?.closest("section")?.getAttribute("aria-labelledby")).toBe("itinerary-outside-posts");
     expect(container.querySelector('[data-itinerary-date] [data-itinerary-post]')).toBeNull();
     expect(post?.textContent).toContain("Gasto: ARS 25,50");
-    for (const date of ["2026-09-24", "2026-09-25"])
+    for (const date of ["2026-09-24", "2026-09-25"]) {
+      await showDay(container, date);
       expect(container.querySelector(`[data-itinerary-date="${date}"] [data-itinerary-expenses]`)?.textContent).toContain("Sin gastos registrados.");
+    }
     expect(post?.querySelector("time")?.getAttribute("datetime")).toBe(value.posts[0].createdAt);
   });
   it.each(["UTC", "America/Argentina/Buenos_Aires"])("shows a linked post under its activity across canonical days in %s", async (timeZone) => {
@@ -164,6 +168,7 @@ describe("itinerary screen", () => {
     expect(container.querySelector(`[data-itinerary-item="${value.activities[0].id}"] ${postSelector}`)).not.toBeNull();
     // The expense follows the root activity's local day, not the publication day.
     expect(container.querySelector('[data-itinerary-date="2026-09-24"] [data-itinerary-expenses]')?.textContent).toContain("25,5");
+    if (timeZone === "UTC") await showDay(container, "2026-09-25");
     if (timeZone === "UTC") expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
   });
   it("shows the empty state and a link to configuring transport", async () => {
@@ -172,11 +177,11 @@ describe("itinerary screen", () => {
     expect(container.textContent).toContain("Todavía no hay itinerario");
     expect(container.querySelector(`a[href="/trips/${itineraryId(1)}/journey"]`)).not.toBeNull();
   });
-  it("links to the Trip memories from the header, also without an itinerary", async () => {
+  it("no longer carries the provisional link to the Trip memories: the Diario tab of the Trip shell replaces it", async () => {
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));
-    expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/memories"]`)?.textContent).toBe("Recuerdos");
+    expect(container.querySelector(`a[href="/trips/${itineraryId(1)}/memories"]`)).toBeNull();
   });
-  it("links to the balance from the header whatever the expense mode (provisional entry until T98)", async () => {
+  it("links to the balance from the header whatever the expense mode (it lives in the itinerary panel)", async () => {
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: fixture() }));
     expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/balance"]`)?.textContent).toBe("Balance");
     const empty = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));

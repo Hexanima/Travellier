@@ -27,13 +27,16 @@ const props = (over: Partial<ComponentProps<typeof App>> = {}): ComponentProps<t
   gallery: { list: vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo(3), photo(2)], nextCursor: null } }) }, ...over });
 let go: NavigateFunction = () => undefined;
 function Nav() { go = useNavigate(); return null; }
-async function render(entry: string | { pathname: string; state?: unknown }, app: ComponentProps<typeof App>) {
+type Entry = string | { pathname: string; state?: unknown };
+async function render(entry: Entry | Entry[], app: ComponentProps<typeof App>) {
+  const entries = Array.isArray(entry) ? entry : [entry];
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
-  await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><Nav /><App {...app} /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}><Nav /><App {...app} /></MemoryRouter>));
   return container;
 }
-const title = (container: HTMLElement) => container.querySelector("h1")?.textContent;
+// Inside the Trip shell the Trip name is the h1 and the screen heading an h2; outside it the screen heading is the h1.
+const title = (container: HTMLElement) => (container.querySelector(".trip-shell-header") ? container.querySelector("main h2") : container.querySelector("h1"))?.textContent;
 const dialog = () => document.querySelector('[role="dialog"]');
 const closeViewer = () => click(document.querySelector('[aria-label="Cerrar"]'));
 const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
@@ -44,8 +47,8 @@ describe("App gallery integration", () => {
   it("goes from the diary to the gallery, opens the viewer and the memory, and back to the same photo without asking again", async () => {
     const app = props();
     const container = await render(base, app);
-    await click(named("a", "Fotos", container));
-    expect(container.querySelector("h1")?.textContent).toBe("Fotos");
+    await click(named("button", "Fotos", container));
+    expect(container.querySelector("main h2")?.textContent).toBe("Fotos");
     expect(Array.from(container.querySelectorAll("ul.photo-grid > li")).map((item) => item.getAttribute("data-photo"))).toEqual([itineraryId(3), itineraryId(2)]);
     await click(thumb(container, 2));
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
@@ -53,7 +56,7 @@ describe("App gallery integration", () => {
     expect(app.posts!.get).toHaveBeenCalledWith(tripId, itineraryId(502));
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(named("button", "Volver", container));
-    expect(container.querySelector("h1")?.textContent).toBe("Fotos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Fotos");
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
     expect(Array.from(container.querySelectorAll("ul.photo-grid > li"))).toHaveLength(2);
     expect(app.gallery!.list).toHaveBeenCalledTimes(1);
@@ -67,7 +70,7 @@ describe("App gallery integration", () => {
     const container = await render({ pathname: `${base}/${itineraryId(502)}`, state: { origin } }, app);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(named("a", "Volver a las fotos", container));
-    expect(container.querySelector("h1")?.textContent).toBe("Fotos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Fotos");
     expect(Array.from(container.querySelectorAll("ul.photo-grid > li"))).toHaveLength(2);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(app.gallery!.list).toHaveBeenCalledTimes(1);
@@ -79,9 +82,9 @@ describe("App gallery integration", () => {
     await click(named("a", "Volver a las fotos", container));
     expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 2");
   });
-  it("grid, viewer, close: one entry back to the grid and then the diary, with no loop", async () => {
-    const container = await render(base, props());
-    await click(named("a", "Fotos", container));
+  it("grid, viewer, close: one entry back to the grid and then out of the Trip (the tabs replace the entry), with no loop", async () => {
+    const container = await render(["/trips", base], props());
+    await click(named("button", "Fotos", container));
     await click(thumb(container, 2));
     expect(dialog()).not.toBeNull();
     await closeViewer();
@@ -89,11 +92,11 @@ describe("App gallery integration", () => {
     expect(title(container)).toBe("Fotos");
     await act(async () => go(-1));
     expect(title(container)).not.toBe("Fotos");
-    expect(named("a", "Fotos", container)).toBeTruthy();
+    expect(container.querySelector("[role=tablist]")).toBeNull(); // Back from the Fotos tab leaves to Mis viajes, not to the Posts tab
   });
   it("grid, viewer, «Ver recuerdo», back, viewer reopened, close: lands on the grid", async () => {
-    const container = await render(base, props());
-    await click(named("a", "Fotos", container));
+    const container = await render(["/trips", base], props());
+    await click(named("button", "Fotos", container));
     await click(thumb(container, 2));
     await click(named("a", "Ver recuerdo"));
     await click(named("button", "Volver", container));
@@ -140,7 +143,7 @@ describe("App gallery integration", () => {
   it("does not take the static photos route as a post id", async () => {
     const app = props();
     const container = await render(`${base}/photos`, app);
-    expect(container.querySelector("h1")?.textContent).toBe("Fotos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Fotos");
     expect(app.posts!.get).not.toHaveBeenCalled();
     expect(app.gallery!.list).toHaveBeenCalledWith(tripId, {});
   });

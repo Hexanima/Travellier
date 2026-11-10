@@ -20,12 +20,12 @@ let go: NavigateFunction = () => undefined;
 function Nav() { go = useNavigate(); return null; }
 function Itinerary() { const gallery = useGalleryPages({ activityId }); return <p data-itinerary>{gallery.phase}:{gallery.photos.length}</p>; }
 function Photos() { const gallery = useGalleryPages(); return <p data-photos>{gallery.phase}:{gallery.photos.length}</p>; }
-async function mount(list: ReturnType<typeof vi.fn>, withGallery = true, start = `/trips/${tripId}/itinerary`) {
+async function mount(list: ReturnType<typeof vi.fn>, withGallery = true, start = `/trips/${tripId}/itinerary`, trips?: { get: ReturnType<typeof vi.fn> }) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const props = withGallery ? { gallery: { list: list as never, now: () => 0 } } : {};
   await act(async () => root.render(<MemoryRouter initialEntries={[start]}><Nav /><Routes>
-    <Route element={<TripContentLayout {...props} />}>
+    <Route element={<TripContentLayout {...props} trips={trips as never} />}>
       <Route path="/trips/:tripId/itinerary" element={<Itinerary />} />
       <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
         <Route path="photos" element={<Photos />} />
@@ -64,6 +64,16 @@ describe("TripContentLayout", () => {
     await act(async () => go(`/trips/${tripId}/itinerary`, { state: { photo: photo.id } }));
     expect(text(container, "itinerary")).toBe("idle:1");
     expect(list).toHaveBeenCalledTimes(2); // not reused: the provider is keyed by trip
+  });
+  it("asks the Trip name once and shares it between the root screens (shell heading); a detail has no heading", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { id: tripId, kind: "member", name: "Patagonia" } });
+    const container = await mount(vi.fn().mockResolvedValue({ ok: true, value: { photos: [], nextCursor: null } }), true, `/trips/${tripId}/itinerary`, { get });
+    expect(container.querySelector("h1")?.textContent).toBe("Patagonia");
+    await act(async () => go(`/trips/${tripId}/memories/photos`));
+    expect(container.querySelector("h1")?.textContent).toBe("Patagonia");
+    await act(async () => go(`/trips/${tripId}/memories/${postId}`));
+    expect(container.querySelector("h1")).toBeNull();
+    expect(get).toHaveBeenCalledTimes(1);
   });
   it("without a gallery configuration it only renders the child routes", async () => {
     const container = await mount(vi.fn(), false, `/trips/${tripId}/memories/${postId}`);

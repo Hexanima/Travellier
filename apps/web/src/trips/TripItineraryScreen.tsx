@@ -25,6 +25,8 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
+import { useInTripShell, useTripName } from "./trip-state.js";
+import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
@@ -37,6 +39,7 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
   calendarSync?: CalendarSyncService };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
+const chipLabel = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 /** Attribution of an expense as the server read it: where it was counted (activity or publication) and when it happened. */
 type Attribution = { source: "activity" | "publication"; occurredAt: string; publishedAt: string };
@@ -61,6 +64,11 @@ export function TripItineraryScreen({ itinerary, activities, participations, mem
 function ItineraryContent({ tripId, itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, timeZone }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  // Inside the Trip shell the frame (main, way back, Trip heading, tabs) is the shell's; the Trip name is already known there.
+  const inShell = useInTripShell();
+  // Inside the shell the screen heading is h2 (the Trip name is the h1), so its sections are h3, the bands h4 and the items h5.
+  const sub = inShell ? 3 : 2;
+  const shellName = useTripName();
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location);
@@ -73,19 +81,32 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const [creating, setCreating] = useState<Extract<ActivityDialogRequest, { kind: "create" }>>();
   const detail = useMemo<ActivityDialogRequest | undefined>(() => urlActivity ? { kind: "detail", activityId: urlActivity } : undefined, [urlActivity]);
   const dialog = creating ?? detail;
-  const updateParams = (change: (params: URLSearchParams) => void) => {
+  // Opening a detail pushes its own entry (marked `dialogPushed`), so the device Back closes it and lands on the itinerary exactly as it was; closing from the
+  // screen (X, save, remove) pops that same entry instead of piling another one. A detail opened by a deep link or a returning link has no mark: it is replaced.
+  // Tab changes inside the dialog replace the entry and keep its state.
+  const updateParams = (change: (params: URLSearchParams) => void, push = false) => {
     const current = locationRef.current;
     const params = new URLSearchParams(current.search);
     change(params);
     const search = params.toString();
-    navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, { replace: true, state: current.state });
+    const kept = { ...(typeof current.state === "object" && current.state !== null ? current.state : {}) } as Record<string, unknown>;
+    delete kept.noBack; // there is an entry behind the new one
+    navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, push ? { state: { ...kept, dialogPushed: true } } : { replace: true, state: current.state });
   };
-  const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); });
-  const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); });
+  const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); }, true);
+  const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); }, true);
+  // The entry already being popped: a second close before the router lands must not pop again (it would leave the itinerary).
+  const popping = useRef<string | undefined>(undefined);
   const closeDialog = () => {
     setCreating(undefined);
-    const params = new URLSearchParams(locationRef.current.search);
-    if (params.has("activity") || params.has("transport") || params.has("tab")) updateParams((next) => { next.delete("activity"); next.delete("transport"); next.delete("tab"); });
+    const current = locationRef.current;
+    const params = new URLSearchParams(current.search);
+    if (!(params.has("activity") || params.has("transport") || params.has("tab"))) return;
+    if ((current.state as { dialogPushed?: unknown } | null)?.dialogPushed === true) {
+      if (popping.current === current.key) return;
+      popping.current = current.key;
+      navigate(-1);
+    } else updateParams((next) => { next.delete("activity"); next.delete("transport"); next.delete("tab"); });
   };
   const [panelSettled, setPanelSettled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -194,6 +215,27 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const setTab = (next: ActivityTab) => updateParams((params) => { params.set("tab", next); });
   const view = useMemo(() => state.kind === "ready" ? projectItineraryView(state.value, timeZone) : undefined, [state, timeZone]);
   const { days, outsidePosts } = view ?? { days: [], outsidePosts: [] };
+  // One local day is read at a time: `?day=YYYY-MM-DD` when it is valid and the Trip has it, else the first day (the URL is not rewritten).
+  // Tapping another day replaces the entry (Back still leaves the itinerary) and moves neither the page nor the focus; tapping the selected one does nothing.
+  const dayParam = new URLSearchParams(location.search).get("day");
+  const selectedDate = dayParam !== null && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((day) => day.date === dayParam) ? dayParam : days[0]?.date;
+  const shownDays = days.filter((day) => day.date === selectedDate);
+  const chipRefs = useRef(new Map<string, HTMLElement>());
+  const tapped = useRef(false);
+  const revealed = useRef<string | undefined>(undefined);
+  const pickDay = (date: string) => {
+    if (date === selectedDate) return;
+    tapped.current = true;
+    updateParams((params) => { params.set("day", date); });
+  };
+  useEffect(() => {
+    // A tap leaves the strip where it is; a day that comes from outside (a restored URL) is brought into view. The default first day needs nothing.
+    const byTap = tapped.current;
+    tapped.current = false;
+    const initialDefault = revealed.current === undefined && selectedDate === days[0]?.date;
+    revealed.current = selectedDate;
+    if (!byTap && !initialDefault && selectedDate) chipRefs.current.get(selectedDate)?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
   const attributions = useMemo(() => new Map((state.kind === "ready" ? state.value.expenses : []).map((row) => [row.postId, row as Attribution] as const)), [state]);
   const outsideExpensesRef = useRef<HTMLElement>(null);
   const showOutsideExpenses = () => {
@@ -203,22 +245,16 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  return <main className="app-shell trips-shell itinerary-shell">
-    <div className="trips-panel">
-      {/* Opened from the notices center (state kept by the `?activity` changes): the way back is that center, never another Trip. */}
-      {readOrigin(location.state, tripId ?? "").label === "avisos"
-        ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
-        : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
+  const body = <>
       <header className="itinerary-header">
-        <h1>Itinerario</h1>
+        {inShell ? <h2>Itinerario</h2> : <h1>Itinerario</h1>}
         <p>El viaje, día a día. Horarios en tu zona local.</p>
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
-        {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/memories`}>Recuerdos</Link> : null}
-        {/* Provisional entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses): T98 gives it its place. */}
+        {/* Entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses). It lives in the itinerary panel: the balance opens outside the tabs. */}
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/balance`}>Balance</Link> : null}
-        {/* Provisional placement of the native calendar sync (T96) next to the .ics export (static copy): T98 gives them their place. */}
+        {/* The native calendar sync (T96) and the .ics export (static copy) stay in the itinerary panel. */}
         {state.kind === "ready" && calendarSync && tripId ? <CalendarSync service={calendarSync} tripId={tripId} itinerary={itinerary} loaded={state.value} timeZone={timeZone} /> : null}
-        {state.kind === "ready" ? <ExportIcsButton tripName={tripName} itinerary={state.value} timeZone={timeZone} {...icsExport}
+        {state.kind === "ready" ? <ExportIcsButton tripName={tripName || shellName} itinerary={state.value} timeZone={timeZone} {...icsExport}
           resolveTripName={trips && tripId ? async () => { const result = await trips.get(tripId); return result.ok ? result.value.name : undefined; } : undefined} /> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
@@ -237,23 +273,30 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
       {state.kind === "ready" && view && view.tripExpenses.expenseCount > 0 ? <section className="itinerary-trip-expenses" aria-labelledby="itinerary-trip-expenses">
-        <h2 id="itinerary-trip-expenses">Gastos del viaje</h2>
+        <Heading level={sub} id="itinerary-trip-expenses">Gastos del viaje</Heading>
         <ExpenseLines totals={view.tripExpenses} />
         {view.outsideExpensePosts.length > 0 ? <Button onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
       </section> : null}
       {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
-        <h2>Todavía no hay itinerario</h2>
+        <Heading level={sub}>Todavía no hay itinerario</Heading>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
         <Link to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
       </section> : null}
+      {state.kind === "ready" && days.length > 0 ? <nav aria-label="Días del viaje">
+        <ul className="itinerary-day-strip">
+          {days.map((day) => <li key={day.date}><button type="button" className="ui-button itinerary-day-chip" data-day={day.date} aria-current={day.date === selectedDate ? "date" : undefined}
+            ref={(element) => { if (element) chipRefs.current.set(day.date, element); else chipRefs.current.delete(day.date); }} onClick={() => pickDay(day.date)}>
+            <time dateTime={day.date}>{chipLabel.format(new Date(`${day.date}T00:00:00Z`))}</time></button></li>)}
+        </ul>
+      </nav> : null}
       {state.kind === "ready" ? <div className="itinerary-days">
-        {days.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
-          <h2 id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></h2>
+        {shownDays.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
+          <Heading level={sub} id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></Heading>
           <div className="itinerary-bands">
             {day.segments.map((segment, index) => <section key={segment.key} className={`itinerary-band itinerary-band--${segment.type}`}
               data-itinerary-kind={segment.type} aria-labelledby={`band-${segment.key}`}>
               <header className="itinerary-band-header">
-                <div><h3 id={`band-${segment.key}`}>{bandLabels[segment.type]}</h3><p>{segment.destinationName}</p></div>
+                <div><Heading level={sub + 1 as 3 | 4} id={`band-${segment.key}`}>{bandLabels[segment.type]}</Heading><p>{segment.destinationName}</p></div>
                 <p className="itinerary-range">
                   {segment.endsAt === null ? "Desde " : null}<time dateTime={segment.startsAt}>{formatActivityClock(segment.startsAt, timeZone)}</time>
                   {segment.endsAt !== null && segment.endsAt !== segment.startsAt ? <> – <time dateTime={segment.endsAt}>{formatActivityClock(segment.endsAt, timeZone)}</time></> : null}
@@ -263,7 +306,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
                 ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setCreating({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
+                {segment.items.map((item) => <AgendaItem titleLevel={sub + 2 as 4 | 5} tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
                   disabled={refreshing} onActivity={activities ? openDetail : undefined} onTransport={openTransport} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
@@ -276,13 +319,13 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         </section>)}
       </div> : null}
       {state.kind === "ready" && outsidePosts.length > 0 ? <section className="itinerary-outside-posts" aria-labelledby="itinerary-outside-posts">
-        <h2 id="itinerary-outside-posts">Publicaciones fuera del itinerario</h2>
+        <Heading level={sub} id="itinerary-outside-posts">Publicaciones fuera del itinerario</Heading>
         <List className="itinerary-posts">
           {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId ?? ""} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List>
       </section> : null}
       {state.kind === "ready" && view && view.outsideExpensePosts.length > 0 ? <section ref={outsideExpensesRef} tabIndex={-1} className="itinerary-outside-expenses" aria-labelledby="itinerary-outside-expenses">
-        <h2 id="itinerary-outside-expenses">Gastos fuera del itinerario</h2>
+        <Heading level={sub} id="itinerary-outside-expenses">Gastos fuera del itinerario</Heading>
         <ExpenseLines totals={view.outsideExpenses} />
         <List className="itinerary-posts">
           {view.outsideExpensePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-outside-expense={post.id}>
@@ -310,11 +353,20 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         timeZone={timeZone} onClose={closeDialog}
         memories={members ? <TransportMemories tripId={tripId ?? ""} transportId={urlTransportEntry.id} itinerary={state.value} members={members} timeZone={timeZone}
           tab={tab} onTab={setTab} onGone={() => onTransportGone(urlTransportEntry.id)} onSettled={() => setPanelSettled(true)} /> : undefined} /> : null}
+  </>;
+  if (inShell) return body;
+  return <main className="app-shell trips-shell itinerary-shell">
+    <div className="trips-panel">
+      {/* Opened from the notices center (state kept by the `?activity` changes): the way back is that center, never another Trip. */}
+      {readOrigin(location.state, tripId ?? "").label === "avisos"
+        ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
+        : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
+      {body}
     </div>
   </main>;
 }
 
-function AgendaItem({ tripId, item, publication, timeZone, attributions, onActivity, onTransport, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+function AgendaItem({ titleLevel, tripId, item, publication, timeZone, attributions, onActivity, onTransport, disabled, participation }: { titleLevel: 4 | 5; tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
   attributions: ReadonlyMap<string, Attribution>;
   onActivity?: (id: string) => void; onTransport?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
   const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
@@ -322,7 +374,7 @@ function AgendaItem({ tripId, item, publication, timeZone, attributions, onActiv
     <time className="itinerary-item-time" dateTime={item.at}>{range?.start ?? formatActivityClock(item.at, timeZone)}</time>
     <div className="itinerary-item-content">
       {item.kind === "transport" ? <>
-        <h4>{onTransport ? <Button className="transport-title" disabled={disabled} onClick={() => onTransport(item.id)}>{transportLabels[item.transport.type]}</Button> : transportLabels[item.transport.type]}</h4>
+        <Heading level={titleLevel}>{onTransport ? <Button className="transport-title" disabled={disabled} onClick={() => onTransport(item.id)}>{transportLabels[item.transport.type]}</Button> : transportLabels[item.transport.type]}</Heading>
         <p>{item.transport.departurePlace} → {item.transport.arrivalPlace}</p>
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
@@ -330,7 +382,7 @@ function AgendaItem({ tripId, item, publication, timeZone, attributions, onActiv
           {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List> : null}
       </> : item.kind === "activity" ? <>
-        <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
+        <Heading level={titleLevel}>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</Heading>
         {item.activity.description ? <p>{item.activity.description}</p> : null}
         {range?.endIso ? <p className="itinerary-secondary">Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
           {" · "}Duración {formatDuration(item.activity.durationMinutes!)}</p> : null}

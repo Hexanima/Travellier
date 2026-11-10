@@ -34,11 +34,9 @@ describe("TripMemoriesScreen", () => {
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
     expect(texts(container)).toEqual(["Recuerdo 14", "Recuerdo 13", "Recuerdo 12", "Recuerdo 11"]);
   });
-  it("links to the photo gallery from the header, also when there are no memories", async () => {
+  it("no longer carries the provisional link to the gallery: the Posts/Fotos tabs of the Trip shell reach it (see TripShell and App.navigation)", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }));
-    const link = Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Fotos");
-    expect(link?.getAttribute("href")).toBe(`/trips/${tripId}/memories/photos`);
-    expect(link?.closest("header")).not.toBeNull();
+    expect(Array.from(container.querySelectorAll("a")).some((item) => item.textContent === "Fotos" || item.getAttribute("href")?.endsWith("/memories/photos"))).toBe(false);
   });
   it("shows text or a placeholder, the local publication date and an edit link", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [post(11, "2026-01-02T15:30:00.000Z", null)] }));

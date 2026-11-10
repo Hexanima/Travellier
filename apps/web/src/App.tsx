@@ -466,11 +466,6 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
             <PublicTripConfirmationScreen trips={tripManagement} />
           </TripRoute>
         } />
-        <Route path="/trips/:tripId/members" element={
-          <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripMembersScreen trips={tripManagement} members={tripMembers} apiBaseUrl={apiBaseUrl} />
-          </TripRoute>
-        } />
         <Route path="/trips/:tripId/config" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <TripConfigurationScreen trips={tripManagement} />
@@ -483,9 +478,10 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripContentLayout gallery={galleryProvider} />
+            <TripContentLayout gallery={galleryProvider} trips={tripManagement} />
           </TripRoute>
         }>
+        <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={tripManagement} members={tripMembers} apiBaseUrl={apiBaseUrl} />} />
         <Route path="/trips/:tripId/itinerary" element={
           <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} calendarSync={activeCalendarSync} />
         } />

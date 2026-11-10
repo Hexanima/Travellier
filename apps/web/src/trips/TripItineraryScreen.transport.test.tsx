@@ -108,13 +108,16 @@ const statuses = () => Array.from(document.querySelectorAll('[role="status"]')).
 const MEMORY_11 = itineraryId(11);
 
 describe("transport dialog in the URL", () => {
-  it("opening sets ?transport=<id> by replacing the entry, so Back leaves the itinerary as before", async () => {
+  it("opening sets ?transport=<id> on its own entry: Back closes the dialog on the itinerary and a second Back leaves it", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openTransport(container);
     expect(here).toBe(`${itineraryPath}?transport=${TR}`);
     expect(dialogOpen()).toBe(true);
     expect(document.querySelector(".transport-dialog h3")!.textContent).toBe("Auto");
     expect(tab("memories")!.getAttribute("aria-selected")).toBe("true");
+    await click(document.querySelector('[data-testid="atras"]'));
+    expect(here).toBe(itineraryPath);
+    expect(dialogOpen()).toBe(false);
     await click(document.querySelector('[data-testid="atras"]'));
     expect(here).toBe(memoriesPath);
   });
@@ -124,7 +127,7 @@ describe("transport dialog in the URL", () => {
     expect(button.closest("h4")).not.toBeNull();
     expect(button.disabled).toBe(false);
   });
-  it("changing the tab sets &tab= and closing clears transport and tab, both by replacing the entry", async () => {
+  it("changing the tab sets &tab= by replacing the entry and closing pops the dialog entry", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openTransport(container);
     await click(tab("photos"));
@@ -153,14 +156,20 @@ describe("transport dialog in the URL", () => {
   });
   it("a transport shown in several local days opens the same detail from each", async () => {
     const { container } = await mount({ itineraries: [{ ok: true, value: crossing() }] });
-    const buttons = Array.from(container.querySelectorAll(`[data-itinerary-item="${TR}"] button.transport-title`));
-    expect(buttons.length).toBeGreaterThan(1);
-    await click(buttons[0]);
-    const first = here;
-    await closeDialog();
-    await click(buttons[1]);
-    expect(here).toBe(first);
-    expect(document.querySelectorAll(".transport-dialog")).toHaveLength(1);
+    // One day is shown at a time: the same transport is reached from each day of the strip where it appears.
+    const reachedFrom: string[] = [], opened: string[] = [];
+    for (const day of Array.from(container.querySelectorAll<HTMLElement>(".itinerary-day-chip"))) {
+      await click(day);
+      const button = container.querySelector(`[data-itinerary-item="${TR}"] button.transport-title`);
+      if (!button) continue;
+      reachedFrom.push(day.getAttribute("data-day")!);
+      await click(button);
+      opened.push(new URLSearchParams(here.split("?")[1]).get("transport")!);
+      expect(document.querySelectorAll(".transport-dialog")).toHaveLength(1);
+      if (reachedFrom.length < 2) await closeDialog();
+    }
+    expect(reachedFrom.length).toBeGreaterThan(1);
+    expect(new Set(opened)).toEqual(new Set([TR]));
     expect(document.querySelectorAll("[data-transport-day]").length).toBe(2);
   });
   it("an invalid tab opens Recuerdos", async () => {
