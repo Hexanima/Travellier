@@ -134,10 +134,10 @@ describe("getTripItinerary", () => {
     f.snapshot.posts[0] = { ...f.post, parentPostId: id(10) };
     f.snapshot.posts.push({ ...f.post, id: id(10), parentPostId: id(7) }, { ...f.post, id: id(40), tripId: id(99) });
     f.snapshot.activities.push({ ...f.activity, id: id(41), tripId: id(99) });
-    f.snapshot.expenses.push({ id: id(42), postId: id(7), tripId: id(99), totalAmount: 800, breakdown: null, paidBy: null, createdAt: time(14) });
+    f.snapshot.expenses.push({ id: id(42), postId: id(7), tripId: id(99), totalAmount: 800, currency: "ARS", breakdown: null, paidBy: null, createdAt: time(14) });
     const result = await f.execute();
     expect(result).toMatchObject({ ok: true, value: { posts: [{ id: id(7), parentPostId: id(10), expense: null }, { id: id(10), parentPostId: id(7), expense: null }],
-      activities: [{ id: id(6) }], days: [{ expenseSummary: { totalAmount: 0 } }, { expenseSummary: { totalAmount: 0 } }] } });
+      activities: [{ id: id(6) }], days: [{ expenseSummary: { expenseCount: 0 } }, { expenseSummary: { expenseCount: 0 } }], expenses: [] } });
   });
 });
 
@@ -155,8 +155,8 @@ describe("getTripItinerary projection of memories by context (T56)", () => {
     if (!result.ok) throw new Error("unexpected");
     return result.value;
   };
-  const expense = (n: number, postId: domain.ObjectId, totalAmount: number) =>
-    ({ id: id(n), tripId, postId, totalAmount, breakdown: null, paidBy: null, createdAt: time(14) });
+  const expense = (n: number, postId: domain.ObjectId, totalAmount: number, currency: domain.Currency | null = "ARS") =>
+    ({ id: id(n), tripId, postId, totalAmount, currency, breakdown: null, paidBy: null, createdAt: time(14) });
   /** Same invariants the current web validator enforces over the response. */
   const expectCompatible = (value: domain.TripItinerary) => {
     const dayIds = new Set(value.days.map((day) => day.id)), postIds = new Set(value.posts.map((post) => post.id));
@@ -289,8 +289,8 @@ describe("getTripItinerary projection of memories by context (T56)", () => {
     for (const mode of ["register", "balance"] as const) {
       f.snapshot.trip.expenseMode = mode;
       const value = await run(f);
-      expect(value.days[1]!.expenseSummary).toEqual({ totalAmount: 1, expenseCount: 1 });
-      expect(value.days[0]!.expenseSummary).toEqual({ totalAmount: 6, expenseCount: 2 });
+      expect(value.days[1]!.expenseSummary).toEqual({ byCurrency: [{ currency: "ARS", totalCents: 100, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 });
+      expect(value.days[0]!.expenseSummary).toEqual({ byCurrency: [{ currency: "ARS", totalCents: 600, expenseCount: 2 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 2 });
     }
   });
 
@@ -358,7 +358,8 @@ describe("getTripItinerary projection of memories by context (T56)", () => {
     expect(value.posts).toMatchObject([{ id: id(10), dayId: id(8), expense: { totalAmount: 9 }, context: { placement: "transport", rootTransportId: f.transport.id } }]);
     expect(value.unplacedPosts).toEqual([]);
     expect(value.transports[0]!.postIds).toEqual([id(10)]);
-    for (const day of value.days) expect(day.expenseSummary).toEqual({ totalAmount: 0, expenseCount: 0 });
+    for (const day of value.days) expect(day.expenseSummary).toMatchObject({ byCurrency: [], expenseCount: 0 });
+    expect(value.expenseSummary.outsideItinerary).toMatchObject({ expenseCount: 1, byCurrency: [{ currency: "ARS", totalCents: 900 }] });
     expectCompatible(value);
   });
 
@@ -379,5 +380,119 @@ describe("getTripItinerary projection of memories by context (T56)", () => {
     expect(value.activities[0]!.postIds).not.toContain(deepest);
     expect(value.days[1]!.items.filter((i) => i.kind === "post").map((i) => i.id)).toEqual([deepest]);
     expectCompatible(value);
+  });
+});
+
+describe("getTripItinerary expense projection (T81)", () => {
+  const iso = (value: string) => new Date(value);
+  const fresh = () => { const f = fixture(); f.snapshot.posts = []; return f; };
+  const mk = (f: ReturnType<typeof fixture>, n: number, fields: Record<string, unknown> = {}) => {
+    const base = { ...f.post } as Record<string, unknown>;
+    delete base.dayId;
+    f.snapshot.posts.push({ ...base, id: id(n), createdAt: time(13), ...fields } as never);
+  };
+  const expense = (n: number, postId: domain.ObjectId, totalAmount: number, currency: domain.Currency | null = "ARS") =>
+    ({ id: id(n), tripId, postId, totalAmount, currency, breakdown: null, paidBy: null, createdAt: time(14) });
+  const run = async (f: ReturnType<typeof fixture>) => {
+    const result = await f.execute();
+    if (!result.ok) throw new Error("unexpected");
+    return result.value;
+  };
+  const ars = (totalCents: number, expenseCount: number) => ({ currency: "ARS", totalCents, expenseCount });
+
+  it("attributes an expense published on a later day to the root activity without changing its publication instant", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id });
+    mk(f, 11, { parentPostId: id(10), createdAt: iso("2026-10-03T12:00:00.987Z") });
+    f.snapshot.expenses = [expense(20, id(11), 12.5)];
+    const value = await run(f);
+    expect(value.expenses).toEqual([{ expenseId: id(20), postId: id(11), rootPostId: id(10), source: "activity", rootActivityId: f.activity.id,
+      occurredAt: f.activity.scheduledAt, publishedAt: iso("2026-10-03T12:00:00.987Z"), dayId: f.day.id, currency: "ARS", amountCents: 1250 }]);
+    expect(value.days[1]!.expenseSummary.byCurrency).toEqual([ars(1250, 1)]);
+    expect(value.posts.find((p) => p.id === id(11))!.createdAt.toISOString()).toBe("2026-10-03T12:00:00.987Z");
+  });
+
+  it("does not duplicate descendants: each expense counts once on its own and the root chain only attributes", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id }); mk(f, 11, { parentPostId: id(10) }); mk(f, 12, { parentPostId: id(11) });
+    f.snapshot.expenses = [expense(20, id(10), 1), expense(21, id(11), 2), expense(22, id(12), 4)];
+    const value = await run(f);
+    expect(value.expenses.map((e) => [e.postId, e.rootPostId, e.amountCents])).toEqual([[id(10), id(10), 100], [id(11), id(10), 200], [id(12), id(10), 400]]);
+    expect(value.expenseSummary.byCurrency).toEqual([ars(700, 3)]);
+    expect(value.expenseSummary.expenseCount).toBe(3);
+  });
+
+  it("moves the expense on relink, keeping the same amount", async () => {
+    const f = fresh();
+    const second = { ...f.activity, id: id(30), dayId: id(8), scheduledAt: time(9) };
+    f.snapshot.activities.push(second);
+    mk(f, 10, { activityId: f.activity.id });
+    f.snapshot.expenses = [expense(20, id(10), 5)];
+    const before = await run(f);
+    expect(before.days[1]!.expenseSummary.byCurrency).toEqual([ars(500, 1)]);
+    f.snapshot.posts[0] = { ...f.snapshot.posts[0]!, activityId: second.id };
+    const after = await run(f);
+    expect(after.days[1]!.expenseSummary.byCurrency).toEqual([]);
+    expect(after.days[0]!.expenseSummary.byCurrency).toEqual([ars(500, 1)]);
+    expect(after.expenses[0]).toMatchObject({ rootActivityId: second.id, occurredAt: second.scheduledAt, amountCents: 500 });
+  });
+
+  it("follows a rescheduled activity and falls back to the own publication when it is deleted, keeping the amount", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id, createdAt: time(9) });
+    f.snapshot.expenses = [expense(20, id(10), 3)];
+    f.snapshot.activities[0] = { ...f.activity, scheduledAt: time(15) };
+    const moved = await run(f);
+    expect(moved.expenses[0]).toMatchObject({ source: "activity", occurredAt: time(15), publishedAt: time(9), amountCents: 300 });
+    f.snapshot.activities = [];
+    const removed = await run(f);
+    expect(removed.expenses[0]).toMatchObject({ source: "publication", rootActivityId: null, occurredAt: time(9), dayId: id(8), amountCents: 300 });
+    expect(removed.days[0]!.expenseSummary.byCurrency).toEqual([ars(300, 1)]);
+  });
+
+  it("uses publication for a broken or cyclic chain", async () => {
+    const f = fresh();
+    mk(f, 10, { parentPostId: id(11), createdAt: time(9) }); mk(f, 11, { parentPostId: id(10), createdAt: time(9) });
+    mk(f, 12, { parentPostId: id(999), createdAt: time(9) });
+    f.snapshot.expenses = [expense(20, id(10), 1), expense(21, id(12), 1)];
+    const value = await run(f);
+    expect(value.expenses.map((e) => [e.rootPostId, e.source])).toEqual([[id(10), "publication"], [id(12), "publication"]]);
+  });
+
+  it("totals the Trip as days plus outside the itinerary, per currency, without a single total", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id }); mk(f, 11, { createdAt: iso("2026-11-01T10:00:00.000Z") });
+    mk(f, 12, { activityId: f.activity.id }); mk(f, 13, { activityId: f.activity.id });
+    f.snapshot.expenses = [expense(20, id(10), 0.1), expense(21, id(11), 7, "USD"), expense(22, id(12), 0.2), expense(23, id(13), 3, "EUR")];
+    const value = await run(f);
+    expect(value.days[1]!.expenseSummary).toMatchObject({ byCurrency: [ars(30, 2), { currency: "EUR", totalCents: 300, expenseCount: 1 }], expenseCount: 3 });
+    expect(value.expenseSummary.outsideItinerary).toEqual({ byCurrency: [{ currency: "USD", totalCents: 700, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 });
+    expect(value.expenseSummary).toMatchObject({ expenseCount: 4, byCurrency: [ars(30, 2), { currency: "EUR", totalCents: 300, expenseCount: 1 }, { currency: "USD", totalCents: 700, expenseCount: 1 }] });
+    expect(value.expenseSummary).not.toHaveProperty("totalAmount");
+    expect(value.expenses.find((e) => e.postId === id(10))!.dayId).not.toBeNull();
+    expect(value.expenses.find((e) => e.postId === id(11))!.dayId).toBeNull();
+  });
+
+  it("counts a legacy expense without currency and ignores foreign expenses or missing posts", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id });
+    f.snapshot.expenses = [expense(20, id(10), 5, null), { ...expense(21, id(10), 9), tripId: id(99) }, expense(22, id(404), 9)];
+    const value = await run(f);
+    expect(value.expenseSummary).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 1 }, expenseCount: 1,
+      outsideItinerary: { byCurrency: [], withoutCurrency: { expenseCount: 0 }, expenseCount: 0 } });
+  });
+
+  it("is empty without expenses", async () => {
+    const value = await run(fresh());
+    expect(value.expenses).toEqual([]);
+    expect(value.expenseSummary.byCurrency).toEqual([]);
+  });
+
+  it("orders attributions by occurredAt then id", async () => {
+    const f = fresh();
+    mk(f, 10, { activityId: f.activity.id }); mk(f, 11, { createdAt: time(9) }); mk(f, 12, { createdAt: time(9) });
+    f.snapshot.expenses = [expense(23, id(10), 1), expense(22, id(12), 1), expense(21, id(11), 1)];
+    const value = await run(f);
+    expect(value.expenses.map((e) => e.expenseId)).toEqual([id(21), id(22), id(23)]);
   });
 });
