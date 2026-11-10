@@ -19,6 +19,7 @@ import { createTripApi } from "./trips/trip-api.js";
 
 export interface ApiGatewayHttpApiEvent {
   rawPath: string;
+  rawQueryString?: string;
   body?: string;
   isBase64Encoded?: boolean;
   headers?: Record<string, string | undefined>;
@@ -129,7 +130,8 @@ export const createLambdaHandler = ({
     return handleRequest(
       {
         method,
-        url: event.rawPath,
+        // API Gateway splits the query from the path; the routes with parameters (photos, notices) parse it from the url.
+        url: event.rawQueryString ? `${event.rawPath}?${event.rawQueryString}` : event.rawPath,
         body: requestBody(event),
         authenticatedUserId: authenticatedRequest.authenticatedUserId,
       },
