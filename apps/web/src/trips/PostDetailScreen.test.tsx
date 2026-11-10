@@ -414,6 +414,23 @@ describe("PostDetailScreen navigation", () => {
     expect(last().search).toBe("?x=1");
     expect(last().state).toEqual({ restore: { anchor, scrollY: 250 } });
   });
+  it("goes back to the photos of a deep link restoring the panel and, from the viewer, the photo", async () => {
+    const photo = itineraryId(9);
+    const anchor = `data-photo=${photo}`;
+    const path = `/trips/${tripId}/memories/photos`;
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5))), 5, { origin: { path, label: "fotos", anchor, scrollY: 90, viewer: true } });
+    expect(byText(container, "a", "Volver a las fotos")?.getAttribute("href")).toBe(path);
+    await click(byText(container, "button", "Volver"));
+    expect(last().pathname).toBe(path);
+    expect(last().state).toEqual({ photo, restore: { anchor, scrollY: 90, panel: "photos" } });
+  });
+  it("goes back to the photos without reopening the viewer when it was not open", async () => {
+    const anchor = `data-photo=${itineraryId(9)}`;
+    const path = `/trips/${tripId}/memories/photos`;
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5))), 5, { origin: { path, label: "fotos", anchor, scrollY: 90 } });
+    await click(byText(container, "button", "Volver"));
+    expect(last().state).toEqual({ restore: { anchor, scrollY: 90, panel: "photos" } });
+  });
   it.each([["another trip", `/trips/${itineraryId(2)}/itinerary`], ["an external url", "https://evil.test/x"], ["a protocol-relative url", "//evil.test/x"]])(
     "ignores an origin pointing to %s", async (_name, path) => {
       const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5))), 5, { origin: { path, label: "itinerario" } });
