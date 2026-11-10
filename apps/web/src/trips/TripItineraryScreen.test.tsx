@@ -176,6 +176,12 @@ describe("itinerary screen", () => {
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));
     expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/memories"]`)?.textContent).toBe("Recuerdos");
   });
+  it("links to the balance from the header whatever the expense mode (provisional entry until T98)", async () => {
+    const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: fixture() }));
+    expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/balance"]`)?.textContent).toBe("Balance");
+    const empty = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));
+    expect(empty.container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/balance"]`)?.textContent).toBe("Balance");
+  });
   it("shows loading until the aggregate resolves", async () => {
     let resolve: (value: unknown) => void = () => undefined;
     const { container } = await render(vi.fn(() => new Promise((done) => { resolve = done; })));

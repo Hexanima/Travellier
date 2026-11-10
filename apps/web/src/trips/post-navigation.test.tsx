@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, describe, expect, it } from "vitest";
 import { itineraryId } from "./itinerary-test-fixture.js";
-import { openPostFrom } from "./open-post.js";
+import { openEditFrom, openPostFrom } from "./open-post.js";
 import { PostLink } from "./post-navigation.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,6 +26,20 @@ async function mount(node: React.ReactNode, state?: unknown) {
   return container;
 }
 const click = async (element: Element | null) => act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+
+describe("opening the editor of a memory from the balance", () => {
+  it("stores the place in the current entry and sends the origin and the focus to the editor", async () => {
+    const balance = `/trips/${tripId}/balance`, anchor = `data-balance-expense=${postId}`;
+    seen.length = 0;
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: balance, search: "", state: { noBack: true } }]}><Spy /></MemoryRouter>));
+    await act(async () => openEditFrom(go, { pathname: balance, search: "", state: { noBack: true } }, { tripId, postId, anchor, label: "balance", focus: "split" }));
+    expect(last()).toEqual({ pathname: `${here}/${postId}/edit`, state: { origin: { path: balance, label: "balance", anchor, scrollY: 0 }, focus: "split" } });
+    await act(async () => go(-1));
+    expect(last()).toEqual({ pathname: balance, state: { noBack: true, restore: { anchor, scrollY: 0 } } });
+  });
+});
 
 describe("opening a post from a list", () => {
   it("stores the place in the current entry merging the previous state instead of replacing it", async () => {

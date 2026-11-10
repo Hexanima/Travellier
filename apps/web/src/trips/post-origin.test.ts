@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorSelector, buildOrigin, canGoBack, withNoBack, diaryOrigin, itineraryAnchor, memoryAnchor, originHref, originLabel, photoAnchor, readOrigin, readPhoto, readRestore } from "./post-origin.js";
+import { anchorSelector, balanceAnchor, balanceOrigin, buildOrigin, canGoBack, withNoBack, diaryOrigin, itineraryAnchor, memoryAnchor, originHref, originLabel, photoAnchor, readOrigin, readPhoto, readRestore } from "./post-origin.js";
 
 const tripId = "000000000000000000000001";
 const diary = { path: `/trips/${tripId}/memories`, label: "diario" };
@@ -58,6 +58,19 @@ describe("post origin", () => {
     expect(readOrigin({ origin: { path, search: "?activity=1#x", label: "actividad" } }, tripId)).toEqual(diary);
     expect(readOrigin({ origin: { path, search: "?a=//evil", label: "actividad" } }, tripId)).toEqual(diary);
     expect(readOrigin({ origin: { path, search: "?activity=1 2", label: "actividad" } }, tripId)).toEqual(diary);
+  });
+  it("accepts the balance label, its origin and its expense anchor", () => {
+    const path = `/trips/${tripId}/balance`;
+    const anchor = balanceAnchor("000000000000000000000007");
+    expect(anchor).toBe("data-balance-expense=000000000000000000000007");
+    expect(balanceOrigin(tripId)).toEqual({ path, label: "balance" });
+    expect(originLabel("balance")).toBe("Volver al balance");
+    const origin = { path, anchor, scrollY: 80, label: "balance" };
+    expect(readOrigin({ origin }, tripId)).toEqual(origin);
+    expect(readRestore({ restore: { anchor, scrollY: 80 } })).toEqual({ anchor, scrollY: 80 });
+    expect(anchorSelector(anchor)).toBe('[data-balance-expense="000000000000000000000007"]');
+    expect(anchorSelector("data-balance-expense=x")).toBeUndefined();
+    expect(readOrigin({ origin: { path, anchor: "data-balance-expense=zz", label: "balance" } }, tripId)).toEqual(diary);
   });
   it("reads a valid restore and ignores a malformed one", () => {
     const anchor = memoryAnchor("000000000000000000000005");
