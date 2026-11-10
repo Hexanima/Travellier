@@ -22,3 +22,5 @@ export * from "./storage-deletion-job.js";
 export { adaptLegacyPaidBy, hasLegacyPaymentsGap } from "./expense-legacy.js";
 export { resolveExpense, validateExpenseRules } from "./expense.js";
 export type { ExpenseIncompleteReason, ExpensePayment, ExpenseResolution, ExpenseRules, ExpenseShare } from "./expense.js";
+export { calculateTripBalance } from "./expense-balance.js";
+export type { CalculateTripBalanceInput } from "./expense-balance.js";

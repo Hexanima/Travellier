@@ -7,6 +7,7 @@ import {
   expelTripParticipant,
   getTrip,
   getTripItinerary,
+  getTripBalance,
   listTripMembers,
   listPublicTrips,
   listUserTrips,
@@ -56,6 +57,7 @@ import { createMongoTripMemberRepository } from "../adapters/mongodb/trip-member
 import { createMongoTripInvitationRepositories } from "../adapters/mongodb/trip-invitation-repositories.js";
 import { createMongoTripJourneyRepository } from "../adapters/mongodb/trip-journey-repository.js";
 import { createMongoTripItineraryQueryRepository } from "../adapters/mongodb/trip-itinerary-query-repository.js";
+import { createMongoTripBalanceQueryRepository } from "../adapters/mongodb/trip-balance-query-repository.js";
 import { createMongoTripDeletionRepository } from "../adapters/mongodb/trip-deletion-repository.js";
 import { createTripInvitationApi } from "./trip-invitation-api.js";
 import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-activity-repository.js";
@@ -89,6 +91,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
   const publicJoinMembers = createMongoTripInvitationRepositories(database).members;
   const journeys = createMongoTripJourneyRepository(database);
   const itinerary = createMongoTripItineraryQueryRepository(database);
+  const balance = createMongoTripBalanceQueryRepository(database);
   const journeyDependencies = { journeys, members, createId };
   const deletion = createMongoTripDeletionRepository(database);
   const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
@@ -133,6 +136,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     get: (payload) => getTrip.execute({ trips }, payload),
     delete: (payload) => deleteTrip.execute({ deletion }, payload),
     getItinerary: (payload) => getTripItinerary.execute({ members, itinerary }, payload),
+    getBalance: (payload) => getTripBalance.execute({ balance }, payload),
     list: (payload) => listUserTrips.execute({ trips }, payload),
     listPublic: (payload) => listPublicTrips.execute({ trips }, payload),
     joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers }, payload),

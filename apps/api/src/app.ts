@@ -29,6 +29,8 @@ import {
   type TripDetail,
   type TripItinerary,
   type GetTripItineraryPayload,
+  type GetTripBalancePayload,
+  type TripBalance,
   type PublicTripPreview,
   type TripMemberSummary,
   type ListTripMembersPayload,
@@ -168,6 +170,7 @@ export interface TripApi extends TripInvitationApi {
   get?: (payload: GetTripPayload) => AsyncResult<TripDetail>;
   delete?: (payload: DeleteTripPayload) => AsyncResult<void>;
   getItinerary?: (payload: GetTripItineraryPayload) => AsyncResult<TripItinerary>;
+  getBalance?: (payload: GetTripBalancePayload) => AsyncResult<TripBalance>;
   list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
   listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
   joinPublic?: (payload: JoinPublicTripPayload) => AsyncResult<JoinTripByCodeResult>;
@@ -678,6 +681,16 @@ export const handleApiRequest = async (
     if (dependencies.trips?.getItinerary === undefined) return unavailableResponse();
     const result = await dependencies.trips.getItinerary({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
     return result.ok ? jsonResponse(200, { itinerary: result.value }) : errorResponse(result.error);
+  }
+
+  const balanceMatch = request.url?.match(/^\/trips\/([^/?]+)\/balance$/);
+  if (request.method === "GET" && balanceMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(balanceMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.getBalance === undefined) return unavailableResponse();
+    const result = await dependencies.trips.getBalance({ authenticatedUserId: request.authenticatedUserId, tripId: tripId.value });
+    return result.ok ? jsonResponse(200, { balance: result.value }) : errorResponse(result.error);
   }
 
   const participationMatch = request.url?.match(/^\/trips\/([^/?]+)\/activities\/([^/?]+)\/participation$/);
