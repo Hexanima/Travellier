@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { auditMongoContracts } from "./contract-audit.js";
+import { migrateMongoSchema } from "./migrations.js";
 import { legacyIds, seedVersion3Fixture, snapshotDocuments } from "../../../test/legacy-contract-fixture.js";
 
 let server: MongoMemoryServer;
@@ -46,6 +47,20 @@ describe("read-only approved contract audit", () => {
     }));
     expect(report.findings).toContainEqual(expect.objectContaining({
       code: "expense_incomplete", documentId: legacyIds.legacyExpense, fields: ["currency", "payments", "shares"],
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: "expense_incomplete", documentId: legacyIds.nullPayerExpense, fields: ["currency", "payments", "shares"],
+    }));
+    expect(report.findings.some(({ documentId }) => documentId.equals(legacyIds.completeExpense))).toBe(false);
+  });
+
+  it("after migration 0006 the adapted payer is no longer a legacy paidBy and the expense stays incomplete for currency and shares only", async () => {
+    await seedVersion3Fixture(database);
+    await migrateMongoSchema(database);
+    const report = await auditMongoContracts(database);
+    expect(report.findings.filter(({ code }) => code === "expense_legacy_paid_by")).toEqual([]);
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: "expense_incomplete", documentId: legacyIds.legacyExpense, fields: ["currency", "shares"],
     }));
     expect(report.findings).toContainEqual(expect.objectContaining({
       code: "expense_incomplete", documentId: legacyIds.nullPayerExpense, fields: ["currency", "payments", "shares"],
