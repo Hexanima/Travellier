@@ -48,6 +48,9 @@ const searchWindow = (startMs: number, endMs: number) => ({ startMs: Math.min(st
 const around = (ref: DeviceRef) => ({ startMs: ref.startMs - 60_000, endMs: ref.endMs + 60_000 });
 const prompting = (value: NativePermissionState) => value === "prompt" || value === "prompt-with-rationale";
 const maxPasses = 50;
+// Stable references: React reads the status as an external store snapshot.
+const checking: CalendarSyncStatus = { state: "checking" };
+const needsAccount: CalendarSyncStatus = { state: "needs-account" };
 
 export function createCalendarSyncService({ access, events, store, accountId, now }: Dependencies): CalendarSyncService {
   const statuses = new Map<string, CalendarSyncStatus>();
@@ -174,8 +177,8 @@ export function createCalendarSyncService({ access, events, store, accountId, no
   return {
     getStatus: (tripId) => {
       const account = accountId();
-      if (account === null) return { state: "needs-account" };
-      return statuses.get(keyOf(account, tripId)) ?? { state: "checking" };
+      if (account === null) return needsAccount;
+      return statuses.get(keyOf(account, tripId)) ?? checking;
     },
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     init: async (tripId) => {
