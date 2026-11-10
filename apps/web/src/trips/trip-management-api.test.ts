@@ -43,7 +43,7 @@ describe("createTripManagementApi", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [trip] } });
     const api = createTripManagementApi({ get, post: vi.fn() } as never);
 
-    expect(await api.list()).toEqual({ ok: true, value: [trip] });
+    expect(await api.list()).toEqual({ ok: true, value: [{ ...trip, startAt: null, endAt: null }] });
     expect(get).toHaveBeenCalledWith("/trips");
   });
 
@@ -54,6 +54,34 @@ describe("createTripManagementApi", () => {
     const api = createTripManagementApi({ get, post: vi.fn() } as never);
 
     expect(await api.list()).toEqual({ ok: true, value: [dated, undated] });
+  });
+
+  it("normalizes missing or invalid startAt/endAt of the Trip list to null without failing the list", async () => {
+    const listWith = async (extra: Record<string, unknown>) => {
+      const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [{ ...trip, ...extra }] } });
+      return createTripManagementApi({ get } as never).list();
+    };
+    const dates = (result: Awaited<ReturnType<typeof listWith>>) => result.ok ? { startAt: result.value[0]?.startAt, endAt: result.value[0]?.endAt } : result;
+
+    expect(dates(await listWith({}))).toEqual({ startAt: null, endAt: null });
+    for (const bad of ["", "x", 5, {}, true, "2026-13-45"]) {
+      expect(dates(await listWith({ startAt: bad, endAt: bad }))).toEqual({ startAt: null, endAt: null });
+    }
+    expect(dates(await listWith({ startAt: "2026-10-01T10:00:00.000Z" }))).toEqual({ startAt: "2026-10-01T10:00:00.000Z", endAt: null });
+  });
+
+  it("canonicalizes valid startAt/endAt of the Trip list to ISO UTC instants", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [{ ...trip, startAt: "2026-10-01T07:00:00-03:00", endAt: "2026-10-09T12:00:00Z" }] } });
+    const result = await createTripManagementApi({ get } as never).list();
+    expect(result).toEqual({ ok: true, value: [{ ...trip, startAt: "2026-10-01T10:00:00.000Z", endAt: "2026-10-09T12:00:00.000Z" }] });
+  });
+
+  it("does not add dates to the created or detailed Trip", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true, value: { trip } });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trip: configuredTrip } });
+    const api = createTripManagementApi({ get, post } as never);
+    expect(await api.create({ name: "Patagonia", primaryDestination: "Bariloche" })).toEqual({ ok: true, value: trip });
+    expect(await api.get(trip.id)).toEqual({ ok: true, value: { ...configuredTrip, kind: "member" } });
   });
 
   it("loads only limited public Trip previews", async () => {
