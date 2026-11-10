@@ -215,6 +215,41 @@ describe("comments panel: create", () => {
     await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
     expect(api.comments.create).toHaveBeenCalledTimes(1);
   });
+  it("keeps what was typed while publishing: the sent comment appears and the field keeps the current text", async () => {
+    const pending = deferred<unknown>();
+    const api = apis([], { comments: { create: vi.fn().mockReturnValue(pending.promise) } });
+    const container = await render(api);
+    await type(container, NEW, "A");
+    await click(button(container, "Comentar"));
+    await type(container, NEW, "AB");
+    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "A" }))));
+    expect(api.comments.create).toHaveBeenCalledExactlyOnceWith(tripId, postId, "A");
+    expect(order(container)).toEqual(["A"]);
+    expect(field(container, NEW)?.value).toBe("AB");
+    expect(button(container, "Comentar")?.disabled).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+  it("clears the draft when nothing was typed while publishing", async () => {
+    const pending = deferred<unknown>();
+    const api = apis([], { comments: { create: vi.fn().mockReturnValue(pending.promise) } });
+    const container = await render(api);
+    await type(container, NEW, "A");
+    await click(button(container, "Comentar"));
+    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "A" }))));
+    expect(order(container)).toEqual(["A"]);
+    expect(field(container, NEW)?.value).toBe("");
+  });
+  it("keeps the text typed after a failed publish too", async () => {
+    const pending = deferred<unknown>();
+    const api = apis([], { comments: { create: vi.fn().mockReturnValue(pending.promise) } });
+    const container = await render(api);
+    await type(container, NEW, "A");
+    await click(button(container, "Comentar"));
+    await type(container, NEW, "AB");
+    await act(async () => pending.resolve(fail("network")));
+    expect(field(container, NEW)?.value).toBe("AB");
+    expect(order(container)).toEqual([]);
+  });
   it("keeps the text and warns that it could not be confirmed on a network failure", async () => {
     const api = apis([], { comments: { create: vi.fn().mockResolvedValue(fail("network")) } });
     const container = await render(api);
@@ -384,6 +419,36 @@ describe("comments panel: edit", () => {
     expect(update).toHaveBeenCalledTimes(1);
     expect(item(container, 5).querySelector("form button[type=submit]")?.getAttribute("aria-busy")).toBe("true");
     await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+  });
+  it("keeps the edit open with the text added while saving", async () => {
+    const pending = deferred<unknown>();
+    const update = vi.fn().mockReturnValue(pending.promise);
+    const container = await render(apis([comment(5)], { comments: { update } }));
+    const name = `comment-edit-${itineraryId(5)}`;
+    await click(button(item(container, 5), "Editar"));
+    await type(container, name, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    await type(container, name, "nuevo y más");
+    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, itineraryId(5), "nuevo");
+    expect(container.querySelectorAll("[data-comment]")).toHaveLength(1);
+    expect(field(container, name)?.value).toBe("nuevo y más");
+    expect(item(container, 5).querySelector("form button[type=submit]")?.getAttribute("aria-busy")).not.toBe("true");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+  it("closes and clears the edit when nothing was typed while saving", async () => {
+    const pending = deferred<unknown>();
+    const update = vi.fn().mockReturnValue(pending.promise);
+    const container = await render(apis([comment(5)], { comments: { update } }));
+    const name = `comment-edit-${itineraryId(5)}`;
+    await click(button(item(container, 5), "Editar"));
+    await type(container, name, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    expect(field(container, name)).toBeNull();
+    expect(order(container)).toEqual(["nuevo"]);
+    await click(button(item(container, 5), "Editar"));
+    expect(field(container, name)?.value).toBe("nuevo");
   });
   it("allows editing several comments at once and keeps each draft", async () => {
     const container = await render(apis([comment(5), comment(6)]));

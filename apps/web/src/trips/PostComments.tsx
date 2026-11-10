@@ -101,14 +101,24 @@ export function CommentItem({ comment, author, format, likes, update, onSaved }:
     focus.current = undefined;
   }, [editing]);
   const value = draft.text ?? comment.text;
+  const latestValue = useRef(value);
+  latestValue.current = value;
   const close = () => { draft.clear(); setMessage(undefined); focus.current = "button"; setEditing(false); };
   const save = async () => {
     if (savingRef.current || commentProblem(value)) return;
     if (value.trim() === comment.text) { close(); return; }
     savingRef.current = true; setSaving(true); setMessage(undefined);
+    const sent = value;
     try {
-      const result = await update(comment.id, value.trim());
-      if (result.ok) { onSaved(result.value); draft.clear(); if (alive.current) { setMessage(undefined); focus.current = "button"; setEditing(false); } return; }
+      const result = await update(comment.id, sent.trim());
+      if (result.ok) {
+        onSaved(result.value);
+        // Text typed during the request is kept: the draft is cleared and the edit closed only if the field still holds what was sent.
+        if (latestValue.current !== sent) { if (alive.current) setMessage(undefined); return; }
+        draft.clear();
+        if (alive.current) { setMessage(undefined); focus.current = "button"; setEditing(false); }
+        return;
+      }
       if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.") ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
     } catch {
       if (alive.current) setMessage({ variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
@@ -206,12 +216,14 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
       }
       const result = await comments.create(tripId, postId, sent.trim());
       if (result.ok) {
-        draft.clear();
+        // Text typed during the request is kept as is: the draft is cleared only if the field still holds what was sent.
+        const untouched = latest.current.text === sent;
+        if (untouched) draft.clear();
         if (!alive.current) return;
         setList((current) => ({ kind: "ready", items: sorted([...(current.kind === "ready" ? current.items : []), result.value]) }));
         latest.current.likes.seed(result.value.id); void latest.current.likes.refresh();
         setMessage({ variant: "success", text: "Comentario publicado" });
-        focusField(form.current);
+        if (untouched) focusField(form.current);
         return;
       }
       if (!alive.current) return;
