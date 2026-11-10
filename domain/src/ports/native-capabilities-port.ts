@@ -48,3 +48,7 @@ export interface CalendarAccessPort {
   checkAccess(): AsyncResult<CalendarAccess, NativeCapabilityError>;
   requestAccess(access: "write" | "manage"): AsyncResult<CalendarAccess, NativeCapabilityError>;
 }
+/** Opens a location link outside the app (maps app or browser). Never resolves or reads the destination. */
+export interface ExternalLinkPort {
+  open(url: string): AsyncResult<void, NativeCapabilityError>;
+}

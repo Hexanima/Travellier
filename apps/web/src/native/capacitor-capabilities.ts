@@ -11,5 +11,6 @@ export function createCapacitorCapabilities() {
     camera: Camera,
     push: PushNotifications,
     calendar: Calendar,
+    externalLink: { open: (url, target, features) => window.open(url, target, features) },
   });
 }

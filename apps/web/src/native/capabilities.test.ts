@@ -31,6 +31,7 @@ function fixture(platform = "ios") {
       checkPermissions: vi.fn(async () => ({ readCalendar: permission, writeCalendar: permission })),
       requestPermissions: vi.fn(async () => ({ readCalendar: "granted" as NativePermissionState, writeCalendar: "granted" as NativePermissionState })),
     },
+    externalLink: { open: vi.fn(() => ({})) },
   };
   return { dependencies: dependencies as NativeDependencies, spies: dependencies, listeners, removed,
     setPermission: (value: NativePermissionState) => { permission = value; } };
