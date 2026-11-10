@@ -8,6 +8,8 @@ export type ExpenseTotals = { byCurrency: CurrencyTotal[]; withoutCurrency: { ex
 type WithExpense = { expense: { totalAmount: number; currency: ExpenseCurrency | null } | null };
 
 const plain = (cents: number): string => `${String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${String(cents % 100).padStart(2, "0")}`;
+/** The amount alone, for a currency that was never indicated. */
+export const formatPlainCents = plain;
 /** Integer arithmetic only: the currency code goes first and the decimals are a comma (es-AR), independent of the device ICU data. */
 export const formatCents = (cents: number, currency: ExpenseCurrency): string => `${currency} ${plain(cents)}`;
 
