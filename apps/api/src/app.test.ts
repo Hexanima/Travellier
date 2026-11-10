@@ -654,3 +654,25 @@ describe("api app", () => {
     expect(getBalance).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("query string handling (T91)", () => {
+  const user = "507f1f77bcf86cd799439011", trip = "507f191e810c19729de860ea";
+
+  it("routes without declared query parameters ignore the query string", async () => {
+    const getBalance = vi.fn().mockResolvedValue({ ok: true, value: { balances: [] } });
+    const response = await handleApiRequest({ method: "GET", url: `/trips/${trip}/balance?x=1`, authenticatedUserId: user } as never, { trips: { getBalance } } as never);
+    expect(response.statusCode).toBe(200);
+    expect(getBalance).toHaveBeenCalledTimes(1);
+    const health = await handleApiRequest({ method: "GET", url: "/health?x=1" } as never, {} as never);
+    expect(health.statusCode).toBe(200);
+  });
+
+  it("keeps reading the query in /notifications and /trips/:id/photos", async () => {
+    const listNotifications = vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], nextCursor: null } });
+    const listPhotos = vi.fn().mockResolvedValue({ ok: true, value: { photos: [], nextCursor: null } });
+    await handleApiRequest({ method: "GET", url: "/notifications?limit=1&cursor=abc", authenticatedUserId: user } as never, { trips: { listNotifications } } as never);
+    expect(listNotifications).toHaveBeenCalledWith({ authenticatedUserId: user, limit: "1", cursor: "abc" });
+    await handleApiRequest({ method: "GET", url: `/trips/${trip}/photos?limit=2`, authenticatedUserId: user } as never, { trips: { listPhotos } } as never);
+    expect(listPhotos).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, limit: "2" });
+  });
+});

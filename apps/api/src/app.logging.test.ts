@@ -51,6 +51,15 @@ describe("local HTTP request logging", () => {
     expect(JSON.stringify(logs)).not.toMatch(/query-secret|access-secret|cookie-secret|password-secret|private@example/);
   });
 
+  it("does not log the query string, token or cursor of routes that read it", async () => {
+    const baseUrl = await start(createApp({}, async () => ({ authenticatedUserId: "507f1f77bcf86cd799439011" }), logger));
+    const response = await fetch(`${baseUrl}/notifications?cursor=cursor-secret&token=query-secret`, { headers: { authorization: "Bearer access-secret" } });
+    await response.text();
+
+    expect(logs.length).toBe(2);
+    expect(JSON.stringify(logs)).not.toMatch(/cursor-secret|query-secret|access-secret/);
+  });
+
   it("redacts verification tokens and invitation codes embedded in paths", async () => {
     const baseUrl = await start(createApp({}, undefined, logger));
     await (await fetch(`${baseUrl}/auth/verify/email-secret`)).text();

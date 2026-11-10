@@ -673,9 +673,12 @@ const unavailableResponse = (): ApiResponse =>
   });
 
 export const handleApiRequest = async (
-  request: ApiRequest,
+  requestWithQuery: ApiRequest,
   dependencies: ApiDependencies = {},
 ): Promise<ApiResponse> => {
+  // Routes without declared query parameters ignore the query string: they match on the path only.
+  // Only /notifications and /trips/:id/photos read it, from `requestWithQuery.url`.
+  const request: ApiRequest = { ...requestWithQuery, url: requestWithQuery.url?.split("?")[0] };
   if (request.method === "GET" && request.url === "/health") {
     return jsonResponse(200, await createHealthResponse());
   }
@@ -823,7 +826,7 @@ export const handleApiRequest = async (
     }
   }
 
-  const notificationListMatch = request.method === "GET" ? request.url?.match(/^\/notifications(?:\?(.*))?$/) : null;
+  const notificationListMatch = request.method === "GET" ? requestWithQuery.url?.match(/^\/notifications(?:\?(.*))?$/) : null;
   if (notificationListMatch) {
     if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
     const query = parseNotificationListQuery(notificationListMatch[1] ?? "");
@@ -835,7 +838,7 @@ export const handleApiRequest = async (
       ({ id, type, tripId, actorId, payload, createdAt })), nextCursor: result.value.nextCursor }) : errorResponse(result.error);
   }
 
-  const photoListMatch = request.method === "GET" ? request.url?.match(/^\/trips\/([^/?]+)\/photos(?:\?(.*))?$/) : null;
+  const photoListMatch = request.method === "GET" ? requestWithQuery.url?.match(/^\/trips\/([^/?]+)\/photos(?:\?(.*))?$/) : null;
   if (photoListMatch) {
     if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
     const tripId = createObjectId(photoListMatch[1] ?? "");
