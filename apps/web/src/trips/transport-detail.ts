@@ -72,3 +72,4 @@ export const transportSteps = (transport: ItineraryTransportResponse, timeZone: 
     return { ...base, iso: null, clock: "Sin horario", note: null };
   });
 };
+export const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" } as const;
