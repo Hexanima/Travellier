@@ -253,6 +253,23 @@ describe("photo protocol HTTP API", () => {
       expect(post.photos).toHaveLength(1);
     });
 
+    it("answers 409 PhotoConflictError when the unique index (11000) fires on insert, and writes nothing", async () => {
+      const keys = await uploaded(1);
+      await saved(keys);
+      const before = await data();
+      // The planning lookup is blinded, so only the unique s3Key index can detect the duplicate.
+      const collection = f.db.collection("postPhotos"), original = f.db.collection.bind(f.db);
+      const real = (collection.find as (...args: unknown[]) => unknown).bind(collection);
+      vi.spyOn(collection, "find").mockImplementation(((filter: Record<string, unknown> | undefined, ...rest: unknown[]) =>
+        real(filter !== undefined && "s3Key" in filter ? { _id: { $in: [] } } : filter, ...rest)) as never);
+      const insert = vi.spyOn(collection, "insertOne");
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "postPhotos" ? collection : original(key, options));
+      const response = await publish(keys);
+      expect(outcome(response), response.body).toEqual([409, "PhotoConflictError"]);
+      expect(insert).toHaveBeenCalledTimes(1);
+      expect(await data()).toEqual(before);
+    });
+
     it("answers 404 when the post does not exist and when the actor is no longer a member", async () => {
       const keys = await uploaded(1), admin = await addMember("admin");
       const missing = await f.request("PATCH", `${f.path()}/${new ObjectId()}`, { photos: refs(keys) });

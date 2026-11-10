@@ -103,11 +103,44 @@ describe("photo persistence and transactions", () => {
       expect(await snapshot()).toEqual(before);
     });
 
-    it("keeps the earlier photos when a later append fails midway", async () => {
+    // Lets the first `nth - 1` calls run for real and rejects the `nth` one, so earlier writes of the same batch must be rolled back.
+    const failOnNth = (name: string, method: "insertOne", nth: number) => {
+      const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
+      const real = (collection[method] as (...args: unknown[]) => Promise<unknown>).bind(collection);
+      let calls = 0;
+      const spy = vi.spyOn(collection, method).mockImplementation((async (...args: unknown[]) => {
+        calls++;
+        if (calls === nth) throw new Error("forced failure");
+        return real(...args);
+      }) as never);
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
+      return spy;
+    };
+
+    it("keeps the previous state when the first insert of an append fails", async () => {
       const { post } = await created(keys(1)), before = await snapshot();
       failOnce("postPhotos", "insertOne");
       expect(await updatePost(post.id, keys(2))).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
       expect(await snapshot()).toEqual(before);
+    });
+
+    it("rolls back the photo already inserted in the same batch when the second insert fails on PATCH", async () => {
+      const { post } = await created(keys(1)), before = await snapshot();
+      const insert = failOnNth("postPhotos", "insertOne", 2);
+      expect(await updatePost(post.id, keys(3))).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(insert).toHaveBeenCalledTimes(2);
+      expect(await snapshot()).toEqual(before);
+      expect(await photoKeys(post.id)).toHaveLength(1);
+    });
+
+    it("creates neither the post nor the photo already inserted when the second photo insert fails on POST", async () => {
+      const before = await snapshot();
+      const insert = failOnNth("postPhotos", "insertOne", 2);
+      expect(await createPost(keys(3))).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(insert).toHaveBeenCalledTimes(2);
+      expect(await snapshot()).toEqual(before);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+      expect(await f.db.collection("postPhotos").countDocuments({})).toBe(0);
     });
 
     it.each([["postPhotos", "insertOne"], ["activityParticipations", "findOneAndUpdate"]] as const)(
@@ -147,6 +180,38 @@ describe("photo persistence and transactions", () => {
       expect(await createPost(list)).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
       expect(await snapshot()).toEqual(before);
       expect(await photoKeys(post.id)).toEqual(list);
+    });
+
+    // The planning reads (`find`) are pointed at nothing, so the duplicate only surfaces from the unique index on `insertOne`.
+    const blindFind = (matches: (filter: Record<string, unknown>) => boolean) => {
+      const collection = f.db.collection("postPhotos"), original = f.db.collection.bind(f.db);
+      const real = (collection.find as (...args: unknown[]) => unknown).bind(collection);
+      vi.spyOn(collection, "find").mockImplementation(((filter: Record<string, unknown>, ...rest: unknown[]) =>
+        real(filter !== undefined && matches(filter) ? { _id: { $in: [] } } : filter, ...rest)) as never);
+      const insert = vi.spyOn(collection, "insertOne");
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "postPhotos" ? collection : original(key, options));
+      return insert;
+    };
+
+    it("maps the duplicate s3Key index (11000) raised by the insert to PhotoConflictError and rolls the whole save back", async () => {
+      const list = keys(1);
+      await created(list);
+      const other = await f.api.createPost!({ ...f.context(), description: "Otro" });
+      if (!other.ok || other.value.outcome !== "created") throw new Error("Post not created.");
+      const before = await snapshot();
+      const insert = blindFind((filter) => "s3Key" in filter);
+      expect(await createPost(list)).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+      expect(await updatePost(other.value.post.id, list)).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+      expect(insert).toHaveBeenCalledTimes(2);
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("maps the duplicate (postId, order) index (11000) raised by the insert to PhotoConflictError and keeps the post unchanged", async () => {
+      const { post } = await created(keys(1)), before = await snapshot();
+      const insert = blindFind((filter) => "postId" in filter && !("s3Key" in filter));
+      expect(await updatePost(post.id, keys(1))).toMatchObject({ ok: false, error: { tag: "PhotoConflictError" } });
+      expect(insert).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
     });
 
     it("never registers a key of another Trip: the format check rejects it and the store refuses foreign Trip photos", async () => {
