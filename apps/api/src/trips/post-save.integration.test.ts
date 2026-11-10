@@ -162,7 +162,7 @@ describe("joint post save and idempotent retry", () => {
       for (const other of [{ ...body, description: "Otra" }, { ...body, photos: photoRefs(1) }, { ...body, photos: undefined }, { ...body, newActivity: withDuration() }]) {
         const response = await post(other);
         expect(response.statusCode, response.body).toBe(409);
-        expect(JSON.parse(response.body).error.code).toBe("PostRequestConflictError");
+        expect(JSON.parse(response.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: body.id });
       }
       expect(await data()).toEqual(before);
     });
@@ -304,12 +304,50 @@ describe("joint post save and idempotent retry", () => {
         const before = await data();
         const different = await patch(created.id, { newActivity: { ...withDuration(), id, title: "Otra" } });
         expect(different.statusCode, different.body).toBe(409);
-        expect(JSON.parse(different.body).error.code).toBe("PostRequestConflictError");
+        expect(JSON.parse(different.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: created.id });
         for (const bad of ["xyz", "B".repeat(24), 5, null]) {
           const response = await patch(created.id, { newActivity: { ...withDuration(), id: bad } });
           expect(response.statusCode, response.body).toBe(422);
         }
         expect(await data()).toEqual(before);
+      });
+
+      it("an exact PATCH retry with a partial expense ({ breakdown }) answers 200 with what is stored; another value is 409 already_saved", async () => {
+        const [ana, beto] = [await addMember("participant"), await addMember("participant")];
+        const created = JSON.parse((await post({ description: "Original", expense: await expenseOf([ana, beto]) })).body).post;
+        const body = { newActivity: { ...withDuration(), id: newId() }, expense: { breakdown: "agua" } };
+        const first = await patch(created.id, body);
+        expect(first.statusCode, first.body).toBe(200);
+        expect(JSON.parse(first.body).expense).toMatchObject({ breakdown: "agua", payments: expect.any(Array) });
+        const before = await data();
+        const retry = await patch(created.id, body);
+        expect(retry.statusCode, retry.body).toBe(200);
+        expect(JSON.parse(retry.body)).toEqual(JSON.parse(first.body));
+        const other = await patch(created.id, { ...body, expense: { breakdown: "otro" } });
+        expect(other.statusCode, other.body).toBe(409);
+        expect(JSON.parse(other.body).error).toMatchObject({ reason: "already_saved", postId: created.id });
+        expect(await data()).toEqual(before);
+      });
+
+      it("the retry after someone relinked the post to another activity is 409 already_saved; an id of another creator stays generic", async () => {
+        const editor = await addMember("admin");
+        const created = JSON.parse((await post({ description: "Original" })).body).post;
+        const body = { newActivity: { ...withDuration(), id: newId() } };
+        expect((await patch(created.id, body)).statusCode).toBe(200);
+        const relinked = await patch(created.id, { newActivity: { title: "Otra", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: 60 } }, editor);
+        expect(relinked.statusCode, relinked.body).toBe(200);
+        const before = await data();
+        const retry = await patch(created.id, body);
+        expect(retry.statusCode, retry.body).toBe(409);
+        expect(JSON.parse(retry.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: created.id });
+        const second = JSON.parse((await post({ description: "Segundo" })).body).post;
+        const foreign = { newActivity: { ...withDuration(), id: newId(), title: "Del editor" } };
+        expect((await patch(second.id, foreign, editor)).statusCode).toBe(200);
+        const mine = await patch(created.id, foreign);
+        expect(mine.statusCode, mine.body).toBe(409);
+        expect(JSON.parse(mine.body).error).not.toHaveProperty("reason");
+        expect(await f.db.collection("posts").countDocuments({})).toBe(2);
+        expect(before).toBeDefined();
       });
 
       it("without id on an already linked post it still creates another activity and repoints (documented ambiguity)", async () => {
@@ -400,7 +438,7 @@ describe("joint post save and idempotent retry", () => {
       } finally { paused.release(); }
       const [a, b] = await Promise.all([first, second]);
       expect([a.statusCode, b.statusCode]).toEqual([201, 409]);
-      expect(JSON.parse(b.body).error.code).toBe("PostRequestConflictError");
+      expect(JSON.parse(b.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: id });
       expect(await f.db.collection("posts").find({ _id: new ObjectId(id) }).toArray()).toMatchObject([{ description: "Uno" }]);
       expect(await f.db.collection("posts").countDocuments({})).toBe(1);
     });
