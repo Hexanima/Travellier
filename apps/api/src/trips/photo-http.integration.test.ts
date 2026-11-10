@@ -43,6 +43,8 @@ describe("photo protocol HTTP API", () => {
     expect(response.statusCode, response.body).toBe(201);
     return body(response) as { post: { id: string }; photos: Array<{ id: string; order: number }> };
   };
+  /** `[status, error code]` that never throws on a success body, so a failing assertion names the real status. */
+  const outcome = (response: { statusCode: number; body?: string }) => [response.statusCode, body(response)?.error?.code];
   const fields = (response: { body?: string }) => body(response).error.fields.map((issue: { field: string; code: string }) => `${issue.field}/${issue.code}`);
   const data = async () => Promise.all(["posts", "postPhotos", "activities", "activityParticipations"]
     .map((name) => f.db.collection(name).find().sort({ _id: 1 }).toArray()));
@@ -81,8 +83,7 @@ describe("photo protocol HTTP API", () => {
           await f.request("GET", `/trips/${f.trip}/posts/${post.post.id}/photos`, undefined, user),
           await f.request("GET", `/trips/${f.trip}/photos/${post.photos[0]!.id}`, undefined, user),
         ]) {
-          expect(response.statusCode, response.body).toBe(404);
-          expect(body(response).error.code).toBe("TripNotFoundError");
+          expect(outcome(response), response.body).toEqual([404, "TripNotFoundError"]);
         }
       };
       await check(stranger);
@@ -92,9 +93,9 @@ describe("photo protocol HTTP API", () => {
 
     it("answers 404 PostNotFoundError and PhotoNotFoundError for unknown resources of the Trip", async () => {
       const missingPost = await f.request("GET", `/trips/${f.trip}/posts/${new ObjectId()}/photos`);
-      expect([missingPost.statusCode, body(missingPost).error.code]).toEqual([404, "PostNotFoundError"]);
+      expect(outcome(missingPost)).toEqual([404, "PostNotFoundError"]);
       const missingPhoto = await f.request("GET", `/trips/${f.trip}/photos/${new ObjectId()}`);
-      expect([missingPhoto.statusCode, body(missingPhoto).error.code]).toEqual([404, "PhotoNotFoundError"]);
+      expect(outcome(missingPhoto)).toEqual([404, "PhotoNotFoundError"]);
     });
   });
 
@@ -131,7 +132,7 @@ describe("photo protocol HTTP API", () => {
       ];
       for (const [files, expected] of cases) {
         const response = await f.request("POST", `/trips/${f.trip}/photo-uploads`, files === undefined ? {} : { files });
-        expect([response.statusCode, body(response).error.code]).toEqual([422, "ValidationError"]);
+        expect(outcome(response)).toEqual([422, "ValidationError"]);
         expect(fields(response)).toEqual(expected);
       }
       expect(fake.uploads).toEqual([]);
@@ -188,7 +189,7 @@ describe("photo protocol HTTP API", () => {
       ];
       for (const [keys, expected] of cases) {
         const response = await publish(keys);
-        expect([response.statusCode, body(response).error.code], response.body).toEqual([422, "ValidationError"]);
+        expect(outcome(response), response.body).toEqual([422, "ValidationError"]);
         expect(fields(response)).toEqual(expected);
         expect(await data()).toEqual(before);
       }
@@ -203,7 +204,7 @@ describe("photo protocol HTTP API", () => {
       const keys = await uploaded(2); fake.failHeadFor.add(keys[1]!);
       const before = await data();
       const response = await publish(keys);
-      expect([response.statusCode, body(response).error.code]).toEqual([500, "InternalError"]);
+      expect(outcome(response)).toEqual([500, "InternalError"]);
       expect(await data()).toEqual(before);
     });
 
@@ -237,7 +238,7 @@ describe("photo protocol HTTP API", () => {
       expect(retry.statusCode, retry.body).toBe(200);
       expect(body(retry).photos).toEqual(post.photos);
       const again = await publish(keys);
-      expect([again.statusCode, body(again).error.code]).toEqual([409, "PhotoConflictError"]);
+      expect(outcome(again)).toEqual([409, "PhotoConflictError"]);
       expect(await f.db.collection("postPhotos").countDocuments({})).toBe(2);
       expect(await f.db.collection("posts").countDocuments({})).toBe(1);
     });
@@ -247,7 +248,7 @@ describe("photo protocol HTTP API", () => {
       const second = await f.request("POST", f.path(), { description: "Otro" });
       const secondId = body(second).post.id, before = await data();
       const response = await f.request("PATCH", `${f.path()}/${secondId}`, { photos: refs(keys) });
-      expect([response.statusCode, body(response).error.code]).toEqual([409, "PhotoConflictError"]);
+      expect(outcome(response)).toEqual([409, "PhotoConflictError"]);
       expect(await data()).toEqual(before);
       expect(post.photos).toHaveLength(1);
     });
@@ -255,10 +256,10 @@ describe("photo protocol HTTP API", () => {
     it("answers 404 when the post does not exist and when the actor is no longer a member", async () => {
       const keys = await uploaded(1), admin = await addMember("admin");
       const missing = await f.request("PATCH", `${f.path()}/${new ObjectId()}`, { photos: refs(keys) });
-      expect([missing.statusCode, body(missing).error.code]).toEqual([404, "PostNotFoundError"]);
+      expect(outcome(missing)).toEqual([404, "PostNotFoundError"]);
       expect((await expel(admin)).ok).toBe(true);
       const denied = await publish(keys);
-      expect([denied.statusCode, body(denied).error.code]).toEqual([404, "TripNotFoundError"]);
+      expect(outcome(denied)).toEqual([404, "TripNotFoundError"]);
       expect(await f.db.collection("postPhotos").countDocuments({})).toBe(0);
       expect(await f.db.collection("posts").countDocuments({})).toBe(0);
     });
@@ -268,8 +269,37 @@ describe("photo protocol HTTP API", () => {
       let expelled = false;
       fake.afterHead = async () => { if (!expelled) { expelled = true; expect((await expel(admin)).ok).toBe(true); } };
       const response = await publish(keys);
-      expect([response.statusCode, body(response).error.code]).toEqual([404, "TripNotFoundError"]);
+      expect(outcome(response)).toEqual([404, "TripNotFoundError"]);
       expect(await f.db.collection("postPhotos").countDocuments({})).toBe(0);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+    });
+
+    it("answers 404 TripNotFoundError to a non-member and a former member with valid photos of their own prefix, never calling the storage", async () => {
+      const mine = await uploaded(1), post = await saved(await uploaded(1)), admin = await addMember("admin");
+      const stranger = new ObjectId(), strangerKey = `trips/${f.trip}/photos/${stranger}/00000000-0000-4000-8000-0000000000aa.jpg`;
+      fake.put(strangerKey);
+      const newActivity = { title: "Cena", scheduledAt: "2026-09-25T12:00:00.456Z", durationMinutes: 60 };
+      const before = await data();
+      fake.heads.length = 0; // the setup save above legitimately inspected its own object
+      const attempt = async (user: ObjectId, keys: string[]) => {
+        for (const response of [await publish(keys, {}, user),
+          await f.request("PATCH", `${f.path()}/${post.post.id}`, { photos: refs(keys) }, user),
+          await f.request("PATCH", `${f.path()}/${post.post.id}`, { newActivity, photos: refs(keys) }, user)]) {
+          expect(outcome(response), response.body).toEqual([404, "TripNotFoundError"]);
+        }
+      };
+      await attempt(stranger, [strangerKey]);
+      expect((await expel(admin)).ok).toBe(true);
+      await attempt(f.actor, mine);
+      expect(fake.heads).toEqual([]);
+      expect(await data()).toEqual(before);
+    });
+
+    it("answers 404 (not 500) to a non-member with photos when the Trip API has no storage", async () => {
+      f.storage = undefined; await f.reset();
+      const stranger = new ObjectId(), key = `trips/${f.trip}/photos/${stranger}/00000000-0000-4000-8000-0000000000bb.jpg`;
+      const response = await publish([key], {}, stranger);
+      expect(outcome(response), response.body).toEqual([404, "TripNotFoundError"]);
       expect(await f.db.collection("posts").countDocuments({})).toBe(0);
     });
 
@@ -294,7 +324,7 @@ describe("photo protocol HTTP API", () => {
         await seedConflict();
         const keys = await uploaded(1), before = await data();
         const conflict = await publish(keys, { newActivity });
-        expect([conflict.statusCode, body(conflict).error.code]).toEqual([409, "ParticipationConflictError"]);
+        expect(outcome(conflict)).toEqual([409, "ParticipationConflictError"]);
         expect(await data()).toEqual(before);
         expect(await f.db.collection("postPhotos").countDocuments({})).toBe(0);
         const { conflicts, activity } = body(conflict).error;
@@ -308,7 +338,7 @@ describe("photo protocol HTTP API", () => {
         await seedConflict();
         const before = await data();
         const conflict = await f.request("PATCH", `${f.path()}/${post.post.id}`, { newActivity, photos: refs(more) });
-        expect([conflict.statusCode, body(conflict).error.code]).toEqual([409, "ParticipationConflictError"]);
+        expect(outcome(conflict)).toEqual([409, "ParticipationConflictError"]);
         expect(await data()).toEqual(before);
         const { conflicts, activity } = body(conflict).error;
         const linked = await f.request("PATCH", `${f.path()}/${post.post.id}`, { newActivity, photos: refs(more), confirmedConflicts: conflicts, confirmedActivity: activity });
@@ -357,7 +387,7 @@ describe("photo protocol HTTP API", () => {
       const photoId = post.photos[0]!.id;
       const check = async (url: string, status: number, code: string) => {
         const response = await f.request("GET", url);
-        expect([response.statusCode, body(response).error.code], url).toEqual([status, code]);
+        expect(outcome(response), url).toEqual([status, code]);
       };
       await check(`/trips/${f.trip}/photos/${photoId}`, 404, "PhotoNotFoundError");
       await check(`/trips/${tripB}/photos/${photoId}`, 404, "TripNotFoundError");
@@ -388,7 +418,7 @@ describe("photo protocol HTTP API", () => {
       for (const [method, url, payload] of [["POST", `/trips/${f.trip}/photo-uploads`, { files: [jpeg] }],
         ["GET", `/trips/${f.trip}/posts/${new ObjectId()}/photos`, undefined], ["GET", `/trips/${f.trip}/photos/${new ObjectId()}`, undefined]] as const) {
         const response = await handleApiRequest({ method, url, body: payload, authenticatedUserId: domainId(f.actor) }, unwired);
-        expect([response.statusCode, body(response).error.code], url).toEqual([503, "ServiceUnavailable"]);
+        expect(outcome(response), url).toEqual([503, "ServiceUnavailable"]);
       }
       f.storage = undefined; await f.reset();
       const keyless = `trips/${f.trip}/photos/${f.actor}/00000000-0000-4000-8000-000000000001.jpg`;
@@ -396,7 +426,7 @@ describe("photo protocol HTTP API", () => {
         await f.request("POST", `/trips/${f.trip}/photo-uploads`, { files: [jpeg] }),
         await f.request("GET", `/trips/${f.trip}/photos/${new ObjectId()}`),
         await f.request("POST", f.path(), { description: "x", photos: [{ key: keyless }] }),
-      ]) expect([response.statusCode, body(response).error.code]).toEqual([500, "InternalError"]);
+      ]) expect(outcome(response)).toEqual([500, "InternalError"]);
       expect(await f.db.collection("posts").countDocuments({})).toBe(0);
       const plain = await f.request("POST", f.path(), { description: "Sin fotos" });
       expect(plain.statusCode).toBe(201);

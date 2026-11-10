@@ -105,6 +105,16 @@ const authorize = async (scope: TripPostReadScope, payload: TripPostPayload) => 
   if (!trip.ok) return trip;
   return trip.value?.id === payload.tripId ? ok(trip.value) : err(new TripNotFoundError());
 };
+/**
+ * Only when the save carries `photos`: a plain snapshot (no Trip lock) rejects non-members with 404 before any storage call.
+ * The transaction still revalidates membership under the lock.
+ */
+const requireMemberBeforeStorage = async (posts: TripPostPort, payload: TripPostPayload & PhotoReferences): AsyncResult<undefined> => {
+  if (payload.photos === undefined) return ok(undefined);
+  const member = await posts.withReadSnapshot(payload.tripId, (scope) => authorize(scope, payload));
+  return member.ok ? ok(undefined) : member;
+};
+
 const find = async (scope: TripPostReadScope, payload: PostDetailPayload): AsyncResult<Post> => {
   const post = await scope.find(payload.postId);
   if (!post.ok) return post;
@@ -147,6 +157,8 @@ const conflictingActivityLink = () => err(new ValidationError([{ field: "activit
 export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload, CreateTripPostResult, TaggedError> = {
   execute: async ({ posts, createId, now, storage }, payload) => {
     // Storage I/O happens before the transaction: the Trip lock is never held while S3 answers.
+    const member = await requireMemberBeforeStorage(posts, payload);
+    if (!member.ok) return member;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
     const keys = verified.value;
@@ -204,6 +216,8 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
 /** Creates a spontaneous activity for an existing post (T55 exclusive link applies); the post keeps its publication time. */
 export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPostToNewActivityPayload, LinkTripPostToNewActivityResult, TaggedError> = {
   execute: async ({ posts, createId, now, storage }, payload) => {
+    const member = await requireMemberBeforeStorage(posts, payload);
+    if (!member.ok) return member;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
     const keys = verified.value;
@@ -287,6 +301,8 @@ export const getTripPostChain: UseCase<Dependencies, PostDetailPayload, TripPost
 /** Edits the post and/or appends photos to it (never removes or reorders them); retrying a key already in the post is a no-op. */
 export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, UpdateTripPostResult, TaggedError> = {
   execute: async ({ posts, storage, createId, now }, payload) => {
+    const member = await requireMemberBeforeStorage(posts, payload);
+    if (!member.ok) return member;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
     const keys = verified.value;

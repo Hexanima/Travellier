@@ -666,6 +666,31 @@ describe("Trip post use cases", () => {
         expect(photoRecords).toEqual([]);
       });
 
+      it("answers 404 to a non-member (outsider or former member) with valid photos without calling the storage", async () => {
+        uploaded(1); role = undefined; records = [seedPost()];
+        const before = state();
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await updateWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await linkWith({ photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(headCalls).toEqual([]); expect(state()).toEqual(before);
+      });
+
+      it("answers 404 (not 500) to a non-member when no storage is configured", async () => {
+        role = undefined; records = [seedPost()];
+        expect(await domain.createTripPost.execute(dependencies(), { ...context, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await domain.updateTripPost.execute(dependencies(), { ...context, postId, photos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await domain.linkTripPostToNewActivity.execute(dependencies(), { ...context, postId, newActivity: withDuration, photos: refs(1) }))
+          .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      });
+
+      it("adds no snapshot read when the save carries no photos", async () => {
+        const snapshot = vi.spyOn(posts, "withReadSnapshot");
+        await createWith({ description: "Sin fotos" });
+        records = [seedPost()];
+        await updateWith({ description: "Editado" });
+        expect(snapshot).not.toHaveBeenCalled();
+      });
+
       it("treats the same key retried in the same post as a no-op and never duplicates or reorders", async () => {
         records = [seedPost()]; uploaded(1, 2);
         const first = await updateWith({ photos: refs(1, 2) });

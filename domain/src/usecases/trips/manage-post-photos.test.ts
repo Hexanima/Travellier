@@ -65,8 +65,9 @@ describe("trip photo use cases", () => {
       expect(first.ok && second.ok && first.value.uploads[0]!.key !== second.value.uploads[0]!.key).toBe(true);
     });
 
-    it.each([["not a member", undefined], ["a former member", undefined]])("answers TripNotFoundError to %s without signing", async (_, memberRole) => {
-      role = memberRole;
+    // The port only exposes `findMemberRole`, so a former member is indistinguishable from an outsider here; the real former member is covered by the HTTP/persistence tests.
+    it("answers TripNotFoundError to a non-member without signing", async () => {
+      role = undefined;
       expect(await upload([{ contentType: "image/png", sizeBytes: 1 }])).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
       expect(await upload([{ contentType: "image/png", sizeBytes: 1 }], id(77))).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
       expect(storage.createUploadTarget).not.toHaveBeenCalled();
