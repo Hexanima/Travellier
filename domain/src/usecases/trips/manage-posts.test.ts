@@ -1167,10 +1167,24 @@ describe("Trip post use cases", () => {
           expect(everything()).toEqual(before);
         });
 
-        it("a post with that id by another author is the same generic conflict, without writes", async () => {
+        it("a retry after another member edited the saved post, photos or payments says already_saved with the post id, without writes", async () => {
+          expect(await createWith(body())).toMatchObject({ ok: true });
+          records = [{ ...records[0]!, description: "Editado por otro" }];
+          const spies = writers(), before = everything();
+          expect(await createWith(body())).toMatchObject({ ok: false, error: { tag: "PostRequestConflictError", reason: "already_saved", postId: clientId } });
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+          photoRecords = photoRecords.slice(0, 1);
+          expect(await createWith(body())).toMatchObject({ ok: false, error: { reason: "already_saved", postId: clientId } });
+          expect(everything()).toEqual({ ...before, photoRecords: before.photoRecords.slice(0, 1) });
+        });
+
+        it("a post with that id by another author is the same generic conflict, without writes and without reason or owner", async () => {
           records = [seedPost({ id: clientId, authorId: id(9) })];
           const spies = writers(), before = everything();
-          expect(await createWith(body())).toMatchObject(conflict);
+          const result = await createWith(body());
+          expect(result).toMatchObject(conflict);
+          expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
           expect(calls(spies)).toBe(0);
           expect(everything()).toEqual(before);
         });
@@ -1180,6 +1194,7 @@ describe("Trip post use cases", () => {
           const spies = writers(), before = everything();
           const other = await createWith(body());
           expect(other).toMatchObject(conflict);
+          expect(!other.ok && Object.keys(other.error).sort()).toEqual(["tag"]);
           expect(calls(spies)).toBe(0);
           expect(everything()).toEqual(before);
           records = [seedPost({ id: clientId, authorId: id(9) })];
@@ -1250,10 +1265,22 @@ describe("Trip post use cases", () => {
             expect(everything()).toEqual(before);
           });
 
-          it("an id that belongs to an activity not linked to this post is a conflict without writes", async () => {
+          it("a retry after another member edited the post says already_saved with the post id, without writes", async () => {
+            expect(await linkWithId({ description: "Editado" })).toMatchObject({ ok: true });
+            records = [{ ...records[0]!, description: "Cambiado por otro" }];
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ description: "Editado" })).toMatchObject({ ok: false,
+              error: { tag: "PostRequestConflictError", reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("an id that belongs to an activity not linked to this post is a generic conflict (no reason) without writes", async () => {
             activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity }];
             const before = everything(), spies = writers();
-            expect(await linkWithId()).toMatchObject(conflict);
+            const result = await linkWithId();
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
             expect(calls(spies)).toBe(0);
             expect(everything()).toEqual(before);
           });

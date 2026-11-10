@@ -297,6 +297,12 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "PostRequestConflictError") {
     // Generic on purpose: the same answer for another Trip, another author or a different body (it never says which).
+    const saved = error as { reason?: string; postId?: string };
+    if (saved.reason === "already_saved" && saved.postId !== undefined) {
+      // Only for the requester's own post of this Trip: the memory was already saved (with later changes), do not republish with another id.
+      return jsonResponse(409, { error: { code: error.tag, reason: saved.reason, postId: saved.postId,
+        message: "This memory was already saved; refresh and open it instead of republishing." } });
+    }
     return jsonResponse(409, { error: { code: error.tag, message: "This request id was already used for a different save." } });
   }
   if (error.tag === "ExpenseConflictError") {

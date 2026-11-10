@@ -197,6 +197,8 @@ const registerPostExpense = async (scope: TripPostScope, plan: PlannedExpense): 
 };
 
 const requestConflict = () => err(new PostRequestConflictError());
+/** The requester's own post of this Trip exists with other content than the retry: safe to say it was already saved. */
+const alreadySaved = (postId: ObjectId) => err(new PostRequestConflictError({ reason: "already_saved", postId }));
 const rowsKey = (rows: readonly { userId: unknown; unit: unknown; value: unknown }[]) => JSON.stringify(rows.map((row) => [row.userId, row.unit, row.value ?? null]));
 /** Whether the `expense` of a retry, normalized as a creation would store it, equals the stored one (no member check: they may have left since). */
 const expenseMatchesStored = (raw: unknown, stored: PostExpense | undefined): boolean => {
@@ -249,8 +251,8 @@ const answerPostRetry = async (scope: TripPostScope, payload: CreateTripPostPayl
     { description: payload.description, mapsUrl: payload.mapsUrl, activityId: payload.activityId, parentPostId: payload.parentPostId,
       transportId: payload.transportId, newActivity: payload.newActivity, photoKeys: keys, expenseSent: payload.expense !== undefined,
       expenseMatches: expenseMatchesStored(payload.expense, expenseRecord) });
-  if (!same) return requestConflict();
-  if (payload.newActivity !== undefined && (activity === undefined || participation === undefined)) return requestConflict();
+  if (!same) return alreadySaved(post.value.id);
+  if (payload.newActivity !== undefined && (activity === undefined || participation === undefined)) return alreadySaved(post.value.id);
   return ok({ outcome: "created" as const, post: post.value,
     ...(payload.newActivity !== undefined && activity !== undefined && participation !== undefined ? { activity, participation } : {}),
     ...(keys !== undefined ? { photos: photos.map((photo) => ({ id: photo.id, order: photo.order })) } : {}),
@@ -269,7 +271,7 @@ const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewA
   const activitySame = activity !== undefined && wanted.title === activity.title && wanted.scheduledAt.getTime() === activity.scheduledAt.getTime()
     && (wanted.durationMinutes ?? null) === activity.durationMinutes && (wanted.description ?? null) === activity.description
     && (wanted.mapsUrl ?? null) === activity.mapsUrl;
-  if (!postSame || !photosSame || !expenseSame || !activitySame || participation === undefined) return requestConflict();
+  if (!postSame || !photosSame || !expenseSame || !activitySame || participation === undefined) return alreadySaved(post.id);
   return ok({ outcome: "linked" as const, post, activity, participation,
     ...(keys !== undefined ? { photos: photos.map((photo) => ({ id: photo.id, order: photo.order })) } : {}),
     ...(payload.expense !== undefined && expense ? { expense } : {}) });
