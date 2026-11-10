@@ -24,7 +24,9 @@ export type MemberTripDetail = TripSummary & {
 export type PublicTripDetail = TripSummary & { kind: "public"; visibility: "public" };
 export type TripDetail = MemberTripDetail | PublicTripDetail;
 export type PublicTripJoinResult = { tripId: string; joined: boolean };
-export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination" | "participation-conflict";
+export type TripFailure = { kind: ApiErrorKind | "itinerary-conflict" | "deletion-conflict" | "last-destination" | "participation-conflict" | "already-saved";
+  /** Only with `already-saved`: the saved post of this person in this Trip, when the server sent a valid one. */
+  postId?: string;
   fields?: readonly { field: string; message: string; code?: string }[]; confirmation?: ParticipationConfirmation; code?: string };
 export type TripResult<T> = { ok: true; value: T } | { ok: false; error: TripFailure };
 export type TripManagementApi = {

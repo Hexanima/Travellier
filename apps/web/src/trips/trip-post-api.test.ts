@@ -185,6 +185,54 @@ describe("post HTTP adapter with a new activity", () => {
     await api.create(tripId, { description: "Texto" });
     expect(sent(fetch).body).toEqual({ description: "Texto" });
   });
+  describe("retry ids and request conflicts (T88)", () => {
+    const ID = itineraryId(30), ACTIVITY_ID = itineraryId(31);
+    const act = { title: "Cena", scheduledAt: "2026-09-25T20:00:00.000Z" };
+    it("create sends the post id", async () => {
+      const { api, fetch } = setup({ post: post() }, 201);
+      await api.create(tripId, { id: ID, description: "Texto" });
+      expect(sent(fetch).body).toEqual({ id: ID, description: "Texto" });
+    });
+    it("create ignores newActivity.id", async () => {
+      const { api, fetch } = setup({ post: post(), activity: activity(), participation }, 201);
+      await api.create(tripId, { id: ID, newActivity: { ...act, id: ACTIVITY_ID } });
+      expect(sent(fetch).body).toEqual({ id: ID, newActivity: act });
+    });
+    it("update sends newActivity.id and never a post id", async () => {
+      const { api, fetch } = setup({ post: post(), activity: activity(), participation });
+      await api.update(tripId, itineraryId(5), { id: ID, newActivity: { ...act, id: ACTIVITY_ID } });
+      expect(sent(fetch).body).toEqual({ newActivity: { id: ACTIVITY_ID, ...act } });
+    });
+    it("an id with an invalid format is not sent", async () => {
+      const bad = { id: "ABCDEF0123456789ABCDEF01", description: "x", newActivity: { ...act, id: "nope" } } as PostInput;
+      const created = setup({ post: post(), activity: activity(), participation }, 201);
+      await created.api.create(tripId, bad);
+      expect(sent(created.fetch).body).toEqual({ description: "x", newActivity: act });
+      const updated = setup({ post: post(), activity: activity(), participation });
+      await updated.api.update(tripId, itineraryId(5), bad);
+      expect(sent(updated.fetch).body).toEqual({ description: "x", newActivity: act });
+    });
+    it("maps a 409 already_saved with its postId", async () => {
+      const body = { error: { code: "PostRequestConflictError", message: "x", reason: "already_saved", postId: itineraryId(5) } };
+      expect(await setup(body, 409).api.create(tripId, { id: ID, description: "x" })).toEqual({ ok: false, error: { kind: "already-saved", postId: itineraryId(5) } });
+      expect(await setup(body, 409).api.update(tripId, itineraryId(5), { newActivity: act })).toEqual({ ok: false, error: { kind: "already-saved", postId: itineraryId(5) } });
+    });
+    it("maps an already_saved without a valid postId to already-saved without it", async () => {
+      const body = { error: { code: "PostRequestConflictError", message: "x", reason: "already_saved", postId: "../x" } };
+      expect(await setup(body, 409).api.create(tripId, { description: "x" })).toEqual({ ok: false, error: { kind: "already-saved" } });
+    });
+    it("maps the generic 409 (no reason) to a server failure with its code", async () => {
+      const body = { error: { code: "PostRequestConflictError", message: "x" } };
+      expect(await setup(body, 409).api.create(tripId, { id: ID, description: "x" })).toEqual({ ok: false, error: { kind: "server", code: "PostRequestConflictError" } });
+    });
+    it("keeps the participation conflict mapping when the body also carries a reason", async () => {
+      expect(await setup(conflictBody, 409).api.create(tripId, { id: ID, newActivity })).toEqual({ ok: false, error: { kind: "participation-conflict", confirmation } });
+    });
+    it("keeps a 422 on the id as validation fields", async () => {
+      const body = { error: { code: "ValidationError", message: "x", fields: [{ field: "id", code: "invalid", message: "m" }] } };
+      expect(await setup(body, 422).api.create(tripId, { id: ID })).toEqual({ ok: false, error: { kind: "validation", fields: [{ field: "id", code: "invalid", message: "m" }] } });
+    });
+  });
 });
 
 describe("post HTTP adapter with an expense", () => {
@@ -281,4 +329,5 @@ describe("post HTTP adapter with payments and shares (T84)", () => {
     expect(result.ok && result.value.expenseUnreadable).toBe(true);
     expect(result.ok && result.value.post.id).toBe(itineraryId(5));
   });
+
 });

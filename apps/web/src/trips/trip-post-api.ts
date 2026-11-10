@@ -66,6 +66,11 @@ const parseSummary = (value: unknown): PostSummary | undefined => {
 const newestFirst = (a: PostSummary, b: PostSummary) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id);
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
 const failure = (error: ApiClientError): TripResult<never> => {
+  // The same id was already saved by this person: not a failure to retry with another id. The generic 409 (no reason) stays a server failure with its code.
+  if (error.status === 409 && error.code === "PostRequestConflictError") {
+    return error.reason === "already_saved" ? { ok: false, error: { kind: "already-saved", ...(id(error.postId) ? { postId: error.postId } : {}) } }
+      : { ok: false, error: { kind: "server", code: "PostRequestConflictError" } };
+  }
   if (error.status === 409 && error.code === "ParticipationConflictError") {
     const confirmation = parseConfirmation(error.details);
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
@@ -121,7 +126,7 @@ const single = (result: Raw, tripId: string, postId?: string, withActivity = fal
   return { ok: true, value: withSaved({ ...parsed, activity, participation: validParticipation(participation, tripId, activity.id) ? participation : null }) };
 };
 /** Only content and link fields travel (null is meaningful: it clears a link): anything else on `input` (e.g. a forced createdAt) is dropped. */
-const newActivityBody = (value: NewActivityInput): NewActivityInput => ({ title: value.title, scheduledAt: value.scheduledAt,
+const newActivityBody = (value: NewActivityInput, withId: boolean): NewActivityInput => ({ ...(withId && id(value.id) ? { id: value.id } : {}), title: value.title, scheduledAt: value.scheduledAt,
   ...(value.durationMinutes !== undefined ? { durationMinutes: value.durationMinutes } : {}),
   ...(value.description !== undefined ? { description: value.description } : {}),
   ...(value.mapsUrl !== undefined ? { mapsUrl: value.mapsUrl } : {}) });
@@ -139,13 +144,15 @@ const expenseBody = (value: ExpenseInput | null | undefined): Pick<PostInput, "e
 };
 const carriesExpense = (input: PostInput) => expenseBody(input.expense).expense !== undefined;
 /** The confirmation of a previous 409 travels at the root of the body, never inside `newActivity`. */
-const body = (input: PostInput, confirmation?: ParticipationConfirmation): PostInput => ({
+const body = (input: PostInput, confirmation: ParticipationConfirmation | undefined, kind: "create" | "update"): PostInput => ({
+  // A post id only travels on create and an activity id only on update (a POST ignores it, a PATCH has no post to name); a malformed id is never sent.
+  ...(kind === "create" && id(input.id) ? { id: input.id } : {}),
   ...(input.description !== undefined ? { description: input.description } : {}),
   ...(input.mapsUrl !== undefined ? { mapsUrl: input.mapsUrl } : {}),
   ...(input.parentPostId !== undefined ? { parentPostId: input.parentPostId } : {}),
   ...(input.activityId !== undefined ? { activityId: input.activityId } : {}),
   ...(input.transportId !== undefined ? { transportId: input.transportId } : {}),
-  ...(input.newActivity !== undefined ? { newActivity: newActivityBody(input.newActivity) } : {}),
+  ...(input.newActivity !== undefined ? { newActivity: newActivityBody(input.newActivity, kind === "update") } : {}),
   ...(input.photos !== undefined ? { photos: input.photos.map(({ key }) => ({ key })) } : {}),
   ...expenseBody(input.expense),
   ...(confirmation ? { confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } : {}),
@@ -175,7 +182,7 @@ export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "pat
     return { ok: true, value: { post, parent, children: children.sort(newestFirst), rootActivityId: id(rootActivityId) ? rootActivityId : null,
       ...(expense ? { expense } : {}), ...(rawExpense !== undefined && !expense ? { expenseUnreadable: true as const } : {}) } };
   },
-  create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation)), tripId, undefined, input.newActivity !== undefined, carriesExpense(input)),
-  update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation)),
+  create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation, "create")), tripId, undefined, input.newActivity !== undefined, carriesExpense(input)),
+  update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation, "update")),
     tripId, postId, input.newActivity !== undefined, carriesExpense(input)),
 });
