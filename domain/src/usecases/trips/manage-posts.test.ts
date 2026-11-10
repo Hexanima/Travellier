@@ -28,6 +28,10 @@ describe("Trip post use cases", () => {
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
+      findPostOwner: async (postRef) => {
+        const found = records.find((p) => p.id === postRef);
+        return domain.ok(found && { id: found.id, tripId: found.tripId, authorId: found.authorId });
+      },
       findTrip: async () => domain.ok(tripExists ? { id: tripId, votingEnabled } : undefined),
       listDays: async () => { listDaysCalls++; return domain.ok(days); },
       findActivity: async (id) => domain.ok(activities.find((a) => a.id === id) ?? (targets.activityId?.id === id ? targets.activityId : undefined)),
@@ -1108,6 +1112,262 @@ describe("Trip post use cases", () => {
           records = [seedPost()];
           expect(await updateWith({ description: "Editado" })).toEqual(domain.ok(seedPost({ description: "Editado" })));
           expect(listMembers).not.toHaveBeenCalled();
+        });
+      });
+      describe("idempotent retry of the joint save (T87)", () => {
+        const clientId = id(500), otherTripId = id(99);
+        const agreed = { totalAmount: 100, currency: "ARS", payments: [{ userId: id(41), unit: "percent", value: 100 }],
+          shares: [{ userId: id(41), unit: "percent", value: 50 }, { userId: id(42), unit: "remainder", value: null }] };
+        const body = (fields = {}) => ({ postId: clientId, description: "Cena", newActivity: withDuration, photos: refs(1, 2), expense: agreed, ...fields });
+        const everything = () => structuredClone({ ...state(), expenseRecords });
+        const writers = () => (["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation"] as const)
+          .map((method) => vi.spyOn(scope, method));
+        const calls = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+        const conflict = { ok: false, error: { tag: "PostRequestConflictError" } };
+        beforeEach(() => {
+          uploaded(1, 2);
+        });
+
+        it("uses the client id as the post id; without it the server generates one (as before)", async () => {
+          expect(await createWith(body({ newActivity: undefined, photos: undefined, expense: undefined }))).toMatchObject({ ok: true, value: { post: { id: clientId } } });
+          expect(await createWith({ description: "Otro" })).toMatchObject({ ok: true, value: { post: { id: id(20) } } });
+        });
+
+        it("a retry with the same id and the same body answers the saved result without writing anything", async () => {
+          const first = await createWith(body());
+          expect(first).toMatchObject({ ok: true, value: { outcome: "created", post: { id: clientId }, activity: { id: id(20) },
+            participation: { status: "going" }, photos: [{ order: 1 }, { order: 2 }], expense: { totalAmount: 100 } } });
+          const before = everything(), spies = writers();
+          const retry = await createWith(body());
+          expect(retry).toEqual(first);
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+          expect(records).toHaveLength(1); expect(activities).toHaveLength(1); expect(participations).toHaveLength(1);
+        });
+
+        it("a retry of a plain post (no activity, photos or expense) answers the saved post", async () => {
+          const first = await createWith({ postId: clientId, description: "Hola" });
+          const spies = writers();
+          expect(await createWith({ postId: clientId, description: "Hola" })).toEqual(first);
+          expect(calls(spies)).toBe(0);
+        });
+
+        it.each<[string, Record<string, unknown>]>([
+          ["description", { description: "Otra" }], ["mapsUrl", { mapsUrl: "maps" }], ["parent", { parentPostId: links.parentPostId }],
+          ["no new activity", { newActivity: undefined }], ["activity title", { newActivity: { ...withDuration, title: "Otra" } }],
+          ["activity start", { newActivity: { ...withDuration, scheduledAt: new Date("2026-09-25T13:00:00Z") } }],
+          ["activity duration", { newActivity: { ...newActivity } }], ["fewer photos", { photos: refs(1) }], ["no photos", { photos: undefined }],
+          ["other photos order", { photos: refs(2, 1) }], ["no expense", { expense: undefined }],
+          ["other expense amount", { expense: { ...agreed, totalAmount: 101 } }], ["other expense shares", { expense: { ...agreed, shares: [] } }],
+        ])("a retry whose body differs (%s) is a 409 conflict without writes", async (_, difference) => {
+          expect(await createWith(body())).toMatchObject({ ok: true });
+          const before = everything(), spies = writers();
+          expect(await createWith(body(difference))).toMatchObject(conflict);
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+
+        it("a retry after another member edited the saved post, photos or payments says already_saved with the post id, without writes", async () => {
+          expect(await createWith(body())).toMatchObject({ ok: true });
+          records = [{ ...records[0]!, description: "Editado por otro" }];
+          const spies = writers(), before = everything();
+          expect(await createWith(body())).toMatchObject({ ok: false, error: { tag: "PostRequestConflictError", reason: "already_saved", postId: clientId } });
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+          photoRecords = photoRecords.slice(0, 1);
+          expect(await createWith(body())).toMatchObject({ ok: false, error: { reason: "already_saved", postId: clientId } });
+          expect(everything()).toEqual({ ...before, photoRecords: before.photoRecords.slice(0, 1) });
+        });
+
+        it("a post with that id by another author is the same generic conflict, without writes and without reason or owner", async () => {
+          records = [seedPost({ id: clientId, authorId: id(9) })];
+          const spies = writers(), before = everything();
+          const result = await createWith(body());
+          expect(result).toMatchObject(conflict);
+          expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+
+        it("a post with that id in another Trip is the same generic conflict, without writes or other answer", async () => {
+          records = [seedPost({ id: clientId, authorId: actor, tripId: otherTripId })];
+          const spies = writers(), before = everything();
+          const other = await createWith(body());
+          expect(other).toMatchObject(conflict);
+          expect(!other.ok && Object.keys(other.error).sort()).toEqual(["tag"]);
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
+          records = [seedPost({ id: clientId, authorId: id(9) })];
+          expect(await createWith(body())).toEqual(other);
+        });
+
+        it("a confirmation_required is never stored: repeating with the same id after confirming creates the post", async () => {
+          seedAgenda(); const before = everything();
+          const first = await createWith(body());
+          expect(first).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+          expect(everything()).toEqual(before);
+          const again = await createWith(body());
+          expect(again).toEqual(first);
+          expect(await createWith(body(confirmationFrom(first)))).toMatchObject({ ok: true, value: { outcome: "created", post: { id: clientId } } });
+          expect(records).toHaveLength(1);
+        });
+
+        it("a failed save leaves nothing and frees the id for the retry", async () => {
+          const original = scope.saveParticipation;
+          scope.saveParticipation = async () => domain.err(new domain.UnknownError("failed"));
+          expect(await createWith(body())).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          expect(everything()).toEqual(structuredClone({ records: [], activities: [], participations: [], photoRecords: [], expenseRecords: [] }));
+          scope.saveParticipation = original;
+          expect(await createWith(body())).toMatchObject({ ok: true, value: { outcome: "created", post: { id: clientId } } });
+        });
+
+        it("a retry still works when the activity window changed after the original save (no revalidation)", async () => {
+          const first = await createWith(body());
+          days = [{ ...day, endsAt: new Date("2026-09-25T12:10:00Z") }];
+          expect(await createWith(body())).toEqual(first);
+        });
+
+        it("a retry only verifies the photos in the storage before the transaction", async () => {
+          await createWith(body()); headCalls = [];
+          await createWith(body());
+          expect(headCalls.sort()).toEqual([key(1), key(2)]);
+          expect(headInsideTransaction).toBe(false);
+        });
+
+        describe("PATCH with newActivity.id", () => {
+          const clientActivity = id(600);
+          const withId = (fields = {}) => ({ ...withDuration, id: clientActivity, ...fields });
+          const linkWithId = (fields = {}) => linkWith({ newActivity: withId(), ...fields });
+          beforeEach(() => { records = [seedPost()]; });
+
+          it("uses the client id as the activity id", async () => {
+            expect(await linkWithId()).toMatchObject({ ok: true, value: { outcome: "linked", activity: { id: clientActivity }, post: { activityId: clientActivity } } });
+          });
+
+          it("a retry with the same id answers the saved result without a second activity, participation or relink", async () => {
+            const first = await linkWithId({ photos: refs(1), expense: agreed });
+            expect(first).toMatchObject({ ok: true, value: { outcome: "linked" } });
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ photos: refs(1), expense: agreed })).toEqual(first);
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+            expect(activities).toHaveLength(1); expect(participations).toHaveLength(1);
+          });
+
+          it.each<[string, Record<string, unknown>]>([
+            ["activity title", { newActivity: withId({ title: "Otra" }) }], ["activity start", { newActivity: withId({ scheduledAt: new Date("2026-09-25T14:00:00Z") }) }],
+            ["description", { description: "Distinta" }], ["extra photo", { photos: refs(1, 2) }], ["expense", { expense: { ...agreed, totalAmount: 7 } }],
+          ])("a retry with the same id but another content (%s) is a 409 without writes", async (_, difference) => {
+            expect(await linkWithId({ description: "Editado", photos: refs(1), expense: agreed })).toMatchObject({ ok: true });
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ description: "Editado", photos: refs(1), expense: agreed, ...difference })).toMatchObject(conflict);
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("a retry after another member edited the post says already_saved with the post id, without writes", async () => {
+            expect(await linkWithId({ description: "Editado" })).toMatchObject({ ok: true });
+            records = [{ ...records[0]!, description: "Cambiado por otro" }];
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ description: "Editado" })).toMatchObject({ ok: false,
+              error: { tag: "PostRequestConflictError", reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("an id that belongs to an activity not linked to this post is a generic conflict (no reason) without writes", async () => {
+            activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity }];
+            const before = everything(), spies = writers();
+            const result = await linkWithId();
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("an exact PATCH retry with a partial expense ({ breakdown }) or without payments/shares answers 200 with what is stored", async () => {
+            const first = await linkWithId({ expense: { ...agreed, breakdown: "agua" } });
+            expect(first).toMatchObject({ ok: true, value: { outcome: "linked", expense: { breakdown: "agua" } } });
+            const before = everything(), spies = writers();
+            for (const partial of [{ breakdown: "agua" }, { totalAmount: 100, currency: "ARS", breakdown: "agua" }, { currency: "ARS" }]) {
+              const retry = await linkWithId({ expense: partial });
+              expect(retry, JSON.stringify(partial)).toMatchObject({ ok: true, value: { outcome: "linked", expense: { breakdown: "agua", payments: expect.any(Array) } } });
+            }
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it.each<[string, Record<string, unknown>]>([
+            ["breakdown", { breakdown: "otro" }], ["totalAmount", { totalAmount: 7 }], ["currency", { currency: "USD" }],
+            ["payments", { payments: [{ userId: id(42), unit: "percent", value: 100 }] }],
+          ])("a PATCH retry whose partial expense changes %s is already_saved, without writes", async (_, partial) => {
+            expect(await linkWithId({ expense: { ...agreed, breakdown: "agua" } })).toMatchObject({ ok: true });
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ expense: partial })).toMatchObject({ ok: false, error: { reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("an exact retry without expense still answers 200", async () => {
+            const first = await linkWithId({ expense: agreed });
+            expect(await linkWithId({ expense: undefined })).toMatchObject({ ok: true, value: { outcome: "linked", activity: first.ok ? first.value.activity : undefined } });
+          });
+
+          it("the same activity id after another member relinked the post elsewhere is already_saved with the route post id when it is the requester's own in this Trip", async () => {
+            expect(await linkWithId()).toMatchObject({ ok: true });
+            records = [{ ...records[0]!, activityId: links.activityId }];
+            const before = everything(), spies = writers();
+            expect(await linkWithId()).toMatchObject({ ok: false, error: { tag: "PostRequestConflictError", reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it.each<[string, Record<string, unknown>]>([["same content", {}], ["another content", { description: "Distinta" }]])(
+            "a post already linked to the same activity id created by ANOTHER member is a generic conflict (no reason) without writes (%s)", async (_, difference) => {
+              expect(await linkWithId()).toMatchObject({ ok: true });
+              activities = activities.map((activity) => activity.id === clientActivity ? { ...activity, createdBy: id(77) } : activity);
+              const before = everything(), spies = writers();
+              const result = await linkWithId(difference);
+              expect(result).toMatchObject(conflict);
+              expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+              expect(calls(spies)).toBe(0);
+              expect(everything()).toEqual(before);
+            });
+
+          it("an occupied activity id of ANOTHER creator in this Trip stays the generic conflict (no reason)", async () => {
+            activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: id(77) }];
+            const result = await linkWithId();
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+          });
+
+          it("an activity id owned by ANOTHER Trip is not visible to the per-Trip listActivities: the flow goes on to the insert, where the simulated 11000 is the generic conflict without writes", async () => {
+            const foreign: Activity = { ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: actor, tripId: otherTripId };
+            activities = [foreign];
+            // Port contract: listActivities only returns this Trip's activities (the foreign one is outside the list).
+            scope.listActivities = async () => domain.ok(activities.filter((activity) => activity.tripId === tripId));
+            const insert = vi.spyOn(scope, "insertActivity").mockResolvedValue(domain.err(new domain.PostRequestConflictError()));
+            const before = everything();
+            const result = await linkWithId();
+            expect(foreign.tripId).not.toBe(tripId);
+            expect(insert).toHaveBeenCalledTimes(1);
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+            expect(everything()).toEqual(before);
+          });
+
+          it("without an id on a post that already has an activity it still creates another and repoints (documented, user decision pending)", async () => {
+            expect(await linkWith()).toMatchObject({ ok: true, value: { activity: { id: id(20) } } });
+            expect(await linkWith({ newActivity: { ...withDuration, scheduledAt: new Date("2026-09-25T15:00:00Z") } })).toMatchObject({ ok: true, value: { outcome: "linked" } });
+            expect(activities).toHaveLength(2);
+            expect(records[0]!.activityId).toBe(activities[1]!.id);
+            expect(activities[1]!.id).not.toBe(id(20));
+          });
+
+          it("a first PATCH with an id on a post linked to ANOTHER activity replaces it (explicit replacement, as without id)", async () => {
+            records = [seedPost({ activityId: links.activityId })];
+            expect(await linkWithId()).toMatchObject({ ok: true, value: { post: { activityId: clientActivity } } });
+          });
         });
       });
     });

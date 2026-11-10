@@ -295,6 +295,16 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   if (error.tag === "PhotoConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "A photo of this upload is already registered in another post." } });
   }
+  if (error.tag === "PostRequestConflictError") {
+    // Generic on purpose: the same answer for another Trip, another author or a different body (it never says which).
+    const saved = error as { reason?: string; postId?: string };
+    if (saved.reason === "already_saved" && saved.postId !== undefined) {
+      // Only for the requester's own post of this Trip: the memory was already saved (with later changes), do not republish with another id.
+      return jsonResponse(409, { error: { code: error.tag, reason: saved.reason, postId: saved.postId,
+        message: "This memory was already saved; refresh and open it instead of republishing." } });
+    }
+    return jsonResponse(409, { error: { code: error.tag, message: "This request id was already used for a different save." } });
+  }
   if (error.tag === "ExpenseConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "The post already has an expense." } });
   }
@@ -566,6 +576,12 @@ const activityPayload = (payload: Record<string, unknown>, creating: boolean): R
   return ok(fields);
 };
 
+/** Client-generated id (T87): exactly 24 lowercase hex characters; anything else (including null or uppercase) is invalid. */
+const clientId = (value: unknown) => {
+  const id = typeof value === "string" && /^[0-9a-f]{24}$/.test(value) ? createObjectId(value) : undefined;
+  return id?.ok ? id.value : undefined;
+};
+
 const postPayload = (payload: Record<string, unknown>):
   Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense">, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
@@ -606,6 +622,12 @@ const postPayload = (payload: Record<string, unknown>):
     if (!parsed.ok) return parsed;
     fields.newActivity = { title: parsed.value.title!, scheduledAt: parsed.value.scheduledAt!,
       description: parsed.value.description, mapsUrl: parsed.value.mapsUrl, durationMinutes: parsed.value.durationMinutes };
+    // Optional client-generated id of the activity (T87): lowercase ObjectId hex; a PATCH retry that repeats it is the same save.
+    if (Object.hasOwn(value, "id")) {
+      const activityId = clientId((value as Record<string, unknown>).id);
+      if (activityId === undefined) return invalid("newActivity.id");
+      fields.newActivity.id = activityId;
+    }
   }
   return ok(fields);
 };
@@ -827,8 +849,13 @@ export const handleApiRequest = async (
       if (!payload) return invalidRequestResponse();
       const parsed = postPayload(payload);
       if (!parsed.ok) return errorResponse(parsed.error);
+      let postIdFromClient: ObjectId | undefined;
+      if (Object.hasOwn(payload, "id")) {
+        postIdFromClient = clientId(payload.id);
+        if (postIdFromClient === undefined) return errorResponse(new ValidationError([{ field: "id", code: "invalid", message: "Post id is invalid." }]));
+      }
       if (!trips?.createPost) return unavailableResponse();
-      const result = await trips.createPost({ ...context, ...parsed.value,
+      const result = await trips.createPost({ ...context, ...parsed.value, ...(postIdFromClient === undefined ? {} : { postId: postIdFromClient }),
         confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity } as CreateTripPostPayload);
       if (!result.ok) return errorResponse(result.error);
       if (result.value.outcome === "confirmation_required") return participationConflictResponse(result.value);

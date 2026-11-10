@@ -22,6 +22,8 @@ export interface TripPostReadScope {
   /** Ids of the transports of this Trip (existing now), to validate post links in the same snapshot. */
   listTransportIds: () => AsyncResult<ObjectId[]>;
   find: (postId: ObjectId) => AsyncResult<Post | undefined>;
+  /** Owner of a post by id whatever its Trip: only to tell a client-supplied post id that is free from one that is taken (never exposed). */
+  findPostOwner: (postId: ObjectId) => AsyncResult<Pick<Post, "id" | "tripId" | "authorId"> | undefined>;
   list: () => AsyncResult<Post[]>;
   /** Direct children of a post in this Trip, newest publication first (id descending on ties). */
   listChildren: (postId: ObjectId) => AsyncResult<Post[]>;

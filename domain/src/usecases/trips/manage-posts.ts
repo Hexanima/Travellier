@@ -2,10 +2,12 @@ import { createActivity, type Activity } from "../../entities/activity.js";
 import type { ActivityConflict } from "../../entities/activity-conflict.js";
 import type { ActivityParticipation } from "../../entities/activity-participation.js";
 import { resolveActivityDayId } from "../../entities/activity-schedule.js";
-import { applyPostExpense, describePostExpense, parsePostExpenseInput, type PostExpenseView, type PostExpensePlan } from "../../entities/post-expense.js";
+import { applyPostExpense, describePostExpense, parsePostExpenseInput, type PostExpense, type PostExpenseView, type PostExpensePlan } from "../../entities/post-expense.js";
 import type { PostPhotoRef } from "../../entities/post-photo.js";
+import { isSameRequest } from "../../entities/post-save-request.js";
 import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
+import { PostRequestConflictError } from "../../errors/post-request-conflict-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
@@ -21,8 +23,9 @@ import { planPostPhotos, registerPostPhotos, verifyOptionalPhotoUploads } from "
 export interface TripPostPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface PostDetailPayload extends TripPostPayload { postId: ObjectId }
 export type PostEditableFields = Pick<Post, "description" | "mapsUrl" | keyof PostLinks>;
+/** `id` is optional and client-generated: the retry of a PATCH that carried it is recognized as the same save (T87). */
 export type NewPostActivity = Pick<Activity, "title" | "scheduledAt"> &
-  Partial<Pick<Activity, "description" | "mapsUrl" | "durationMinutes">>;
+  Partial<Pick<Activity, "id" | "description" | "mapsUrl" | "durationMinutes">>;
 /** Plan-change confirmation the author gave for the new activity (checked against the current agenda). */
 interface PlanConfirmation {
   /** Conflicts the author saw when confirming. */ confirmedConflicts?: unknown;
@@ -35,6 +38,11 @@ interface PlanConfirmation {
 export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & ExpenseReference & {
   dayId?: ObjectId;
   newActivity?: NewPostActivity;
+  /**
+   * Client-generated id of the post (T87), used as its `_id`: sending the same id again is a retry that answers the saved result
+   * without writing. Without it the server generates the id and a retry creates another post.
+   */
+  postId?: ObjectId;
 };
 /** Photos of the save: `{ key }` references of uploads authorized by `createTripPhotoUploads`; validated by the use case. */
 interface PhotoReferences { photos?: unknown }
@@ -188,6 +196,92 @@ const registerPostExpense = async (scope: TripPostScope, plan: PlannedExpense): 
   return written.ok ? ok(describePostExpense(plan.expense, plan.memberIds)) : written;
 };
 
+const requestConflict = () => err(new PostRequestConflictError());
+/** The requester's own post of this Trip exists with other content than the retry: safe to say it was already saved. */
+const alreadySaved = (postId: ObjectId) => err(new PostRequestConflictError({ reason: "already_saved", postId }));
+const rowsKey = (rows: readonly { userId: unknown; unit: unknown; value: unknown }[]) => JSON.stringify(rows.map((row) => [row.userId, row.unit, row.value ?? null]));
+/**
+ * Whether the `expense` of a retry equals the stored one (no member check: they may have left since). A POST is normalized as a creation;
+ * a PATCH is applied as the partial edit it is over the stored expense, and matches when no field would change.
+ */
+const expenseMatchesStored = (raw: unknown, stored: PostExpense | undefined, mode: "create" | "patch" = "create"): boolean => {
+  if (raw === undefined || stored === undefined) return false;
+  const parsed = parsePostExpenseInput(raw);
+  if (!parsed.ok) return false;
+  const plan = applyPostExpense({ existing: mode === "patch" ? stored : undefined, input: parsed.value, tripId: stored.tripId, postId: stored.postId, id: stored.id,
+    createdAt: stored.createdAt, memberIds: [...stored.payments, ...stored.shares].map((row) => row.userId) });
+  if (!plan.ok) return false;
+  const { expense } = plan.value;
+  return expense.totalAmount === stored.totalAmount && expense.currency === stored.currency && expense.breakdown === stored.breakdown
+    && rowsKey(expense.payments) === rowsKey(stored.payments) && rowsKey(expense.shares) === rowsKey(stored.shares);
+};
+/** What the first successful save left stored for this post, read inside the transaction (a retry never writes). */
+const readSavedPost = async (scope: TripPostScope, post: Post, userId: ObjectId) => {
+  const photos = await scope.listPhotos(post.id);
+  if (!photos.ok) return photos;
+  const expense = await scope.findExpense(post.id);
+  if (!expense.ok) return expense;
+  let activity: Activity | undefined, participation: ActivityParticipation | undefined;
+  if (post.activityId !== null) {
+    const activities = await scope.listActivities();
+    if (!activities.ok) return activities;
+    activity = activities.value.find((candidate) => candidate.id === post.activityId);
+    const records = await scope.listUserParticipations(userId);
+    if (!records.ok) return records;
+    participation = records.value.find((record) => record.activityId === post.activityId);
+  }
+  const named = expense.value === undefined ? [] : [...new Set([...expense.value.payments, ...expense.value.shares].map((row) => row.userId))];
+  const members = named.length === 0 ? ok([] as ObjectId[]) : await scope.listMemberUserIds(named);
+  if (!members.ok) return members;
+  return ok({ photos: photos.value, expenseRecord: expense.value, activity, participation,
+    expense: expense.value === undefined ? undefined : describePostExpense(expense.value, members.value) });
+};
+/**
+ * A client post id that already exists. It is the retry of this author's own save when the body is the same one stored (answers the saved
+ * result, reconstructed from what is persisted, without writing); a post of another Trip or author, or a different body, is the same
+ * generic conflict. Nothing here writes.
+ */
+const answerPostRetry = async (scope: TripPostScope, payload: CreateTripPostPayload, owner: { id: ObjectId; tripId: ObjectId; authorId: ObjectId },
+  keys: string[] | undefined): AsyncResult<CreateTripPostResult> => {
+  if (owner.tripId !== payload.tripId || owner.authorId !== payload.authenticatedUserId) return requestConflict();
+  const post = await scope.find(owner.id);
+  if (!post.ok) return post;
+  if (post.value === undefined) return requestConflict();
+  const saved = await readSavedPost(scope, post.value, payload.authenticatedUserId);
+  if (!saved.ok) return saved;
+  const { photos, expenseRecord, activity, participation, expense } = saved.value;
+  const same = isSameRequest({ post: post.value, activity: activity ?? null, photoKeys: photos.map((photo) => photo.s3Key), hasExpense: expenseRecord !== undefined },
+    { description: payload.description, mapsUrl: payload.mapsUrl, activityId: payload.activityId, parentPostId: payload.parentPostId,
+      transportId: payload.transportId, newActivity: payload.newActivity, photoKeys: keys, expenseSent: payload.expense !== undefined,
+      expenseMatches: expenseMatchesStored(payload.expense, expenseRecord) });
+  if (!same) return alreadySaved(post.value.id);
+  if (payload.newActivity !== undefined && (activity === undefined || participation === undefined)) return alreadySaved(post.value.id);
+  return ok({ outcome: "created" as const, post: post.value,
+    ...(payload.newActivity !== undefined && activity !== undefined && participation !== undefined ? { activity, participation } : {}),
+    ...(keys !== undefined ? { photos: photos.map((photo) => ({ id: photo.id, order: photo.order })) } : {}),
+    ...(expense ? { expense } : {}) });
+};
+/** The PATCH with `newActivity.id` whose activity is already linked to the post: same save when the content is the stored one. */
+const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewActivityPayload, post: Post, keys: string[] | undefined):
+  AsyncResult<LinkTripPostToNewActivityResult> => {
+  const saved = await readSavedPost(scope, post, payload.authenticatedUserId);
+  if (!saved.ok) return saved;
+  const { photos, expenseRecord, activity, participation, expense } = saved.value, wanted = payload.newActivity;
+  // An activity with that id created by someone else is not the requester's save: generic conflict, no reason.
+  if (activity !== undefined && activity.createdBy !== payload.authenticatedUserId) return requestConflict();
+  const fields = ["description", "mapsUrl", "parentPostId", "transportId"] as const;
+  const postSame = fields.every((field) => !Object.hasOwn(payload, field) || payload[field] === undefined || payload[field] === post[field]);
+  const photosSame = keys === undefined || keys.every((key) => photos.some((photo) => photo.s3Key === key));
+  const expenseSame = payload.expense === undefined || expenseMatchesStored(payload.expense, expenseRecord, "patch");
+  const activitySame = activity !== undefined && wanted.title === activity.title && wanted.scheduledAt.getTime() === activity.scheduledAt.getTime()
+    && (wanted.durationMinutes ?? null) === activity.durationMinutes && (wanted.description ?? null) === activity.description
+    && (wanted.mapsUrl ?? null) === activity.mapsUrl;
+  if (!postSame || !photosSame || !expenseSame || !activitySame || participation === undefined) return alreadySaved(post.id);
+  return ok({ outcome: "linked" as const, post, activity, participation,
+    ...(keys !== undefined ? { photos: photos.map((photo) => ({ id: photo.id, order: photo.order })) } : {}),
+    ...(payload.expense !== undefined && expense ? { expense } : {}) });
+};
+
 const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",
   message: "Choose an existing activity or create a new one." }]));
 
@@ -202,7 +296,12 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     return posts.withTransaction<CreateTripPostResult>(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
     if (!trip.ok) return trip;
-    const postId = createId(), createdAt = now();
+    if (payload.postId !== undefined) {
+      const owner = await scope.findPostOwner(payload.postId);
+      if (!owner.ok) return owner;
+      if (owner.value !== undefined) return answerPostRetry(scope, payload, owner.value, keys);
+    }
+    const postId = payload.postId ?? createId(), createdAt = now();
     let activity: Activity | undefined;
     if (payload.newActivity !== undefined) {
       if (payload.activityId != null) return conflictingActivityLink();
@@ -271,8 +370,18 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     const current = await find(scope, payload);
     if (!current.ok) return current;
     if (payload.activityId != null) return conflictingActivityLink();
+    const wantedActivityId = payload.newActivity.id;
+    if (wantedActivityId !== undefined) {
+      if (current.value.activityId === wantedActivityId) return answerLinkRetry(scope, payload, current.value, keys);
+      const taken = await scope.listActivities();
+      if (!taken.ok) return taken;
+      const occupant = taken.value.find((candidate) => candidate.id === wantedActivityId);
+      // Own activity of this Trip that the post no longer points to (relinked by someone else): the save already happened.
+      if (occupant !== undefined) return occupant.tripId === payload.tripId && occupant.createdBy === payload.authenticatedUserId
+        ? alreadySaved(payload.postId) : requestConflict();
+    }
     const createdAt = now();
-    const built = await buildNewActivity(scope, trip.value, payload, createId(), createdAt);
+    const built = await buildNewActivity(scope, trip.value, payload, wantedActivityId ?? createId(), createdAt);
     if (!built.ok) return built;
     const activity = built.value;
     const fields = ["description", "mapsUrl", "parentPostId", "transportId"] as const;
