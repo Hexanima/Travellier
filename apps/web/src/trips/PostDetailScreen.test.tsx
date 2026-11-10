@@ -79,21 +79,26 @@ describe("PostDetailScreen content", () => {
     const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { description: null } }))));
     expect(container.textContent).toContain("Recuerdo sin texto.");
   });
-  it("shows the location as a safe link when there is one", async () => {
-    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl: "https://maps.test/x" } }))));
-    const link = container.querySelector('a[href="https://maps.test/x"]');
-    expect(link?.textContent).toBe("Ver ubicación");
+  it("shows the location as a place card with a safe open action when there is one", async () => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl: "https://maps.google.com/?q=Torre+Eiffel" } }))));
+    const link = container.querySelector('a[href="https://maps.google.com/?q=Torre+Eiffel"]');
+    expect(link?.textContent).toBe("Abrir en Maps");
+    expect(link?.getAttribute("aria-label")).toBe("Abrir en Maps: Torre Eiffel");
     expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(container.querySelector(".memory-detail .location-preview, .location-preview")?.getAttribute("data-context")).toBe("memory");
+    expect(container.textContent).not.toContain("Ver ubicación");
   });
-  it.each(["javascript:alert(1)", "/relativo/mapa", "ftp://maps.test/x", "data:text/html,x", "maps.test/x", "mailto:a@b.c"])("does not link an unsafe location (%s)", async (mapsUrl) => {
+  it.each(["javascript:alert(1)", "/relativo/mapa", "ftp://maps.test/x", "data:text/html,x", "maps.test/x", "mailto:a@b.c", "https://maps.test/x"])("does not link an unsafe or unlisted location (%s)", async (mapsUrl) => {
     const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl } }))));
     expect(container.textContent).toContain("Recuerdo 5");
-    expect(container.textContent).not.toContain("Ver ubicación");
-    expect(container.querySelector("a[href^='javascript:'], a[href='/relativo/mapa'], a[href^='ftp:'], a[href^='data:'], a[href^='mailto:']")).toBeNull();
+    expect(container.textContent).not.toContain("Abrir en Maps");
+    expect(container.querySelector("[role=status]")?.textContent).toBe("Vínculo de Maps no válido");
+    expect(container.querySelector("a[href^='javascript:'], a[href='/relativo/mapa'], a[href^='ftp:'], a[href^='data:'], a[href^='mailto:'], a[href^='https://maps.test']")).toBeNull();
   });
-  it("links an http location as well", async () => {
-    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl: "http://maps.test/x" } }))));
-    expect(container.querySelector('a[href="http://maps.test/x"]')?.getAttribute("rel")).toBe("noopener noreferrer");
+  it("does not link an http location any more", async () => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { mapsUrl: "http://maps.google.com/x" } }))));
+    expect(container.querySelector('a[href^="http://"]')).toBeNull();
+    expect(container.textContent).not.toContain("Abrir en Maps");
   });
   it("shows generic link labels for an activity root and a transport", async () => {
     const withActivity = await open(vi.fn().mockResolvedValue(ok(detail(5, { rootActivityId: itineraryId(8) }))));

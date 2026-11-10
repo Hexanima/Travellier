@@ -282,3 +282,29 @@ describe("ActivityForm", () => {
     });
   });
 });
+
+describe("ActivityForm location preview", () => {
+  it("shows the preview of the typed link below the field and nothing without it", async () => {
+    const { container } = await render();
+    expect(container.querySelector(".location-preview, [role=status]")).toBeNull();
+    await field(container, "mapsUrl", "https://maps.google.com/?q=Plaza+Mayor");
+    expect(container.querySelector(".location-preview")?.getAttribute("data-context")).toBe("composer");
+    expect(container.querySelector(".location-preview")?.textContent).toContain("Plaza Mayor");
+    await field(container, "mapsUrl", "");
+    expect(container.querySelector(".location-preview, [role=status]")).toBeNull();
+  });
+  it("flags an invalid link without blocking the submit or changing the payload", async () => {
+    const { container, create } = await render();
+    await field(container, "title", "Museo"); await field(container, "time", "09:00");
+    await field(container, "mapsUrl", " http://maps.example/x ");
+    expect(container.querySelector("[role=status]")?.textContent).toBe("Vínculo de Maps no válido");
+    await submit(container);
+    expect(create).toHaveBeenCalledWith(itineraryFixture().tripId, expect.objectContaining({ mapsUrl: "http://maps.example/x" }));
+  });
+  it("sends the trimmed raw text for a valid link, not the normalized href", async () => {
+    const { container, create } = await render();
+    await field(container, "title", "Museo"); await field(container, "time", "09:00");
+    await field(container, "mapsUrl", " https://MAPS.GOOGLE.COM/?q=a "); await submit(container);
+    expect(create).toHaveBeenCalledWith(itineraryFixture().tripId, expect.objectContaining({ mapsUrl: "https://MAPS.GOOGLE.COM/?q=a" }));
+  });
+});
