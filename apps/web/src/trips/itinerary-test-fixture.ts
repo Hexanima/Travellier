@@ -1,4 +1,6 @@
 // Shared synthetic itinerary for client tests; IDs and timestamps follow the HTTP contract.
+import { attributeExpense, totalizeExpenses, type ObjectId } from "app-domain";
+import { createTripItineraryApi, type TripItineraryResponse } from "./trip-itinerary-api.js";
 export const itineraryId = (n: number) => n.toString(16).padStart(24, "0");
 type LinkablePost = { id: string; activityId: string | null; transportId: string | null; parentPostId: string | null;
   context: { parentPostId: string | null; rootPostId: string; rootActivityId: string | null; rootTransportId: string | null;
@@ -66,3 +68,35 @@ export const itineraryFixture = () => {
       currency: "ARS" as "ARS" | "EUR" | "USD" | null, amountCents: 2550 as number | null }],
   };
 };
+
+/**
+ * Leaves the expense state of a payload the way the real backend would return it after a change: the day items only list
+ * activities and transports that exist, and `expenses[]`, every day summary and the Trip summary are recomputed with the
+ * domain's own attribution (root activity's day, else the canonical band containing the publication, else outside).
+ * Mutates and returns the same object; the caller is responsible for the activities, links and dates it changed.
+ */
+export const settleItinerary = (value: TripItineraryResponse): TripItineraryResponse => {
+  const activities = new Map(value.activities.map((activity) => [activity.id, activity]));
+  const transports = new Set(value.transports.map((transport) => transport.id));
+  for (const day of value.days) day.items = day.items.filter((entry) => entry.kind === "post" || (entry.kind === "activity" ? activities.has(entry.id) : transports.has(entry.id)));
+  const bandOf = (iso: string) => value.days.find((day) => Date.parse(day.startsAt) <= Date.parse(iso) && (day.endsAt === null || Date.parse(iso) < Date.parse(day.endsAt)))?.id ?? null;
+  const asId = (text: string | null) => text as unknown as ObjectId;
+  const attributions = [...value.posts, ...value.unplacedPosts].flatMap((post) => {
+    if (post.expense === null) return [];
+    const activity = post.context.rootActivityId === null ? undefined : activities.get(post.context.rootActivityId);
+    return [attributeExpense({
+      expense: { id: asId(post.expense.id), postId: asId(post.id), totalAmount: post.expense.totalAmount, currency: post.expense.currency },
+      post: { createdAt: new Date(post.createdAt) }, rootPostId: asId(post.context.rootPostId),
+      activity: activity ? { id: asId(activity.id), dayId: asId(activity.dayId), scheduledAt: new Date(activity.scheduledAt) } : null,
+      publicationDayId: asId(bandOf(post.createdAt)),
+    })];
+  }).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || String(a.expenseId).localeCompare(String(b.expenseId)));
+  const wire = <T,>(data: T) => JSON.parse(JSON.stringify(data)) as T;
+  for (const day of value.days) day.expenseSummary = wire(totalizeExpenses(attributions.filter((entry) => String(entry.dayId) === day.id)));
+  value.expenses = wire(attributions) as unknown as TripItineraryResponse["expenses"];
+  value.expenseSummary = wire({ ...totalizeExpenses(attributions), outsideItinerary: totalizeExpenses(attributions.filter((entry) => entry.dayId === null)) });
+  return value;
+};
+/** Passes a payload through the real client validator, as the screen would receive it over HTTP. */
+export const throughClientValidator = async (value: TripItineraryResponse) =>
+  createTripItineraryApi({ get: async () => ({ ok: true, value: { itinerary: value } }) } as never).get(value.tripId);

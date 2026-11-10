@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost, settleItinerary, throughClientValidator } from "./itinerary-test-fixture.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
 
@@ -134,17 +134,27 @@ describe("itinerary screen expenses", () => {
       linkPost(value.posts[0], { activityId: itineraryId(8) }); value.activities[0].postIds = [itineraryId(10)];
       return value;
     };
+    /** Each state is what the backend returns: summaries and expenses[] recomputed, and accepted by the real client validator. */
+    const settled = async (value: TripItineraryResponse) => {
+      settleItinerary(value);
+      expect(await throughClientValidator(value)).toEqual({ ok: true, value });
+      return value;
+    };
     const reload = async (container: HTMLElement, next: TripItineraryResponse) => {
       await act(async () => roots.splice(0).forEach((root) => root.unmount())); container.remove();
       return render(next);
     };
     it("moves the expense to the new day when the activity is rescheduled to another day", async () => {
-      const value = twoDays();
+      const value = await settled(twoDays());
+      expect(value.expenses[0]).toMatchObject({ source: "activity", dayId: itineraryId(4) });
       const first = await render(value);
       expect(dayAt(first, "2026-09-25").textContent).toContain("ARS 25,50 · 1 gasto");
       expect(dayAt(first, "2026-09-26").textContent).toContain("Sin gastos registrados.");
       const moved = twoDays();
       moved.activities[0].dayId = itineraryId(30); moved.activities[0].scheduledAt = "2026-09-26T12:00:00.000Z";
+      await settled(moved);
+      expect(moved.expenses[0]).toMatchObject({ source: "activity", dayId: itineraryId(30) });
+      expect(moved.days.map((day) => day.expenseSummary.expenseCount)).toEqual([0, 0, 0, 1]);
       const after = await reload(first, moved);
       expect(dayAt(after, "2026-09-26").textContent).toContain("ARS 25,50 · 1 gasto");
       expect(dayAt(after, "2026-09-25").textContent).toContain("Sin gastos registrados.");
@@ -153,11 +163,16 @@ describe("itinerary screen expenses", () => {
       expect(outsideSection(after)).toBeNull();
     });
     it("lists the expense among those outside the itinerary, once, when the post stays outside every day after removal", async () => {
-      const value = twoDays();
-      const first = await render(value);
+      const first = await render(await settled(twoDays()));
       expect(button(first, "Ver gastos fuera del itinerario")).toBeUndefined();
+      // Only the linked activity is deleted: the other one stays and the day items no longer mention the deleted one.
       const removed = twoDays();
-      removed.activities = []; linkPost(removed.posts[0], {}); removed.posts[0].createdAt = "2026-10-03T12:00:00.000Z";
+      removed.activities = removed.activities.filter((activity) => activity.id !== itineraryId(8)); linkPost(removed.posts[0], {});
+      removed.posts[0].createdAt = "2026-10-03T12:00:00.000Z";
+      await settled(removed);
+      expect(removed.days[1].items.map((entry) => entry.id)).toEqual([itineraryId(10), itineraryId(9)]);
+      expect(removed.expenses[0]).toMatchObject({ source: "publication", rootActivityId: null, dayId: null });
+      expect(removed.expenseSummary.outsideItinerary.expenseCount).toBe(1);
       const after = await reload(first, removed);
       expect(button(after, "Ver gastos fuera del itinerario (1)")).toBeDefined();
       expect(outsideSection(after)?.querySelectorAll("[data-outside-expense]")).toHaveLength(1);
@@ -167,9 +182,12 @@ describe("itinerary screen expenses", () => {
     it("keeps the expense under the publication day, with no outside shortcut, when the activity is removed", async () => {
       const value = twoDays();
       value.activities[0].dayId = itineraryId(30); value.activities[0].scheduledAt = "2026-09-26T12:00:00.000Z";
-      const first = await render(value);
+      const first = await render(await settled(value));
       expect(dayAt(first, "2026-09-26").textContent).toContain("ARS 25,50 · 1 gasto");
-      const removed = twoDays(); removed.activities = []; linkPost(removed.posts[0], {});
+      const removed = twoDays();
+      removed.activities = removed.activities.filter((activity) => activity.id !== itineraryId(8)); linkPost(removed.posts[0], {});
+      await settled(removed);
+      expect(removed.expenses[0]).toMatchObject({ source: "publication", dayId: itineraryId(4) });
       const after = await reload(first, removed);
       expect(dayAt(after, "2026-09-25").textContent).toContain("ARS 25,50 · 1 gasto");
       expect(dayAt(after, "2026-09-26").textContent).toContain("Sin gastos registrados.");
