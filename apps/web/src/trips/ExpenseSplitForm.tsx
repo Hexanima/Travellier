@@ -99,7 +99,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
   const [payments, setPayments] = useState<PaymentRow[]>(initial.payments);
   const [shares, setShares] = useState<ShareRow[]>(initial.shares);
   const [serverErrors, setServerErrors] = useState<RowErrors>(() => entry?.rowErrors ?? {});
-  const serverLists: ListErrors = entry?.listErrors ?? {};
+  const [serverLists, setServerLists] = useState<ListErrors>(() => entry?.listErrors ?? {});
   const [submitted, setSubmitted] = useState(false);
   const [adding, setAdding] = useState("");
   const [focusRequest, setFocusRequest] = useState<{ key: string; n: number } | null>(() => {
@@ -128,27 +128,28 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
   useEffect(() => { if (!focusRequest && Object.keys(serverLists).length > 0) focusOn("alert"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const focus = (key: string) => setFocusRequest((current) => ({ key, n: (current?.n ?? 0) + 1 }));
   const clearServer = (key: string) => setServerErrors((current) => { if (!(key in current)) return current; const next = { ...current }; delete next[key]; return next; });
+  const clearList = (section: "payments" | "shares") => setServerLists((current) => { if (!(section in current)) return current; const next = { ...current }; delete next[section]; return next; });
   const errorOf = (key: string, section: SectionCheck<unknown>) => serverErrors[key] ?? (submitted ? section.rowErrors[key] : undefined);
 
-  const editPayment = (key: string, change: Partial<PaymentRow>) => { setPayments((rows) => rows.map((row) => row.key === key ? { ...row, ...change } : row)); clearServer(key); };
-  const editShare = (key: string, change: Partial<ShareRow>) => { setShares((rows) => rows.map((row) => row.key === key ? { ...row, ...change } : row)); clearServer(key); };
+  const editPayment = (key: string, change: Partial<PaymentRow>) => { setPayments((rows) => rows.map((row) => row.key === key ? { ...row, ...change } : row)); clearServer(key); clearList("payments"); };
+  const editShare = (key: string, change: Partial<ShareRow>) => { setShares((rows) => rows.map((row) => row.key === key ? { ...row, ...change } : row)); clearServer(key); clearList("shares"); };
   const addPayment = () => {
     if (adding === "") return;
     const key = newRowKey();
     setPayments((rows) => [...rows, { key, userId: adding, unit: "amount", value: "" }]);
-    setAdding(""); focus(key);
+    clearList("payments"); setAdding(""); focus(key);
   };
   const removeRow = (section: "payments" | "shares", key: string) => {
     const list: readonly (PaymentRow | ShareRow)[] = section === "payments" ? payments : shares;
     const index = list.findIndex((row) => row.key === key), neighbour = list[index + 1] ?? list[index - 1];
     if (section === "payments") setPayments((rows) => rows.filter((row) => row.key !== key)); else setShares((rows) => rows.filter((row) => row.key !== key));
-    clearServer(key);
+    clearServer(key); clearList(section);
     // Next row of the same section, else the previous one, else the section itself (its add control or heading).
     if (neighbour) focus(neighbour.key); else focusOn(section === "payments" ? "add-payment" : "shares-title");
   };
   const include = (userId: string) => {
     const index = withoutShare.indexOf(userId), remaining = withoutShare.filter((id) => id !== userId);
-    setShares((rows) => includeMember(rows, userId));
+    setShares((rows) => includeMember(rows, userId)); clearList("shares");
     const next = remaining[index] ?? remaining[index - 1];
     focusOn(next !== undefined ? `include-${next}` : "shares-title");
   };
@@ -235,7 +236,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
         {withoutShare.map((id) => <li key={id}><Button data-focus={`include-${id}`} onClick={() => include(id)}>{`Incluir a ${authorLabel(people, id)}`}</Button></li>)}
       </ul>}
       <button type="button" className="ui-button" aria-disabled={withoutShare.length === 0 || undefined}
-        onClick={() => { if (withoutShare.length > 0) setShares((rows) => includeAll(rows, currentIds)); }}>Incluir a todos</button>
+        onClick={() => { if (withoutShare.length > 0) { setShares((rows) => includeAll(rows, currentIds)); clearList("shares"); } }}>Incluir a todos</button>
       {summary(check.shares, serverLists.shares)}
       {check.incomplete.shares?.map((text) => <p key={text} className="itinerary-secondary">{text}</p>)}
     </section>

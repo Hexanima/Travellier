@@ -38,6 +38,7 @@ function Probe() {
     <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true,
       rowErrors: { [seed.extras.split.shares?.[0]?.key ?? "x"]: "Esta persona no es válida." }, listErrors: {} } })}>ir con errores</button>
     <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true, rowErrors: {}, listErrors: { payments: "x" } } })}>ir con error de lista</button>
+    <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true, rowErrors: {}, listErrors: { payments: "Error de pagos.", shares: "Error de reparto." } } })}>ir con errores de listas</button>
   </div>;
 }
 type Probed = { draft: PostDraft | null; state: { focus?: string } | null; path: string; returned: { focus?: string } | null };
@@ -289,6 +290,48 @@ describe("ExpenseSplitForm", () => {
     const { container } = await open({ action: "ir con error de lista" });
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
     expect(document.activeElement).toBe(container.querySelector('[role="alert"]'));
+  });
+
+  describe("list errors from the server", () => {
+    const stored = () => view({ payments: [{ userId: me, unit: "amount", value: 10 }], shares: [{ userId: me, unit: "amount", value: 10 }, { userId: beto, unit: "remainder", value: null }] });
+    const openLists = () => open({ path: editPath, saved: stored(), draft: seeded(null), action: "ir con errores de listas" });
+    const alertsIn = (container: HTMLElement) => container.querySelectorAll('[role="alert"]');
+
+    it("editing a payment clears the payments notice, keeps the shares one and a single alert", async () => {
+      const { container } = await openLists();
+      expect(container.textContent).toContain("Error de pagos.");
+      expect(container.textContent).toContain("Error de reparto.");
+      await type(valueOf(rows(container, "payments")[0]!), "8");
+      expect(container.textContent).not.toContain("Error de pagos.");
+      expect(container.textContent).toContain("Error de reparto.");
+      expect(alertsIn(container)).toHaveLength(1);
+    });
+
+    it("the general alert goes away once no server error is left, and the summary no longer contradicts", async () => {
+      const { container } = await openLists();
+      await type(valueOf(rows(container, "payments")[0]!), "8");
+      await type(valueOf(rows(container, "shares")[0]!), "8");
+      expect(alertsIn(container)).toHaveLength(0);
+      expect(container.textContent).not.toContain("Error de");
+    });
+
+    it("removing a payment or including a member also clears the notice of its section", async () => {
+      const { container } = await openLists();
+      await click(rows(container, "payments")[0]!.querySelector("button"));
+      expect(container.textContent).not.toContain("Error de pagos.");
+      expect(container.textContent).toContain("Error de reparto.");
+      await click(button(container, "Incluir a Caro"));
+      expect(container.textContent).not.toContain("Error de reparto.");
+      expect(alertsIn(container)).toHaveLength(0);
+    });
+
+    it("adding a payment clears the payments notice", async () => {
+      const { container } = await openLists();
+      await choose(container.querySelector('select[name="payments-add"]') as HTMLSelectElement, beto);
+      await click(button(container, "Agregar pago"));
+      expect(container.textContent).not.toContain("Error de pagos.");
+      expect(container.textContent).toContain("Error de reparto.");
+    });
   });
 
   it("an expense detail that could not be read shows the retry state, and recovers", async () => {
