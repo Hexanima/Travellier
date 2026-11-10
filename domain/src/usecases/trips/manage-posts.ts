@@ -2,7 +2,7 @@ import { createActivity, type Activity } from "../../entities/activity.js";
 import type { ActivityConflict } from "../../entities/activity-conflict.js";
 import type { ActivityParticipation } from "../../entities/activity-participation.js";
 import { resolveActivityDayId } from "../../entities/activity-schedule.js";
-import { applyPostExpense, parsePostExpenseInput, type PostExpense, type PostExpensePlan } from "../../entities/post-expense.js";
+import { applyPostExpense, describePostExpense, parsePostExpenseInput, type PostExpenseView, type PostExpensePlan } from "../../entities/post-expense.js";
 import type { PostPhotoRef } from "../../entities/post-photo.js";
 import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
@@ -14,7 +14,7 @@ import type { TripPostPort, TripPostReadScope, TripPostScope } from "../../ports
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
-import type { ObjectId } from "../../value-objects/object-id.js";
+import { createObjectId, type ObjectId } from "../../value-objects/object-id.js";
 import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
 import { planPostPhotos, registerPostPhotos, verifyOptionalPhotoUploads } from "./manage-post-photos.js";
 
@@ -42,7 +42,7 @@ interface PhotoReferences { photos?: unknown }
 interface ExpenseReference { expense?: unknown }
 export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields> & PhotoReferences & ExpenseReference;
 /** The post; when the save carried `photos` it also lists the photos of the post (`id`, `order`), and with `expense` the saved expense. */
-export type UpdateTripPostResult = Post & { photos?: PostPhotoRef[]; expense?: PostExpense };
+export type UpdateTripPostResult = Post & { photos?: PostPhotoRef[]; expense?: PostExpenseView };
 export type LinkTripPostToNewActivityPayload = PostDetailPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & ExpenseReference & {
   dayId?: ObjectId;
   newActivity: NewPostActivity;
@@ -54,10 +54,10 @@ export interface PostConfirmationRequired {
   activity: { scheduledAt: Date; durationMinutes: number | null };
 }
 export type CreateTripPostResult =
-  | { outcome: "created"; post: Post; activity?: Activity; participation?: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpense }
+  | { outcome: "created"; post: Post; activity?: Activity; participation?: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpenseView }
   | PostConfirmationRequired;
 export type LinkTripPostToNewActivityResult =
-  | { outcome: "linked"; post: Post; activity: Activity; participation: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpense }
+  | { outcome: "linked"; post: Post; activity: Activity; participation: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpenseView }
   | PostConfirmationRequired;
 export type PostSummary = Pick<Post, "id" | "authorId" | "createdAt" | "description">;
 export interface TripPostChainResult {
@@ -67,6 +67,8 @@ export interface TripPostChainResult {
   /** Activity of the highest ancestor; null when the root has none or stored data is inconsistent. */
   rootActivityId: ObjectId | null;
 }
+/** An expense plan with the current members among the users it names (to derive `formerMemberIds` after the write). */
+type PlannedExpense = PostExpensePlan & { memberIds: ObjectId[] };
 interface Dependencies { posts: TripPostPort }
 /** `storage` is only needed (and used) when a save carries `photos`. */
 interface PhotoDependencies { storage?: ObjectStoragePort }
@@ -159,19 +161,29 @@ const loadAncestors = async (scope: TripPostReadScope, tripId: ObjectId, startId
  * (1:1 by `postId`) and decides insert or update. No `expense` means nothing to do. Writes nothing.
  */
 const planPostExpense = async (scope: TripPostScope, input: { tripId: ObjectId; postId: ObjectId; expense: unknown;
-  createId: () => ObjectId; createdAt: Date }): AsyncResult<PostExpensePlan | undefined> => {
+  createId: () => ObjectId; createdAt: Date }): AsyncResult<PlannedExpense | undefined> => {
   if (input.expense === undefined) return ok(undefined);
   const parsed = parsePostExpenseInput(input.expense);
   if (!parsed.ok) return parsed;
   const existing = await scope.findExpense(input.postId);
   if (!existing.ok) return existing;
-  return applyPostExpense({ existing: existing.value, input: parsed.value, tripId: input.tripId, postId: input.postId,
-    id: existing.value?.id ?? input.createId(), createdAt: input.createdAt });
+  // Membership of every user the expense will name (sent now or already stored), read in the same snapshot and under the Trip lock
+  // as `authorize`: an expulsion and this save are serialized.
+  const referenced = new Set<ObjectId>();
+  for (const row of [...(parsed.value.payments ?? []), ...(parsed.value.shares ?? []), ...(existing.value?.payments ?? []), ...(existing.value?.shares ?? [])]) {
+    const userId = typeof row?.userId === "string" ? createObjectId(row.userId) : undefined;
+    if (userId?.ok) referenced.add(userId.value);
+  }
+  const members = referenced.size === 0 ? ok([] as ObjectId[]) : await scope.listMemberUserIds([...referenced]);
+  if (!members.ok) return members;
+  const plan = applyPostExpense({ existing: existing.value, input: parsed.value, tripId: input.tripId, postId: input.postId,
+    id: existing.value?.id ?? input.createId(), createdAt: input.createdAt, memberIds: members.value });
+  return plan.ok ? ok({ ...plan.value, memberIds: members.value }) : plan;
 };
-/** Writes the planned expense; call it after the post itself is stored in the same transaction. */
-const registerPostExpense = async (scope: TripPostScope, plan: PostExpensePlan): AsyncResult<PostExpense> => {
+/** Writes the planned expense; call it after the post itself is stored in the same transaction. Answers the expense with its derived completeness. */
+const registerPostExpense = async (scope: TripPostScope, plan: PlannedExpense): AsyncResult<PostExpenseView> => {
   const written = plan.mode === "insert" ? await scope.insertExpense(plan.expense) : await scope.updateExpenseFields(plan.expense, plan.changed);
-  return written.ok ? ok(plan.expense) : written;
+  return written.ok ? ok(describePostExpense(plan.expense, plan.memberIds)) : written;
 };
 
 const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",

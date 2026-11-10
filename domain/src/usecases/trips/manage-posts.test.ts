@@ -19,12 +19,12 @@ const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, au
 
 describe("Trip post use cases", () => {
   let role: TripRole | undefined, votingEnabled: boolean, tripExists: boolean;
-  let expenseRecords: PostExpense[];
+  let expenseRecords: PostExpense[], members: ObjectId[];
   let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number;
   beforeEach(() => {
-    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; expenseRecords = []; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
+    role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; expenseRecords = []; members = [actor, id(41), id(42)]; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
       findMemberRole: async () => domain.ok(role),
@@ -41,6 +41,7 @@ describe("Trip post use cases", () => {
       findPhoto: async (id) => domain.ok(photoRecords.find((p) => p.id === id)),
       findPhotosByKeys: async (keys) => domain.ok(photoRecords.filter((p) => keys.includes(p.s3Key))),
       insertPhotos: async (photos) => { photoRecords.push(...photos); return domain.ok(undefined); },
+      listMemberUserIds: async (userIds) => domain.ok(userIds.filter((userId) => members.includes(userId))),
       findExpense: async (id) => domain.ok(expenseRecords.find((e) => e.postId === id)),
       insertExpense: async (expense) => { expenseRecords.push(expense); return domain.ok(undefined); },
       updateExpenseFields: async (expense, fields) => {
@@ -799,7 +800,9 @@ describe("Trip post use cases", () => {
         const full = () => structuredClone({ ...state(), expenseRecords });
         const empty = { records: [], activities: [], participations: [], photoRecords: [], expenseRecords: [] };
         const stored = (fields: Record<string, unknown> = {}): PostExpense => ({ id: id(70), tripId, postId, totalAmount: 100, currency: "USD",
-          breakdown: "viejo", createdAt: new Date("2026-01-01T00:00:00Z"), ...fields }) as PostExpense;
+          breakdown: "viejo", payments: [], shares: [], createdAt: new Date("2026-01-01T00:00:00Z"), ...fields }) as PostExpense;
+        // Derived answer fields (T80): a bare expense has nothing agreed yet.
+        const bare = { payments: [], shares: [], completeness: { status: "incomplete", reasons: ["missing_payments", "missing_shares"] }, formerMemberIds: [] };
         const writers = () => (["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation"] as const)
           .map((method) => vi.spyOn(scope, method));
         const calls = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
@@ -807,8 +810,8 @@ describe("Trip post use cases", () => {
         it("creates the post and its expense with the server id and the post publication time", async () => {
           const result = await createWith({ description: "Cena", expense });
           expect(result).toEqual(domain.ok({ outcome: "created", post: seedPost({ id: id(20), authorId: actor, description: "Cena", mapsUrl: null }),
-            expense: { id: id(21), tripId, postId: id(20), ...expense, createdAt } }));
-          expect(expenseRecords).toEqual([{ id: id(21), tripId, postId: id(20), ...expense, createdAt }]);
+            expense: { id: id(21), tripId, postId: id(20), ...expense, ...bare, createdAt } }));
+          expect(expenseRecords).toEqual([{ id: id(21), tripId, postId: id(20), ...expense, payments: [], shares: [], createdAt }]);
         });
 
         it("writes the expense after the post, and answers exactly as before without an expense", async () => {
@@ -855,10 +858,10 @@ describe("Trip post use cases", () => {
           records = [seedPost({ description: "Intacta" })];
           const replace = vi.spyOn(scope, "replace");
           expect(await updateWith({ expense })).toEqual(domain.ok({ ...seedPost({ description: "Intacta" }),
-            expense: { id: id(20), tripId, postId, ...expense, createdAt } }));
+            expense: { id: id(20), tripId, postId, ...expense, ...bare, createdAt } }));
           expect(replace).not.toHaveBeenCalled();
           expect(records).toEqual([seedPost({ description: "Intacta" })]);
-          expect(expenseRecords).toEqual([{ id: id(20), tripId, postId, ...expense, createdAt }]);
+          expect(expenseRecords).toEqual([{ id: id(20), tripId, postId, ...expense, payments: [], shares: [], createdAt }]);
         });
 
         it("links the post to a new activity and saves its expense together", async () => {
@@ -870,7 +873,7 @@ describe("Trip post use cases", () => {
         });
 
         it("completes a legacy expense by $set of only the present fields and never inserts a second record", async () => {
-          const legacy = { ...stored({ currency: null, breakdown: null }), paidBy: id(33), payments: [{ userId: id(33) }] } as PostExpense;
+          const legacy = { ...stored({ currency: null, breakdown: null }), paidBy: id(33), payments: [{ userId: id(33), unit: "percent", value: 100 }] } as PostExpense;
           expenseRecords = [legacy]; records = [seedPost()];
           const insertExpense = vi.spyOn(scope, "insertExpense"), update = vi.spyOn(scope, "updateExpenseFields");
           const result = await updateWith({ expense: { currency: "EUR" } });
@@ -904,8 +907,8 @@ describe("Trip post use cases", () => {
         it.each([
           ["a non-positive total", { totalAmount: 0, currency: "ARS" }, "expense.totalAmount/invalid"],
           ["a currency outside the catalog", { totalAmount: 5, currency: "BRL" }, "expense.currency/invalid"],
-          ["payments", { totalAmount: 5, currency: "ARS", payments: [] }, "expense.payments/unsupported"],
-          ["shares", { totalAmount: 5, currency: "ARS", shares: [] }, "expense.shares/unsupported"],
+          ["completeness", { totalAmount: 5, currency: "ARS", completeness: {} }, "expense.completeness/unsupported"],
+          ["null payments", { totalAmount: 5, currency: "ARS", payments: null }, "expense.payments/invalid"],
           ["paidBy", { totalAmount: 5, currency: "ARS", paidBy: id(2) }, "expense.paidBy/unsupported"],
           ["null", null, "expense/invalid"], ["an empty object", {}, "expense/invalid"], ["a list", [], "expense/invalid"], ["text", "10", "expense/invalid"],
         ])("rejects %s and writes nothing on create, link or update", async (_, bad, expected) => {
@@ -964,6 +967,117 @@ describe("Trip post use cases", () => {
             role = memberRole; expenseRecords = [stored()]; records = [seedPost({ authorId: id(99) })];
             expect(await updateWith({ expense: { totalAmount: 7 } })).toMatchObject({ ok: true, value: { expense: { totalAmount: 7 } } });
           }
+        });
+      });
+
+      describe("payments and shares of the expense (T80)", () => {
+        const [ana, beto, ghost] = [id(41), id(42), id(43)];
+        const agreed = { totalAmount: 100, currency: "ARS", payments: [{ userId: ana, unit: "percent", value: 100 }],
+          shares: [{ userId: ana, unit: "percent", value: 50 }, { userId: beto, unit: "remainder", value: null }] };
+        const full = () => structuredClone({ ...state(), expenseRecords });
+        const empty = { records: [], activities: [], participations: [], photoRecords: [], expenseRecords: [] };
+        const stored = (fields: Record<string, unknown> = {}): PostExpense => ({ id: id(70), tripId, postId, totalAmount: 100, currency: "ARS",
+          breakdown: null, payments: [], shares: [], createdAt: new Date("2026-01-01T00:00:00Z"), ...fields }) as PostExpense;
+        const writers = () => (["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation"] as const)
+          .map((method) => vi.spyOn(scope, method));
+        const calls = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+
+        it("persists the agreed rows and answers them with completeness and no former members, without persisting the completeness", async () => {
+          const result = await createWith({ expense: agreed });
+          expect(result).toMatchObject({ ok: true, value: { expense: { payments: agreed.payments, shares: agreed.shares,
+            completeness: { status: "complete", reasons: [] }, formerMemberIds: [] } } });
+          expect(expenseRecords).toEqual([{ id: id(21), tripId, postId: id(20), totalAmount: 100, currency: "ARS", breakdown: null,
+            payments: agreed.payments, shares: agreed.shares, createdAt }]);
+          expect(expenseRecords[0]).not.toHaveProperty("completeness");
+          expect(expenseRecords[0]).not.toHaveProperty("formerMemberIds");
+        });
+
+        it("asks the membership once for the distinct users referenced, in the same transaction scope", async () => {
+          const listMembers = vi.spyOn(scope, "listMemberUserIds");
+          expect(await createWith({ expense: { ...agreed, payments: [{ userId: ana.toUpperCase(), unit: "percent", value: 100 }] } }))
+            .toMatchObject({ ok: true });
+          expect(listMembers).toHaveBeenCalledTimes(1);
+          expect([...listMembers.mock.calls[0]![0]].sort()).toEqual([ana, beto]);
+          listMembers.mockClear(); records = [seedPost()];
+          await updateWith({ expense: { totalAmount: 5 } });
+          expect(listMembers).not.toHaveBeenCalled();
+        });
+
+        it("a new row of a non-member answers 422 not_member and writes nothing, with new activity and photos", async () => {
+          uploaded(1); records = [];
+          const spies = writers();
+          const bad = { ...agreed, shares: [{ userId: ana, unit: "remainder", value: null }, { userId: ghost, unit: "excluded", value: null }] };
+          expect(failures(await createWith({ newActivity: withDuration, photos: refs(1), expense: bad }))).toEqual(["expense.shares[1].userId/not_member"]);
+          records = [seedPost()];
+          expect(failures(await linkWith({ photos: refs(1), expense: bad }))).toEqual(["expense.shares[1].userId/not_member"]);
+          expect(failures(await updateWith({ description: "Editado", expense: { totalAmount: 100, currency: "ARS", payments: [{ userId: ghost, unit: "percent", value: 100 }] } })))
+            .toEqual(["expense.payments[0].userId/not_member"]);
+          expect(calls(spies)).toBe(0);
+          expect(full()).toEqual({ ...empty, records: [seedPost()] });
+        });
+
+        it("authorizes before looking at the rows: a non-member of the Trip gets 404, not not_member, and nothing is read or written", async () => {
+          role = undefined; records = [seedPost()];
+          const spies = writers(), listMembers = vi.spyOn(scope, "listMemberUserIds");
+          expect(await updateWith({ expense: { payments: [{ userId: ghost, unit: "percent", value: 100 }] } })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+          expect(listMembers).not.toHaveBeenCalled(); expect(calls(spies)).toBe(0);
+        });
+
+        it("keeps a saved row of a former member, lists them apart and lets the group redistribute by sending the rows without them", async () => {
+          expenseRecords = [stored({ payments: [{ userId: ghost, unit: "percent", value: 100 }], shares: [{ userId: ghost, unit: "amount", value: 30 }] })]; records = [seedPost()];
+          const update = vi.spyOn(scope, "updateExpenseFields");
+          expect(await updateWith({ expense: { shares: [{ userId: ghost, unit: "amount", value: 30 }, { userId: ana, unit: "remainder", value: null }] } }))
+            .toMatchObject({ ok: true, value: { expense: { formerMemberIds: [ghost], completeness: { status: "complete", reasons: [] } } } });
+          expect(update.mock.calls[0]![1]).toEqual(["shares"]);
+          expect(expenseRecords[0]!.payments).toEqual([{ userId: ghost, unit: "percent", value: 100 }]);
+          expect(await updateWith({ expense: { payments: [{ userId: ana, unit: "percent", value: 100 }], shares: [{ userId: ana, unit: "remainder", value: null }] } }))
+            .toMatchObject({ ok: true, value: { expense: { formerMemberIds: [] } } });
+          expect(expenseRecords[0]).toMatchObject({ payments: [{ userId: ana }], shares: [{ userId: ana }] });
+        });
+
+        it("a member that joins later does not alter the saved agreements", async () => {
+          expenseRecords = [stored({ payments: agreed.payments, shares: agreed.shares })]; records = [seedPost()];
+          const before = full(); members.push(id(44));
+          const update = vi.spyOn(scope, "updateExpenseFields");
+          expect(await updateWith({ expense: { breakdown: "x" } })).toMatchObject({ ok: true, value: { expense: { payments: agreed.payments, shares: agreed.shares } } });
+          expect(update.mock.calls[0]![1]).toEqual(["breakdown"]);
+          expect(expenseRecords).toEqual([{ ...before.expenseRecords[0]!, breakdown: "x" }]);
+        });
+
+        it("a draft is never persisted by the server: an expense without shares writes no shares and proposes no payer", async () => {
+          expect(await createWith({ expense: { totalAmount: 100, currency: "ARS" } })).toMatchObject({ ok: true,
+            value: { expense: { payments: [], shares: [], completeness: { status: "incomplete", reasons: ["missing_payments", "missing_shares"] } } } });
+          expect(expenseRecords[0]).toMatchObject({ payments: [], shares: [] });
+          records = [seedPost()]; expenseRecords = [stored({ payments: agreed.payments })];
+          const update = vi.spyOn(scope, "updateExpenseFields");
+          expect(await updateWith({ expense: { payments: [] } })).toMatchObject({ ok: true });
+          expect(update.mock.calls[0]![1]).toEqual(["payments"]);
+          expect(expenseRecords[0]!.shares).toEqual([]);
+        });
+
+        it("reports a legacy payer as incomplete with the missing parts and the former member apart", async () => {
+          expenseRecords = [stored({ currency: null, payments: [{ userId: ghost, unit: "percent", value: 100 }] })]; records = [seedPost()];
+          expect(await updateWith({ expense: { currency: "EUR" } })).toMatchObject({ ok: true, value: { expense: { currency: "EUR", formerMemberIds: [ghost],
+            completeness: { status: "incomplete", reasons: ["missing_shares"] } } } });
+        });
+
+        it("rolls everything back when a write AFTER the expense fails (author participation of the new activity)", async () => {
+          uploaded(1);
+          scope.saveParticipation = async () => domain.err(new domain.UnknownError("failed"));
+          expect(await createWith({ newActivity: withDuration, photos: refs(1), expense: agreed })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          expect(full()).toEqual(empty);
+          records = [seedPost()];
+          expect(await linkWith({ photos: refs(1), expense: agreed })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          expect(full()).toEqual({ ...empty, records: [seedPost()] });
+        });
+
+        it("answers exactly as T79 when the save carries no expense", async () => {
+          const listMembers = vi.spyOn(scope, "listMemberUserIds");
+          const plain = await createWith({ description: "Sin gasto" });
+          expect(plain.ok && Object.keys(plain.value).sort()).toEqual(["outcome", "post"]);
+          records = [seedPost()];
+          expect(await updateWith({ description: "Editado" })).toEqual(domain.ok(seedPost({ description: "Editado" })));
+          expect(listMembers).not.toHaveBeenCalled();
         });
       });
     });

@@ -57,10 +57,12 @@ describe("post expense persistence and transactions (T79)", () => {
     const { post, expense: saved } = await created({ expense });
     const stored = await expenses();
     expect(stored).toHaveLength(1);
-    expect(Object.keys(stored[0]!).sort()).toEqual(["_id", "breakdown", "createdAt", "currency", "postId", "totalAmount", "tripId"]);
-    expect(stored[0]).toEqual({ _id: new ObjectId(saved!.id), postId: new ObjectId(post.id), tripId: f.trip, ...expense, createdAt: post.createdAt });
+    expect(Object.keys(stored[0]!).sort()).toEqual(["_id", "breakdown", "createdAt", "currency", "payments", "postId", "shares", "totalAmount", "tripId"]);
+    expect(stored[0]).toEqual({ _id: new ObjectId(saved!.id), postId: new ObjectId(post.id), tripId: f.trip, ...expense, payments: [], shares: [], createdAt: post.createdAt });
     expect(stored[0]!.createdAt).toBeInstanceOf(Date);
-    expect(saved).toEqual({ id: saved!.id, postId: post.id, tripId: post.tripId, ...expense, createdAt: post.createdAt });
+    expect(saved).toEqual({ id: saved!.id, postId: post.id, tripId: post.tripId, ...expense, payments: [], shares: [], createdAt: post.createdAt,
+      completeness: { status: "incomplete", reasons: ["missing_payments", "missing_shares"] }, formerMemberIds: [] });
+    expect(stored[0]).not.toHaveProperty("completeness");
   });
 
   it("stores a missing breakdown as null and a blank one too", async () => {
@@ -250,6 +252,227 @@ describe("post expense persistence and transactions (T79)", () => {
         .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expense.totalAmount", code: "invalid" }] } });
       expect(await snapshot()).toEqual(before);
     });
+
+    // T80: rows that fail validation or membership must not leave the post, activity, participation, photos or expense behind.
+    it("writes nothing when a new payment row names a non-member, not even the post, activity, participation or photos", async () => {
+      const before = await snapshot(), photo = keyFor(), outsider = new ObjectId().toHexString();
+      expect(await createPost({ newActivity: scheduled("2026-09-25T12:00:00.000Z"), photos: [{ key: photo }],
+        expense: { ...expense, payments: [{ userId: outsider, unit: "percent", value: 100 }] } }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expense.payments[0].userId", code: "not_member" }] } });
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("rolls back the payments and shares inserted with the expense when the author's participation fails AFTER them", async () => {
+      const before = await snapshot();
+      const { expenseWrites, participationFailure } = failAfterExpense("insertOne");
+      const rows = { payments: [{ userId: f.actor.toHexString(), unit: "percent", value: 100 }], shares: [{ userId: f.actor.toHexString(), unit: "remainder", value: null }] };
+      expect(await createPost({ newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense: { ...expense, ...rows } }))
+        .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(expenseWrites).toHaveBeenCalledTimes(1);
+      expect(participationFailure).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect(await expenses()).toEqual([]);
+    });
+
+    it("keeps the stored payments and shares when their $set is rolled back because the author's participation fails AFTER it", async () => {
+      const { post } = await created({ expense }), before = await snapshot();
+      const { expenseWrites, participationFailure } = failAfterExpense("updateOne");
+      const rows = { payments: [{ userId: f.actor.toHexString(), unit: "percent", value: 100 }], shares: [{ userId: f.actor.toHexString(), unit: "remainder", value: null }] };
+      expect(await f.api.linkPostToNewActivity!({ ...f.context(), postId: domainId(new ObjectId(post.id)),
+        newActivity: scheduled("2026-09-25T12:00:00.000Z"), expense: rows })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(expenseWrites).toHaveBeenCalledTimes(1);
+      expect(participationFailure).toHaveBeenCalledTimes(1);
+      expect(await snapshot()).toEqual(before);
+      expect((await expenses())[0]).toMatchObject({ payments: [], shares: [] });
+    });
+  });
+
+  describe("payments and shares (T80)", () => {
+    const hex = (id: ObjectId) => id.toHexString();
+    const spyOnExpenseWrites = () => {
+      const collection = f.db.collection("postExpenses"), original = f.db.collection.bind(f.db);
+      const updates = vi.spyOn(collection, "updateOne"), inserts = vi.spyOn(collection, "insertOne");
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "postExpenses" ? collection : original(key, options));
+      return { updates, inserts };
+    };
+    const agreement = async () => {
+      const [ana, beto, caro, dani] = [await addMember("participant"), await addMember("participant"), await addMember("participant"), await addMember("participant")];
+      return { ana, beto, caro, dani, rows: {
+        payments: [{ userId: hex(ana), unit: "amount", value: 400 }, { userId: hex(ana), unit: "amount", value: 100 }, { userId: hex(beto), unit: "percent", value: 50 }],
+        shares: [{ userId: hex(ana), unit: "amount", value: 100 }, { userId: hex(beto), unit: "percent", value: 20 }, { userId: hex(caro), unit: "remainder", value: null },
+          { userId: hex(dani), unit: "excluded", value: null }] } };
+    };
+
+    it("stores several payments and every share unit as ObjectId rows and answers the same rows with a complete agreement", async () => {
+      const { ana, beto, caro, dani, rows } = await agreement();
+      const { expense: saved } = await created({ expense: { totalAmount: 1000, currency: "ARS", ...rows } });
+      expect(await expenses()).toMatchObject([{ payments: [{ userId: ana, unit: "amount", value: 400 }, { userId: ana, unit: "amount", value: 100 },
+        { userId: beto, unit: "percent", value: 50 }], shares: [{ userId: ana, unit: "amount", value: 100 }, { userId: beto, unit: "percent", value: 20 },
+        { userId: caro, unit: "remainder", value: null }, { userId: dani, unit: "excluded", value: null }] }]);
+      const stored = (await expenses())[0]!;
+      for (const row of [...stored.payments, ...stored.shares]) expect(row.userId).toBeInstanceOf(ObjectId);
+      expect(saved).toMatchObject({ payments: rows.payments, shares: rows.shares, completeness: { status: "complete", reasons: [] }, formerMemberIds: [] });
+      expect(stored).not.toHaveProperty("completeness");
+    });
+
+    it("saves an incomplete agreement and names what is missing, rejecting only the invalid or the excess", async () => {
+      const { ana } = await agreement();
+      const { post } = await created();
+      const { expense: saved } = await edited(post.id, { expense: { ...expense, payments: [{ userId: hex(ana), unit: "amount", value: 10 }] } });
+      expect(saved).toMatchObject({ completeness: { status: "incomplete", reasons: ["payments_not_covering_total", "missing_shares"] } });
+      const before = await snapshot();
+      expect(await updatePost(post.id, { expense: { payments: [{ userId: hex(ana), unit: "amount", value: 99999 }] } }))
+        .toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expense.payments", code: "exceeds_total" }] } });
+      expect(await snapshot()).toEqual(before);
+    });
+
+    it("$set of one list keeps the other list, paidBy and createdAt, and writes no shares nobody sent", async () => {
+      const { ana, beto } = await agreement();
+      const { post } = await created({ expense: { ...expense, payments: [{ userId: hex(ana), unit: "percent", value: 100 }],
+        shares: [{ userId: hex(beto), unit: "remainder", value: null }] } });
+      const paidBy = new ObjectId();
+      await f.db.collection("postExpenses").updateOne({ postId: new ObjectId(post.id) }, { $set: { paidBy } });
+      const before = (await expenses())[0]!;
+      const writes = spyOnExpenseWrites();
+      await edited(post.id, { expense: { payments: [{ userId: hex(beto), unit: "percent", value: 100 }] } });
+      expect(writes.updates).toHaveBeenCalledTimes(1);
+      expect(writes.updates.mock.calls[0]![1]).toEqual({ $set: { payments: [{ userId: beto, unit: "percent", value: 100 }] } });
+      expect((await expenses())[0]).toEqual({ ...before, payments: [{ userId: beto, unit: "percent", value: 100 }] });
+      expect((await expenses())[0]).toMatchObject({ paidBy, createdAt: before.createdAt, shares: before.shares });
+    });
+
+    it("an expense without shares writes empty lists on insert and never proposes a payer or a split", async () => {
+      await agreement();
+      const writes = spyOnExpenseWrites();
+      const { expense: saved } = await created({ expense });
+      expect(writes.inserts.mock.calls[0]![0]).toMatchObject({ payments: [], shares: [] });
+      expect(saved).toMatchObject({ payments: [], shares: [], completeness: { status: "incomplete" } });
+      expect(await expenses()).toMatchObject([{ payments: [], shares: [] }]);
+    });
+
+    it("null and non-list payments answer 422 and an explicit empty list clears the stored one", async () => {
+      const { ana } = await agreement();
+      const { post } = await created({ expense: { ...expense, payments: [{ userId: hex(ana), unit: "percent", value: 100 }] } });
+      const before = await snapshot();
+      for (const bad of [null, "x", {}]) {
+        expect(await updatePost(post.id, { expense: { payments: bad } })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expense.payments", code: "invalid" }] } });
+      }
+      expect(await snapshot()).toEqual(before);
+      expect((await edited(post.id, { expense: { payments: [] } })).expense).toMatchObject({ payments: [] });
+      expect(await expenses()).toMatchObject([{ payments: [] }]);
+    });
+
+    it.each([["register", "balance"], ["balance", "register"]] as const)("a Trip changing from %s to %s keeps and accepts payments and shares", async (from, to) => {
+      const { ana, beto, rows } = await agreement();
+      await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { expenseMode: from } });
+      const { post } = await created({ expense: { totalAmount: 1000, currency: "ARS", ...rows } });
+      await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { expenseMode: to } });
+      const stored = (await expenses())[0]!;
+      expect(stored.payments).toHaveLength(3); expect(stored.shares).toHaveLength(4);
+      const after = await edited(post.id, { expense: { shares: [{ userId: hex(ana), unit: "remainder", value: null }, { userId: hex(beto), unit: "excluded", value: null }] } });
+      expect(after.expense).toMatchObject({ payments: rows.payments });
+      await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { expenseMode: from } });
+      expect((await expenses())[0]!.payments).toEqual(stored.payments);
+    });
+
+    it("a total change keeps fixed amounts as amounts and percentages as percentages; an excess answers 422 until rows are resent", async () => {
+      const { ana, beto } = await agreement();
+      const { post } = await created({ expense: { totalAmount: 1000, currency: "ARS", payments: [{ userId: hex(ana), unit: "amount", value: 400 },
+        { userId: hex(beto), unit: "percent", value: 60 }] } });
+      await edited(post.id, { expense: { totalAmount: 2000 } });
+      expect((await expenses())[0]).toMatchObject({ totalAmount: 2000, payments: [{ userId: ana, unit: "amount", value: 400 }, { userId: beto, unit: "percent", value: 60 }] });
+      const before = await snapshot();
+      expect(await updatePost(post.id, { expense: { totalAmount: 300 } })).toMatchObject({ ok: false,
+        error: { tag: "ValidationError", issues: [{ field: "expense.payments", code: "exceeds_total" }] } });
+      expect(await snapshot()).toEqual(before);
+      expect(await updatePost(post.id, { expense: { totalAmount: 300, payments: [{ userId: hex(ana), unit: "amount", value: 100 }] } })).toMatchObject({ ok: true });
+    });
+
+    describe("former members", () => {
+      const formerMember = async (how: "expelled" | "left") => {
+        const { ana, beto } = await agreement();
+        const { post } = await created({ expense: { totalAmount: 100, currency: "ARS", payments: [{ userId: hex(ana), unit: "percent", value: 100 }],
+          shares: [{ userId: hex(ana), unit: "amount", value: 30 }, { userId: hex(beto), unit: "remainder", value: null }] } });
+        if (how === "expelled") {
+          const admin = await addMember("admin");
+          const expelled = await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(ana) });
+          expect(expelled.ok).toBe(true);
+        } else await f.db.collection("tripMembers").deleteOne({ tripId: f.trip, userId: ana });
+        expect(await f.db.collection("tripMembers").countDocuments({ tripId: f.trip, userId: ana })).toBe(0);
+        return { ana, beto, post };
+      };
+
+      it.each(["expelled", "left"] as const)("keeps the payment and share of a user who %s, lists them as a former member and keeps the expense readable", async (how) => {
+        const { ana, post } = await formerMember(how);
+        const { expense: saved } = await edited(post.id, { expense: { breakdown: "cena" } });
+        expect(saved).toMatchObject({ breakdown: "cena", formerMemberIds: [hex(ana)], payments: [{ userId: hex(ana), unit: "percent", value: 100 }],
+          shares: [{ userId: hex(ana), unit: "amount", value: 30 }, { unit: "remainder" }], completeness: { status: "complete", reasons: [] } });
+        expect((await expenses())[0]).toMatchObject({ payments: [{ userId: ana }], shares: [{ userId: ana, value: 30 }, {}] });
+      });
+
+      it("accepts resending the rows of the former member as returned, and lets the group redistribute without them; a NEW row of theirs is refused", async () => {
+        const { ana, beto, post } = await formerMember("expelled");
+        const resent = (await edited(post.id, { expense: { totalAmount: 100 } })).expense!;
+        expect(await updatePost(post.id, { expense: { payments: resent.payments, shares: resent.shares } })).toMatchObject({ ok: true });
+        const before = await snapshot();
+        expect(await updatePost(post.id, { expense: { shares: [{ userId: hex(beto), unit: "remainder", value: null }, { userId: hex(new ObjectId()), unit: "excluded", value: null }] } }))
+          .toMatchObject({ ok: false, error: { issues: [{ field: "expense.shares[1].userId", code: "not_member" }] } });
+        expect(await snapshot()).toEqual(before);
+        const redistributed = await edited(post.id, { expense: { payments: [{ userId: hex(beto), unit: "percent", value: 100 }], shares: [{ userId: hex(beto), unit: "remainder", value: null }] } });
+        expect(redistributed.expense).toMatchObject({ formerMemberIds: [], completeness: { status: "complete" } });
+        expect(JSON.stringify(await expenses())).not.toContain(hex(ana));
+      });
+
+      it("a member who joins later does not change the stored agreements and a new row for them is an explicit edit", async () => {
+        const { ana, post } = await formerMember("left");
+        const before = (await expenses())[0]!;
+        const newcomer = await addMember("participant");
+        expect((await expenses())[0]).toEqual(before);
+        const { expense: saved } = await edited(post.id, { expense: { breakdown: "x" } });
+        expect(saved).toMatchObject({ payments: [{ userId: hex(ana) }], formerMemberIds: [hex(ana)] });
+        expect((await expenses())[0]).toEqual({ ...before, breakdown: "x" });
+        const included = await edited(post.id, { expense: { shares: [{ userId: hex(newcomer), unit: "remainder", value: null }, { userId: hex(ana), unit: "amount", value: 30 }] } });
+        expect(included.expense).toMatchObject({ shares: [{ userId: hex(newcomer) }, { userId: hex(ana) }] });
+      });
+    });
+
+    describe("legacy paidBy", () => {
+      const legacyDocument = async (post: { id: string }, fields: object = {}) => {
+        const paidBy = new ObjectId(), legacy = { _id: new ObjectId(), tripId: f.trip, postId: new ObjectId(post.id), totalAmount: 100, paidBy,
+          createdAt: new Date("2026-01-01T00:00:00.000Z"), ...fields };
+        await f.db.collection("postExpenses").insertOne(legacy);
+        return legacy;
+      };
+
+      it("reads the legacy payer as a payment of 100 percent without writing anything, incomplete and with the payer as former member", async () => {
+        const { post } = await created();
+        const legacy = await legacyDocument(post);
+        const writes = spyOnExpenseWrites();
+        const { expense: saved } = await edited(post.id, { expense: { currency: "ARS" } });
+        expect(saved).toMatchObject({ currency: "ARS", payments: [{ userId: hex(legacy.paidBy), unit: "percent", value: 100 }], shares: [],
+          formerMemberIds: [hex(legacy.paidBy)], completeness: { status: "incomplete", reasons: ["missing_shares"] } });
+        expect(writes.updates.mock.calls[0]![1]).toEqual({ $set: { currency: "ARS" } });
+        expect((await expenses())[0]).toEqual({ ...legacy, currency: "ARS" });
+      });
+
+      it("an explicit empty payments list is not adapted again from paidBy, nor does a later save resurrect it", async () => {
+        const { post } = await created();
+        const legacy = await legacyDocument(post, { currency: "ARS" });
+        expect((await edited(post.id, { expense: { payments: [] } })).expense).toMatchObject({ payments: [] });
+        expect((await expenses())[0]).toMatchObject({ paidBy: legacy.paidBy, payments: [] });
+        expect((await edited(post.id, { expense: { breakdown: "otra vez" } })).expense).toMatchObject({ payments: [], formerMemberIds: [] });
+        expect((await expenses())[0]).toMatchObject({ payments: [] });
+      });
+
+      it("a null or absent paidBy gives no payment and a stored payments list wins over paidBy", async () => {
+        const { post } = await created();
+        const legacy = await legacyDocument(post, { paidBy: null, currency: "ARS" });
+        expect((await edited(post.id, { expense: { breakdown: "x" } })).expense).toMatchObject({ payments: [], completeness: { reasons: ["missing_payments", "missing_shares"] } });
+        const ana = await addMember("participant");
+        await f.db.collection("postExpenses").updateOne({ _id: legacy._id }, { $set: { paidBy: new ObjectId(), payments: [{ userId: ana, unit: "amount", value: 100 }] } });
+        expect((await edited(post.id, { expense: { breakdown: "y" } })).expense).toMatchObject({ payments: [{ userId: hex(ana), unit: "amount", value: 100 }], formerMemberIds: [] });
+      });
+    });
   });
 
   // Deterministic ordering: the first call of `method` on `name` runs for real and then stays paused (its transaction
@@ -353,5 +576,67 @@ describe("post expense persistence and transactions (T79)", () => {
     const stored = await expenses();
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ totalAmount: 10, currency: "ARS", breakdown: "segunda" });
+  });
+
+  // T80: the membership of the referenced users is read under the same Trip lock as the save, so an expulsion and a save are serialized.
+  const expelUser = (admin: ObjectId, target: ObjectId) => f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(target) });
+
+  concurrent("an expulsion that wins the lock makes a save that names the expelled user as a NEW row fail with not_member, writing nothing", async () => {
+    const admin = await addMember("admin"), target = await addMember("participant");
+    const paused = pauseAfterFirst("trips", "updateOne");
+    const expelling = launch(expelUser(admin, target));
+    let saving!: ReturnType<typeof createPost>;
+    try {
+      await paused.reached;
+      saving = launch(createPost({ expense: { ...expense, payments: [{ userId: target.toHexString(), unit: "percent", value: 100 }] } })); const save = track(saving);
+      await pause();
+      expect(save.settled, "save finished while the expulsion transaction was open").toBe(false);
+    } finally { paused.release(); }
+    const [expelled, saved] = await Promise.all([expelling, saving]);
+    expect(expelled.ok).toBe(true);
+    expect(saved).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "expense.payments[0].userId", code: "not_member" }] } });
+    expect(await expenses()).toEqual([]);
+    expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+    expect(await f.db.collection("tripMembers").countDocuments({ userId: target })).toBe(0);
+  });
+
+  concurrent("a save that wins the lock keeps the row of the user, and the expulsion that follows makes them a former member", async () => {
+    const admin = await addMember("admin"), target = await addMember("participant");
+    const paused = pauseAfterFirst("postExpenses", "insertOne");
+    const saving = launch(createPost({ expense: { ...expense, payments: [{ userId: target.toHexString(), unit: "percent", value: 100 }] } }));
+    let expelling!: ReturnType<typeof expelUser>;
+    try {
+      await paused.reached;
+      expelling = launch(expelUser(admin, target)); const expulsion = track(expelling);
+      await pause();
+      expect(expulsion.settled, "expulsion finished while the save transaction was open").toBe(false);
+    } finally { paused.release(); }
+    const [saved, expelled] = await Promise.all([saving, expelling]);
+    expect(saved.ok).toBe(true);
+    expect(expelled.ok).toBe(true);
+    expect(await expenses()).toMatchObject([{ payments: [{ userId: target, unit: "percent", value: 100 }] }]);
+    if (!saved.ok || saved.value.outcome !== "created") throw new Error("expected created");
+    expect(saved.value.expense).toMatchObject({ formerMemberIds: [] });
+    const later = await edited(saved.value.post.id, { expense: { breakdown: "despues" } });
+    expect(later.expense).toMatchObject({ formerMemberIds: [target.toHexString()], payments: [{ userId: target.toHexString() }] });
+  });
+
+  concurrent("serializes two concurrent PATCH of payments and shares: both lists survive and none is lost", async () => {
+    const ana = await addMember("participant");
+    const { post } = await created({ expense });
+    const paused = pauseAfterFirst("postExpenses", "updateOne");
+    const first = launch(updatePost(post.id, { expense: { payments: [{ userId: ana.toHexString(), unit: "percent", value: 100 }] } }));
+    let second!: ReturnType<typeof updatePost>;
+    try {
+      await paused.reached;
+      second = launch(updatePost(post.id, { expense: { shares: [{ userId: ana.toHexString(), unit: "remainder", value: null }] } })); const rival = track(second);
+      await pause();
+      expect(rival.settled, "second PATCH finished while the first transaction was open").toBe(false);
+    } finally { paused.release(); }
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.ok).toBe(true);
+    expect(b.ok, JSON.stringify(b)).toBe(true);
+    expect(await expenses()).toMatchObject([{ payments: [{ userId: ana, unit: "percent", value: 100 }], shares: [{ userId: ana, unit: "remainder", value: null }] }]);
+    if (b.ok) expect(b.value.expense).toMatchObject({ completeness: { status: "complete", reasons: [] } });
   });
 });

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { auditMongoContracts } from "./contract-audit.js";
+import { migrateMongoSchema } from "./migrations.js";
 import { legacyIds, seedVersion3Fixture, snapshotDocuments } from "../../../test/legacy-contract-fixture.js";
 
 let server: MongoMemoryServer;
@@ -53,6 +54,20 @@ describe("read-only approved contract audit", () => {
     expect(report.findings.some(({ documentId }) => documentId.equals(legacyIds.completeExpense))).toBe(false);
   });
 
+  it("after migration 0006 the adapted payer is no longer a legacy paidBy and the expense stays incomplete for currency and shares only", async () => {
+    await seedVersion3Fixture(database);
+    await migrateMongoSchema(database);
+    const report = await auditMongoContracts(database);
+    expect(report.findings.filter(({ code }) => code === "expense_legacy_paid_by")).toEqual([]);
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: "expense_incomplete", documentId: legacyIds.legacyExpense, fields: ["currency", "shares"],
+    }));
+    expect(report.findings).toContainEqual(expect.objectContaining({
+      code: "expense_incomplete", documentId: legacyIds.nullPayerExpense, fields: ["currency", "payments", "shares"],
+    }));
+    expect(report.findings.some(({ documentId }) => documentId.equals(legacyIds.completeExpense))).toBe(false);
+  });
+
   it("is repeatable without writes, even for legacy data and migration version timestamps", async () => {
     await seedVersion3Fixture(database);
     const before = await snapshotDocuments(database);
@@ -87,7 +102,21 @@ describe("read-only approved contract audit", () => {
     payments: [payment("percent", 100)], shares: [share("percent", 100)] });
 
   it.each([
-    ["empty payments", { payments: [] }, ["payments"]],
+    ["null", { payments: null }, true],
+    ["absent", {}, true],
+    ["an explicit empty list (cleared on purpose, never re-adapted)", { payments: [] }, false],
+    ["own payments", { payments: [payment("amount", 50)] }, false],
+  ])("legacy paidBy is reported only when payments is absent or null: %s", async (_name, overrides, legacy) => {
+    const base: Record<string, unknown> = { ...completeExpense(), paidBy: legacyIds.formerUser };
+    delete base.payments;
+    const { insertedId } = await database.collection("postExpenses").insertOne({ ...base, ...overrides });
+    const report = await auditMongoContracts(database);
+    expect(report.findings.some(({ code, documentId }) => code === "expense_legacy_paid_by" && documentId.equals(insertedId))).toBe(legacy);
+    expect(report.findings.some(({ code, documentId }) => code === "expense_incomplete" && documentId.equals(insertedId))).toBe(true);
+  });
+
+  it.each([
+    ["empty payments",{ payments: [] }, ["payments"]],
     ["empty shares", { shares: [] }, ["shares"]],
     ["partial payments", { payments: [payment("amount", 50)] }, ["payments"]],
     ["partial shares", { shares: [share("percent", 50)] }, ["shares"]],
