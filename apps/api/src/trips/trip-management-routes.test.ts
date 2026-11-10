@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { TripMemberNotFoundError, TripNotFoundError, UnauthorizedError, ok } from "app-domain";
+import { TripMemberNotFoundError, TripNotFoundError, UnauthorizedError, UnknownError, ok } from "app-domain";
 import { handleApiRequest } from "../app.js";
 
 const actorId = "507f1f77bcf86cd799439011";
@@ -85,6 +85,26 @@ describe("Trip management routes", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response.body)).toEqual({ trips: [trip] });
     expect(list).toHaveBeenCalledWith({ authenticatedUserId: actorId });
+  });
+
+  it("serializes the derived startAt/endAt as ISO strings with milliseconds, or null", async () => {
+    const list = vi.fn().mockResolvedValue(ok([
+      { ...trip, startAt: new Date("2026-10-01T10:00:00.123Z"), endAt: new Date("2026-10-09T12:00:00.999Z") },
+      { ...trip, id: "507f191e810c19729de860eb", startAt: null, endAt: null },
+    ]));
+    const response = await handleApiRequest({ method: "GET", url: "/trips", authenticatedUserId: actorId as never }, { trips: { list } } as never);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).trips).toMatchObject([
+      { startAt: "2026-10-01T10:00:00.123Z", endAt: "2026-10-09T12:00:00.999Z" },
+      { startAt: null, endAt: null },
+    ]);
+  });
+
+  it("keeps the current 500 format when listing fails", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: false, error: new UnknownError("db down") });
+    const response = await handleApiRequest({ method: "GET", url: "/trips", authenticatedUserId: actorId as never }, { trips: { list } } as never);
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain("startAt");
   });
 
   it("lists public trip previews for an authenticated user", async () => {

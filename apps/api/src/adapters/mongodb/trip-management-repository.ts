@@ -2,6 +2,7 @@ import { MongoServerError, ObjectId as MongoObjectId, type Db } from "mongodb";
 
 import {
   createObjectId,
+  deriveTripBounds,
   err,
   InviteCodeConflictError,
   ok,
@@ -11,6 +12,7 @@ import {
   type TripConfigurationUpdate,
   type TripCreationRecord,
   type TripDestination,
+  type TripListItem,
   type PublicTripPreview,
   type TripManagementPort,
   type TripView,
@@ -89,6 +91,7 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
   const trips = database.collection<TripDocument>("trips");
   const members = database.collection<MembershipDocument>("tripMembers");
   const destinations = database.collection<DestinationDocument>("destinations");
+  const transports = database.collection("transports");
 
   const findDestination = async (tripId: MongoObjectId): Promise<DestinationDocument> => {
     const destination = await destinations.findOne({ tripId, order: 1 });
@@ -146,11 +149,22 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         if (memberships.length === 0) return ok([]);
         const tripIds = memberships.map((membership) => membership.tripId);
         const documents = await trips.find({ _id: { $in: tripIds } }).sort({ createdAt: -1, _id: -1 }).toArray();
-        const views: TripView[] = [];
+        // Una sola lectura agrupada: min/max de departureAt y arrivalAt (solo Date) por viaje.
+        const bounds = await transports.aggregate<{ _id: MongoObjectId; startAt: Date; endAt: Date }>([
+          { $match: { tripId: { $in: documents.map((trip) => trip._id) } } },
+          { $project: { tripId: 1, instants: ["$departureAt", "$arrivalAt"] } },
+          { $unwind: "$instants" },
+          { $match: { instants: { $type: "date" } } },
+          { $group: { _id: "$tripId", startAt: { $min: "$instants" }, endAt: { $max: "$instants" } } },
+        ]).toArray();
+        const boundsByTrip = new Map(bounds.map((entry) => [entry._id.toHexString(), entry]));
+        const items: TripListItem[] = [];
         for (const trip of documents) {
-          views.push(toView(trip, await findDestination(trip._id)));
+          const entry = boundsByTrip.get(trip._id.toHexString());
+          const derived = deriveTripBounds(entry === undefined ? [] : [{ departureAt: entry.startAt, arrivalAt: entry.endAt }]);
+          items.push({ ...toView(trip, await findDestination(trip._id)), startAt: derived.startAt, endAt: derived.endAt });
         }
-        return ok(views);
+        return ok(items);
       } catch {
         return err(unknownError());
       }
