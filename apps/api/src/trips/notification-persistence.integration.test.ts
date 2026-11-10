@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
+import { createTripApi } from "./trip-api.js";
 
 /** Events and personal notices persisted with the operation that originates them (T91), over a real transactional MongoDB. */
 describe("notification persistence with the originating operation", () => {
@@ -321,7 +322,111 @@ describe("notification persistence with the originating operation", () => {
       const settled = await Promise.allSettled([expelling, editing]);
       expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"]);
       expect(await participation(a, u1)).toMatchObject({ status: "going", decisionRequired: null });
-      expect(await events({ userId: u1 })).toEqual([]);
+      // Only the notice of the expulsion itself: the edit, which ran after it, neither unlinked nor told the former member anything.
+      expect((await events({ userId: u1 })).map((event) => event.type)).toEqual(["member.expelled"]);
+    });
+  });
+
+  describe("membership", () => {
+    const code = () => f.trip.toHexString();
+    const joinByCode = (user: ObjectId) => f.api.joinByCode({ authenticatedUserId: domainId(user), code: code() });
+    const joinPublic = (user: ObjectId) => f.api.joinPublic!({ authenticatedUserId: domainId(user), tripId: domainId(f.trip) });
+    const expel = (admin: ObjectId, target: ObjectId) => f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(target) });
+    const deleteTrip = (admin: ObjectId) => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(admin) });
+
+    it.each([["by code", joinByCode], ["public", joinPublic]] as const)("a new member (%s) emits member.joined to the other members and a re-join emits nothing", async (_, join) => {
+      const other = await addMember();
+      const joiner = new ObjectId();
+      expect(await join(joiner)).toMatchObject({ ok: true, value: { joined: true } });
+      const membership = await f.db.collection("tripMembers").findOne({ tripId: f.trip, userId: joiner });
+      const stored = await events({ type: "member.joined" });
+      expect(stored.map((event) => event.userId.toHexString()).sort()).toEqual([f.actor, other].map((id) => id.toHexString()).sort());
+      for (const event of stored) {
+        expect(event).toMatchObject({ tripId: f.trip, actorId: joiner, status: "pending", eventKey: `member.joined:${membership!._id}:${event.userId}`,
+          payload: { memberId: membership!._id, userId: joiner } });
+      }
+      expect(stored.some((event) => event.userId.equals(joiner))).toBe(false);
+      expect(await join(joiner)).toMatchObject({ ok: true, value: { joined: false } });
+      expect(await events({ type: "member.joined" })).toEqual(stored);
+    });
+
+    it("an admin that follows an invitation (joined false) emits nothing", async () => {
+      await addMember();
+      expect(await joinByCode(f.actor)).toMatchObject({ ok: true, value: { joined: false } });
+      expect(await events()).toEqual([]);
+    });
+
+    it("an expulsion notifies only the expelled user, without actor nor data of the Trip, and nothing to anyone else", async () => {
+      const admin = await addMember("admin"); await addMember();
+      expect((await expel(admin, f.actor)).ok).toBe(true);
+      const stored = await events();
+      expect(stored).toHaveLength(1);
+      const [event] = stored;
+      expect(event).toMatchObject({ type: "member.expelled", tripId: f.trip, userId: f.actor, actorId: null, status: "pending", payload: { tripId: f.trip } });
+      expect(Object.keys(event!.payload)).toEqual(["tripId"]);
+      expect(event!.eventKey).toMatch(/^member\.expelled:[0-9a-f]{24}:[0-9a-f]{24}$/);
+      expect(JSON.stringify(event)).not.toContain(admin.toHexString());
+    });
+
+    it("a failed expulsion (not a member, an admin, a missing Trip) emits nothing", async () => {
+      const admin = await addMember("admin");
+      expect(await expel(admin, new ObjectId())).toMatchObject({ ok: false });
+      expect(await expel(f.actor, admin)).toMatchObject({ ok: false });
+      expect(await events()).toEqual([]);
+      const before = await f.db.collection("tripMembers").countDocuments();
+      const outbox = f.db.collection("outboxEvents"), original = f.db.collection.bind(f.db);
+      vi.spyOn(outbox, "bulkWrite").mockRejectedValueOnce(new Error("forced failure"));
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "outboxEvents" ? outbox : original(key, options));
+      expect(await expel(admin, f.actor)).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      vi.restoreAllMocks();
+      expect(await f.db.collection("tripMembers").countDocuments()).toBe(before);
+      expect(await events()).toEqual([]);
+    });
+
+    concurrent("two simultaneous expulsions of the same member leave exactly one notice", async () => {
+      const admin = await addMember("admin");
+      const settled = await Promise.all([launch(expel(admin, f.actor)), launch(expel(admin, f.actor))]);
+      expect(settled.filter((result) => result.ok)).toHaveLength(1);
+      expect(await events({ type: "member.expelled" })).toHaveLength(1);
+    });
+
+    concurrent("an invitation waits for an in-flight Trip deletion and then fails without notices or memberships", async () => {
+      await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
+      const joiner = new ObjectId();
+      const paused = pauseAfterFirst("trips", "updateOne");
+      const deleting = launch(deleteTrip(f.actor));
+      let joining!: ReturnType<typeof joinByCode>;
+      try {
+        await paused.reached;
+        joining = launch(joinByCode(joiner)); const join = track(joining);
+        await pause();
+        expect(join.settled, "the join finished while the deletion transaction was open").toBe(false);
+      } finally { paused.release(); }
+      const [deleted, joined] = await Promise.all([deleting, joining]);
+      expect(deleted.ok).toBe(true);
+      expect(joined).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(await f.db.collection("outboxEvents").countDocuments({ tripId: f.trip })).toBe(0);
+      expect(await f.db.collection("tripMembers").countDocuments({ tripId: f.trip })).toBe(0);
+    });
+
+    concurrent("a Trip deletion waits for an in-flight join and leaves no orphan notice", async () => {
+      await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
+      const joiner = new ObjectId();
+      const paused = pauseAfterFirst("tripMembers", "updateOne");
+      // The membership collection handle is taken when the repository is built: build it after the pause is installed.
+      const pausedApi = createTripApi(f.db);
+      const joining = launch(pausedApi.joinByCode({ authenticatedUserId: domainId(joiner), code: code() }));
+      let deleting!: ReturnType<typeof deleteTrip>;
+      try {
+        await paused.reached;
+        deleting = launch(deleteTrip(f.actor)); const deletion = track(deleting);
+        await pause();
+        expect(deletion.settled, "the deletion finished while the join transaction was open").toBe(false);
+      } finally { paused.release(); }
+      const [joined, deleted] = await Promise.all([joining, deleting]);
+      expect(joined.ok).toBe(true);
+      expect(deleted.ok).toBe(true);
+      expect(await f.db.collection("outboxEvents").countDocuments({ tripId: f.trip })).toBe(0);
     });
   });
 });

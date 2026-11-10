@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
 
+import { buildTripNotifications, type ObjectId as DomainId } from "app-domain";
 import { createMongoTripMemberRepository } from "./trip-member-repository.js";
 
 describe("Mongo trip member repository", () => {
@@ -95,10 +96,10 @@ describe("Mongo trip member repository", () => {
     ]);
     const repository = createMongoTripMemberRepository(database);
 
-    expect(await repository.removeParticipant(participantId.toHexString() as never, otherTripId.toHexString() as never, userId.toHexString() as never)).toEqual({ ok: true, value: false });
-    expect(await repository.removeParticipant(participantId.toHexString() as never, tripId.toHexString() as never, adminId.toHexString() as never)).toEqual({ ok: true, value: false });
-    expect(await repository.removeParticipant(adminId.toHexString() as never, tripId.toHexString() as never, adminUserId.toHexString() as never)).toEqual({ ok: true, value: false });
-    expect(await repository.removeParticipant(participantId.toHexString() as never, tripId.toHexString() as never, userId.toHexString() as never)).toEqual({ ok: true, value: true });
+    expect(await repository.removeParticipant(participantId.toHexString() as never, otherTripId.toHexString() as never, userId.toHexString() as never, [])).toEqual({ ok: true, value: false });
+    expect(await repository.removeParticipant(participantId.toHexString() as never, tripId.toHexString() as never, adminId.toHexString() as never, [])).toEqual({ ok: true, value: false });
+    expect(await repository.removeParticipant(adminId.toHexString() as never, tripId.toHexString() as never, adminUserId.toHexString() as never, [])).toEqual({ ok: true, value: false });
+    expect(await repository.removeParticipant(participantId.toHexString() as never, tripId.toHexString() as never, userId.toHexString() as never, [])).toEqual({ ok: true, value: true });
     expect(await members.findOne({ _id: participantId })).toBeNull();
     expect(await members.findOne({ _id: adminId })).not.toBeNull();
   });
@@ -108,7 +109,7 @@ describe("Mongo trip member repository", () => {
     await database.collection("trips").insertOne({ _id: tripId, destinationOrderRevision: 0 });
     await database.collection("tripMembers").insertOne({ _id: membershipId, tripId, userId, role: "participant" });
     const repository = createMongoTripMemberRepository(database);
-    expect(await repository.removeParticipant(membershipId.toHexString() as never, tripId.toHexString() as never, userId.toHexString() as never))
+    expect(await repository.removeParticipant(membershipId.toHexString() as never, tripId.toHexString() as never, userId.toHexString() as never, []))
       .toEqual({ ok: true, value: true });
     expect(await database.collection("trips").findOne({ _id: tripId })).toMatchObject({ destinationOrderRevision: 1 });
     expect(await database.collection("tripMembers").findOne({ _id: membershipId })).toBeNull();
@@ -118,7 +119,7 @@ describe("Mongo trip member repository", () => {
     const tripId = new ObjectId(), userId = new ObjectId(), membershipId = new ObjectId();
     await database.collection("tripMembers").insertOne({ _id: membershipId, tripId, userId, role: "participant" });
     expect(await createMongoTripMemberRepository(database).removeParticipant(membershipId.toHexString() as never,
-      tripId.toHexString() as never, userId.toHexString() as never)).toEqual({ ok: true, value: false });
+      tripId.toHexString() as never, userId.toHexString() as never, [])).toEqual({ ok: true, value: false });
     expect(await database.collection("tripMembers").findOne({ _id: membershipId })).not.toBeNull();
   });
 
@@ -134,9 +135,56 @@ describe("Mongo trip member repository", () => {
     });
     try {
       expect(await createMongoTripMemberRepository(database).removeParticipant(membershipId.toHexString() as never,
-        tripId.toHexString() as never, userId.toHexString() as never)).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        tripId.toHexString() as never, userId.toHexString() as never, [])).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
       expect(await database.collection("trips").findOne({ _id: tripId })).toMatchObject({ destinationOrderRevision: 0 });
       expect(await members.findOne({ _id: membershipId })).not.toBeNull();
     } finally { vi.restoreAllMocks(); }
+  });
+
+  describe("member.expelled event (T91)", () => {
+    const hex = (id: ObjectId) => id.toHexString() as DomainId;
+    const notice = (tripId: ObjectId, membershipId: ObjectId, userId: ObjectId) => buildTripNotifications({ type: "member.expelled", tripId: hex(tripId),
+      operationRef: hex(membershipId), actorId: null, recipients: [hex(userId)], payload: { tripId: hex(tripId) }, createdAt: new Date("2026-10-04T12:00:00.789Z") });
+    const setup = async () => {
+      const tripId = new ObjectId(), userId = new ObjectId(), membershipId = new ObjectId(), admin = new ObjectId();
+      await database.collection("trips").insertOne({ _id: tripId, destinationOrderRevision: 0 });
+      await database.collection("tripMembers").insertMany([{ _id: membershipId, tripId, userId, role: "participant", joinedAt: new Date() },
+        { _id: new ObjectId(), tripId, userId: admin, role: "admin", joinedAt: new Date() }]);
+      return { tripId, userId, membershipId, admin };
+    };
+    const events = (tripId: ObjectId) => database.collection("outboxEvents").find({ tripId }).toArray();
+
+    it("stores the notice of the expelled user alone in the transaction that deletes the membership", async () => {
+      const { tripId, userId, membershipId } = await setup();
+      expect(await createMongoTripMemberRepository(database).removeParticipant(hex(membershipId), hex(tripId), hex(userId), notice(tripId, membershipId, userId)))
+        .toEqual({ ok: true, value: true });
+      expect(await events(tripId)).toMatchObject([{ type: "member.expelled", userId, actorId: null, status: "pending", payload: { tripId }, tripId,
+        eventKey: `member.expelled:${membershipId}:${userId}`, operationKey: `member.expelled:${membershipId}` }]);
+    });
+
+    it("stores nothing when nothing was deleted (wrong role or user, missing Trip)", async () => {
+      const { tripId, userId, membershipId, admin } = await setup();
+      const repository = createMongoTripMemberRepository(database);
+      expect(await repository.removeParticipant(hex(membershipId), hex(tripId), hex(admin), notice(tripId, membershipId, admin))).toEqual({ ok: true, value: false });
+      const missing = new ObjectId(), orphan = new ObjectId();
+      await database.collection("tripMembers").insertOne({ _id: orphan, tripId: missing, userId, role: "participant", joinedAt: new Date() });
+      expect(await repository.removeParticipant(hex(orphan), hex(missing), hex(userId), notice(missing, orphan, userId))).toEqual({ ok: true, value: false });
+      expect(await events(tripId)).toEqual([]);
+      expect(await events(missing)).toEqual([]);
+    });
+
+    it("does not delete the membership when the notice cannot be written", async () => {
+      const { tripId, userId, membershipId } = await setup();
+      const outbox = database.collection("outboxEvents"), original = database.collection.bind(database);
+      vi.spyOn(outbox, "bulkWrite").mockRejectedValueOnce(new Error("forced failure"));
+      vi.spyOn(database, "collection").mockImplementation((name, options) => name === "outboxEvents" ? outbox : original(name, options));
+      try {
+        expect(await createMongoTripMemberRepository(database).removeParticipant(hex(membershipId), hex(tripId), hex(userId), notice(tripId, membershipId, userId)))
+          .toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(await database.collection("tripMembers").findOne({ _id: membershipId })).not.toBeNull();
+        expect(await events(tripId)).toEqual([]);
+        expect(await database.collection("trips").findOne({ _id: tripId })).toMatchObject({ destinationOrderRevision: 0 });
+      } finally { vi.restoreAllMocks(); }
+    });
   });
 });

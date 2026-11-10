@@ -101,10 +101,11 @@ describe("Trip use cases", () => {
     const calls: unknown[][] = [];
     const dependencies = {
       members: { addPublicParticipant: async (...args: unknown[]) => { calls.push(args); return ok(true); } },
+      now: () => createdAt,
     };
     expect(await joinPublicTrip.execute(dependencies as never, { authenticatedUserId: userId, tripId }))
       .toEqual(ok({ tripId, joined: true }));
-    expect(calls).toEqual([[tripId, userId]]);
+    expect(calls).toEqual([[tripId, userId, expect.any(Function)]]);
   });
 
   it("uses the guarded write result when visibility is no longer public", async () => {
@@ -114,6 +115,7 @@ describe("Trip use cases", () => {
         addParticipant: async () => { joined = true; return ok(true); },
         addPublicParticipant: async () => ok(undefined),
       },
+      now: () => createdAt,
     } as never, { authenticatedUserId: userId, tripId });
 
     expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
