@@ -92,31 +92,87 @@ describe("comment persistence and transactions", () => {
     expect(winning).not.toContain("COLLSCAN");
   });
 
-  it.each([1, 2, 3])("serializes commenting with expulsion without leaving a comment written after revocation (round %i)", async () => {
-    await f.reset();
+  // Deterministic ordering: the first call of `method` on `name` runs for real and then stays paused (its transaction
+  // open, Trip lock already taken) until `release()`. The rival operation is started while the pause holds.
+  const pauseAfterFirst = (name: string, method: "insertOne" | "updateOne") => {
+    const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
+    const real = (collection[method] as (...args: unknown[]) => Promise<unknown>).bind(collection);
+    let reached!: () => void, release!: () => void, first = true;
+    const reachedPromise = new Promise<void>((resolve) => { reached = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(collection, method).mockImplementation((async (...args: unknown[]) => {
+      const result = await real(...args);
+      if (first) { first = false; reached(); await gate; }
+      return result;
+    }) as never);
+    vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
+    return { reached: reachedPromise, release };
+  };
+  const track = <T>(promise: Promise<T>) => { const state = { settled: false }; void promise.finally(() => { state.settled = true; }); return state; };
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 500));
+  const expel = (admin: ObjectId) => f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) });
+  const deleteTrip = () => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) });
+
+  it("makes an expulsion wait for an in-flight comment, which is kept as former-member", async () => {
     const post = await createPost(); const admin = await addMember("admin");
-    const [created, expelled] = await Promise.all([f.api.createComment!({ ...payload(post.id), text: "Hola" }),
-      f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) })]);
+    const paused = pauseAfterFirst("comments", "insertOne");
+    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
+    await paused.reached;
+    const expelling = expel(admin); const expulsion = track(expelling);
+    await pause();
+    expect(expulsion.settled, "expulsion finished while the comment transaction was open").toBe(false);
+    paused.release();
+    const [created, expelled] = await Promise.all([creating, expelling]);
+    expect(created.ok).toBe(true);
     expect(expelled.ok).toBe(true);
-    const stored = await f.db.collection("comments").find({ tripId: f.trip }).toArray();
-    if (!created.ok) {
-      expect(created.error.tag).toBe("TripNotFoundError");
-      expect(stored).toHaveLength(0);
-    } else {
-      expect(stored).toHaveLength(1);
-      expect(stored[0]).toMatchObject({ authorId: f.actor });
-      expect(await f.api.listComments!(payload(post.id, admin))).toMatchObject({ ok: true, value: [{ authorIsFormerMember: true }] });
-    }
-    expect(await f.api.createComment!({ ...payload(post.id), text: "No" })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
-    expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(created.ok ? 1 : 0);
+    expect(await f.db.collection("comments").find({ tripId: f.trip }).toArray()).toMatchObject([{ authorId: f.actor, text: "Hola" }]);
+    expect(await f.api.listComments!(payload(post.id, admin))).toMatchObject({ ok: true, value: [{ authorIsFormerMember: true }] });
   });
 
-  it("serializes commenting with Trip deletion leaving no orphan comments", async () => {
+  it("makes a comment wait for an in-flight expulsion and then fail without writing", async () => {
+    const post = await createPost(); const admin = await addMember("admin");
+    const paused = pauseAfterFirst("trips", "updateOne");
+    const expelling = expel(admin);
+    await paused.reached;
+    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+    await pause();
+    expect(creation.settled, "comment finished while the expulsion transaction was open").toBe(false);
+    paused.release();
+    const [created, expelled] = await Promise.all([creating, expelling]);
+    expect(expelled.ok).toBe(true);
+    expect(created).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
+  });
+
+  it("makes Trip deletion wait for an in-flight comment and leaves no orphan comment", async () => {
     await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
     const post = await createPost();
-    const [created, deleted] = await Promise.all([f.api.createComment!({ ...payload(post.id), text: "Hola" }), f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) })]);
+    const paused = pauseAfterFirst("comments", "insertOne");
+    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
+    await paused.reached;
+    const deleting = deleteTrip(); const deletion = track(deleting);
+    await pause();
+    expect(deletion.settled, "deletion finished while the comment transaction was open").toBe(false);
+    paused.release();
+    const [created, deleted] = await Promise.all([creating, deleting]);
+    expect(created.ok).toBe(true);
     expect(deleted.ok).toBe(true);
-    if (!created.ok) expect(created.error.tag).toBe("TripNotFoundError");
+    expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
+  });
+
+  it("makes a comment wait for an in-flight Trip deletion and then fail without writing", async () => {
+    await f.db.collection("tripMembers").updateOne({ tripId: f.trip }, { $set: { role: "admin" } });
+    const post = await createPost();
+    const paused = pauseAfterFirst("trips", "updateOne");
+    const deleting = deleteTrip();
+    await paused.reached;
+    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+    await pause();
+    expect(creation.settled, "comment finished while the deletion transaction was open").toBe(false);
+    paused.release();
+    const [created, deleted] = await Promise.all([creating, deleting]);
+    expect(deleted.ok).toBe(true);
+    expect(created).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
     expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
   });
 
