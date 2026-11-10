@@ -51,6 +51,7 @@ const activityMessage = (field: string, code: string) => field === "title" ? "In
 const retryHint = "Revisá tus recuerdos antes de reintentar por si ya se publicó.";
 /** With a retry id the server recognizes a repeated request, so retrying cannot publish twice. */
 const safeRetryHint = "Podés reintentar: el recuerdo no se va a publicar dos veces.";
+const isGenericRequestConflict = (error: TripFailure) => error.kind === "server" && error.code === "PostRequestConflictError";
 const withoutAttempt = (draft: PostDraft, which: "attemptId" | "activityAttemptId"): PostDraft => { const next = { ...draft }; delete next[which]; return next; };
 const badPhotoMessage = "Una foto no es válida. Reintentá subirla o quitala.";
 const invalidReservedMessage = "Alguna foto no es válida. Revisá las fotos marcadas, quitalas o reemplazalas.";
@@ -328,8 +329,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
       await send(buildInput(draftRef.current, resolved), undefined);
     } finally { savingRef.current = false; setSaving(false); }
   };
-  /** Saves memory and activity together; a confirmation from a previous 409 is forwarded unchanged. Nothing is announced unless everything was saved. */
-  const send = async (input: PostInput, confirmation: ParticipationConfirmation | undefined) => {
+  /**
+   * Saves memory and activity together; a confirmation from a previous 409 is forwarded unchanged. Nothing is announced unless everything was saved.
+   * `retried` marks the single automatic retry after a generic 409 (the id was taken by someone else): it uses a new id and never repeats again.
+   */
+  const send = async (input: PostInput, confirmation: ParticipationConfirmation | undefined, retried = false) => {
     if (!tripId) return;
     savingRef.current = true; setSaving(true);
     try {
@@ -343,8 +347,19 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
         if (backToBalance()) return;
         navigate(listing, { state: { post, going: participation?.status === "going",
           notice: activity ? (existing ? "linked-activity" : "created-activity") : existing ? "updated" : "created" } });
+      } else if (result.error.kind === "already-saved") {
+        // The same attempt was saved before (a lost answer): never republish. The draft is dropped and the saved memory is one tap away in the listing.
+        const savedId = existing ? existing.id : result.error.postId;
+        setPending(undefined);
+        handle.clear();
+        navigate(listing, { state: { notice: "already-saved", ...(savedId !== undefined ? { postId: savedId } : {}) } });
       } else if (result.error.kind === "participation-conflict" && result.error.confirmation) {
         setPending({ input, confirmation: result.error.confirmation, stale: confirmation !== undefined });
+      } else if (!retried && isGenericRequestConflict(result.error) && (existing ? input.newActivity?.id !== undefined : input.id !== undefined)) {
+        // The id belongs to someone else (not a retry of ours): a fresh one, same content, once.
+        const fresh = newId();
+        applyDraft((current) => existing ? { ...current, activityAttemptId: fresh } : { ...current, attemptId: fresh });
+        await send(existing && input.newActivity ? { ...input, newActivity: { ...input.newActivity, id: fresh } } : { ...input, id: fresh }, confirmation, true);
       } else { setPending(undefined); fail(result.error); }
     } catch { setPending(undefined); fail({ kind: "network" }); }
     finally { savingRef.current = false; setSaving(false); }

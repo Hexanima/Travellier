@@ -272,3 +272,105 @@ describe("PostComposer retry key with activity and photos (T88)", () => {
     expect(update.mock.calls.map((call) => (call[2] as { newActivity: { id: string } }).newActivity.id)).toEqual([ID1, ID2]);
   });
 });
+
+describe("PostComposer request conflicts (T88)", () => {
+  const alreadySaved = (postId?: string) => ({ ok: false, error: { kind: "already-saved", ...(postId ? { postId } : {}) } });
+  const generic = { ok: false, error: { kind: "server", code: "PostRequestConflictError" } };
+  const listingState = (container: HTMLElement) => JSON.parse(container.querySelector('[data-testid="listing"]')!.textContent!.replace(/^LISTADO /, "")) as Record<string, unknown>;
+  it("already_saved on create: no second create, no extra reads, listing with the notice and the saved memory", async () => {
+    const create = vi.fn().mockResolvedValue(alreadySaved(postId));
+    const { container, itineraryGet, list, get } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledOnce();
+    expect(listingState(container)).toEqual({ notice: "already-saved", postId });
+    expect(itineraryGet).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled();
+  });
+  it("already_saved without a valid postId still goes to the listing with the notice only", async () => {
+    const create = vi.fn().mockResolvedValue(alreadySaved());
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    expect(listingState(container)).toEqual({ notice: "already-saved" });
+  });
+  it("already_saved clears the draft and its id: a later publication starts clean with a new id", async () => {
+    const create = vi.fn().mockResolvedValueOnce(alreadySaved(postId)).mockResolvedValue({ ok: true, value: saved() });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    await click(link(container, "nav-new"));
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("");
+    await type(container, "description", "Otro"); await submit(container);
+    expect(ids(create)).toEqual([ID1, ID2]);
+  });
+  it("already_saved with a new activity and confirmation does not republish nor ask again", async () => {
+    const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValue(alreadySaved(postId));
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await addActivity(container); await submit(container);
+    await click(button(dialog()!, "Cambiar de plan"));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(dialog()).toBeNull();
+    expect(listingState(container)).toEqual({ notice: "already-saved", postId });
+  });
+  it("already_saved on a PATCH uses the memory of the route", async () => {
+    const update = vi.fn().mockResolvedValue(alreadySaved(itineraryId(99)));
+    const { container } = await render(editPath, { update });
+    await addActivity(container); await submit(container);
+    expect(update).toHaveBeenCalledOnce();
+    expect(listingState(container)).toEqual({ notice: "already-saved", postId });
+  });
+  it("a generic 409 retries once, automatically, with a new id and the same content", async () => {
+    const create = vi.fn().mockResolvedValueOnce(generic).mockResolvedValue({ ok: true, value: saved() });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    expect(ids(create)).toEqual([ID1, ID2]);
+    expect(body(create, 1)).toEqual({ id: ID2, description: "Hola" });
+    expect(listingState(container)).toMatchObject({ notice: "created" });
+  });
+  it("a second generic 409 shows the generic error and stops retrying", async () => {
+    const create = vi.fn().mockResolvedValue(generic);
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(ids(create)).toEqual([ID1, ID2]);
+    expect(container.textContent).toContain("No pudimos guardar el recuerdo.");
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    expect(container.querySelector("form")).not.toBeNull();
+  });
+  it("the automatic retry keeps the photo keys and the confirmation of the agenda", async () => {
+    const mocks = makeDeps();
+    const create = vi.fn().mockResolvedValueOnce(conflict).mockResolvedValueOnce(generic).mockResolvedValue({ ok: true, value: withActivity() });
+    const { container } = await render(newPath, { create, photos: mocks.deps });
+    await type(container, "description", "Hola"); await addActivity(container);
+    mocks.offer(1); await click(button(container, "Agregar fotos"));
+    await submit(container);
+    await click(button(dialog()!, "Cambiar de plan"));
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(ids(create)).toEqual([ID1, ID1, ID2]);
+    expect(create.mock.calls[2]![2]).toEqual(confirmation);
+    expect(body(create, 2).photos).toEqual(body(create, 0).photos);
+    expect(mocks.api.reserve).toHaveBeenCalledTimes(1);
+  });
+  it("a generic 409 on a PATCH with a new activity retries once with a new activity id", async () => {
+    const update = vi.fn().mockResolvedValueOnce(generic).mockResolvedValue({ ok: true, value: withActivity() });
+    const { container } = await render(editPath, { update });
+    await addActivity(container); await submit(container);
+    expect(update.mock.calls.map((call) => (call[2] as { newActivity: { id: string } }).newActivity.id)).toEqual([ID1, ID2]);
+    expect(listingState(container)).toMatchObject({ notice: "linked-activity" });
+  });
+  it("a generic 409 on a PATCH without an activity id is just a failure", async () => {
+    const update = vi.fn().mockResolvedValue(generic);
+    const { container } = await render(editPath, { update });
+    await type(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("No pudimos guardar el recuerdo.");
+  });
+  it("with photos and a new activity a conflict never triggers a request other than create or update", async () => {
+    const create = vi.fn().mockResolvedValue(alreadySaved(postId));
+    const mocks = makeDeps();
+    const { container, itineraryGet, list, get } = await render(newPath, { create, photos: mocks.deps });
+    await type(container, "description", "Hola"); await addActivity(container);
+    mocks.offer(1); await click(button(container, "Agregar fotos"));
+    const reads = itineraryGet.mock.calls.length;
+    await submit(container);
+    expect(create).toHaveBeenCalledOnce();
+    expect(itineraryGet.mock.calls.length).toBe(reads); expect(list).not.toHaveBeenCalled(); expect(get).not.toHaveBeenCalled();
+  });
+});
