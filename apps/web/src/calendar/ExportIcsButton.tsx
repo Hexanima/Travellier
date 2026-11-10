@@ -8,7 +8,9 @@ import { buildItineraryIcs, icsEventCount, icsFileName } from "./ics.js";
 export const icsStaticCopyNotice = "El archivo es una copia estática: si el itinerario cambia, descargá una nueva exportación y volvé a importarla. Los eventos ya importados no se actualizan solos.";
 
 type Props = {
-  tripName: string;
+  /** Known Trip name; when blank, `resolveTripName` is asked at click time and a failure falls back to a fixed name. */
+  tripName?: string;
+  resolveTripName?: () => Promise<string | undefined>;
   /** Latest loaded itinerary; without it nothing is offered. It is read at click time, never cached. */
   itinerary: TripItineraryResponse | undefined;
   download?: (text: string, fileName: string) => DownloadResult | Promise<DownloadResult>;
@@ -17,7 +19,7 @@ type Props = {
 };
 type Outcome = { kind: "idle" } | { kind: "done"; at: Date } | { kind: "error" };
 
-export function ExportIcsButton({ tripName, itinerary, download = downloadIcs, now = () => new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
+export function ExportIcsButton({ tripName = "", resolveTripName, itinerary, download = downloadIcs, now = () => new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>({ kind: "idle" });
   // A ref closes the window between two clicks of the same tick, before the state update renders.
@@ -28,8 +30,13 @@ export function ExportIcsButton({ tripName, itinerary, download = downloadIcs, n
     if (running.current) return;
     running.current = true; setBusy(true); setOutcome({ kind: "idle" });
     try {
+      let name = tripName.trim();
+      if (name === "" && resolveTripName) {
+        // Never blocks the export: a failed or blank lookup leaves the fixed fallback name.
+        try { name = (await resolveTripName())?.trim() ?? ""; } catch { name = ""; }
+      }
       const exportedAt = now();
-      const result = await download(buildItineraryIcs({ tripName, itinerary, exportedAt }), icsFileName(tripName));
+      const result = await download(buildItineraryIcs({ tripName: name, itinerary, exportedAt }), icsFileName(name));
       setOutcome(result.ok ? { kind: "done", at: exportedAt } : { kind: "error" });
     } catch {
       setOutcome({ kind: "error" });

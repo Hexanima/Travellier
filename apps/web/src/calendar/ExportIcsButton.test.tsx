@@ -14,12 +14,12 @@ afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => 
 const fixture = () => itineraryFixture() as TripItineraryResponse;
 const now = () => new Date("2026-11-10T12:34:56.789Z");
 type Download = (text: string, fileName: string) => DownloadResult | Promise<DownloadResult>;
-function mount(initial: { itinerary?: TripItineraryResponse; tripName?: string; download?: Download }) {
+function mount(initial: { itinerary?: TripItineraryResponse; tripName?: string; download?: Download; resolveTripName?: () => Promise<string | undefined> }) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const download = initial.download ?? vi.fn<Download>(() => ({ ok: true }));
   const render = async (itinerary: TripItineraryResponse | undefined = initial.itinerary, tripName = initial.tripName ?? "Viaje a Córdoba") =>
-    act(async () => root.render(<ExportIcsButton tripName={tripName} itinerary={itinerary} download={download} now={now} timeZone="America/Argentina/Buenos_Aires" />));
+    act(async () => root.render(<ExportIcsButton tripName={tripName} resolveTripName={initial.resolveTripName} itinerary={itinerary} download={download} now={now} timeZone="America/Argentina/Buenos_Aires" />));
   return { container, download: download as ReturnType<typeof vi.fn<Download>>, render };
 }
 const button = (container: HTMLElement) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Exportar a calendario (.ics)") as HTMLButtonElement | undefined;
@@ -113,6 +113,31 @@ describe("ExportIcsButton", () => {
     expect(button(none.container)).toBeUndefined();
     expect(none.container.textContent).toContain("No hay nada para exportar");
     expect(none.download).not.toHaveBeenCalled();
+  });
+  it("looks the Trip name up at click time only when it was not provided, and never blocks on a failed lookup", async () => {
+    const resolveTripName = vi.fn().mockResolvedValue("Nombre remoto");
+    const looked = mount({ itinerary: fixture(), tripName: "", resolveTripName });
+    await looked.render();
+    expect(resolveTripName).not.toHaveBeenCalled();
+    await click(looked.container);
+    expect(resolveTripName).toHaveBeenCalledTimes(1);
+    expect(looked.download.mock.calls[0][0]).toContain("X-WR-CALNAME:Nombre remoto");
+    expect(looked.download.mock.calls[0][1]).toBe("travellier-nombre-remoto.ics");
+
+    const given = mount({ itinerary: fixture(), tripName: "Propio", resolveTripName });
+    await given.render();
+    await click(given.container);
+    expect(resolveTripName).toHaveBeenCalledTimes(1);
+    expect(given.download.mock.calls[0][0]).toContain("X-WR-CALNAME:Propio");
+
+    for (const failing of [vi.fn().mockRejectedValue(new Error("red")), vi.fn().mockResolvedValue(undefined), vi.fn().mockResolvedValue("  ")]) {
+      const fallback = mount({ itinerary: fixture(), tripName: "", resolveTripName: failing });
+      await fallback.render();
+      await click(fallback.container);
+      expect(fallback.download.mock.calls[0][0]).toContain("X-WR-CALNAME:Viaje Travellier");
+      expect(fallback.container.querySelector('[role="alert"]')).toBeNull();
+      expect(fallback.container.querySelectorAll('[role="status"]')).toHaveLength(1);
+    }
   });
   it("falls back to a fixed Trip name when none is known", async () => {
     const { container, download, render } = mount({ itinerary: fixture(), tripName: "  " });

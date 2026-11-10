@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { downloadIcs, type DownloadDeps } from "./download-ics.js";
 
-class FakeBlob { constructor(public parts: unknown[], public options: { type?: string }) {} }
+class FakeBlob {
+  parts: unknown[];
+  options: { type?: string };
+  constructor(parts: unknown[], options: { type?: string }) { this.parts = parts; this.options = options; }
+}
 function setup(overrides: Partial<{ createObjectURL: () => string; click: () => void }> = {}) {
   const calls: string[] = [];
   const anchor = { href: "", download: "", rel: "", style: { display: "" }, click: vi.fn(() => { calls.push("click"); overrides.click?.(); }), remove: vi.fn(() => calls.push("remove")) };
@@ -29,9 +33,9 @@ describe("downloadIcs", () => {
     expect(anchor.download).toBe("travellier-viaje.ics");
     expect(anchor.rel).toBe("noopener");
     expect(calls).toEqual(["create", "append", "click", "remove"]);
-    expect(deps.url.revokeObjectURL).not.toHaveBeenCalled();
+    expect(deps.url!.revokeObjectURL).not.toHaveBeenCalled();
     deferred.forEach((task) => task());
-    expect(deps.url.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:fake-1");
+    expect(deps.url!.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:fake-1");
   });
   it.each([["../../etc/passwd", "etc-passwd.ics"], ["a/b\\c:d*e?.ics", "a-b-c-d-e.ics"], ["", "travellier-viaje.ics"], ["..", "travellier-viaje.ics"], ["nombre", "nombre.ics"],
     ["x\u0000\n.ics", "x.ics"]])("sanitizes the file name %j -> %s", (name, expected) => {
@@ -43,13 +47,13 @@ describe("downloadIcs", () => {
     const { deps, anchor } = setup({ createObjectURL: () => { throw new Error("boom"); } });
     expect(downloadIcs("x", "a.ics", deps)).toEqual({ ok: false });
     expect(anchor.click).not.toHaveBeenCalled();
-    expect(deps.url.revokeObjectURL).not.toHaveBeenCalled();
+    expect(deps.url!.revokeObjectURL).not.toHaveBeenCalled();
   });
   it("returns ok:false when the click fails, removes the anchor and revokes the URL", () => {
     const { deps, anchor } = setup({ click: () => { throw new Error("blocked"); } });
     expect(downloadIcs("x", "a.ics", deps)).toEqual({ ok: false });
     expect(anchor.remove).toHaveBeenCalled();
-    expect(deps.url.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:fake-1");
+    expect(deps.url!.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:fake-1");
   });
   it("returns ok:false when the platform has no Blob or URL support", () => {
     const { deps } = setup();

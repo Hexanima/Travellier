@@ -35,8 +35,7 @@ describe("ics place", () => {
     expect(field(lines, "LOCATION")).toBeUndefined();
     expect(field(lines, "URL")).toBe("https://maps.app.goo.gl/abc123");
   });
-  it.each([["invalid host", "https://evil.example/maps/place/Casa"], ["free text", "calle falsa 123"], ["javascript", "javascript:alert(1)"], ["empty", ""], ["none", null]])
-  ("%s: neither LOCATION nor URL and the raw text is not dumped", (_name, value) => {
+  it.each([["invalid host", "https://evil.example/maps/place/Casa"], ["free text", "calle falsa 123"], ["javascript", "javascript:alert(1)"], ["empty", ""], ["none", null]])("%s: neither LOCATION nor URL and the raw text is not dumped", (_name, value) => {
     const { lines, text } = activityEvent(value);
     expect(field(lines, "LOCATION")).toBeUndefined();
     expect(field(lines, "URL")).toBeUndefined();
