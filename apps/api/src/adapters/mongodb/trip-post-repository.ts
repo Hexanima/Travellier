@@ -3,6 +3,7 @@ import { createObjectId, err, ok, PostNotFoundError, TaggedError, TripNotFoundEr
   type Activity, type AsyncResult, type ObjectId, type Post, type TripPostPort, type TripPostScope, type TripRole } from "app-domain";
 import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
 import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
+import { createPostExpenseStore, type PostExpenseDocument } from "./post-expense-store.js";
 import { createPostPhotoStore, type PostPhotoDocument } from "./post-photo-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
@@ -33,6 +34,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
   const posts = database.collection<PostDocument>("posts");
   const store = createParticipationStore(database.collection<ParticipationDocument>("activityParticipations"), tripId, session);
   const photos = createPostPhotoStore(database.collection<PostPhotoDocument>("postPhotos"), tripId, session);
+  const expenses = createPostExpenseStore(database.collection<PostExpenseDocument>("postExpenses"), tripId, session);
   const reference = async (name: "activities" | "transports", referenceId: ObjectId) => {
     const value = await database.collection(name).findOne({ ...query, _id: new MongoObjectId(referenceId) },
       { ...options, projection: { _id: 1, tripId: 1 } });
@@ -72,6 +74,9 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     findPhoto: photos.findPhoto,
     findPhotosByKeys: photos.findPhotosByKeys,
     insertPhotos: photos.insertPhotos,
+    findExpense: expenses.findExpense,
+    insertExpense: expenses.insertExpense,
+    updateExpenseFields: expenses.updateExpenseFields,
     insert: async (post) => {
       if (post.tripId !== tripId) throw new TripNotFoundError();
       await posts.insertOne({ _id: new MongoObjectId(post.id), tripId: mongoTripId, authorId: new MongoObjectId(post.authorId),

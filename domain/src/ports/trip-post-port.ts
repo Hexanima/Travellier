@@ -1,6 +1,7 @@
 import type { ActivityParticipation } from "../entities/activity-participation.js";
 import type { Activity } from "../entities/activity.js";
 import type { ItineraryDay } from "../entities/itinerary-day.js";
+import type { PostExpense, PostExpenseField } from "../entities/post-expense.js";
 import type { PostPhoto } from "../entities/post-photo.js";
 import type { Post } from "../entities/post.js";
 import type { Transport } from "../entities/transport.js";
@@ -39,6 +40,12 @@ export interface TripPostScope extends TripPostReadScope {
   findPhotosByKeys: (keys: readonly string[]) => AsyncResult<PostPhoto[]>;
   /** Writes the photo records; a key already registered fails with `PhotoConflictError`. */
   insertPhotos: (photos: readonly PostPhoto[]) => AsyncResult<void>;
+  /** Expense of a post of this Trip (1:1 by `postId`); a legacy record has `currency` null. */
+  findExpense: (postId: ObjectId) => AsyncResult<PostExpense | undefined>;
+  /** Writes a new expense; a second one for the same post fails with `ExpenseConflictError`. */
+  insertExpense: (expense: PostExpense) => AsyncResult<void>;
+  /** `$set` of only these fields of an existing expense; never replaces the record (payers, payments and shares are kept). */
+  updateExpenseFields: (expense: PostExpense, fields: readonly PostExpenseField[]) => AsyncResult<void>;
   insertActivity: (activity: Activity) => AsyncResult<void>;
   /** Complete activities of the Trip, to review the author's agenda in the same snapshot. */
   listActivities: () => AsyncResult<Activity[]>;

@@ -2,6 +2,7 @@ import { createActivity, type Activity } from "../../entities/activity.js";
 import type { ActivityConflict } from "../../entities/activity-conflict.js";
 import type { ActivityParticipation } from "../../entities/activity-participation.js";
 import { resolveActivityDayId } from "../../entities/activity-schedule.js";
+import { applyPostExpense, parsePostExpenseInput, type PostExpense, type PostExpensePlan } from "../../entities/post-expense.js";
 import type { PostPhotoRef } from "../../entities/post-photo.js";
 import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
@@ -31,16 +32,18 @@ interface PlanConfirmation {
  * `dayId` only feeds the new activity and is optional: when absent the slice is derived from `scheduledAt`.
  * The post itself never stores or validates a day.
  */
-export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & {
+export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & ExpenseReference & {
   dayId?: ObjectId;
   newActivity?: NewPostActivity;
 };
 /** Photos of the save: `{ key }` references of uploads authorized by `createTripPhotoUploads`; validated by the use case. */
 interface PhotoReferences { photos?: unknown }
-export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields> & PhotoReferences;
-/** The post; when the save carried `photos` it also lists the photos of the post (`id`, `order`). */
-export type UpdateTripPostResult = Post & { photos?: PostPhotoRef[] };
-export type LinkTripPostToNewActivityPayload = PostDetailPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & {
+/** Expense of the save (`{ totalAmount?, currency?, breakdown? }`, merge-patch over the stored expense); validated by the use case. */
+interface ExpenseReference { expense?: unknown }
+export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields> & PhotoReferences & ExpenseReference;
+/** The post; when the save carried `photos` it also lists the photos of the post (`id`, `order`), and with `expense` the saved expense. */
+export type UpdateTripPostResult = Post & { photos?: PostPhotoRef[]; expense?: PostExpense };
+export type LinkTripPostToNewActivityPayload = PostDetailPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & ExpenseReference & {
   dayId?: ObjectId;
   newActivity: NewPostActivity;
 };
@@ -51,10 +54,10 @@ export interface PostConfirmationRequired {
   activity: { scheduledAt: Date; durationMinutes: number | null };
 }
 export type CreateTripPostResult =
-  | { outcome: "created"; post: Post; activity?: Activity; participation?: ActivityParticipation; photos?: PostPhotoRef[] }
+  | { outcome: "created"; post: Post; activity?: Activity; participation?: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpense }
   | PostConfirmationRequired;
 export type LinkTripPostToNewActivityResult =
-  | { outcome: "linked"; post: Post; activity: Activity; participation: ActivityParticipation; photos?: PostPhotoRef[] }
+  | { outcome: "linked"; post: Post; activity: Activity; participation: ActivityParticipation; photos?: PostPhotoRef[]; expense?: PostExpense }
   | PostConfirmationRequired;
 export type PostSummary = Pick<Post, "id" | "authorId" | "createdAt" | "description">;
 export interface TripPostChainResult {
@@ -151,6 +154,26 @@ const loadAncestors = async (scope: TripPostReadScope, tripId: ObjectId, startId
   return ok({ posts: loaded, truncated: false });
 };
 
+/**
+ * Inside the post transaction, after `authorize` and before any write: validates the `expense` of the save against the stored one
+ * (1:1 by `postId`) and decides insert or update. No `expense` means nothing to do. Writes nothing.
+ */
+const planPostExpense = async (scope: TripPostScope, input: { tripId: ObjectId; postId: ObjectId; expense: unknown;
+  createId: () => ObjectId; createdAt: Date }): AsyncResult<PostExpensePlan | undefined> => {
+  if (input.expense === undefined) return ok(undefined);
+  const parsed = parsePostExpenseInput(input.expense);
+  if (!parsed.ok) return parsed;
+  const existing = await scope.findExpense(input.postId);
+  if (!existing.ok) return existing;
+  return applyPostExpense({ existing: existing.value, input: parsed.value, tripId: input.tripId, postId: input.postId,
+    id: existing.value?.id ?? input.createId(), createdAt: input.createdAt });
+};
+/** Writes the planned expense; call it after the post itself is stored in the same transaction. */
+const registerPostExpense = async (scope: TripPostScope, plan: PostExpensePlan): AsyncResult<PostExpense> => {
+  const written = plan.mode === "insert" ? await scope.insertExpense(plan.expense) : await scope.updateExpenseFields(plan.expense, plan.changed);
+  return written.ok ? ok(plan.expense) : written;
+};
+
 const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",
   message: "Choose an existing activity or create a new one." }]));
 
@@ -183,12 +206,17 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     const photoPlan = keys === undefined || activity ? undefined : await planPostPhotos(scope, { tripId: payload.tripId, postId,
       uploaderId: payload.authenticatedUserId, keys, createId, uploadedAt: createdAt });
     if (photoPlan && !photoPlan.ok) return photoPlan;
+    const expensePlan = await planPostExpense(scope, { tripId: payload.tripId, postId, expense: payload.expense, createId, createdAt });
+    if (!expensePlan.ok) return expensePlan;
     if (!activity) {
       const saved = await scope.insert(post.value);
       if (!saved.ok) return saved;
       const photos = photoPlan && await registerPostPhotos(scope, photoPlan.value);
       if (photos && !photos.ok) return photos;
-      return ok({ outcome: "created" as const, post: post.value, ...(photos ? { photos: photos.value } : {}) });
+      const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
+      if (expense && !expense.ok) return expense;
+      return ok({ outcome: "created" as const, post: post.value, ...(photos ? { photos: photos.value } : {}),
+        ...(expense ? { expense: expense.value } : {}) });
     }
     const reviewed = await planAuthorAgenda(scope, payload, activity);
     if (!reviewed.ok) return reviewed;
@@ -205,10 +233,12 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     if (!inserted.ok) return inserted;
     const photos = activityPhotoPlan && await registerPostPhotos(scope, activityPhotoPlan.value);
     if (photos && !photos.ok) return photos;
+    const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
+    if (expense && !expense.ok) return expense;
     const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
       conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
     return participation.ok ? ok({ outcome: "created" as const, post: post.value, activity, participation: participation.value,
-      ...(photos ? { photos: photos.value } : {}) }) : participation;
+      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) }) : participation;
     });
   },
 };
@@ -238,6 +268,8 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     if (!resolved.ok) return resolved;
     const post = relinkPost(merged, {}, resolved.value);
     if (!post.ok) return post;
+    const expensePlan = await planPostExpense(scope, { tripId: payload.tripId, postId: payload.postId, expense: payload.expense, createId, createdAt });
+    if (!expensePlan.ok) return expensePlan;
     const reviewed = await planAuthorAgenda(scope, payload, activity);
     if (!reviewed.ok) return reviewed;
     const { plan, records } = reviewed.value;
@@ -252,10 +284,12 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     if (!replaced.ok) return replaced;
     const photos = photoPlan && await registerPostPhotos(scope, photoPlan.value);
     if (photos && !photos.ok) return photos;
+    const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
+    if (expense && !expense.ok) return expense;
     const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
       conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
     return participation.ok ? ok({ outcome: "linked" as const, post: post.value, activity, participation: participation.value,
-      ...(photos ? { photos: photos.value } : {}) }) : participation;
+      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) }) : participation;
     });
   },
 };
@@ -306,7 +340,9 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
     const keys = verified.value;
-    if (keys !== undefined && (createId === undefined || now === undefined)) return err(new UnknownError("Photo registration is not configured."));
+    if ((keys !== undefined || payload.expense !== undefined) && (createId === undefined || now === undefined)) {
+      return err(new UnknownError("Photo and expense registration is not configured."));
+    }
     return posts.withTransaction<UpdateTripPostResult>(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
     if (!trip.ok) return trip;
@@ -314,7 +350,7 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     if (!current.ok) return current;
     const fields = ["description", "mapsUrl", "activityId", "parentPostId", "transportId"] as const;
     const supplied = fields.filter((field) => Object.hasOwn(payload, field) && payload[field] !== undefined);
-    if (supplied.length === 0 && keys === undefined) {
+    if (supplied.length === 0 && keys === undefined && payload.expense === undefined) {
       return err(new ValidationError([{ field: "post", code: "required", message: "An editable field is required." }]));
     }
     const merged: Post = { ...current.value, ...Object.fromEntries(supplied.map((field) => [field, payload[field]])) };
@@ -337,14 +373,19 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     const photoPlan = keys === undefined ? undefined : await planPostPhotos(scope, { tripId: payload.tripId, postId: payload.postId,
       uploaderId: payload.authenticatedUserId, keys, createId: createId!, uploadedAt: now!() });
     if (photoPlan && !photoPlan.ok) return photoPlan;
-    // A photos-only edit leaves the stored post untouched.
+    const expensePlan = payload.expense === undefined ? ok(undefined)
+      : await planPostExpense(scope, { tripId: payload.tripId, postId: payload.postId, expense: payload.expense, createId: createId!, createdAt: now!() });
+    if (!expensePlan.ok) return expensePlan;
+    // A photos-only or expense-only edit leaves the stored post untouched.
     if (supplied.length > 0) {
       const saved = await scope.replace(post.value);
       if (!saved.ok) return saved;
     }
     const photos = photoPlan && await registerPostPhotos(scope, photoPlan.value);
     if (photos && !photos.ok) return photos;
-    return ok(photos ? { ...post.value, photos: photos.value } : post.value);
+    const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
+    if (expense && !expense.ok) return expense;
+    return ok(photos || expense ? { ...post.value, ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) } : post.value);
     });
   },
 };
