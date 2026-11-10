@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
 import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
+import { ignoreRetryIds } from "./trips/post-composer-test-api.js";
 import type { PostResponse } from "./trips/trip-post-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -16,7 +17,13 @@ const auth = { refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessTok
 const tripId = itineraryId(1), postId = itineraryId(30);
 const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
-async function render(path: string, props: ComponentProps<typeof App>) {
+// The suite is not about the retry key: the mocks see the input without the per-attempt ids (the real request test below does check the id).
+const withoutRetryIds = (posts: NonNullable<ComponentProps<typeof App>["posts"]>) => {
+  const wrapped = ignoreRetryIds(posts as Parameters<typeof ignoreRetryIds>[0]);
+  return { ...posts, ...(posts.create ? { create: wrapped.create } : {}), ...(posts.update ? { update: wrapped.update } : {}) };
+};
+async function render(path: string, rawProps: ComponentProps<typeof App>) {
+  const props = rawProps.posts ? { ...rawProps, posts: withoutRetryIds(rawProps.posts) } : rawProps;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}><App {...props} /></MemoryRouter>));
@@ -85,7 +92,7 @@ describe("App memories integration", () => {
     const call = fetch.mock.calls[1]!;
     expect(call[0]).toBe(`https://api.example.test/trips/${tripId}/posts`);
     expect(call[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer renewed" }) }));
-    expect(JSON.parse(call[1].body as string)).toEqual({ description: "Atardecer" });
+    expect(JSON.parse(call[1].body as string)).toEqual({ id: expect.stringMatching(/^[0-9a-f]{24}$/), description: "Atardecer" });
   });
 });
 
