@@ -23,7 +23,20 @@ const pendingMigrations: {
   },
 ];
 
-// Additive DDL only: no backfills, data removal or replacement of historical indexes.
+/**
+ * Legacy `paidBy` (a valid ObjectId) with no `payments` field becomes one payment of 100 percent by that person: the same rule as
+ * `adaptLegacyPaidBy`, which the read path applies to documents this migration has not reached (a parity test pins both).
+ * The filter makes it idempotent by itself: a document that already has `payments` (even `[]`, cleared on purpose) never matches,
+ * so a rerun or a concurrent save cannot duplicate or resurrect the payment. `paidBy` is kept; `currency`, `shares` and
+ * `totalAmount` are never written, and a null, missing or invalid `paidBy` is left alone.
+ */
+export const EXPENSE_PAYMENTS_MIGRATION_ID = "0006-adapt-legacy-expense-paid-by";
+const adaptLegacyExpensePayers = (database: Db) => database.collection("postExpenses").updateMany(
+  { paidBy: { $type: "objectId" }, payments: { $exists: false } },
+  [{ $set: { payments: [{ userId: "$paidBy", unit: "percent", value: 100 }] } }],
+);
+
+// Index DDL is additive (no data removal or replacement of historical indexes); 0006 is the only data change.
 export const migratePendingContracts = async (database: Db): Promise<void> => {
   const versions = database.collection<{ id: string; appliedAt: Date }>("_migrations");
   for (const migration of pendingMigrations) {
@@ -32,5 +45,9 @@ export const migratePendingContracts = async (database: Db): Promise<void> => {
       await database.collection(name).createIndexes(indexes);
     }
     await versions.updateOne({ id: migration.id }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
+  }
+  if (!(await versions.findOne({ id: EXPENSE_PAYMENTS_MIGRATION_ID }))) {
+    await adaptLegacyExpensePayers(database);
+    await versions.updateOne({ id: EXPENSE_PAYMENTS_MIGRATION_ID }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
   }
 };
