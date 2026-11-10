@@ -256,6 +256,36 @@ describe("Trip post use cases", () => {
       expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId }))
         .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
     });
+
+    describe("expense of the post", () => {
+      const former = id(77);
+      const stored = (fields: Partial<PostExpense> = {}): PostExpense => ({ id: id(70), tripId, postId, totalAmount: 100, currency: "USD",
+        breakdown: null, payments: [], shares: [], createdAt, ...fields });
+      it("answers payments, shares, incomplete completeness and former members", async () => {
+        records = [seedPost()];
+        expenseRecords = [stored({ payments: [{ userId: actor, unit: "percent", value: 100 }, { userId: former, unit: "amount", value: 0 }],
+          shares: [{ userId: id(41), unit: "percent", value: 50 }] })];
+        const result = await domain.getTripPostChain.execute(dependencies(), { ...context, postId });
+        expect(result).toMatchObject({ ok: true, value: { expense: { id: id(70), totalAmount: 100, currency: "USD", formerMemberIds: [former],
+          payments: [{ userId: actor, unit: "percent", value: 100 }, { userId: former, unit: "amount", value: 0 }],
+          shares: [{ userId: id(41), unit: "percent", value: 50 }], completeness: { status: "incomplete" } } } });
+        expect(result.ok && result.value.expense?.completeness.reasons).toContain("shares_not_covering_total");
+      });
+
+      it("omits the expense key when the post has none", async () => {
+        records = [seedPost()];
+        const result = await domain.getTripPostChain.execute(dependencies(), { ...context, postId });
+        expect(result.ok && Object.keys(result.value).sort()).toEqual(["children", "parent", "post", "rootActivityId"]);
+      });
+
+      it("does not read the expense of a non member", async () => {
+        records = [seedPost()]; expenseRecords = [stored()]; role = undefined;
+        const find = vi.spyOn(scope, "findExpense");
+        expect(await domain.getTripPostChain.execute(dependencies(), { ...context, postId }))
+          .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(find).not.toHaveBeenCalled();
+      });
+    });
   });
 
   it("removes all links and preserves omitted text", async () => {

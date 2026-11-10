@@ -3,7 +3,7 @@ import { createPhotoBlobStore, type PhotoBlobStore, type PhotoBlobs } from "./ph
 import type { PostDraft } from "./post-draft.js";
 
 /** What the selector leaves for the composer when it returns with `navigate(-1)`: where to focus and what to announce (read once). */
-export type PostReturn = { focus?: "link" | "expense"; notice?: string };
+export type PostReturn = { focus?: "link" | "expense" | "split"; notice?: string };
 /** `blobs` are the binaries of the draft's photos: outside React state; `clear` empties them together with the draft. */
 export type PostDraftHandle = { draft: PostDraft | undefined; setDraft: (draft: PostDraft) => void; clear: () => void; blobs: PhotoBlobs;
   returned: PostReturn | undefined; setReturned: (value: PostReturn) => void; clearReturned: () => void };

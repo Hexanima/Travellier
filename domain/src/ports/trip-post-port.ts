@@ -31,6 +31,14 @@ export interface TripPostReadScope {
   listPhotosByPosts: (postIds: readonly ObjectId[]) => AsyncResult<PostPhoto[]>;
   /** Photo by id whatever its Trip: the caller compares `tripId` with the Trip it authorized. */
   findPhoto: (photoId: ObjectId) => AsyncResult<PostPhoto | undefined>;
+  /** Expense of a post of this Trip (1:1 by `postId`); a legacy record has `currency` null. */
+  findExpense: (postId: ObjectId) => AsyncResult<PostExpense | undefined>;
+  /**
+   * Which of these users are CURRENT members of the Trip, read in the same scope as `authorize`. In a write scope that runs under the Trip lock,
+   * so an expulsion and an expense save are serialized; in a read scope it is a consistent snapshot and takes no lock. A user not listed may be a
+   * former member or never have belonged: they cannot be told apart.
+   */
+  listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
 }
 
 export interface TripPostScope extends TripPostReadScope {
@@ -40,13 +48,6 @@ export interface TripPostScope extends TripPostReadScope {
   findPhotosByKeys: (keys: readonly string[]) => AsyncResult<PostPhoto[]>;
   /** Writes the photo records; a key already registered fails with `PhotoConflictError`. */
   insertPhotos: (photos: readonly PostPhoto[]) => AsyncResult<void>;
-  /** Expense of a post of this Trip (1:1 by `postId`); a legacy record has `currency` null. */
-  findExpense: (postId: ObjectId) => AsyncResult<PostExpense | undefined>;
-  /**
-   * Which of these users are CURRENT members of the Trip, read in the same snapshot (and under the same Trip lock) as `authorize`, so an
-   * expulsion and an expense save are serialized. A user not listed may be a former member or never have belonged: they cannot be told apart.
-   */
-  listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
   /** Writes a new expense (`payments` and `shares` are stored as given, empty by default); a second one for the same post fails with `ExpenseConflictError`. */
   insertExpense: (expense: PostExpense) => AsyncResult<void>;
   /** `$set` of only these fields of an existing expense; never replaces the record (the legacy `paidBy`, `createdAt` and the lists not listed are kept). */

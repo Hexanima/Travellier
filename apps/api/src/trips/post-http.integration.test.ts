@@ -41,6 +41,31 @@ describe("post HTTP API", () => {
     expect(JSON.parse((await f.request("GET")).body)).toEqual({ posts: [edited] });
   });
 
+  describe("expense in the post detail (T84)", () => {
+    it("omits the expense key without an expense and answers the saved payments and shares after a PATCH", async () => {
+      const post = await create(), url = `${f.path()}/${post.id}`;
+      const ana = new ObjectId();
+      await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: ana, role: "participant", joinedAt: new Date() });
+      expect(Object.keys(JSON.parse((await f.request("GET", url)).body)).sort()).toEqual(["children", "parent", "post", "rootActivityId"]);
+      const payments = [{ userId: ana.toHexString(), unit: "amount", value: 400 }];
+      const shares = [{ userId: ana.toHexString(), unit: "percent", value: 50 }];
+      const saved = await f.request("PATCH", url, { expense: { totalAmount: 1000, currency: "ARS", payments, shares } });
+      expect(saved.statusCode, saved.body).toBe(200);
+      const detail = JSON.parse((await f.request("GET", url)).body);
+      expect(detail.expense).toMatchObject({ totalAmount: 1000, currency: "ARS", payments, shares, formerMemberIds: [],
+        completeness: { status: "incomplete" } });
+    });
+
+    it("reads a legacy paidBy as a payment of 100 percent and lists the unknown payer as a former member", async () => {
+      const post = await create(), paidBy = new ObjectId();
+      await f.db.collection("postExpenses").insertOne({ tripId: f.trip, postId: new ObjectId(post.id), totalAmount: 100, paidBy, createdAt: new Date() });
+      const detail = JSON.parse((await f.request("GET", `${f.path()}/${post.id}`)).body);
+      expect(detail.expense).toMatchObject({ currency: null, payments: [{ userId: paidBy.toHexString(), unit: "percent", value: 100 }],
+        shares: [], formerMemberIds: [paidBy.toHexString()] });
+      expect(detail.expense).not.toHaveProperty("paidBy");
+    });
+  });
+
   it.each(Array.from({ length: 8 }, (_, i) => i).filter((mask) => !(mask & 2) || !(mask & 5)))("creates combination %i and later links and unlinks independently", async (mask) => {
     const all = await links();
     const selected = { activityId: mask & 1 ? all.activityId : null, parentPostId: mask & 2 ? all.parentPostId : null, transportId: mask & 4 ? all.transportId : null };

@@ -8,19 +8,33 @@ export type PostResponse = { id: string; tripId: string; authorId: string; descr
   activityId: string | null; parentPostId: string | null; transportId: string | null; createdAt: string };
 /** Only content fields: the publication date and the day are decided by the server and can never be sent. */
 export type NewActivityInput = { title: string; scheduledAt: string; durationMinutes?: number | null; description?: string | null; mapsUrl?: string | null };
-/** Only these three fields travel: payments and shares are never sent, so a merge-patch keeps them. `breakdown: null` clears it. */
-export type ExpenseInput = { totalAmount?: number; currency?: "ARS" | "EUR" | "USD"; breakdown?: string | null };
+export type ExpensePaymentRow = { userId: string; unit: "amount" | "percent"; value: number };
+export type ExpenseShareRow = { userId: string; unit: "amount" | "percent" | "remainder" | "excluded"; value: number | null };
+/**
+ * Merge-patch: an absent key keeps what is stored. `breakdown: null` clears it; `payments`/`shares` replace the whole list
+ * (`[]` clears it) and only travel as a list of rows.
+ */
+export type ExpenseInput = { totalAmount?: number; currency?: "ARS" | "EUR" | "USD"; breakdown?: string | null;
+  payments?: ExpensePaymentRow[]; shares?: ExpenseShareRow[] };
 /** `newActivity` creates the activity together with the post; the server derives its day, so `dayId` is never sent. */
 export type PostInput = { description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null;
   newActivity?: NewActivityInput; photos?: { key: string }[]; expense?: ExpenseInput };
-/** What the server stored for the expense (the currency is null only in legacy data); payments and shares are not read here. */
+/** What the server stored for the expense (the currency is null only in legacy data); payments and shares are read from the post detail. */
 export type SavedExpenseResponse = { postId: string; totalAmount: number; currency: "ARS" | "EUR" | "USD" | null; breakdown: string | null };
+/**
+ * Expense of the post detail: what the group agreed (a legacy payer reads as one payment of 100 percent), what is missing for a
+ * balance (`completeness`, derived by the server) and the users of the rows that are no longer members of the Trip.
+ */
+export type SavedExpenseView = SavedExpenseResponse & { payments: ExpensePaymentRow[]; shares: ExpenseShareRow[];
+  completeness: { status: "complete" | "incomplete"; reasons: string[] }; formerMemberIds: string[] };
 /** `activity` and `participation` are present only when a new activity was sent; `expense` only when an expense was sent. */
 export type SavedPost = PostResponse & { activity?: ActivityResponse; participation?: ParticipationResponse | null; expense?: SavedExpenseResponse };
 /** Summary of a chained post: the server sends only these fields for the immediate parent and the direct children. */
 export type PostSummary = { id: string; authorId: string; createdAt: string; description: string | null };
 /** `parent` is the immediate parent (null when absent or not visible); `children` are only the direct children, newest first. */
-export type PostDetail = { post: PostResponse; parent: PostSummary | null; children: PostSummary[]; rootActivityId: string | null };
+export type PostDetail = { post: PostResponse; parent: PostSummary | null; children: PostSummary[]; rootActivityId: string | null; expense?: SavedExpenseView;
+  /** The detail carried an expense that could not be read: the rest of the detail is still valid, but the stored lists are unknown. */
+  expenseUnreadable?: true };
 export type TripPostApi = {
   list: (tripId: string) => Promise<TripResult<PostResponse[]>>;
   get: (tripId: string, postId: string) => Promise<TripResult<PostDetail>>;
@@ -68,6 +82,30 @@ const parseExpense = (value: unknown, tripId: string, postId: string): SavedExpe
     !nullableText(value.breakdown ?? null)) return undefined;
   return { postId, totalAmount: value.totalAmount, currency: (value.currency as SavedExpenseResponse["currency"] | undefined) ?? null, breakdown: (value.breakdown as string | null | undefined) ?? null };
 };
+const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const parsePaymentRow = (value: unknown): ExpensePaymentRow | undefined => record(value) && id(value.userId) && (value.unit === "amount" || value.unit === "percent") &&
+  finiteNumber(value.value) ? { userId: value.userId, unit: value.unit, value: value.value } : undefined;
+const parseShareRow = (value: unknown): ExpenseShareRow | undefined => {
+  if (!record(value) || !id(value.userId)) return undefined;
+  if (value.unit === "remainder" || value.unit === "excluded") return value.value === null || value.value === undefined ? { userId: value.userId, unit: value.unit, value: null } : undefined;
+  return (value.unit === "amount" || value.unit === "percent") && finiteNumber(value.value) ? { userId: value.userId, unit: value.unit, value: value.value } : undefined;
+};
+const rows = <T>(value: unknown, parse: (row: unknown) => T | undefined): T[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.map(parse);
+  return parsed.every((row) => row !== undefined) ? parsed : undefined;
+};
+/** Strict: the detail expense must belong to this post and carry well-formed rows, completeness and former members. */
+const parseExpenseView = (value: unknown, tripId: string, postId: string): SavedExpenseView | undefined => {
+  const base = parseExpense(value, tripId, postId);
+  if (!base || !record(value)) return undefined;
+  const payments = rows(value.payments, parsePaymentRow), shares = rows(value.shares, parseShareRow);
+  const completeness = value.completeness, former = value.formerMemberIds;
+  if (!payments || !shares || !record(completeness) || (completeness.status !== "complete" && completeness.status !== "incomplete") ||
+    !Array.isArray(completeness.reasons) || !completeness.reasons.every((reason) => typeof reason === "string") ||
+    !Array.isArray(former) || !former.every(id)) return undefined;
+  return { ...base, payments, shares, completeness: { status: completeness.status, reasons: completeness.reasons as string[] }, formerMemberIds: former as string[] };
+};
 const single = (result: Raw, tripId: string, postId?: string, withActivity = false, withExpense = false): TripResult<SavedPost> => {
   if (!result.ok) return failure(result.error);
   const parsed = record(result.value) ? parsePost(result.value.post, tripId, postId) : undefined;
@@ -87,11 +125,16 @@ const newActivityBody = (value: NewActivityInput): NewActivityInput => ({ title:
   ...(value.durationMinutes !== undefined ? { durationMinutes: value.durationMinutes } : {}),
   ...(value.description !== undefined ? { description: value.description } : {}),
   ...(value.mapsUrl !== undefined ? { mapsUrl: value.mapsUrl } : {}) });
-/** Allow list: payments, shares and `paidBy` never travel; `null` is never a valid expense and an empty object carries nothing. */
+/** Allow list of a row: only `userId`, `unit` and `value` (a row key such as the editor's `key`, or `paidBy`, never travels). */
+const rowBody = (row: { userId: string; unit: string; value?: number | null }) => ({ userId: row.userId, unit: row.unit,
+  ...(row.value !== undefined ? { value: row.value } : {}) });
+/** Allow list: `paidBy` never travels; `null` is never a valid expense, a list key only travels as a list and an empty object carries nothing. */
 const expenseBody = (value: ExpenseInput | null | undefined): Pick<PostInput, "expense"> => {
   if (typeof value !== "object" || value === null) return {};
   const expense: ExpenseInput = { ...(value.totalAmount !== undefined ? { totalAmount: value.totalAmount } : {}),
-    ...(value.currency !== undefined ? { currency: value.currency } : {}), ...(value.breakdown !== undefined ? { breakdown: value.breakdown } : {}) };
+    ...(value.currency !== undefined ? { currency: value.currency } : {}), ...(value.breakdown !== undefined ? { breakdown: value.breakdown } : {}),
+    ...(Array.isArray(value.payments) ? { payments: value.payments.map(rowBody) as ExpensePaymentRow[] } : {}),
+    ...(Array.isArray(value.shares) ? { shares: value.shares.map(rowBody) as ExpenseShareRow[] } : {}) };
   return Object.keys(expense).length > 0 ? { expense } : {};
 };
 const carriesExpense = (input: PostInput) => expenseBody(input.expense).expense !== undefined;
@@ -127,7 +170,10 @@ export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "pat
     if (parent === undefined || !Array.isArray(rawChildren)) return server;
     const children = rawChildren.map(parseSummary);
     if (!children.every((child) => child !== undefined)) return server;
-    return { ok: true, value: { post, parent, children: children.sort(newestFirst), rootActivityId: id(rootActivityId) ? rootActivityId : null } };
+    const rawExpense = result.value.expense;
+    const expense = rawExpense === undefined ? undefined : parseExpenseView(rawExpense, tripId, postId);
+    return { ok: true, value: { post, parent, children: children.sort(newestFirst), rootActivityId: id(rootActivityId) ? rootActivityId : null,
+      ...(expense ? { expense } : {}), ...(rawExpense !== undefined && !expense ? { expenseUnreadable: true as const } : {}) } };
   },
   create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation)), tripId, undefined, input.newActivity !== undefined, carriesExpense(input)),
   update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation)),

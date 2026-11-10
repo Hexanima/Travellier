@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, SelectField, TextAreaField, TextField } from "../components/index.js";
 import { diffExpense, expenseCurrencies, expenseDraftFromSaved, validateExpense, type AmountError, type ExpenseDraft, type SavedExpense } from "./expense-draft.js";
-import { draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
+import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
@@ -65,7 +65,7 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
     <div className="trips-panel">
       <header className="itinerary-header">
         <h1 ref={headingRef} tabIndex={-1}>{postId ? "Editar gasto" : "Agregar gasto"}</h1>
-        <p>El gasto se guarda junto con el recuerdo. Pagos y reparto se configuran en otra sección.</p>
+        <p>El gasto se guarda junto con el recuerdo. Aceptalo y cargá quién pagó y cómo se reparte en «Pagos y reparto», desde el recuerdo.</p>
       </header>
       {saved.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
       {saved.kind === "error" ? <div className="trips-state">
@@ -91,7 +91,7 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
     if (leaving.current) return;
     const blank = values.amount.trim() === "" && values.currency === "" && values.breakdown.trim() === "";
     // Nothing typed: creating means «no expense»; an edit without a saved one stays untouched. A saved expense is never removed.
-    if (blank && !saved) { commit(setExpense(draft, null)); back(); return; }
+    if (blank && !saved) { commit(clearExpense(draft)); back(); return; }
     const checked = validateExpense(values);
     if (!checked.ok) {
       // One alert at a time: the first invalid field in form order.

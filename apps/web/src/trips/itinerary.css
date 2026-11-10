@@ -95,6 +95,9 @@
 .post-link-section, .post-link-transport, .post-link-panel { display: grid; gap: 8px; }
 .post-link-section, .post-expense-section { display: grid; gap: 8px; }
 .post-expense-section p { margin: 0; }
+.split-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.split-rows li { display: grid; gap: 6px; }
+.split-person { font-weight: 600; }
 .post-link-section p, .post-link-transport p { margin: 0; }
 .post-link-options { display: grid; gap: 4px; }
 .post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }
