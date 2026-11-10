@@ -11,6 +11,7 @@ export * from "./activity.js";
 export * from "./activity-participation.js";
 export * from "./post.js";
 export * from "./post-photo.js";
+export * from "./post-expense.js";
 export * from "./post-photo-cursor.js";
 export * from "./post-chain-projection.js";
 export * from "./comment.js";
