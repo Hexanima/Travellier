@@ -411,7 +411,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
     if (backToBalance()) return;
     const origin = readOrigin(location.state, tripId ?? "");
     if (postId && origin.label !== "recuerdo") { navigate(listing); return; }
-    if ((origin.label === "recuerdo" || origin.label === "actividad") && canGoBack(location)) { leaving.current = true; navigate(-1); }
+    if ((origin.label === "recuerdo" || origin.label === "actividad" || origin.label === "transporte") && canGoBack(location)) { leaving.current = true; navigate(-1); }
     else navigate(originHref(origin), { replace: true, state: withNoBack() });
   };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };

@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { openPostFrom } from "./open-post.js";
 import type { OriginLabel } from "./post-origin.js";
 
-export type PostLinkProps = { tripId: string; postId: string; anchor: string; label: Extract<OriginLabel, "diario" | "itinerario" | "fotos" | "actividad">; className?: string; children: ReactNode };
+export type PostLinkProps = { tripId: string; postId: string; anchor: string; label: Extract<OriginLabel, "diario" | "itinerario" | "fotos" | "actividad" | "transporte">; className?: string; children: ReactNode };
 
 /** Link to the detail of a post. Modified clicks keep the browser behaviour. */
 export function PostLink({ tripId, postId, anchor, label, className, children }: PostLinkProps) {

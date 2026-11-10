@@ -1,12 +1,12 @@
 /** Where a post detail was opened from and how to restore that place. Everything read from router state is validated: the state is untrusted input. */
-export type OriginLabel = "diario" | "itinerario" | "recuerdo" | "fotos" | "actividad" | "balance" | "avisos";
+export type OriginLabel = "diario" | "itinerario" | "recuerdo" | "fotos" | "actividad" | "transporte" | "balance" | "avisos";
 /** `viewer`: the detail was opened from the photo viewer, so going back reopens it on the photo of the anchor. */
 export type PostOrigin = { path: string; search?: string; anchor?: string; scrollY?: number; label: OriginLabel; viewer?: boolean };
 /** `panel` is only the gallery tab (`photos`); any other value is dropped without invalidating the restore. */
 export type RestorePanel = "photos";
 export type RestoreState = { anchor: string; scrollY: number; panel?: RestorePanel };
 
-const labels: readonly unknown[] = ["diario", "itinerario", "recuerdo", "fotos", "actividad", "balance", "avisos"];
+const labels: readonly unknown[] = ["diario", "itinerario", "recuerdo", "fotos", "actividad", "transporte", "balance", "avisos"];
 const anchorPattern = /^(data-memory|data-itinerary-post|data-photo|data-balance-expense)=[0-9a-f]{24}$/;
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const scroll = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -25,7 +25,7 @@ export const anchorSelector = (anchor: string): string | undefined => {
 export const diaryOrigin = (tripId: string): PostOrigin => ({ path: `/trips/${tripId}/memories`, label: "diario" });
 export const balanceOrigin = (tripId: string): PostOrigin => ({ path: `/trips/${tripId}/balance`, label: "balance" });
 export const originHref = (origin: PostOrigin) => `${origin.path}${origin.search ?? ""}`;
-export const originLabel = (label: OriginLabel) => label === "diario" ? "Volver al diario" : label === "itinerario" ? "Volver al itinerario" : label === "fotos" ? "Volver a las fotos" : label === "actividad" ? "Volver a la actividad" : label === "balance" ? "Volver al balance" : label === "avisos" ? "Volver a avisos" : "Volver al recuerdo";
+export const originLabel = (label: OriginLabel) => label === "diario" ? "Volver al diario" : label === "itinerario" ? "Volver al itinerario" : label === "fotos" ? "Volver a las fotos" : label === "actividad" ? "Volver a la actividad" : label === "transporte" ? "Volver al transporte" : label === "balance" ? "Volver al balance" : label === "avisos" ? "Volver a avisos" : "Volver al recuerdo";
 
 /** The notifications center is the only origin outside a Trip: exactly this path and label, nothing else travels with it. */
 export const noticesOrigin: PostOrigin = { path: "/notifications", label: "avisos" };

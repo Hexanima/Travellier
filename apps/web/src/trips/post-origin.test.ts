@@ -59,6 +59,18 @@ describe("post origin", () => {
     expect(readOrigin({ origin: { path, search: "?a=//evil", label: "actividad" } }, tripId)).toEqual(diary);
     expect(readOrigin({ origin: { path, search: "?activity=1 2", label: "actividad" } }, tripId)).toEqual(diary);
   });
+  it("accepts the transport label with the transport dialog search; rejects invented labels and malicious searches", () => {
+    const path = `/trips/${tripId}/itinerary`;
+    const search = "?transport=000000000000000000000005&tab=photos";
+    const origin = { path, search, anchor: memoryAnchor("000000000000000000000006"), scrollY: 10, label: "transporte" };
+    expect(readOrigin({ origin }, tripId)).toEqual(origin);
+    expect(originHref(readOrigin({ origin }, tripId))).toBe(`${path}${search}`);
+    expect(originLabel("transporte")).toBe("Volver al transporte");
+    expect(buildOrigin({ pathname: path, search }, "transporte")).toEqual({ path, search, label: "transporte" });
+    expect(readOrigin({ origin: { path, search: "?transport=1#x", label: "transporte" } }, tripId)).toEqual(diary);
+    expect(readOrigin({ origin: { path: `/trips/000000000000000000000099/itinerary`, search, label: "transporte" } }, tripId)).toEqual(diary);
+    expect(readOrigin({ origin: { path, search, label: "transportes" } }, tripId)).toEqual(diary);
+  });
   it("accepts the balance label, its origin and its expense anchor", () => {
     const path = `/trips/${tripId}/balance`;
     const anchor = balanceAnchor("000000000000000000000007");
