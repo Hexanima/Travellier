@@ -20,8 +20,9 @@ const render = async (status: PushStatus, handlers: { onEnable?: () => void; onD
   const root = createRoot(container);
   roots.push(root);
   const onEnable = handlers.onEnable ?? vi.fn();
-  await act(async () => root.render(<PushPermissionPanel status={status} onEnable={onEnable} {...(handlers.onDismiss ? { onDismiss: handlers.onDismiss } : {})} />));
-  return { container, onEnable };
+  const update = async (next: PushStatus) => act(async () => root.render(<PushPermissionPanel status={next} onEnable={onEnable} {...(handlers.onDismiss ? { onDismiss: handlers.onDismiss } : {})} />));
+  await update(status);
+  return { container, onEnable, update };
 };
 const button = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === label);
 const click = async (element: Element | undefined) => { expect(element).toBeDefined(); await act(async () => { element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); }); };
@@ -41,8 +42,10 @@ describe("PushPermissionPanel", () => {
   it.each(["requesting", "registering"] as const)("%s: the button is busy and cannot be pressed again", async (state) => {
     const { container, onEnable } = await render({ state });
     const busy = container.querySelector("button");
-    expect(busy?.disabled).toBe(true);
+    expect(busy?.disabled).toBe(false);
+    expect(busy?.getAttribute("aria-disabled")).toBe("true");
     expect(busy?.getAttribute("aria-busy")).toBe("true");
+    expect(busy?.textContent).toBe("Activando…");
     await click(busy ?? undefined);
     expect(onEnable).not.toHaveBeenCalled();
   });
@@ -63,6 +66,49 @@ describe("PushPermissionPanel", () => {
     await click(button(container, "Reintentar"));
     expect(onEnable).toHaveBeenCalledTimes(1);
   });
+  it("keeps the same enable button mounted and focused while requesting and registering", async () => {
+    const { container, update } = await render({ state: "off" });
+    const original = container.querySelector("button")!;
+    original.focus();
+    expect(document.activeElement).toBe(original);
+    for (const state of ["requesting", "registering"] as const) {
+      await update({ state });
+      expect(container.querySelector("button")).toBe(original);
+      expect(document.activeElement).toBe(original);
+      expect(original.getAttribute("aria-disabled")).toBe("true");
+    }
+  });
+  it("has one persistent status region that announces the final states and no alert", async () => {
+    const { container, update } = await render({ state: "off" });
+    const region = container.querySelector("[role=status]");
+    expect(region).not.toBeNull();
+    for (const [status, text] of [
+      [{ state: "registered", tokenHint: "****1111" }, "Avisos activados en este dispositivo."],
+      [{ state: "denied" }, "Los avisos están desactivados"],
+      [{ state: "error" }, "No pudimos activar los avisos."],
+    ] as const) {
+      await update(status);
+      expect(container.querySelectorAll("[role=status]")).toHaveLength(1);
+      expect(container.querySelector("[role=status]")).toBe(region);
+      expect(region?.textContent).toContain(text);
+      expect(container.querySelector("[role=alert], [aria-live]")).toBeNull();
+    }
+  });
+  it("when the pressed button disappears (registered) the focus moves into the panel instead of body", async () => {
+    const { container, update } = await render({ state: "off" });
+    await click(button(container, "Activar avisos"));
+    container.querySelector("button")!.focus();
+    await update({ state: "requesting" });
+    await update({ state: "registered", tokenHint: "****1111" });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(container.contains(document.activeElement)).toBe(true);
+  });
+  it("Ahora no also exists in the denied state when onDismiss is given", async () => {
+    const onDismiss = vi.fn();
+    const denied = await render({ state: "denied" }, { onDismiss });
+    await click(button(denied.container, "Ahora no"));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
   it("Ahora no only exists with onDismiss and in the off state, and calls nothing else", async () => {
     const onDismiss = vi.fn();
     const withDismiss = await render({ state: "off" }, { onDismiss });
@@ -71,7 +117,7 @@ describe("PushPermissionPanel", () => {
     expect(withDismiss.onEnable).not.toHaveBeenCalled();
     const without = await render({ state: "off" });
     expect(button(without.container, "Ahora no")).toBeUndefined();
-    const denied = await render({ state: "denied" }, { onDismiss });
-    expect(button(denied.container, "Ahora no")).toBeUndefined();
+    const registered = await render({ state: "registered", tokenHint: "****1111" }, { onDismiss });
+    expect(button(registered.container, "Ahora no")).toBeUndefined();
   });
 });

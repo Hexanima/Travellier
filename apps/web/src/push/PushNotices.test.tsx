@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProfileScreen } from "../profile/ProfileScreen.js";
 import { PushNotices } from "./PushNotices.js";
 import type { PushDeviceApi } from "./push-device-api.js";
-import { createPushDeviceService } from "./push-device-service.js";
+import { createPushDeviceService, type PushDeviceService } from "./push-device-service.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -84,9 +84,37 @@ describe("PushNotices (connected section)", () => {
     expect(port.requestPermission).not.toHaveBeenCalled();
     expect(port.register).not.toHaveBeenCalled();
   });
-  it("the dismissible card is not shown when notices are already granted or denied", async () => {
-    const denied = await mount(<PushNotices push={setup("denied").service} dismissible />);
-    expect(denied.textContent).not.toContain("Ahora no");
+  it("the dismissible card is not shown when notices are already registered", async () => {
+    const registeredStatus = { state: "registered", tokenHint: "****1111" } as const;
+    const registeredService: PushDeviceService = {
+      getStatus: () => registeredStatus,
+      subscribe: () => () => undefined,
+      refreshStatus: async () => undefined,
+      resume: async () => undefined,
+      enable: async () => undefined,
+      revokeBeforeLogout: async () => ({ revoked: true }),
+      reset: () => undefined,
+    };
+    const registered = await mount(<PushNotices push={registeredService} dismissible />);
+    expect(registered.innerHTML).toBe("");
+    const inProfile = await mount(<PushNotices push={registeredService} />);
+    expect(inProfile.textContent).toContain("Avisos activados en este dispositivo.");
+  });
+  it("the dismissible card shows the informational denied message with Ahora no, which hides it for the session", async () => {
+    const container = await mount(<main><h1>Unirse a un viaje</h1><a href="/x">Ver miembros</a><PushNotices push={setup("denied").service} dismissible /></main>);
+    expect(container.textContent).toContain("Los avisos están desactivados para Travellier.");
+    expect(button(container, "Ahora no")).toBeDefined();
+    expect(button(container, "Activar avisos")).toBeUndefined();
+    await click(button(container, "Ahora no"));
+    expect(container.querySelector(".push-notices")).toBeNull();
+    // The focus goes to the screen heading, not to body.
+    expect(document.activeElement).toBe(container.querySelector("h1"));
+  });
+  it("keeps the confirmation visible when the user enables the notices from the card itself", async () => {
+    const { service } = setup("prompt");
+    const container = await mount(<PushNotices push={service} dismissible />);
+    await click(button(container, "Activar avisos"));
+    expect(container.querySelector(".push-notices")).not.toBeNull();
   });
 });
 
