@@ -125,6 +125,58 @@ describe("itinerary screen expenses", () => {
     expect(dayExpenses(container).textContent).toContain("ARS 25,50 · 1 gasto");
   });
 
+  describe("rescheduling and removing the activity of a linked post (reload with the new aggregate)", () => {
+    const dayAt = (container: HTMLElement, date: string) => container.querySelector(`[data-itinerary-date="${date}"] [data-itinerary-expenses]`)!;
+    /** Two activity days (25 and 26); the activity and its linked post (with expense) start on the 25th. */
+    const twoDays = () => {
+      const value = fixture();
+      value.days.push({ ...value.days[1], id: itineraryId(30), order: 4, startsAt: "2026-09-26T10:00:00.000Z", endsAt: "2026-09-26T18:00:00.000Z", items: [] });
+      linkPost(value.posts[0], { activityId: itineraryId(8) }); value.activities[0].postIds = [itineraryId(10)];
+      return value;
+    };
+    const reload = async (container: HTMLElement, next: TripItineraryResponse) => {
+      await act(async () => roots.splice(0).forEach((root) => root.unmount())); container.remove();
+      return render(next);
+    };
+    it("moves the expense to the new day when the activity is rescheduled to another day", async () => {
+      const value = twoDays();
+      const first = await render(value);
+      expect(dayAt(first, "2026-09-25").textContent).toContain("ARS 25,50 · 1 gasto");
+      expect(dayAt(first, "2026-09-26").textContent).toContain("Sin gastos registrados.");
+      const moved = twoDays();
+      moved.activities[0].dayId = itineraryId(30); moved.activities[0].scheduledAt = "2026-09-26T12:00:00.000Z";
+      const after = await reload(first, moved);
+      expect(dayAt(after, "2026-09-26").textContent).toContain("ARS 25,50 · 1 gasto");
+      expect(dayAt(after, "2026-09-25").textContent).toContain("Sin gastos registrados.");
+      expect(tripSection(after)?.textContent).toContain("ARS 25,50 · 1 gasto");
+      expect(button(after, "Ver gastos fuera del itinerario")).toBeUndefined();
+      expect(outsideSection(after)).toBeNull();
+    });
+    it("lists the expense among those outside the itinerary, once, when the post stays outside every day after removal", async () => {
+      const value = twoDays();
+      const first = await render(value);
+      expect(button(first, "Ver gastos fuera del itinerario")).toBeUndefined();
+      const removed = twoDays();
+      removed.activities = []; linkPost(removed.posts[0], {}); removed.posts[0].createdAt = "2026-10-03T12:00:00.000Z";
+      const after = await reload(first, removed);
+      expect(button(after, "Ver gastos fuera del itinerario (1)")).toBeDefined();
+      expect(outsideSection(after)?.querySelectorAll("[data-outside-expense]")).toHaveLength(1);
+      expect(dayAt(after, "2026-09-25").textContent).toContain("Sin gastos registrados.");
+      expect(tripSection(after)?.textContent).toContain("ARS 25,50 · 1 gasto");
+    });
+    it("keeps the expense under the publication day, with no outside shortcut, when the activity is removed", async () => {
+      const value = twoDays();
+      value.activities[0].dayId = itineraryId(30); value.activities[0].scheduledAt = "2026-09-26T12:00:00.000Z";
+      const first = await render(value);
+      expect(dayAt(first, "2026-09-26").textContent).toContain("ARS 25,50 · 1 gasto");
+      const removed = twoDays(); removed.activities = []; linkPost(removed.posts[0], {});
+      const after = await reload(first, removed);
+      expect(dayAt(after, "2026-09-25").textContent).toContain("ARS 25,50 · 1 gasto");
+      expect(dayAt(after, "2026-09-26").textContent).toContain("Sin gastos registrados.");
+      expect(button(after, "Ver gastos fuera del itinerario")).toBeUndefined();
+    });
+  });
+
   describe("attributed date", () => {
     const attributed = (occurredAt: string, publishedAt: string, source: "activity" | "publication" = "activity") => {
       const value = fixture();
