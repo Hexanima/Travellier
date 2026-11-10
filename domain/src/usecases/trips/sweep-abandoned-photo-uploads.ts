@@ -26,6 +26,8 @@ export interface AbandonedUploadSweepSummary {
   ignored: number;
   listFailed: boolean;
   deleteFailed: number;
+  /** Candidates kept because the link check failed (page query or recheck); they are never deleted. */
+  linkCheckFailed: number;
   /** The run stopped (deadline or `maxPages`) before the whole prefix was listed. */
   truncated: boolean;
 }
@@ -42,7 +44,7 @@ export const sweepAbandonedPhotoUploads = async (deps: SweepAbandonedPhotoUpload
   if (!Number.isFinite(minAgeSeconds) || minAgeSeconds < ABANDONED_UPLOAD_FLOOR_SECONDS) {
     return err(new ValidationError([{ field: "minAgeSeconds", code: "too_low", message: "Minimum age is below the signed upload lifetime plus margin." }]));
   }
-  const summary: AbandonedUploadSweepSummary = { pages: 0, scanned: 0, deleted: 0, keptRecent: 0, keptLinked: 0, ignored: 0, listFailed: false, deleteFailed: 0, truncated: false };
+  const summary: AbandonedUploadSweepSummary = { pages: 0, scanned: 0, deleted: 0, keptRecent: 0, keptLinked: 0, ignored: 0, listFailed: false, deleteFailed: 0, linkCheckFailed: 0, truncated: false };
   let token: string | undefined;
 
   for (;;) {
@@ -59,11 +61,14 @@ export const sweepAbandonedPhotoUploads = async (deps: SweepAbandonedPhotoUpload
       else candidates.push(object.key);
     }
     const linked = candidates.length > 0 ? await deps.links.findLinkedKeys(candidates) : undefined;
+    // A failed link check never deletes: the objects are kept and counted.
+    if (linked !== undefined && !linked.ok) summary.linkCheckFailed += candidates.length;
     if (linked?.ok) {
       for (const objectKey of candidates) {
+        if (deps.now().getTime() >= deps.deadline.getTime()) { summary.truncated = true; return ok(summary); }
         if (linked.value.has(objectKey)) { summary.keptLinked += 1; continue; }
         const recheck = await deps.links.findLinkedKeys([objectKey]);
-        if (!recheck.ok) continue;
+        if (!recheck.ok) { summary.linkCheckFailed += 1; continue; }
         if (recheck.value.has(objectKey)) { summary.keptLinked += 1; continue; }
         const deleted = await deps.storage.deleteObject({ objectKey });
         if (deleted.ok) summary.deleted += 1; else summary.deleteFailed += 1;

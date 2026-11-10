@@ -56,7 +56,7 @@ describe("sweepAbandonedPhotoUploads", () => {
   it("deletes an old orphan, lists the trips/ prefix and reports counters only", async () => {
     const ctx = setup({ pages: [[object(key(1), OLD)]] });
     const result = await sweepAbandonedPhotoUploads(ctx.deps);
-    expect(result).toEqual({ ok: true, value: { pages: 1, scanned: 1, deleted: 1, keptRecent: 0, keptLinked: 0, ignored: 0, listFailed: false, deleteFailed: 0, truncated: false } });
+    expect(result).toEqual({ ok: true, value: { pages: 1, scanned: 1, deleted: 1, keptRecent: 0, keptLinked: 0, ignored: 0, listFailed: false, deleteFailed: 0, linkCheckFailed: 0, truncated: false } });
     expect(ctx.deleted).toEqual([key(1)]);
     expect(ctx.listCalls).toEqual([{ prefix: "trips/", maxKeys: 1000 }]);
   });
@@ -127,6 +127,48 @@ describe("sweepAbandonedPhotoUploads", () => {
     const result = await sweepAbandonedPhotoUploads(ctx.deps);
     expect(result).toMatchObject({ ok: true, value: { pages: 2, deleted: 1 } });
     expect(ctx.deleted).toEqual([key(2)]);
+  });
+
+  it("cuts a page in the middle when the deadline passes, and a later run resumes without duplicates or extra deletes", async () => {
+    const keys = [1, 2, 3, 4, 5].map(key);
+    let elapsedMs = 0;
+    const first = setup({ pages: [keys.map((k) => object(k, OLD))] });
+    const realDelete = first.deps.storage.deleteObject;
+    first.deps.storage = { ...first.deps.storage, deleteObject: async (input) => { elapsedMs += 20_000; return realDelete(input); } };
+    first.deps.now = () => new Date(NOW.getTime() + elapsedMs);
+    const result = await sweepAbandonedPhotoUploads(first.deps);
+    expect(result).toMatchObject({ ok: true, value: { pages: 1, scanned: 5, deleted: 3, truncated: true, deleteFailed: 0 } });
+    expect(first.deleted).toEqual(keys.slice(0, 3));
+
+    const second = setup({ pages: [keys.filter((k) => !first.deleted.includes(k)).map((k) => object(k, OLD))] });
+    expect(await sweepAbandonedPhotoUploads(second.deps)).toMatchObject({ ok: true, value: { deleted: 2, truncated: false } });
+    expect([...first.deleted, ...second.deleted].sort()).toEqual([...keys].sort());
+  });
+
+  it("counts a failed link query on a page and keeps going with the next page", async () => {
+    let calls = 0;
+    const ctx = setup({ pages: [[object(key(1), OLD), object(key(2), OLD)], [object(key(3), OLD)]] });
+    ctx.deps.links = { findLinkedKeys: async (keys) => (++calls === 1 ? err(new UnknownError("secret")) : ok(new Set(keys.filter(() => false)))) };
+    const result = await sweepAbandonedPhotoUploads(ctx.deps);
+    expect(result).toMatchObject({ ok: true, value: { pages: 2, deleted: 1, linkCheckFailed: 2 } });
+    expect(ctx.deleted).toEqual([key(3)]);
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
+  it("counts a failed recheck, keeps only that key and continues with the rest", async () => {
+    const ctx = setup({ pages: [[object(key(1), OLD), object(key(2), OLD), object(key(3), OLD)]] });
+    ctx.deps.links = { findLinkedKeys: async (keys) => (keys.length === 1 && keys[0] === key(2) ? err(new UnknownError("secret")) : ok(new Set<string>())) };
+    const result = await sweepAbandonedPhotoUploads(ctx.deps);
+    expect(result).toMatchObject({ ok: true, value: { deleted: 2, linkCheckFailed: 1 } });
+    expect(ctx.deleted).toEqual([key(1), key(3)]);
+  });
+
+  it("never deletes when every link check fails, but reports the failures", async () => {
+    const ctx = setup({ pages: [[object(key(1), OLD), object(key(2), OLD)]] });
+    ctx.deps.links = { findLinkedKeys: async () => err(new UnknownError("secret")) };
+    const result = await sweepAbandonedPhotoUploads(ctx.deps);
+    expect(result).toMatchObject({ ok: true, value: { deleted: 0, linkCheckFailed: 2 } });
+    expect(ctx.deleted).toEqual([]);
   });
 
   it("a delete failure does not abort the rest", async () => {
