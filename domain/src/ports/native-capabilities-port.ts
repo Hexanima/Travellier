@@ -71,6 +71,14 @@ export interface NativeCalendarEvent {
   startMs: number;
   endMs: number;
   calendarId?: string;
+  /** Lets callers tell an identical copy from one the person edited. */
+  title?: string;
+}
+/** Answer of `update`: the id to keep; `staleCopy` when the previous event could not be deleted after re-creating it; `ignoredCopies` counts other copies with the marker that were left untouched. */
+export interface CalendarUpdateResult {
+  id: string;
+  staleCopy?: true;
+  ignoredCopies?: number;
 }
 /**
  * Events of the device calendar, identified by a marker kept in their notes (the installed plugin cannot target an update by id).
@@ -81,6 +89,6 @@ export interface NativeCalendarEvent {
 export interface CalendarEventsPort {
   find(marker: string, window: CalendarEventWindow): AsyncResult<readonly NativeCalendarEvent[], NativeCapabilityError>;
   create(spec: CalendarEventSpec): AsyncResult<{ id: string }, NativeCapabilityError>;
-  update(eventId: string, marker: string, window: CalendarEventWindow, spec: CalendarEventSpec): AsyncResult<{ id: string }, NativeCapabilityError>;
+  update(eventId: string, marker: string, window: CalendarEventWindow, spec: CalendarEventSpec): AsyncResult<CalendarUpdateResult, NativeCapabilityError>;
   remove(id: string): AsyncResult<void, NativeCapabilityError>;
 }

@@ -156,4 +156,132 @@ describe("«remove from calendar» with partial failures", () => {
     expect(service.getStatus(tripId).state).toBe("off");
     expect(vi.isMockFunction(calendar.accessPort.requestAccess)).toBe(true);
   });
+  it("a permission revoked mid-run keeps «stop syncing» available for an enabled sync", async () => {
+    const { service, calendar } = setup("android");
+    await service.enable(tripId, plain());
+    calendar.revokeOnCreate.value = true;
+    const more = plain();
+    more.activities.push({ ...more.activities[0]!, id: itineraryId(40), title: "Plan nuevo" });
+    await service.sync(tripId, more);
+    expect(service.getStatus(tripId)).toMatchObject({ state: "denied", limited: false, enabled: true });
+    await service.disable(tripId);
+    expect(service.getStatus(tripId).state).toBe("off");
+  });
+});
+
+const refsOf = (prefs: ReturnType<typeof memoryPreferences>) => (JSON.parse([...prefs.values.values()][0]!) as { deviceRefs: Record<string, { eventId: string }> }).deviceRefs;
+const activityKey = `activity-${itineraryId(8)}`;
+
+describe.each(["android", "ios"] as const)("copies carrying the marker: conservative policy (%s)", (platform) => {
+  it("«add again» keeps the referenced event even when a hand-made copy that starts earlier is the first match", async () => {
+    const { service, calendar, prefs } = setup(platform);
+    await service.enable(tripId, plain());
+    const [id, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("early-copy", { ...original, startDate: original.startDate - 30_000 });
+    await service.restore(tripId, plain());
+    expect(refsOf(prefs)[activityKey]!.eventId).toBe(id);
+    expect(calendar.events.has("early-copy")).toBe(true);
+  });
+  it("«add again» reassigns only when the referenced id is gone, preferring the copy that matches the plan over the first one", async () => {
+    const { service, calendar, prefs } = setup(platform);
+    await service.enable(tripId, plain());
+    const [id, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.delete(id);
+    calendar.events.set("edited", { ...original, title: "Editado", startDate: original.startDate - 30_000 });
+    calendar.events.set("match", { ...original });
+    await service.restore(tripId, plain());
+    expect(refsOf(prefs)[activityKey]!.eventId).toBe("match");
+  });
+  it("a copy edited by the person is neither deleted nor adopted when the referenced event exists; the plan is applied to the referenced one", async () => {
+    const { service, calendar, prefs } = setup(platform);
+    await service.enable(tripId, plain());
+    const [, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("edited", { ...original, title: "Mi versión" });
+    const edited = plain();
+    edited.activities[0]!.title = "Paseo v2";
+    await service.sync(tripId, edited);
+    expect(calendar.events.get("edited")).toMatchObject({ title: "Mi versión" });
+    expect(refsOf(prefs)[activityKey]!.eventId).not.toBe("edited");
+    expect(calendar.titles().filter((title) => title === "Paseo v2")).toHaveLength(1);
+    expect(service.getStatus(tripId)).toMatchObject({ state: "synced", ignoredCopies: 1 });
+  });
+  it("an identical copy is deleted, and one that matches only to the second too", async () => {
+    const { service, calendar } = setup(platform);
+    await service.enable(tripId, plain());
+    const [, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("same", { ...original });
+    calendar.events.set("same-seconds", { ...original, startDate: original.startDate + 400 });
+    const again = setup(platform, { calendar });
+    await again.service.enable(tripId, plain());
+    expect(calendar.events.has("same")).toBe(false);
+    expect(calendar.events.has("same-seconds")).toBe(false);
+    expect(calendar.events.size).toBe(5);
+    expect(again.service.getStatus(tripId)).toMatchObject({ state: "synced" });
+    expect(again.service.getStatus(tripId)).not.toHaveProperty("ignoredCopies");
+  });
+  it("without reference, the event that matches the plan is adopted instead of the first one, and the edited copy stays", async () => {
+    const { service, calendar } = setup(platform);
+    await service.enable(tripId, plain());
+    const [, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set("edited", { ...original, title: "Editado", startDate: original.startDate - 30_000 });
+    const again = setup(platform, { calendar });
+    await again.service.enable(tripId, plain());
+    // The adopted one is then re-created by the update (another copy is present): the managed event is never the edited one.
+    expect(refsOf(again.prefs)[activityKey]!.eventId).not.toBe("edited");
+    expect(calendar.titles().filter((title) => title === "Paseo por el centro")).toHaveLength(1);
+    expect(calendar.events.get("edited")).toMatchObject({ title: "Editado" });
+    expect(calendar.events.size).toBe(6);
+    expect(again.service.getStatus(tripId)).toMatchObject({ state: "synced", ignoredCopies: 1 });
+  });
+  it("without reference and with only an edited copy, it is adopted as a last resort (and then overwritten with the plan)", async () => {
+    const { service, calendar } = setup(platform);
+    await service.enable(tripId, plain());
+    const [id, original] = byTitle(calendar, "Paseo por el centro");
+    calendar.events.set(id, { ...original, title: "Solo editada" });
+    const again = setup(platform, { calendar });
+    await again.service.enable(tripId, plain());
+    expect(refsOf(again.prefs)[activityKey]!.eventId).toBe(id);
+    expect(calendar.events.size).toBe(5);
+    expect(again.service.getStatus(tripId).state).toBe("synced");
+  });
+});
+
+describe("recreating an event keeps the original when something fails between the two steps (android, place cleared)", () => {
+  const cleared = async () => {
+    const setupResult = setup("android");
+    await setupResult.service.enable(tripId, withPlace());
+    setupResult.calendar.pluginCalls.length = 0;
+    return setupResult;
+  };
+  it("createEvent failing leaves the original event intact and never deletes it", async () => {
+    const { service, calendar } = await cleared();
+    const [id, before] = byTitle(calendar, "Paseo por el centro");
+    calendar.pluginFailing.set("createEvent", () => true);
+    await service.sync(tripId, plain());
+    expect(calendar.events.get(id)).toEqual(before);
+    expect(calendar.events.size).toBe(5);
+    expect(calendar.pluginCalls).not.toContain("deleteEvent");
+    expect(service.getStatus(tripId).state).not.toBe("synced");
+  });
+  it("deleteEvent of the old one failing keeps the new id and retries removing the stale copy", async () => {
+    const { service, calendar, prefs } = await cleared();
+    const [id] = byTitle(calendar, "Paseo por el centro");
+    calendar.pluginFailing.set("deleteEvent", (call) => call === 1);
+    await service.sync(tripId, plain());
+    expect(calendar.pluginCalls.indexOf("createEvent")).toBeLessThan(calendar.pluginCalls.indexOf("deleteEvent"));
+    expect(refsOf(prefs)[activityKey]!.eventId).not.toBe(id);
+    expect(calendar.events.has(id)).toBe(false);
+    expect(calendar.events.size).toBe(5);
+    expect(service.getStatus(tripId).state).toBe("synced");
+  });
+  it("when the stale copy cannot be removed either, it is reported as an ignored copy, not as an error", async () => {
+    const { service, calendar, prefs } = await cleared();
+    const [id] = byTitle(calendar, "Paseo por el centro");
+    calendar.pluginFailing.set("deleteEvent", () => true);
+    await service.sync(tripId, plain());
+    expect(refsOf(prefs)[activityKey]!.eventId).not.toBe(id);
+    expect(calendar.events.has(id)).toBe(true);
+    expect(calendar.events.size).toBe(6);
+    expect(service.getStatus(tripId)).toMatchObject({ state: "synced", ignoredCopies: 1 });
+  });
 });

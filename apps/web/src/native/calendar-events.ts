@@ -26,6 +26,10 @@ function notesOf(spec: CalendarEventSpec) {
   const at = spec.notes.lastIndexOf("\n");
   return `${at < 0 ? "" : spec.notes.slice(0, at + 1)}${spec.url}\n${spec.notes.slice(at + 1)}`;
 }
+/** Same title and same window, compared to the second (the plugin may truncate milliseconds). */
+const seconds = (ms: number) => Math.floor(ms / 1000);
+const same = (event: { title?: string; startDate: number; endDate: number }, other: { title?: string; startDate: number; endDate: number }) =>
+  event.title === other.title && seconds(event.startDate) === seconds(other.startDate) && seconds(event.endDate) === seconds(other.endDate);
 const managed = (spec: CalendarEventSpec) => ({ title: spec.title, notes: notesOf(spec), ...(spec.location ? { location: spec.location } : {}), startDate: spec.startDate, endDate: spec.endDate });
 
 /**
@@ -47,31 +51,36 @@ export function createCalendarEvents(calendar: NativeDependencies["calendar"], p
   };
   return {
     find: (marker, window) => nativeResult(platform, async () => (await search(marker, window)).filter((event) => carriesMarker(event.notes, marker))
-      .map((event) => ({ id: event.id, startMs: event.startDate, endMs: event.endDate, ...(event.calendarId !== undefined ? { calendarId: event.calendarId } : {}) }))),
+      .map((event) => ({ id: event.id, ...(event.title !== undefined ? { title: event.title } : {}), startMs: event.startDate, endMs: event.endDate, ...(event.calendarId !== undefined ? { calendarId: event.calendarId } : {}) }))),
     create: (spec) => nativeResult(platform, () => created(spec)),
     update: (eventId, marker, window, spec) => nativeResult(platform, async () => {
       const found = await search(marker, window);
       const target = found.find((event) => event.id === eventId && carriesMarker(event.notes, marker));
       // The referenced event is not where it was (or lost its marker): the caller forgets the reference.
       if (!target) throw new NativeCapabilityError("missing");
-      // Copies carrying the same marker are removed, keeping the referenced one.
+      // Conservative: only copies that carry the marker AND equal the plan or the referenced event (title and window to the second) are removed.
+      // Copies the person edited are left alone; they are counted, never adopted here.
       const gone = new Set<string>();
+      let ignoredCopies = 0;
       for (const copy of found) {
         if (copy.id === eventId || !carriesMarker(copy.notes, marker)) continue;
+        if (!(same(copy, spec) || same(copy, target))) { ignoredCopies += 1; continue; }
         try { await calendar.deleteEvent({ id: copy.id }); gone.add(copy.id); } catch { /* it is still there: the plugin could then edit it instead of the referenced one */ }
       }
       const others = found.filter((event) => event.id !== eventId && !gone.has(event.id));
+      const counted = ignoredCopies > 0 ? { ignoredCopies } : {};
       // Android cannot clear a place in place.
       const clearsPlace = platform() === "android" && !spec.location && Boolean(target.location);
       // modifyEvent targets the first match by filter, not by id: it is only safe when the referenced event is the only candidate.
       if (others.length === 0 && !clearsPlace) {
         await calendar.modifyEvent({ filter: { notes: marker, startDate: window.startMs, endDate: window.endMs },
           newEvent: { ...managed(spec), ...(!spec.location && platform() === "ios" ? { location: "" } : {}) } });
-        return { id: eventId };
+        return { id: eventId, ...counted };
       }
-      // Safest way left: delete by id and create again with the new data, in the same calendar.
-      await calendar.deleteEvent({ id: eventId });
-      return created(spec, target.calendarId);
+      // Safest way left: create the new one first (same calendar) and only then delete the previous one by id, so a failure never loses the event.
+      const replacement = await created(spec, target.calendarId);
+      try { await calendar.deleteEvent({ id: eventId }); } catch { return { ...replacement, staleCopy: true as const, ...counted }; }
+      return { ...replacement, ...counted };
     }),
     remove: (id) => nativeResult(platform, () => calendar.deleteEvent({ id })),
   };

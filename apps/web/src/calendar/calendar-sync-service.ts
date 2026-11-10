@@ -1,4 +1,4 @@
-import type { CalendarAccess, CalendarAccessPort, CalendarEventsPort, NativePermissionState } from "app-domain";
+import type { CalendarAccess, CalendarAccessPort, CalendarEventSpec, CalendarEventsPort, NativeCalendarEvent, NativePermissionState } from "app-domain";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
 import { buildCalendarEvents } from "./calendar-events.js";
 import type { CalendarRefStore } from "./calendar-ref-store.js";
@@ -20,7 +20,8 @@ export type CalendarSyncStatus =
   | { state: "removing-partial"; remaining: number }
   | { state: "syncing" }
   | { state: "pending" }
-  | { state: "synced"; at: string }
+  /** `ignoredCopies`: other events carrying the marker that the person edited; they were neither adopted nor deleted. Not an error. */
+  | { state: "synced"; at: string; ignoredCopies?: number }
   | { state: "partial"; failed: number; at: string | null }
   | { state: "error" };
 
@@ -51,7 +52,21 @@ const day = 86_400_000;
 const searchWindow = (startMs: number, endMs: number) => ({ startMs: Math.min(startMs, endMs) - 400 * day, endMs: Math.max(startMs, endMs) + 400 * day });
 /** Targets the event by its previous window with a small tolerance (the plugin may truncate to seconds). */
 const around = (ref: DeviceRef) => ({ startMs: ref.startMs - 60_000, endMs: ref.endMs + 60_000 });
-const prompting = (value: NativePermissionState) => value === "prompt" || value === "prompt-with-rationale";
+const second = (ms: number) => Math.floor(ms / 1000);
+/** Same title and same window to the second. */
+const sameSlot = (event: NativeCalendarEvent, title: string | undefined, startMs: number, endMs: number) =>
+  event.title === title && second(event.startMs) === second(startMs) && second(event.endMs) === second(endMs);
+/**
+ * The managed event among those found: the referenced id; else the one equal to the plan (title and window); else the one on the reference's window; else the first.
+ * With no reference and only edited copies, the first is adopted as a last resort (and overwritten with the plan on the next update).
+ */
+function choose(found: readonly NativeCalendarEvent[], spec: CalendarEventSpec, ref?: DeviceRef): NativeCalendarEvent {
+  return (ref && found.find((event) => event.id === ref.eventId))
+    || found.find((event) => sameSlot(event, spec.title, spec.startDate, spec.endDate))
+    || (ref && found.find((event) => second(event.startMs) === second(ref.startMs) && second(event.endMs) === second(ref.endMs)))
+    || found[0]!;
+}
+const prompting =(value: NativePermissionState) => value === "prompt" || value === "prompt-with-rationale";
 const defaultPasses = 50;
 // Stable references: React reads the status as an external store snapshot.
 const checking: CalendarSyncStatus = { state: "checking" };
@@ -107,6 +122,10 @@ export function createCalendarSyncService({ access, events, store, accountId, no
     const refs: Record<string, DeviceRef> = { ...saved.deviceRefs };
     const failed = new Set<string>();
     let succeeded = 0, revoked = false;
+    // Copies with the marker that the person edited and the app left untouched, per key (a count, not an error).
+    const ignored = new Map<string, number>();
+    const countIgnored = (itemKey: string, count: number) => { if (count > 0) ignored.set(itemKey, count); else ignored.delete(itemKey); };
+    const ignoredCopies = () => [...ignored.values()].reduce((sum, count) => sum + count, 0);
     const persist = () => store.write(account, tripId, { enabled: true, deviceRefs: refs, syncedAt: saved.syncedAt });
     // A permission revoked while running stops the whole run; anything else only fails that key.
     const settle = (result: { ok: boolean; error?: { kind: string } }, itemKey: string) => {
@@ -123,7 +142,8 @@ export function createCalendarSyncService({ access, events, store, accountId, no
         if (!settle(found, item.key)) continue;
         if (!found.ok) continue;
         if (found.value.length === 0) delete refs[item.key];
-        else if (found.value[0]!.id !== ref.eventId) refs[item.key] = { ...ref, eventId: found.value[0]!.id };
+        // The referenced event is still there: keep it, whatever else carries the marker. Reassign only when it is gone.
+        else if (!found.value.some((event) => event.id === ref.eventId)) refs[item.key] = { ...ref, eventId: choose(found.value, item.spec, ref).id };
       }
       await persist();
     }
@@ -134,10 +154,17 @@ export function createCalendarSyncService({ access, events, store, accountId, no
       const found = await events.find(marker, searchWindow(item.spec.startDate, item.spec.endDate));
       if (!settle(found, item.key) || !found.ok) return;
       if (found.value.length > 0) {
-        const [keep, ...extra] = found.value;
-        refs[item.key] = { eventId: keep!.id, fingerprint: "adopted", startMs: keep!.startMs, endMs: keep!.endMs };
+        const keep = choose(found.value, item.spec);
+        refs[item.key] = { eventId: keep.id, fingerprint: "adopted", startMs: keep.startMs, endMs: keep.endMs };
         await persist();
-        for (const copy of extra) await events.remove(copy.id);
+        // Only identical copies (title and window) of the plan or of the adopted event are deleted; the ones the person edited stay, ignored.
+        let left = 0;
+        for (const copy of found.value) {
+          if (copy.id === keep.id) continue;
+          if (sameSlot(copy, item.spec.title, item.spec.startDate, item.spec.endDate) || sameSlot(copy, keep.title, keep.startMs, keep.endMs)) await events.remove(copy.id);
+          else left += 1;
+        }
+        countIgnored(item.key, left);
         return;
       }
       const created = await events.create(item.spec);
@@ -163,7 +190,18 @@ export function createCalendarSyncService({ access, events, store, accountId, no
         if (revoked) break;
         const updated = await events.update(ref.eventId, eventMarker(item.key, tripId), around(ref), item.spec);
         // The adapter may have had to create the event again: it answers the id to keep.
-        if (updated.ok) { refs[item.key] = { eventId: updated.value.id, fingerprint: item.fingerprint, startMs: item.spec.startDate, endMs: item.spec.endDate }; await persist(); succeeded += 1; }
+        if (updated.ok) {
+          refs[item.key] = { eventId: updated.value.id, fingerprint: item.fingerprint, startMs: item.spec.startDate, endMs: item.spec.endDate };
+          await persist();
+          succeeded += 1;
+          countIgnored(item.key, updated.value.ignoredCopies ?? 0);
+          if (updated.value.staleCopy) {
+            // The adapter created the new event but could not delete the previous one: try once more; otherwise it stays as an ignored copy (it no longer equals the plan).
+            const stale = await events.remove(ref.eventId);
+            if (!stale.ok && stale.error.kind === "denied") revoked = true;
+            else if (!stale.ok && stale.error.kind !== "missing") countIgnored(item.key, (ignored.get(item.key) ?? 0) + 1);
+          }
+        }
         // Not found where it was: deleted or moved outside the app. Forget the reference; the next pass adopts it by marker or creates it again.
         else if (updated.error.kind === "missing") { delete refs[item.key]; await persist(); } else settle(updated, item.key);
       }
@@ -171,14 +209,15 @@ export function createCalendarSyncService({ access, events, store, accountId, no
       progressed = succeeded > before;
     }
 
-    if (revoked) { await store.write(account, tripId, { enabled: true, deviceRefs: refs, syncedAt: null }); setStatus(key, { state: "denied", limited: false }); return; }
+    if (revoked) { await store.write(account, tripId, { enabled: true, deviceRefs: refs, syncedAt: null }); setStatus(key, { state: "denied", limited: false, enabled: true }); return; }
     // The passes can run out (or loop) with work left: never report «synced» unless nothing remains to do.
     const left = pendingPlan();
     const leftCount = left.create.length + left.update.length + left.remove.length;
     if (failed.size === 0 && leftCount === 0) {
       const at = now().toISOString();
       await store.write(account, tripId, { enabled: true, deviceRefs: refs, syncedAt: at });
-      setStatus(key, { state: "synced", at });
+      const copies = ignoredCopies();
+      setStatus(key, { state: "synced", at, ...(copies > 0 ? { ignoredCopies: copies } : {}) });
       return;
     }
     await store.write(account, tripId, { enabled: true, deviceRefs: refs, syncedAt: null });

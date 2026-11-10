@@ -37,6 +37,14 @@ export function fakeCalendar(platform: "android" | "ios" = "android") {
   const calls: string[] = [];
   const pluginCalls: string[] = [];
   const failing = new Map<string, (spec?: CalendarEventSpec) => boolean>();
+  /** Failures injected INSIDE the adapter, at the plugin call (keys: createEvent, deleteEvent, modifyEvent); the predicate receives the call number (1-based) for that operation. */
+  const pluginFailing = new Map<string, (call: number) => boolean>();
+  const pluginCount = new Map<string, number>();
+  const pluginFails = (op: string) => {
+    const call = (pluginCount.get(op) ?? 0) + 1;
+    pluginCount.set(op, call);
+    return pluginFailing.get(op)?.(call) === true;
+  };
   const revokeOnCreate = { value: false };
   const gate = { pause: undefined as Promise<void> | undefined };
   const fails = (op: string, spec?: CalendarEventSpec) => failing.get(op)?.(spec) === true;
@@ -55,6 +63,7 @@ export function fakeCalendar(platform: "android" | "ios" = "android") {
     },
     createEvent: async (options: Fields) => {
       pluginCalls.push("createEvent");
+      if (pluginFails("createEvent")) throw new Error("plugin create failed");
       const id = `ev-${nextId++}`;
       const notes = android && options.url ? (options.notes ? `${options.notes} ${options.url}` : options.url) : options.notes ?? "";
       events.set(id, { title: options.title ?? "", notes, ...(options.location ? { location: options.location } : {}), ...(!android && options.url ? { url: options.url } : {}),
@@ -78,6 +87,7 @@ export function fakeCalendar(platform: "android" | "ios" = "android") {
     },
     deleteEvent: async ({ id }: { id?: string }) => {
       pluginCalls.push("deleteEvent");
+      if (pluginFails("deleteEvent")) throw new Error("plugin delete failed");
       if (!id || !events.delete(id)) throw noMatch();
     },
   };
@@ -109,7 +119,7 @@ export function fakeCalendar(platform: "android" | "ios" = "android") {
   const set = (read: NativePermissionState, write: NativePermissionState) => { access.read = read; access.write = write; };
   /** An event the user created by hand (not through the app). */
   const addForeign = (id: string, event: Partial<StoredEvent> & Pick<StoredEvent, "startDate" | "endDate">) => { events.set(id, { title: "Ajeno", notes: "", calendarId: "cal", ...event }); };
-  return { events, port, plugin, accessPort, calls, pluginCalls, failing, gate, set, dialog, revokeOnCreate, platform, addForeign,
+  return { events, port, plugin, accessPort, calls, pluginCalls, failing, pluginFailing, gate, set, dialog, revokeOnCreate, platform, addForeign,
     titles: () => [...events.values()].map((event) => event.title).sort(),
     markers: () => [...events.values()].map((event) => event.notes.split("\n").pop()!) };
 }
