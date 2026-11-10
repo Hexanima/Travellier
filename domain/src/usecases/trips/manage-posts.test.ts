@@ -44,6 +44,8 @@ describe("Trip post use cases", () => {
       replace: async (post) => { records = records.map((p) => p.id === post.id ? post : p); return domain.ok(undefined); },
       insertActivity: async (activity) => { activities.push(activity); return domain.ok(undefined); },
       listActivities: async () => domain.ok(activities),
+      listActivityIds: async () => domain.ok(activities.map((a) => a.id)),
+      listTransportIds: async () => domain.ok(targets.transportId ? [targets.transportId.id] : []),
       listUserParticipations: async (userId) => domain.ok(participations.filter((p) => p.userId === userId)),
       saveParticipation: async (participation) => {
         const index = participations.findIndex((p) => p.activityId === participation.activityId && p.userId === participation.userId);

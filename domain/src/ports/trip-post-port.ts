@@ -16,6 +16,10 @@ export interface TripPostReadScope {
   listDays: () => AsyncResult<ItineraryDay[]>;
   findActivity: (activityId: ObjectId) => AsyncResult<Pick<Activity, "id" | "tripId"> | undefined>;
   findTransport: (transportId: ObjectId) => AsyncResult<Pick<Transport, "id" | "tripId"> | undefined>;
+  /** Ids of the activities of this Trip (existing now), to validate post links in the same snapshot. */
+  listActivityIds: () => AsyncResult<ObjectId[]>;
+  /** Ids of the transports of this Trip (existing now), to validate post links in the same snapshot. */
+  listTransportIds: () => AsyncResult<ObjectId[]>;
   find: (postId: ObjectId) => AsyncResult<Post | undefined>;
   list: () => AsyncResult<Post[]>;
   /** Direct children of a post in this Trip, newest publication first (id descending on ties). */

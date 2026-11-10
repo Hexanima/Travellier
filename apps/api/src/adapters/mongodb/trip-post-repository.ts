@@ -52,6 +52,10 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     listDays: () => createMongoTripJourneyRepository(database, session).listItineraryDays(tripId),
     findActivity: (id) => reference("activities", id),
     findTransport: (id) => reference("transports", id),
+    listActivityIds: async () => ok((await database.collection("activities").find(query, { ...options, projection: { _id: 1 } }).toArray())
+      .map((value) => domainId(value._id))),
+    listTransportIds: async () => ok((await database.collection("transports").find(query, { ...options, projection: { _id: 1 } }).toArray())
+      .map((value) => domainId(value._id))),
     find: async (postId) => {
       const post = await posts.findOne({ ...query, _id: new MongoObjectId(postId) }, options);
       return ok(post === null ? undefined : toPost(post));

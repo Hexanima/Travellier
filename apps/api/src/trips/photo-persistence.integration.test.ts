@@ -569,8 +569,19 @@ describe("photo persistence and transactions", () => {
         scope.listPhotosByPosts([domainId(own), domainId(foreignPost)]));
       expect(scoped.ok && scoped.value.map((photo) => [photo.postId, photo.tripId, photo.order]).sort()).toEqual([
         ...ownPhotos.map((d) => [domainId(own), domainId(f.trip), d.order]), [domainId(foreignPost), domainId(f.trip), 8]].sort());
+      // The existing-id reads that validate post links are scoped by Trip too.
+      const ownActivity = new ObjectId(), ownTransport = new ObjectId(), transportB = new ObjectId();
+      await f.db.collection("activities").insertOne({ _id: ownActivity, tripId: f.trip, dayId: new ObjectId(), title: "A", scheduledAt: at(0) });
+      await f.db.collection("transports").insertMany([{ _id: ownTransport, tripId: f.trip, destinationId: new ObjectId(), direction: "outbound" },
+        { _id: transportB, tripId: tripB, destinationId: new ObjectId(), direction: "outbound" }]);
+      const repository = createMongoTripPostRepository(f.db);
+      const activityIds = await repository.withReadSnapshot(domainId(f.trip), (scope) => scope.listActivityIds());
+      const transportIds = await repository.withReadSnapshot(domainId(f.trip), (scope) => scope.listTransportIds());
+      expect(activityIds.ok && activityIds.value).toContain(domainId(ownActivity));
+      expect(activityIds.ok && activityIds.value).not.toContain(domainId(activityB));
+      expect(transportIds.ok && transportIds.value).toEqual([domainId(ownTransport)]);
       expect(await list({}, memberB)).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
-      const ofB = await list({ limit: 60 }, memberB, tripB);
+      const ofB =await list({ limit: 60 }, memberB, tripB);
       expect(ofB.ok && ofB.value.photos.map((p) => [p.postId, p.order])).toEqual([1, 2, 3].map((order) => [foreignPost.toHexString(), order]));
       expect(await list({ activityId: domainId(activityB) })).toMatchObject({ ok: false, error: { tag: "ActivityNotFoundError" } });
     });

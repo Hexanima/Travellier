@@ -85,7 +85,11 @@ export const listTripPhotos: UseCase<Dependencies, ListTripPhotosPayload, TripPh
       const listed = await scope.list();
       if (!listed.ok) return listed;
       const tripPosts = listed.value.filter((post) => post.tripId === tripId);
-      const roots = projectPostRoots(tripPosts);
+      const activityIds = await scope.listActivityIds();
+      if (!activityIds.ok) return activityIds;
+      const transportIds = await scope.listTransportIds();
+      if (!transportIds.ok) return transportIds;
+      const roots = projectPostRoots(tripPosts, new Set(activityIds.value), new Set(transportIds.value));
       const eligible = tripPosts
         .filter((post) => {
           const root = roots.get(post.id)!;

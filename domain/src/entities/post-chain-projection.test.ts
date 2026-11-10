@@ -12,7 +12,8 @@ const tripId = id(1), actor = id(2), destinationId = id(3), activityA = id(40), 
 const at = (hour: number) => new Date(`2026-09-25T${String(hour).padStart(2, "0")}:00:00.000Z`);
 const post = (n: number, fields: Partial<Post> = {}): Post => ({ id: id(n), tripId, authorId: actor, description: null, mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: at(12), ...fields });
-const roots = (posts: Post[]) => projectPostRoots(posts);
+const roots = (posts: Post[], activityIds: ObjectId[] = [activityA, activityB], transportIds: ObjectId[] = [transportId]) =>
+  projectPostRoots(posts, new Set(activityIds), new Set(transportIds));
 
 describe("projectPostRoots", () => {
   it("gives a post without links and without a parent itself as root with no context", () => {
@@ -37,6 +38,26 @@ describe("projectPostRoots", () => {
   it("prefers the post's own link over the root's", () => {
     const result = roots([post(100, { activityId: activityA }), post(101, { parentPostId: id(100), activityId: activityB })]);
     expect(result.get(id(101))).toEqual({ rootPostId: id(100), activityId: activityB, transportId: null });
+  });
+
+  it("falls back to the root's link when the own link dangles (does not exist), activity and transport independently", () => {
+    const missingActivity = id(990), missingTransport = id(991);
+    const result = roots([
+      post(100, { activityId: activityA }), post(101, { parentPostId: id(100), activityId: missingActivity }),
+      post(110, { transportId }), post(111, { parentPostId: id(110), transportId: missingTransport }),
+      post(120, { activityId: activityA, transportId }), post(121, { parentPostId: id(120), activityId: missingActivity, transportId: missingTransport }),
+      post(122, { parentPostId: id(120), activityId: activityB, transportId: missingTransport }),
+      post(130, { activityId: missingActivity, transportId: missingTransport }), post(131, { parentPostId: id(130) }),
+      post(140, { activityId: activityA }), post(141, { parentPostId: id(140), activityId: missingActivity, transportId }),
+    ]);
+    expect(result.get(id(101))).toEqual({ rootPostId: id(100), activityId: activityA, transportId: null });
+    expect(result.get(id(111))).toEqual({ rootPostId: id(110), activityId: null, transportId });
+    expect(result.get(id(121))).toEqual({ rootPostId: id(120), activityId: activityA, transportId });
+    expect(result.get(id(122))).toEqual({ rootPostId: id(120), activityId: activityB, transportId });
+    // A dangling link on the root itself counts as no link, also for its descendants.
+    expect(result.get(id(130))).toEqual({ rootPostId: id(130), activityId: null, transportId: null });
+    expect(result.get(id(131))).toEqual({ rootPostId: id(130), activityId: null, transportId: null });
+    expect(result.get(id(141))).toEqual({ rootPostId: id(140), activityId: activityA, transportId });
   });
 
   it("treats a root without links as independent and its children too", () => {
@@ -87,7 +108,13 @@ describe("projectPostRoots", () => {
       post(103, { parentPostId: id(100), }), post(110, { transportId }), post(111, { parentPostId: id(110) }), post(120),
       post(121, { parentPostId: id(120) }), post(130, { parentPostId: id(999) }), post(131, { parentPostId: id(130) }),
       post(140, { parentPostId: id(141) }), post(141, { parentPostId: id(140) }), post(150, { activityId: activityB }),
-      post(151, { parentPostId: id(150) }), post(152, { parentPostId: id(151) }), post(160, { activityId: activityA, parentPostId: null })];
+      post(151, { parentPostId: id(150) }), post(152, { parentPostId: id(151) }), post(160, { activityId: activityA, parentPostId: null }),
+      // Own links that dangle (nonexistent activity/transport) under roots with valid links, and both kinds at once.
+      post(170, { activityId: activityA }), post(171, { parentPostId: id(170), activityId: id(990) }),
+      post(172, { transportId }), post(173, { parentPostId: id(172), transportId: id(991) }),
+      post(180, { activityId: activityB, transportId }), post(181, { parentPostId: id(180), activityId: id(990), transportId: id(991) }),
+      post(182, { parentPostId: id(180), activityId: activityA, transportId: id(991) }), post(183, { parentPostId: id(180), activityId: id(990) }),
+      post(190, { activityId: id(990) }), post(191, { parentPostId: id(190), transportId }), post(192, { parentPostId: id(191), activityId: id(990) })];
     const snapshot: TripItinerarySnapshot = { trip: { id: tripId, expenseMode: "register" },
       destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: at(0) }],
       days: [day, { ...day, id: id(5), type: "transit_out", startsAt: at(8), endsAt: at(10), order: 1 }],
@@ -101,7 +128,10 @@ describe("projectPostRoots", () => {
     if (!itinerary.ok) return;
     const reported = [...itinerary.value.posts, ...itinerary.value.unplacedPosts];
     expect(reported).toHaveLength(posts.length);
-    const result = roots(posts);
+    const result = roots(posts, snapshot.activities.map((value) => value.id), snapshot.transports.map((value) => value.id));
+    // The scenario must really contain the dangling-link cases the rule is about.
+    expect(result.get(id(171))!.activityId).toBe(activityA);
+    expect(result.get(id(181))).toMatchObject({ activityId: activityB, transportId });
     for (const item of reported) {
       expect(result.get(item.id), String(item.id)).toEqual({ rootPostId: item.context.rootPostId, activityId: item.context.rootActivityId,
         transportId: item.context.rootTransportId });

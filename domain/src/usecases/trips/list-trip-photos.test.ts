@@ -42,6 +42,8 @@ describe("listTripPhotos", () => {
       findTrip: async () => ok({ id: tripId }),
       findActivity: async (activityId: ObjectId) => ok(activities.find((a) => a.id === activityId)),
       findTransport: async (transportId: ObjectId) => ok(transports.includes(transportId) ? { id: transportId, tripId } : undefined),
+      listActivityIds: async () => ok(activities.filter((a) => a.tripId === tripId).map((a) => a.id)),
+      listTransportIds: async () => ok([...transports]),
       list: async () => { listCalls++; return ok([...posts]); },
       // Deliberately lax (no tripId filter): the use case must not trust it blindly.
       listPhotosByPosts: async (postIds: readonly ObjectId[]) => { batches.push([...postIds]);
@@ -189,6 +191,21 @@ describe("listTripPhotos", () => {
     expect((await page({ activityId: activityA })).photos.map((p) => p.postId)).toEqual([id(10)]);
   });
 
+  it("falls back to the root's link when a descendant's own link dangles, as the itinerary does, and exposes the real root context", async () => {
+    const missingActivity = id(990), missingTransport = id(991);
+    posts = [post(10, { activityId: activityA, transportId: transportT, minutes: 1 }),
+      post(11, { parentPostId: id(10), activityId: missingActivity, transportId: missingTransport, minutes: 2 }),
+      post(12, { parentPostId: id(10), activityId: missingActivity, minutes: 3 })];
+    photos = [photo(10, 0), photo(11, 0), photo(12, 0)];
+    const inA = await page({ activityId: activityA });
+    expect(inA.photos.map((p) => p.postId)).toEqual([id(12), id(11), id(10)]);
+    expect(inA.photos.map((p) => [p.post.rootActivityId, p.post.rootTransportId])).toEqual(Array(3).fill([activityA, transportT]));
+    expect((await page({ transportId: transportT })).photos.map((p) => p.postId)).toEqual([id(12), id(11), id(10)]);
+    // A dangling activity never shows up as a root context, nor does it filter anything.
+    const all = await page();
+    expect(all.photos.some((p) => p.post.rootActivityId === missingActivity || p.post.rootTransportId === missingTransport)).toBe(false);
+  });
+
   it("filters by transport through the chain root", async () => {
     posts = [post(10, { transportId: transportT, minutes: 1 }), post(11, { parentPostId: id(10), minutes: 2 }), post(12, { minutes: 3 })];
     photos = [photo(10, 0), photo(11, 0), photo(12, 0)];
@@ -297,6 +314,59 @@ describe("listTripPhotos", () => {
     expect(ids(result)).toEqual([photos[0]!.id]);
     expect(batches.length).toBe(4);
     expect(batches.flat()).toHaveLength(200);
+  });
+
+  it("keeps the lookahead when the limit equals the batch size: 51 posts of one photo, limit 50", async () => {
+    posts = Array.from({ length: 51 }, (_, i) => post(1000 + i, { minutes: i }));
+    photos = posts.map((p, i) => photo(1000 + i, 0, { postId: p.id }));
+    const expected = [...posts].reverse().map((p) => p.id);
+    const first = await page({ limit: 50 });
+    expect(first.photos).toHaveLength(50);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await page({ limit: 50, cursor: first.nextCursor });
+    expect(second.photos).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect([...first.photos, ...second.photos].map((p) => p.postId)).toEqual(expected);
+    const pages = await walk(50);
+    expect(pages.map((p) => p.photos.length)).toEqual([50, 1]);
+    expect(new Set(pages.flatMap(ids)).size).toBe(51);
+  });
+
+  it("keeps looking in the next batch when a full batch ends with a post without photos and limit equals the batch size", async () => {
+    // Newest 50 posts: 49 with a photo and the oldest of them without; the 51st-newest post (next batch) has the extra photo.
+    posts = Array.from({ length: 52 }, (_, i) => post(1000 + i, { minutes: i }));
+    const newestFirst = [...posts].reverse();
+    photos = newestFirst.filter((p, i) => i !== 49 && i < 51).map((p) => photo(0, 0, { postId: p.id }));
+    expect(photos).toHaveLength(50);
+    const first = await page({ limit: 49 });
+    expect(first.photos).toHaveLength(49);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await page({ limit: 49, cursor: first.nextCursor });
+    expect(second.photos).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    // limit 50 = batch size: the batch of 50 posts yields exactly 49 photos, the 50th (and last) is in the next batch.
+    const wide = await page({ limit: 50 });
+    expect(wide.photos).toHaveLength(50);
+    expect(wide.nextCursor).toBeNull();
+    const pages = await walk(49);
+    expect(pages.flatMap(ids)).toEqual(photos.map((p) => p.id));
+  });
+
+  it("keeps the lookahead when a batch yields exactly limit = 50 photos and its last post has none", async () => {
+    // Newest batch: the newest post has 2 photos, posts 1..48 one each (50 photos), post 49 none; the next batch holds the 51st photo.
+    posts = Array.from({ length: 52 }, (_, i) => post(1000 + i, { minutes: i }));
+    const newestFirst = [...posts].reverse();
+    photos = [photo(0, 0, { postId: newestFirst[0]!.id }), photo(0, 1, { postId: newestFirst[0]!.id }),
+      ...newestFirst.slice(1, 49).map((p) => photo(0, 0, { postId: p.id })), photo(0, 0, { postId: newestFirst[50]!.id })];
+    expect(photos).toHaveLength(51);
+    const first = await page({ limit: 50 });
+    expect(first.photos).toHaveLength(50);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await page({ limit: 50, cursor: first.nextCursor });
+    expect(second.photos.map((p) => p.id)).toEqual([photos[50]!.id]);
+    expect(second.nextCursor).toBeNull();
+    const pages = await walk(50);
+    expect(pages.flatMap(ids)).toEqual(photos.map((p) => p.id));
   });
 
   it("returns the storage error without a partial page", async () => {

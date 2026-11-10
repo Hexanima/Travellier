@@ -14,11 +14,14 @@ type Resolved = { root: Post; depth: number } | null;
 
 /**
  * Pure projection of each post's effective activity/transport from the root of its chain. It follows the itinerary rule
- * (own valid link first, then the root's; a broken chain counts as no chain, so the post is its own root) and memoizes
+ * (first link that exists in the given Trip id sets, own before the root's, else none; a broken chain counts as no chain,
+ * so the post is its own root) and memoizes
  * every node, so each post is walked once instead of paying the whole chain per post. Nothing is persisted: relinking
  * or deleting an activity only changes the next projection, never the photos.
  */
-export const projectPostRoots = (posts: readonly Post[]): Map<ObjectId, PostRoots> => {
+export const projectPostRoots = (
+  posts: readonly Post[], activityIds: ReadonlySet<ObjectId>, transportIds: ReadonlySet<ObjectId>,
+): Map<ObjectId, PostRoots> => {
   const byId = new Map(posts.map((post) => [post.id, post]));
   const memo = new Map<ObjectId, Resolved>();
   const resolve = (start: Post): Resolved => {
@@ -43,7 +46,9 @@ export const projectPostRoots = (posts: readonly Post[]): Map<ObjectId, PostRoot
   const result = new Map<ObjectId, PostRoots>();
   for (const post of posts) {
     const chain = resolve(post), root = chain?.root ?? post;
-    result.set(post.id, { rootPostId: root.id, activityId: post.activityId ?? root.activityId, transportId: post.transportId ?? root.transportId });
+    const activityId = [post.activityId, root.activityId].find((value) => value != null && activityIds.has(value)) ?? null;
+    const transportId = [post.transportId, root.transportId].find((value) => value != null && transportIds.has(value)) ?? null;
+    result.set(post.id, { rootPostId: root.id, activityId, transportId });
   }
   return result;
 };
