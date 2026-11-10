@@ -1,8 +1,15 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { err, ok, UnknownError, type ObjectStoragePort } from "app-domain";
 
 type StorageCommand = GetObjectCommand | PutObjectCommand;
+
+/** S3 reports a missing object as `NotFound` (HeadObject) or `NoSuchKey`, with status 404. */
+const isMissingObject = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const { name, $metadata } = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return name === "NotFound" || name === "NoSuchKey" || $metadata?.httpStatusCode === 404;
+};
 
 export const createS3ObjectStorage = ({
   bucketName,
@@ -13,10 +20,11 @@ export const createS3ObjectStorage = ({
   client?: S3Client;
   sign?: (command: StorageCommand, options: { expiresIn: number }) => Promise<string>;
 }): ObjectStoragePort => ({
-  createUploadTarget: async ({ objectKey, contentType, expiresInSeconds }) => {
+  createUploadTarget: async ({ objectKey, contentType, expiresInSeconds, contentLength }) => {
     try {
       const uploadUrl = await sign(new PutObjectCommand({
         Bucket: bucketName, Key: objectKey, ContentType: contentType,
+        ...(contentLength === undefined ? {} : { ContentLength: contentLength }),
       }), { expiresIn: expiresInSeconds });
       return ok({
         uploadUrl,
@@ -24,7 +32,7 @@ export const createS3ObjectStorage = ({
         expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
       });
     } catch {
-      return err(new UnknownError("Unable to sign avatar upload."));
+      return err(new UnknownError("Unable to sign upload."));
     }
   },
   createDownloadTarget: async ({ objectKey, expiresInSeconds }) => {
@@ -34,7 +42,15 @@ export const createS3ObjectStorage = ({
       });
       return ok({ downloadUrl });
     } catch {
-      return err(new UnknownError("Unable to sign avatar download."));
+      return err(new UnknownError("Unable to sign download."));
+    }
+  },
+  headObject: async ({ objectKey }) => {
+    try {
+      const head = await client.send(new HeadObjectCommand({ Bucket: bucketName, Key: objectKey }));
+      return ok({ contentType: head.ContentType ?? null, sizeBytes: head.ContentLength ?? 0 });
+    } catch (error) {
+      return isMissingObject(error) ? ok(undefined) : err(new UnknownError("Unable to inspect stored object."));
     }
   },
 });
