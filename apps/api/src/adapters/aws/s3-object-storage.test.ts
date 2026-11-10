@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 
-import { createS3ObjectStorage } from "./s3-object-storage.js";
+import { createS3ObjectCleanup, createS3ObjectStorage } from "./s3-object-storage.js";
 
 describe("createS3ObjectStorage", () => {
   it("signs a PUT for the exact avatar key and content type", async () => {
@@ -72,5 +72,54 @@ describe("createS3ObjectStorage headObject", () => {
   it("fails with UnknownError when the rejection is not an Error", async () => {
     const result = await withClient(vi.fn().mockRejectedValue("boom")).headObject({ objectKey: "k" });
     expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+  });
+});
+
+describe("createS3ObjectCleanup", () => {
+  const withClient = (send: ReturnType<typeof vi.fn>) => createS3ObjectCleanup({ bucketName: "photos", client: { send } as unknown as S3Client });
+  const failure = (name: string, status?: number) => Object.assign(new Error(name + " secret-detail"), { name, $metadata: { httpStatusCode: status } });
+
+  it("deletes exactly the bucket and key requested", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const result = await withClient(send).deleteObject({ objectKey: "trips/t/photos/u/id.png" });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(DeleteObjectCommand);
+    expect(send.mock.calls[0]?.[0].input).toEqual({ Bucket: "photos", Key: "trips/t/photos/u/id.png" });
+    expect(result).toEqual({ ok: true, value: undefined });
+  });
+
+  it.each([["NoSuchKey", undefined], ["NotFound", 404], ["Other", 404]])("treats %s on delete as already absent", async (name, status) => {
+    expect(await withClient(vi.fn().mockRejectedValue(failure(name, status))).deleteObject({ objectKey: "k" })).toEqual({ ok: true, value: undefined });
+  });
+
+  it.each([["AccessDenied", 403], ["InternalError", 500], ["Error", undefined]])("fails delete with a generic UnknownError on %s", async (name, status) => {
+    const result = await withClient(vi.fn().mockRejectedValue(failure(name, status))).deleteObject({ objectKey: "trips/secret-key.jpg" });
+    expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+    expect(JSON.stringify(result)).not.toMatch(/secret|photos|trips/);
+    expect(await withClient(vi.fn().mockRejectedValue("boom")).deleteObject({ objectKey: "k" })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+  });
+
+  it("lists with prefix, max keys and continuation token and maps LastModified and Size", async () => {
+    const lastModified = new Date("2026-11-01T00:00:00.000Z");
+    const send = vi.fn().mockResolvedValue({ Contents: [{ Key: "trips/a.jpg", LastModified: lastModified, Size: 12 }, { Key: "trips/b.jpg" }, { LastModified: lastModified }],
+      NextContinuationToken: "next" });
+    const result = await withClient(send).listObjects({ prefix: "trips/", maxKeys: 500, continuationToken: "tok" });
+    expect(send.mock.calls[0]?.[0]).toBeInstanceOf(ListObjectsV2Command);
+    expect(send.mock.calls[0]?.[0].input).toEqual({ Bucket: "photos", Prefix: "trips/", MaxKeys: 500, ContinuationToken: "tok" });
+    expect(result).toEqual({ ok: true, value: { objects: [{ key: "trips/a.jpg", lastModified, sizeBytes: 12 }],
+      nextContinuationToken: "next" } });
+  });
+
+  it("omits the continuation token on the first page, returns no token on the last and an empty bucket as an empty list", async () => {
+    const send = vi.fn().mockResolvedValue({});
+    const result = await withClient(send).listObjects({ prefix: "trips/", maxKeys: 10 });
+    expect(send.mock.calls[0]?.[0].input).toEqual({ Bucket: "photos", Prefix: "trips/", MaxKeys: 10 });
+    expect(result).toEqual({ ok: true, value: { objects: [] } });
+  });
+
+  it("fails the listing with a generic UnknownError", async () => {
+    const result = await withClient(vi.fn().mockRejectedValue(failure("AccessDenied", 403))).listObjects({ prefix: "trips/", maxKeys: 10 });
+    expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+    expect(JSON.stringify(result)).not.toMatch(/secret|photos|trips/);
   });
 });
