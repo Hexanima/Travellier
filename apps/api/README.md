@@ -168,6 +168,16 @@ Protocolo de fotos de un post con el bucket privado de S3 (el cliente es T74 en 
 
 `postPhotos` guarda `{ _id, postId, tripId, uploaderId, s3Key, order, uploadedAt }` con índices únicos `s3Key_unique` y `postId_order_unique` (migración `0004-unique-post-photo-keys`). La baja del Trip conserva las claves en `storageDeletionJobs`. No se probó contra S3 real: el IAM de `trips/*` (GetObject/ListBucket) y CORS para GET son decisiones pendientes (ver `docs/REVISION_PENDIENTE.md`, T72).
 
+## Limpieza de fotos (T73)
+
+Código del worker de limpieza de S3, **sin cablear ni desplegar** (ver `docs/infraestructura/servicios-pendientes.md`, «Estado de T73»). La baja del Trip sigue insertando `storageDeletionJobs` dentro de su transacción y no invoca al storage; el worker procesa esos trabajos aparte.
+
+- `src/storage-deletion-lambda.ts`: `handler` SQS (lote de 1, `ReportBatchItemFailures`). Acepta solo el tick exacto `{ kind: "storageDeletionJobs", stage }` con `stage` = `APP_ENV`; un tick inválido o un fallo de infraestructura (config, Mongo) falla el ítem. Usa un deadline interno de 45 s y hasta 5 trabajos por tick, no pide `JWT_SECRET_ARN` y solo registra contadores (sin claves ni errores crudos).
+- `processStorageDeletionJobs` (dominio): reclama un trabajo de forma atómica con lease de 120 s (`findOneAndUpdate`), borra solo las claves del trabajo con formato `trips/<tripId>/photos/<userId>/<uuid>.<ext>` de su propio Trip y que no figuren en `postPhotos` (las demás se registran en `rejectedKeys` y nunca se borran), tolera objetos ausentes, persiste el avance por lotes de 25 claves y completa al resolver todas. Ante fallos incrementa `attempts`, reprograma `nextAttemptAt` con backoff exponencial (1 min a 6 h) y tras 10 intentos deja el trabajo `failed` sin borrarlo. Toda escritura posterior al reclamo filtra por `leaseOwner`: un worker con lease vencido no pisa al que retomó el trabajo.
+- `sweepAbandonedPhotoUploads` / `runAbandonedPhotoSweep`: entrada manual `{ "kind": "photoSweep", "stage": "<stage>" }`. Lista `trips/` por páginas y borra solo claves con el formato exacto de foto, con antigüedad ≥24 h (se rechaza un mínimo inferior a 1 h 15 min) y sin vínculo en `postPhotos`, consultado por página y de nuevo antes de cada borrado. También limpia Trips ya dados de baja. Sin cursor: cada corrida reinicia. No tiene schedule y requiere `s3:ListBucket` (pendiente de decisión).
+- Migración `0005-storage-deletion-job-indexes`: agrega índices `{ status, nextAttemptAt }` y `{ tripId }` y completa los trabajos legados sin borrar nada. La confirmación de fotos de T72 no cambió: una carrera entre el barrido y la confirmación de un objeto de ~24 h queda documentada en `docs/REVISION_PENDIENTE.md` (T73).
+- No se verificó contra S3 ni MongoDB reales.
+
 ## API de participación (T38)
 
 Las rutas requieren `Authorization: Bearer <accessToken>` y membresía actual del Trip, incluso si es público. Admins y participantes pueden consultar y actualizar únicamente su propia participación; `userId` se obtiene del JWT.
