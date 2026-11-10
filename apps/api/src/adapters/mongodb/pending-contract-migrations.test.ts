@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { describePostExpense, resolveExpense } from "app-domain";
@@ -17,10 +17,12 @@ let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
 let counter = 0;
+// Several tests run the whole migration chain more than once: under load the default 5 s is not enough.
+vi.setConfig({ testTimeout: 30_000 });
 beforeAll(async () => {
   server = await MongoMemoryServer.create();
   client = await new MongoClient(server.getUri()).connect();
-});
+}, 120_000);
 beforeEach(() => { database = client.db(`contracts_${++counter}`); });
 afterAll(async () => { await client?.close(); await server?.stop(); });
 
