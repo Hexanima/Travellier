@@ -1,8 +1,10 @@
+import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import './App.css'
+import { createDirectUpload } from './api/direct-upload.js'
 import { createHttpClient } from './api/index.js'
 import { AuthScreen } from './auth/AuthScreen.js'
 import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/auth-api.js'
@@ -10,6 +12,8 @@ import { createNativeSessionStorage, type NativeSessionStorage } from './auth/na
 import { Button, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
+import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
+import { createPhotoFileReader } from './native/photo-file.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
 import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
@@ -28,6 +32,8 @@ import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
 import { createTripCommentApi, type TripCommentApi } from './trips/trip-comment-api.js'
 import { createTripLikeApi, type TripLikeApi } from './trips/trip-like-api.js'
+import { createTripPhotoApi, type TripPhotoApi } from './trips/trip-photo-api.js'
+import type { PostPhotoDeps } from './trips/use-post-photos.js'
 import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
 import { SpontaneousActivityForm } from './trips/SpontaneousActivityForm.js'
@@ -48,6 +54,10 @@ type AppProps = {
   posts?: Partial<TripPostApi>
   comments?: Partial<TripCommentApi>
   likes?: Partial<TripLikeApi>
+  /** Reservation of photo uploads; the default uses the authenticated client. */
+  photos?: Partial<TripPhotoApi>
+  /** Device side of the photo upload (picker, file reader, direct transfer); the defaults are the Capacitor ones and request no permission until used. */
+  devicePhotos?: Partial<Omit<PostPhotoDeps, 'api'>>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -70,7 +80,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, photos, devicePhotos }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -90,6 +100,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultPosts = useRef<TripPostApi | undefined>(undefined)
   const defaultComments = useRef<TripCommentApi | undefined>(undefined)
   const defaultLikes = useRef<TripLikeApi | undefined>(undefined)
+  const defaultPhotos = useRef<TripPhotoApi | undefined>(undefined)
+  const defaultDevicePhotos = useRef<Partial<Omit<PostPhotoDeps, 'api'>>>({})
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -123,6 +135,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultPosts.current = createTripPostApi(client)
     defaultComments.current = createTripCommentApi(client)
     defaultLikes.current = createTripLikeApi(client)
+    defaultPhotos.current = createTripPhotoApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -135,6 +148,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activePosts = posts ?? defaultPosts.current
   const activeComments = comments ?? defaultComments.current
   const activeLikes = likes ?? defaultLikes.current
+  const activePhotos = photos ?? defaultPhotos.current
   const tripComments = useMemo<TripCommentApi>(() => ({
     list: activeComments?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeComments?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -151,6 +165,19 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     create: activePosts?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activePosts])
+  // Without a reservation api there is no photo section. Device defaults are built on first need and request nothing at startup.
+  const photoDeps = useMemo<PostPhotoDeps | undefined>(() => {
+    const reserve = activePhotos?.reserve
+    if (!reserve) return undefined
+    const device = defaultDevicePhotos.current
+    return {
+      api: { reserve },
+      source: devicePhotos?.source ?? (device.source ??= createCapacitorCapabilities().photos),
+      reader: devicePhotos?.reader ?? (device.reader ??= createPhotoFileReader({ fetch: (url) => globalThis.fetch(url), convertFileSrc: (reference) => Capacitor.convertFileSrc(reference) })),
+      transfer: devicePhotos?.transfer ?? (device.transfer ??= createDirectUpload({ createXhr: () => new XMLHttpRequest() })),
+      ...(devicePhotos?.now ? { now: devicePhotos.now } : {}),
+    }
+  }, [activePhotos, devicePhotos])
   const tripParticipations = useMemo<TripParticipationApi | undefined>(() => activeParticipations ? ({
     get: activeParticipations.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     set: activeParticipations.set ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -320,9 +347,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           </TripRoute>
         }>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
-          <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
           <Route path=":postId" element={<PostDetailScreen posts={tripPosts} members={tripMembers} comments={tripComments} likes={tripLikes} />} />
-          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
+          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
           <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
           <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
           <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />

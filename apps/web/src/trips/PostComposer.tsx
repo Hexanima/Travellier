@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
+import { PostPhotosSection } from "./PostPhotosSection.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
@@ -12,13 +13,16 @@ import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-a
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostInput, PostResponse, TripPostApi } from "./trip-post-api.js";
 import { usePostDraft } from "./use-post-drafts.js";
+import { usePostPhotos, type PostPhotoDeps, type UploadOutcome } from "./use-post-photos.js";
 import "./itinerary.css";
 
-export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string };
+/** `photos` is optional: without it the composer shows no photo section (nothing about photos reaches the form). */
+export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string; photos?: PostPhotoDeps };
 /** A conflict answer waits here for an explicit decision: the same entry is resent with the confirmation, or dropped on cancel. */
 type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfirmation; stale: boolean };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse } | { kind: "error"; error: TripFailure };
 const missingContentMessage = "Escribí un texto o agregá una ubicación.";
+const missingContentWithPhotosMessage = "Escribí un texto, agregá una ubicación o elegí una foto.";
 const fieldMessages: Record<string, string> = { description: "Revisá el texto del recuerdo.", mapsUrl: "Revisá el link de la ubicación." };
 const linkFields = ["parentPostId", "activityId", "transportId"];
 const windowMessage = "Elegí un horario dentro de la franja de actividad del destino.";
@@ -26,6 +30,9 @@ const activityMessage = (field: string, code: string) => field === "title" ? "In
   : field === "durationMinutes" ? code === "outside_window" ? "La actividad terminaría después de la salida del destino. Acortá la duración o elegí otro horario." : "Revisá la duración estimada."
   : field === "scheduledAt" || field === "dayId" ? windowMessage : undefined;
 const retryHint = "Revisá tus recuerdos antes de reintentar por si ya se publicó.";
+const badPhotoMessage = "Una foto no es válida. Reintentá subirla o quitala.";
+const invalidReservedMessage = "Alguna foto no es válida. Revisá las fotos marcadas, quitalas o reemplazalas.";
+const photosFieldMessage = "Revisá las fotos: un recuerdo admite hasta 10, en formato JPEG, PNG o WebP.";
 const linkMessage = (code: string) => code === "cycle" || code === "self_reference" ? "Ese recuerdo no puede ser el vínculo: crearía un ciclo. Elegí otro."
   : code === "conflict" ? "Un recuerdo continuación no puede tener otro vínculo directo." : "No pudimos aplicar el vínculo. Elegí otro.";
 const queryId = (search: string, name: string) => { const value = new URLSearchParams(search).get(name); return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : null; };
@@ -34,12 +41,12 @@ const parentParam = (search: string) => queryId(search, "parentPostId");
 /** Presentation only: the excerpt of the parent sent by its detail (the id is what travels). */
 const parentLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { parentLabel?: unknown }).parentLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
 
-export function PostComposer({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
+export function PostComposer({ posts, itinerary, photos, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
-  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} timeZone={timeZone} />;
+  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} photos={photos} timeZone={timeZone} />;
 }
 
-function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostComposerProps, "timeZone"> & { timeZone: string; tripId?: string; postId?: string }) {
+function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<PostComposerProps, "timeZone"> & { timeZone: string; tripId?: string; postId?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const handle = usePostDraft(draftKeyFor({ postId, search: location.search }));
@@ -61,9 +68,13 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const [pending, setPending] = useState<PendingConfirmation>();
   const [loadedItinerary, setLoadedItinerary] = useState<TripItineraryResponse>();
+  const [photoError, setPhotoError] = useState<string>();
+  const [focusRetry, setFocusRetry] = useState(0);
   const itineraryRequest = useRef<Promise<TripItineraryResponse | undefined> | undefined>(undefined);
   const hadPending = useRef(false);
   const savingRef = useRef(false);
+  /** The photo ids behind the `photos` of the input last sent, by position. */
+  const sentPhotoIds = useRef<readonly string[]>([]);
   const focusPending = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
@@ -121,6 +132,15 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
   const draft: PostDraft = handle.draft ?? base;
   const dirty = isDraftDirty(draft, base);
   const newActivity = draft.extras.newActivity;
+  // Async photo work (selection, uploads) changes the draft long after the render that started it: it reads and writes the latest one here.
+  const draftRef = useRef(draft);
+  const setDraftRef = useRef(handle.setDraft);
+  useEffect(() => { draftRef.current = draft; setDraftRef.current = handle.setDraft; });
+  const applyDraft = useCallback((change: (current: PostDraft) => PostDraft) => {
+    const next = change(draftRef.current);
+    draftRef.current = next; setDraftRef.current(next);
+  }, []);
+  const photosCtl = usePostPhotos({ deps: photos, tripId, blobs: handle.blobs, getDraft: () => draftRef.current, applyDraft, isSaving: () => savingRef.current });
   /** Needed only with a new activity: to revalidate its schedule and to name the incompatible plans. A failure never blocks publishing. */
   const loadItinerary = () => {
     itineraryRequest.current ??= itinerary.get(tripId ?? "").then((result) => result.ok ? result.value : undefined, () => undefined).then((value) => {
@@ -141,39 +161,78 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
     if (error.kind === "validation") {
       const mapped: Record<string, string> = {};
       for (const { field, code } of error.fields ?? []) {
-        if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
+        const photoField = /^photos\[(\d+)\]/.exec(field);
+        if (photoField) {
+          // The index is the position in what was sent; it is resolved through the ids kept when the input was built (not the current draft order).
+          const sent = sentPhotoIds.current[Number(photoField[1])];
+          if (sent !== undefined) photosCtl.markFailed(sent, code ?? "invalid");
+          mapped.photos = badPhotoMessage; setFocusRetry((value) => value + 1);
+        } else if (field === "photos") mapped.photos ??= photosFieldMessage;
+        else if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
         else if (field in fieldMessages) mapped[field] = fieldMessages[field]!;
         else if (newActivity !== null && activityMessage(field, code ?? "")) mapped.activity ??= activityMessage(field, code ?? "")!;
       }
-      setErrors(mapped); focusPending.current = Object.keys(mapped).length > 0;
+      setErrors(mapped); focusPending.current = Object.keys(mapped).some((name) => name !== "photos");
     }
   };
-  /** The entry is built once per attempt: a confirmed retry resends this very input. A new activity needs its instant resolved first. */
-  const buildInput = (): PostInput | undefined => {
-    let resolved: ResolvedNewActivity | undefined;
-    if (newActivity !== null) {
-      // With the itinerary loaded the schedule is validated here too; without it the server decides.
-      const result = loadedItinerary ? resolveNewActivity(newActivity, { days: loadedItinerary.days, timeZone, tripId: tripId ?? "" }) : parseNewActivity(newActivity, timeZone);
-      if (!result.ok) {
-        setErrors({ activity: Object.values(result.errors)[0] ?? windowMessage }); focusPending.current = true;
-        return undefined;
-      }
-      resolved = result.value;
+  const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
+  /** What the person is told when the photos did not finish uploading; true means every photo is ready to be sent. */
+  const settleUpload = (outcome: UploadOutcome, publishing: boolean): boolean => {
+    if (outcome.kind === "ready") return true;
+    if (outcome.kind === "aborted") return false;
+    const unsaved = !publishing ? "" : existing ? " El recuerdo no cambió." : " El recuerdo no se publicó.";
+    if (outcome.kind === "error") {
+      if (unavailable(outcome.error.kind) || outcome.error.kind === "unauthorized") fail(outcome.error);
+      // A validation failure of the reservation already marked each photo it names (by its place in the reserved batch): point to them.
+      else if (outcome.error.kind === "validation" && (outcome.error.fields?.length ?? 0) > 0) setPhotoError(`${invalidReservedMessage}${unsaved}`);
+      else setPhotoError(`No pudimos subir las fotos. Revisá tu conexión e intentá nuevamente.${unsaved}`);
+      if (outcome.failed > 0) setFocusRetry((value) => value + 1);
+      return false;
     }
-    return existing ? prepareUpdate(draft, existing, resolved) : prepareCreate(draft, resolved);
+    const many = outcome.failed > 1;
+    setPhotoError(`${many ? `${outcome.failed} fotos no se subieron` : "Una foto no se subió"}. Reintentá o quitá ${many ? "esas fotos" : "esa foto"}.${unsaved}`);
+    setFocusRetry((value) => value + 1);
+    return false;
+  };
+  /** The schedule of a new activity resolved once per attempt; `"invalid"` means the form already shows why. */
+  const resolveActivity = (): ResolvedNewActivity | undefined | "invalid" => {
+    if (newActivity === null) return undefined;
+    // With the itinerary loaded the schedule is validated here too; without it the server decides.
+    const result = loadedItinerary ? resolveNewActivity(newActivity, { days: loadedItinerary.days, timeZone, tripId: tripId ?? "" }) : parseNewActivity(newActivity, timeZone);
+    if (!result.ok) {
+      setErrors({ activity: Object.values(result.errors)[0] ?? windowMessage }); focusPending.current = true;
+      return "invalid";
+    }
+    return result.value;
+  };
+  /** Built once per attempt, from the draft as it is after the uploads: a confirmed retry resends this very input. */
+  const buildInput = (source: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
+    // Same selection as the input's `photos` (uploaded ones, in order): index i of a 422 `photos[i]` is the photo with this id.
+    sentPhotoIds.current = source.extras.photos.filter((item) => item.status === "uploaded" && item.key !== undefined).map((item) => item.localId);
+    return existing ? prepareUpdate(source, existing, resolved) : prepareCreate(source, resolved);
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (savingRef.current || !tripId) return;
-    setMessage(""); setFailure(undefined); setErrors({}); setMissingContent(false); setNotice("");
-    // Creating always needs text or a location; editing only when the text or the location changed and nothing is left
+    if (savingRef.current || photosCtl.isBusy() || !tripId) return;
+    setMessage(""); setFailure(undefined); setErrors({}); setMissingContent(false); setNotice(""); setPhotoError(undefined);
+    // Creating always needs text, a location or a photo; editing only when the text or the location changed and nothing is left
     // (an existing memory can be relinked without them).
     const textChanged = draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl;
     if (!hasContent(draft) && (!existing || textChanged)) { setMissingContent(true); focusPending.current = true; return; }
-    const input = buildInput();
-    if (!input) return;
-    if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
-    await send(input, undefined);
+    const resolved = resolveActivity();
+    if (resolved === "invalid") return;
+    if (!photos || draft.extras.photos.length === 0) {
+      const input = buildInput(draft, resolved);
+      if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
+      await send(input, undefined);
+      return;
+    }
+    // Photos first, straight to storage; the post is only sent when every one is uploaded (nothing is published without a photo in silence).
+    savingRef.current = true; setSaving(true);
+    try {
+      if (!settleUpload(await photosCtl.ensureUploaded(), true)) return;
+      await send(buildInput(draftRef.current, resolved), undefined);
+    } finally { savingRef.current = false; setSaving(false); }
   };
   /** Saves memory and activity together; a confirmation from a previous 409 is forwarded unchanged. Nothing is announced unless everything was saved. */
   const send = async (input: PostInput, confirmation: ParticipationConfirmation | undefined) => {
@@ -214,10 +273,13 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
     else navigate(originHref(origin), { replace: true, state: withNoBack() });
   };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
-  const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;
 
   const blocked = loaded.kind === "error" ? loaded.error : failure && (unavailable(failure.kind) || failure.kind === "unauthorized") ? failure : undefined;
+  const photoConflict = failure?.code === "PhotoConflictError";
+  const conflictAlert: ReactNode = photoConflict ? <>Revisá tus recuerdos antes de reintentar; puede que ya esté publicado. <Link to={listing}>Ver recuerdos</Link></> : undefined;
+  const photoAlert: ReactNode = photoError || errors.photos || conflictAlert || photosCtl.message || undefined;
+  const hasText = draft.values.description.trim() !== "" || draft.values.mapsUrl.trim() !== "";
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <header className="itinerary-header">
@@ -227,6 +289,11 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
       {loaded.kind === "loading" ? <LoadingState label="Cargando recuerdo…" /> : null}
       {blocked && unavailable(blocked.kind) ? <div className="trips-state">
         <Feedback variant="error">Este recuerdo ya no está disponible para tu cuenta.</Feedback>
+        {hasText ? <div className="post-unsaved">
+          <p>{existing ? "Ya no podés editar este recuerdo. Tu texto sigue acá para que lo copies." : "Tu recuerdo no se publicó. Copiá tu texto antes de salir."}</p>
+          {draft.values.description.trim() !== "" ? <textarea readOnly rows={6} aria-label="Texto de tu recuerdo, solo lectura" value={draft.values.description} /> : null}
+          {draft.values.mapsUrl.trim() !== "" ? <input readOnly type="text" aria-label="Ubicación de tu recuerdo, solo lectura" value={draft.values.mapsUrl} /> : null}
+        </div> : null}
         <Link to={listing}>Volver a recuerdos</Link>
       </div> : null}
       {blocked?.kind === "unauthorized" ? <div className="trips-state">
@@ -239,10 +306,16 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
       </div> : null}
       {loaded.kind === "ready" && !blocked ? <form ref={formRef} className="auth-form post-composer" onSubmit={(event) => void submit(event)} noValidate>
         {existing && published ? <p className="itinerary-secondary">Publicado el <time dateTime={existing.createdAt}>{published.format(new Date(existing.createdAt))}</time></p> : null}
-        <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={missingContent ? missingContentMessage : errors.description}
+        <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={missingContent ? photos ? missingContentWithPhotosMessage : missingContentMessage : errors.description}
           onChange={(event) => update("description", event.target.value)} />
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
+        {photos ? <PostPhotosSection items={draft.extras.photos} active={photosCtl.active} progress={photosCtl.progress} summary={photosCtl.summary} alert={photoAlert}
+          busy={saving || photosCtl.uploading || photosCtl.selecting} focusRetry={focusRetry}
+          onAdd={(source) => { setPhotoError(undefined); setMissingContent(false); setNotice(""); return photosCtl.add(source); }}
+          onRemove={(localId) => { setPhotoError(undefined); photosCtl.remove(localId); }}
+          onMove={(localId, delta) => photosCtl.move(localId, delta)}
+          onRetry={(localId) => { setPhotoError(undefined); void photosCtl.retry(localId).then((outcome) => { if (outcome !== "busy") settleUpload(outcome, false); }); }} /> : null}
         <section className="post-link-section" aria-label="Vínculo">
           {draft.extras.transportId ? <div className="post-link-transport">
             <p>Vinculado a un transporte</p>
@@ -262,9 +335,9 @@ function Composer({ tripId, postId, posts, itinerary, timeZone }: Omit<PostCompo
           {notice ? <Feedback>{notice}</Feedback> : null}
         </section>
         {message ? <Feedback>{message}</Feedback> : null}
-        {failure && failure.kind !== "validation" ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
-          {newActivity && (failure.kind === "network" || failure.kind === "server") ? ` ${retryHint}` : ""}</Feedback> : null}
-        {failure?.kind === "validation" && !errors.link && !errors.activity ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
+        {failure && failure.kind !== "validation" && !photoConflict ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
+          {(newActivity || draft.extras.photos.length > 0) && (failure.kind === "network" || failure.kind === "server") ? ` ${retryHint}` : ""}</Feedback> : null}
+        {failure?.kind === "validation" && !errors.link && !errors.activity && !errors.photos ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}
         </Button>

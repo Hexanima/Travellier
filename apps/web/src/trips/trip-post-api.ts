@@ -10,7 +10,7 @@ export type PostResponse = { id: string; tripId: string; authorId: string; descr
 export type NewActivityInput = { title: string; scheduledAt: string; durationMinutes?: number | null; description?: string | null; mapsUrl?: string | null };
 /** `newActivity` creates the activity together with the post; the server derives its day, so `dayId` is never sent. */
 export type PostInput = { description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null;
-  newActivity?: NewActivityInput };
+  newActivity?: NewActivityInput; photos?: { key: string }[] };
 /** `activity` and `participation` are present only when a new activity was sent. */
 export type SavedPost = PostResponse & { activity?: ActivityResponse; participation?: ParticipationResponse | null };
 /** Summary of a chained post: the server sends only these fields for the immediate parent and the direct children. */
@@ -52,6 +52,7 @@ const failure = (error: ApiClientError): TripResult<never> => {
     const confirmation = parseConfirmation(error.details);
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
   }
+  if (error.status === 409 && error.code === "PhotoConflictError") return { ok: false, error: { kind: "server", code: "PhotoConflictError" } };
   return { ok: false, error: { kind: error.kind,
     ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
 };
@@ -79,6 +80,7 @@ const body = (input: PostInput, confirmation?: ParticipationConfirmation): PostI
   ...(input.activityId !== undefined ? { activityId: input.activityId } : {}),
   ...(input.transportId !== undefined ? { transportId: input.transportId } : {}),
   ...(input.newActivity !== undefined ? { newActivity: newActivityBody(input.newActivity) } : {}),
+  ...(input.photos !== undefined ? { photos: input.photos.map(({ key }) => ({ key })) } : {}),
   ...(confirmation ? { confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } : {}),
 });
 export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripPostApi => ({
