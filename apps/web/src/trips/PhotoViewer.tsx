@@ -10,10 +10,13 @@ export type PhotoViewerProps = {
   onImageError: (photoId: string) => void; onRetryImage: (photoId: string) => void;
   /** The image could not load even after a refresh. */
   failed: boolean;
+  /** Load or refresh failure shown inside the dialog as its single alert (the page hides its own while the viewer is open). */
+  notice?: string;
+  onRetryNotice?: () => void;
 };
 
 /** Enlarged photo over the loaded ones. It is controlled: the open photo lives in the history state (an id), never a url. */
-export function PhotoViewer({ photos, photoId, hasMore, loadingMore, authorOf, timeZone, postHref, onSelect, onLoadMore, onClose, onOpenPost, onImageError, onRetryImage, failed }: PhotoViewerProps) {
+export function PhotoViewer({ photos, photoId, hasMore, loadingMore, authorOf, timeZone, postHref, onSelect, onLoadMore, onClose, onOpenPost, onImageError, onRetryImage, failed, notice, onRetryNotice }: PhotoViewerProps) {
   const index = photos.findIndex((item) => item.id === photoId);
   const current = photos[index];
   const awaitingMore = useRef(false);
@@ -56,8 +59,10 @@ export function PhotoViewer({ photos, photoId, hasMore, loadingMore, authorOf, t
     event.preventDefault();
     onOpenPost(current);
   };
-  return <Modal isOpen closeOnEscape onClose={onClose} title={`Foto ${index + 1} de ${photos.length}${hasMore ? " cargadas" : ""}`}>
+  return <Modal isOpen closeOnEscape onClose={onClose} error={notice} title={`Foto ${index + 1} de ${photos.length}${hasMore ? " cargadas" : ""}`}>
     <div className="photo-viewer">
+      {notice && onRetryNotice ? <button type="button" onClick={onRetryNotice}>Reintentar</button> : null}
+      {loadingMore ? <p role="status">Cargando más fotos…</p> : null}
       {failed ? <div className="photo-viewer__failed">
         <p>No se pudo cargar la imagen</p>
         <button type="button" onClick={() => onRetryImage(current.id)}>Reintentar</button>

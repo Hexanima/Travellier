@@ -88,6 +88,15 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
 
   const failure = phase === "initial-error" || phase === "more-error" ? error : undefined;
   const unavailable = failure !== undefined && ["not-found", "forbidden"].includes(failure.kind);
+  const failureText = failure === undefined ? undefined : unavailable ? "Las fotos de este viaje no están disponibles para tu cuenta."
+    : failure.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
+    : rejectsCursor(failure) ? "No pudimos continuar la lista de fotos. Podés volver a cargarla desde el inicio."
+    : "No pudimos cargar las fotos. Revisá tu conexión e intentá nuevamente.";
+  const refreshText = "No pudimos renovar algunas fotos. Se conservan las que ya estaban cargadas.";
+  // With the viewer open (aria-modal) the notices live inside it and are not repeated in the page: a single alert is visible at any time.
+  const inViewer = viewed !== undefined;
+  const notice = failureText ?? (gallery.refreshFailed ? refreshText : undefined);
+  const retryNotice = failure ? (failure.kind === "network" || failure.kind === "server" ? gallery.retry : undefined) : gallery.refreshFailed ? gallery.retryRefresh : undefined;
   const create = `/trips/${tripId}/memories/new`;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
@@ -97,18 +106,15 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
         <p>Las fotos del viaje, de la más reciente a la más antigua. Horarios en tu zona local.</p>
       </header>
       {phase === "initial-loading" ? <LoadingState label="Cargando fotos…" /> : null}
-      {failure ? <div className="trips-state">
-        <Feedback variant="error">{unavailable ? "Las fotos de este viaje no están disponibles para tu cuenta."
-          : failure.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : rejectsCursor(failure) ? "No pudimos continuar la lista de fotos. Podés volver a cargarla desde el inicio."
-          : "No pudimos cargar las fotos. Revisá tu conexión e intentá nuevamente."}</Feedback>
+      {failure && !inViewer ? <div className="trips-state">
+        <Feedback variant="error">{failureText}</Feedback>
         {failure.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : unavailable ? null
           : rejectsCursor(failure) ? <Button onClick={gallery.restart}>Volver a cargar desde el inicio</Button>
           : <Button onClick={gallery.retry}>Reintentar</Button>}
       </div> : null}
-      {!failure && gallery.refreshFailed ? <div className="trips-state">
-        <Feedback variant="error">No pudimos renovar algunas fotos. Se conservan las que ya estaban cargadas.</Feedback>
+      {!failure && gallery.refreshFailed && !inViewer ? <div className="trips-state">
+        <Feedback variant="error">{refreshText}</Feedback>
         <Button onClick={gallery.retryRefresh}>Reintentar</Button>
       </div> : null}
       {phase === "idle" && photos.length === 0 && !hasMore ? <section className="trips-empty">
@@ -119,12 +125,12 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
       {photos.length > 0 ? <>
         <PhotoGrid label="Fotos del viaje" items={items} />
         <p role="status">Mostrando {photos.length} {photos.length === 1 ? "foto" : "fotos"}</p>
-        {phase === "more-loading" ? <LoadingState label="Cargando más fotos…" /> : null}
+        {phase === "more-loading" && !inViewer ? <LoadingState label="Cargando más fotos…" /> : null}
         {hasMore ? <Button aria-disabled={phase === "more-loading" || undefined} onClick={loadMore}>Cargar más</Button> : null}
       </> : null}
       {viewed ? <PhotoViewer photos={photos} photoId={viewed.id} hasMore={hasMore} loadingMore={phase === "more-loading"} timeZone={timeZone}
         authorOf={(item) => authorLabel(people, item.uploaderId)} postHref={(item) => `/trips/${tripId}/memories/${item.postId}`}
-        onSelect={select} onLoadMore={() => gallery.loadMore()} onClose={close} failed={gallery.failed.has(viewed.id)}
+        onSelect={select} onLoadMore={() => gallery.loadMore()} onClose={close} failed={gallery.failed.has(viewed.id)} notice={notice} onRetryNotice={retryNotice}
         onOpenPost={(item) => openPostFrom(navigate, location, { tripId, postId: item.postId, anchor: photoAnchor(item.id), label: "fotos", viewer: true, panel: "photos" })}
         onImageError={gallery.imageError} onRetryImage={gallery.retryImage} /> : null}
     </div>

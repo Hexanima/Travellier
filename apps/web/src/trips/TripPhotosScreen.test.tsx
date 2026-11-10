@@ -259,6 +259,62 @@ describe("TripPhotosScreen", () => {
     expect(thumbs(container)).toEqual([itineraryId(3), itineraryId(2)]);
     expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
   });
+  describe("notices with the viewer open", () => {
+    const dialogAlerts = () => document.querySelectorAll('[role="dialog"] [role="alert"]');
+    const next = () => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Siguiente");
+    it("shows a failed load of more photos as the single alert inside the dialog and retries from there", async () => {
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockResolvedValueOnce(fail("server")).mockResolvedValueOnce(page([photo(1)], null));
+      const container = await mount(list);
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      await click(next());
+      expect(alerts(document)).toHaveLength(1);
+      expect(dialogAlerts()).toHaveLength(1);
+      expect(dialogAlerts()[0]!.textContent).toContain("No pudimos cargar las fotos");
+      expect(alerts(container.querySelector(".trips-panel")!)).toHaveLength(1); // the same one (the dialog lives in the panel)
+      expect(Array.from(container.querySelectorAll(".trips-panel > .trips-state"))).toHaveLength(0);
+      await click(Array.from(document.querySelectorAll('[role="dialog"] button')).find((item) => item.textContent === "Reintentar"));
+      expect(list).toHaveBeenLastCalledWith(tripId, { cursor: "c1" });
+      expect(alerts(document)).toHaveLength(0);
+      expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 3");
+      await click(next());
+      expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 3 de 3");
+    });
+    it("announces the load in progress inside the dialog and not outside it", async () => {
+      const second = deferred<unknown>();
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockReturnValueOnce(second.promise);
+      const container = await mount(list);
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      await click(next());
+      const inside = Array.from(document.querySelectorAll('[role="dialog"] [role="status"]')).filter((item) => item.textContent === "Cargando más fotos…");
+      expect(inside).toHaveLength(1);
+      expect(container.textContent?.split("Cargando más fotos…").length).toBe(2);
+      await act(async () => second.resolve(page([photo(1)], null)));
+      expect(container.textContent).not.toContain("Cargando más fotos…");
+    });
+    it("keeps the previous behaviour with the viewer closed: the alert and the retry are in the page", async () => {
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockResolvedValueOnce(fail("server"));
+      const container = await mount(list);
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      await click(next());
+      await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(byText(container, "Reintentar")).toBeTruthy();
+    });
+    it("shows the refresh failure inside the dialog with the viewer open, once, and in the page once it is closed", async () => {
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], null)).mockResolvedValueOnce(fail("network"));
+      const container = await mount(list);
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      await act(async () => document.querySelector("img")!.dispatchEvent(new Event("error")));
+      await act(async () => { await Promise.resolve(); });
+      expect(alerts(document)).toHaveLength(1);
+      expect(dialogAlerts()).toHaveLength(1);
+      expect(dialogAlerts()[0]!.textContent).toContain("No pudimos renovar algunas fotos");
+      await click(Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar"));
+      expect(alerts(container)).toHaveLength(1);
+      expect(container.textContent).toContain("No pudimos renovar algunas fotos");
+    });
+  });
   it("never puts a signed url in the history state, outside an src, or in the console", async () => {
     const spies = (["log", "info", "warn", "error", "debug"] as const).map((name) => vi.spyOn(console, name).mockImplementation(() => undefined));
     const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockResolvedValueOnce(fail("server"));

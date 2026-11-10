@@ -131,6 +131,25 @@ describe("PhotoViewer", () => {
     await act(async () => button("Reintentar").click());
     expect(p.onRetryImage).toHaveBeenCalledWith(itineraryId(2));
   });
+  it("shows the notice as the single alert of the dialog, without aria-live next to it, and retries from inside", async () => {
+    const onRetryNotice = vi.fn();
+    const { render } = await mount(props({ notice: "No pudimos cargar las fotos.", onRetryNotice }));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(dialog.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe("No pudimos cargar las fotos.");
+    expect(dialog.querySelector('[role="alert"][aria-live]')).toBeNull();
+    await act(async () => button("Reintentar").click());
+    expect(onRetryNotice).toHaveBeenCalledTimes(1);
+    await render(props());
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(0);
+  });
+  it("announces the load of more photos inside the dialog as a status", async () => {
+    await mount(props({ photoId: itineraryId(1), hasMore: true, loadingMore: true }));
+    const status = Array.from(document.querySelectorAll('[role="dialog"] [role="status"]')).find((item) => item.textContent === "Cargando más fotos…");
+    expect(status).toBeTruthy();
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(0);
+  });
   it("renders nothing for a photo that is not loaded", async () => {
     await mount(props({ photoId: itineraryId(77) }));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
