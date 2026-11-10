@@ -12,8 +12,10 @@ describe("external link adapter", () => {
     const open = vi.fn(() => ({}));
     expect(await createExternalLink({ open }).open("  https://MAPS.GOOGLE.COM/?q=a ")).toEqual({ ok: true, value: undefined });
     expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith("https://maps.google.com/?q=a", "_blank", "noopener,noreferrer");
   });
 
+  it("treats a null window as opened: noopener makes the result unobservable", async () => {
     const open = vi.fn(() => null);
     expect(await createExternalLink({ open }).open(url)).toEqual({ ok: true, value: undefined });
   });
