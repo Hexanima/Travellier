@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toCents } from "../value-objects/money.js";
 import { createObjectId, type ObjectId } from "../value-objects/object-id.js";
 import { applyPostExpense, parsePostExpenseInput, type PostExpense } from "./post-expense.js";
 
@@ -32,12 +33,33 @@ describe("parsePostExpenseInput", () => {
   it.each([0.1 + 0.2, 1e-7, 1e21, 1.5e-3, Number.MIN_VALUE])("rejects the edge totalAmount %j", (totalAmount) => {
     expect(parsePostExpenseInput({ totalAmount })).toMatchObject({ ok: false, error: { issues: [{ field: "expense.totalAmount", code: "invalid" }] } });
   });
-  it.each([[1e2, 100], [0.01, 0.01], [123456789012.34, 123456789012.34], [90071992547409.91, 90071992547409.91]])(
+  it.each([[1e2, 100], [0.01, 0.01], [123456789012.34, 123456789012.34], [70368744177663.98, 70368744177663.98], [70368744177663.99, 70368744177663.99]])(
     "accepts the edge totalAmount %j without rounding it", (totalAmount, expected) => {
       const parsed = parsePostExpenseInput({ totalAmount });
       expect(parsed).toEqual({ ok: true, value: { totalAmount: expected } });
       expect(Object.is((parsed as { value: { totalAmount: number } }).value.totalAmount, expected)).toBe(true);
+      expect(String(expected)).toBe(String(totalAmount));
     });
+  it.each([[70368744177663.98, 7036874417766398], [70368744177663.99, 7036874417766399], [123456789012.34, 12345678901234]])(
+    "keeps the exact cents of %j (below 2^46 every 2-decimal amount is its own double)", (amount, cents) => {
+      expect(toCents(amount)).toEqual({ ok: true, value: cents });
+      const applied = apply(undefined, { totalAmount: amount, currency: "ARS" });
+      expect(applied).toMatchObject({ ok: true, value: { expense: { totalAmount: amount } } });
+      expect(toCents((applied as { value: { expense: { totalAmount: number } } }).value.expense.totalAmount)).toEqual({ ok: true, value: cents });
+    });
+  // LIMITE CONOCIDO de representacion: por encima de 2^46 (~7,04e13) los doubles distan 1/64, asi que dos importes
+  // con 2 decimales pueden ser el mismo double: el JSON ya llega redondeado y el dominio no puede detectarlo.
+  it("KNOWN LIMIT: 90071992547409.91 is the same double as 90071992547409.9 and yields 9007199254740990 cents", () => {
+    expect(90071992547409.91 === 90071992547409.9).toBe(true);
+    expect(String(90071992547409.91)).toBe("90071992547409.9");
+    expect(toCents(90071992547409.91)).toEqual({ ok: true, value: 9007199254740990 });
+    expect(parsePostExpenseInput({ totalAmount: 90071992547409.91 })).toEqual({ ok: true, value: { totalAmount: 90071992547409.9 } });
+  });
+  it("rejects the amounts whose cents exceed Number.MAX_SAFE_INTEGER", () => {
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 90071992547409.92 }))).toEqual(["expense.totalAmount:invalid"]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: Number.MAX_SAFE_INTEGER / 100 }))).toEqual([]);
+    expect(toCents(Number.MAX_SAFE_INTEGER).ok).toBe(false);
+  });
   it.each(["BRL", "ars", 1, null])("rejects currency %j", (currency) => {
     expect(issuesOf(parsePostExpenseInput({ currency }))).toEqual(["expense.currency:invalid"]);
   });
