@@ -33,6 +33,8 @@ const button = (container: HTMLElement, label: string) => {
   expect(result, `Button ${label}`).toBeDefined(); return result!;
 };
 const click = async (container: HTMLElement, label: string) => act(async () => button(container, label).click());
+/** One day is shown at a time: pick it in the strip. */
+const showDay = async (container: HTMLElement, date: string) => act(async () => container.querySelector<HTMLElement>(`[data-day="${date}"]`)!.click());
 const field = async (container: HTMLElement, name: string, value: string) => {
   const element = container.querySelector<HTMLInputElement>(`[name="${name}"]`); expect(element).not.toBeNull();
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element!.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -86,11 +88,14 @@ describe("itinerary activity flows", () => {
     const returning = { ...fixture.days[2], date: first.endsAt, startsAt: last.endsAt, endsAt: "2026-09-26T06:00:00.000Z", items: [], order: 4 };
     fixture.days = [first, last, returning]; fixture.activities = []; fixture.posts = []; fixture.transports = [];
     const { container, create } = await render(fixture);
+    await showDay(container, "2026-09-26");
     expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).not.toContain("Crear actividad");
+    await showDay(container, "2026-09-25");
     await click(container, "Crear actividad"); await field(container, "title", "Despedida");
     await field(container, "date", "2026-09-26"); await field(container, "time", "00:00"); await save(container);
     expect(create).toHaveBeenCalledWith(fixture.tripId, expect.objectContaining({ dayId: last.id, scheduledAt: last.endsAt }));
     expect(container.querySelector('[role="dialog"]')).toBeNull();
+    await showDay(container, "2026-09-26");
     expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).toContain("Despedida");
   });
   it.each([
@@ -148,6 +153,7 @@ describe("itinerary activity flows", () => {
     expect(getItinerary).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(container.querySelector('[data-itinerary-date="2026-09-25"]')?.textContent).not.toContain("Paseo por el centro");
+    await showDay(container, "2026-09-26");
     expect(container.querySelector('[data-itinerary-date="2026-09-26"]')?.textContent).toContain("Paseo por el centro");
     const moved = Array.from(container.querySelectorAll('[data-itinerary-date="2026-09-26"] [data-itinerary-post]')).map((n) => n.getAttribute("data-itinerary-post"));
     expect(moved).toEqual([fixture.posts[0].id, child.id]);

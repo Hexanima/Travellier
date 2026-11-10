@@ -153,14 +153,20 @@ describe("transport dialog in the URL", () => {
   });
   it("a transport shown in several local days opens the same detail from each", async () => {
     const { container } = await mount({ itineraries: [{ ok: true, value: crossing() }] });
-    const buttons = Array.from(container.querySelectorAll(`[data-itinerary-item="${TR}"] button.transport-title`));
-    expect(buttons.length).toBeGreaterThan(1);
-    await click(buttons[0]);
-    const first = here;
-    await closeDialog();
-    await click(buttons[1]);
-    expect(here).toBe(first);
-    expect(document.querySelectorAll(".transport-dialog")).toHaveLength(1);
+    // One day is shown at a time: the same transport is reached from each day of the strip where it appears.
+    const reachedFrom: string[] = [], opened: string[] = [];
+    for (const day of Array.from(container.querySelectorAll<HTMLElement>(".itinerary-day-chip"))) {
+      await click(day);
+      const button = container.querySelector(`[data-itinerary-item="${TR}"] button.transport-title`);
+      if (!button) continue;
+      reachedFrom.push(day.getAttribute("data-day")!);
+      await click(button);
+      opened.push(new URLSearchParams(here.split("?")[1]).get("transport")!);
+      expect(document.querySelectorAll(".transport-dialog")).toHaveLength(1);
+      if (reachedFrom.length < 2) await closeDialog();
+    }
+    expect(reachedFrom.length).toBeGreaterThan(1);
+    expect(new Set(opened)).toEqual(new Set([TR]));
     expect(document.querySelectorAll("[data-transport-day]").length).toBe(2);
   });
   it("an invalid tab opens Recuerdos", async () => {

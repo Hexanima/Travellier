@@ -38,6 +38,7 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
   calendarSync?: CalendarSyncService };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
+const chipLabel = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 /** Attribution of an expense as the server read it: where it was counted (activity or publication) and when it happened. */
 type Attribution = { source: "activity" | "publication"; occurredAt: string; publishedAt: string };
@@ -198,6 +199,27 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const setTab = (next: ActivityTab) => updateParams((params) => { params.set("tab", next); });
   const view = useMemo(() => state.kind === "ready" ? projectItineraryView(state.value, timeZone) : undefined, [state, timeZone]);
   const { days, outsidePosts } = view ?? { days: [], outsidePosts: [] };
+  // One local day is read at a time: `?day=YYYY-MM-DD` when it is valid and the Trip has it, else the first day (the URL is not rewritten).
+  // Tapping another day replaces the entry (Back still leaves the itinerary) and moves neither the page nor the focus; tapping the selected one does nothing.
+  const dayParam = new URLSearchParams(location.search).get("day");
+  const selectedDate = dayParam !== null && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((day) => day.date === dayParam) ? dayParam : days[0]?.date;
+  const shownDays = days.filter((day) => day.date === selectedDate);
+  const chipRefs = useRef(new Map<string, HTMLElement>());
+  const tapped = useRef(false);
+  const revealed = useRef<string>();
+  const pickDay = (date: string) => {
+    if (date === selectedDate) return;
+    tapped.current = true;
+    updateParams((params) => { params.set("day", date); });
+  };
+  useEffect(() => {
+    // A tap leaves the strip where it is; a day that comes from outside (a restored URL) is brought into view. The default first day needs nothing.
+    const byTap = tapped.current;
+    tapped.current = false;
+    const initialDefault = revealed.current === undefined && selectedDate === days[0]?.date;
+    revealed.current = selectedDate;
+    if (!byTap && !initialDefault && selectedDate) chipRefs.current.get(selectedDate)?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
   const attributions = useMemo(() => new Map((state.kind === "ready" ? state.value.expenses : []).map((row) => [row.postId, row as Attribution] as const)), [state]);
   const outsideExpensesRef = useRef<HTMLElement>(null);
   const showOutsideExpenses = () => {
@@ -244,8 +266,15 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
         <Link to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
       </section> : null}
+      {state.kind === "ready" && days.length > 0 ? <nav aria-label="Días del viaje">
+        <ul className="itinerary-day-strip">
+          {days.map((day) => <li key={day.date}><button type="button" className="ui-button itinerary-day-chip" data-day={day.date} aria-current={day.date === selectedDate ? "date" : undefined}
+            ref={(element) => { if (element) chipRefs.current.set(day.date, element); else chipRefs.current.delete(day.date); }} onClick={() => pickDay(day.date)}>
+            <time dateTime={day.date}>{chipLabel.format(new Date(`${day.date}T00:00:00Z`))}</time></button></li>)}
+        </ul>
+      </nav> : null}
       {state.kind === "ready" ? <div className="itinerary-days">
-        {days.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
+        {shownDays.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
           <h2 id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></h2>
           <div className="itinerary-bands">
             {day.segments.map((segment, index) => <section key={segment.key} className={`itinerary-band itinerary-band--${segment.type}`}
