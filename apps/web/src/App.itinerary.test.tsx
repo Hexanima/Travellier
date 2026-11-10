@@ -40,7 +40,7 @@ describe("App itinerary integration", () => {
     vi.stubGlobal("fetch", fetch);
     const container = await render(`/trips/${itineraryId(1)}/itinerary`, { apiBaseUrl: "https://api.example.test", sessionStorage: storage(true) });
     expect(container.textContent).toContain("Paseo por el centro");
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(5); // refresh, itinerary, Trip name (shell heading) and one participation per activity
     expect(fetch).toHaveBeenNthCalledWith(2, `https://api.example.test/trips/${itineraryId(1)}/itinerary`, expect.objectContaining({
       method: "GET", headers: { Authorization: "Bearer renewed" },
     }));
@@ -70,7 +70,7 @@ describe("App itinerary integration", () => {
       expect(postGet).toHaveBeenCalledExactlyOnceWith(itineraryId(1), value.posts[0].id);
       const back = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver");
       await act(async () => back?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
-      expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+      expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
       expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`)).not.toBeNull();
     });
   });
@@ -104,7 +104,7 @@ describe("App itinerary integration", () => {
       expect(back).toBeDefined();
       await click(back);
       await act(async () => { await Promise.resolve(); });
-      expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+      expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
       expect(document.querySelector(".activity-dialog")).not.toBeNull();
       expect(document.activeElement).toBe(document.querySelector(`[data-memory="${value.posts[0]!.id}"]`));
     });

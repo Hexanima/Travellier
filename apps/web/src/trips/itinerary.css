@@ -155,3 +155,12 @@
 .calendar-sync { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
 .calendar-sync p { margin: 0; line-height: 1.5; }
 .calendar-sync [role="group"] { display: grid; justify-items: start; gap: 8px; }
+/* Structure of the Trip tabs (T98); colors, sizes and final composition belong to the visual tasks (T105+). */
+.trip-shell-header h1 { margin: 0; }
+.ui-tablist { display: flex; gap: 8px; overflow-x: auto; }
+.ui-tab { flex: none; }
+.ui-tab[aria-selected="true"] { font-weight: 700; text-decoration: underline; }
+.ui-tabpanel { display: grid; gap: 12px; min-width: 0; }
+.itinerary-day-strip { display: flex; gap: 8px; overflow-x: auto; padding: 0; margin: 0; list-style: none; }
+.itinerary-day-chip { flex: none; }
+.itinerary-day-chip[aria-current="date"] { font-weight: 700; text-decoration: underline; }

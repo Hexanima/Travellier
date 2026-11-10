@@ -55,7 +55,7 @@ describe("App balance route", () => {
     await click(link(container, "Balance"));
     expect(container.querySelector("h1")?.textContent).toBe("Balance");
     await click(link(container, "Volver al itinerario"));
-    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+    expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
   });
   it("leaving the editor with Cancelar comes back to the balance, which is asked for again", async () => {
     const get = vi.fn().mockResolvedValueOnce({ ok: true, value: pendingBalance }).mockResolvedValue({ ok: true, value: completeBalance });

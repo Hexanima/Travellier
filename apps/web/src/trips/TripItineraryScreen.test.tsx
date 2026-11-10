@@ -172,11 +172,11 @@ describe("itinerary screen", () => {
     expect(container.textContent).toContain("Todavía no hay itinerario");
     expect(container.querySelector(`a[href="/trips/${itineraryId(1)}/journey"]`)).not.toBeNull();
   });
-  it("links to the Trip memories from the header, also without an itinerary", async () => {
+  it("no longer carries the provisional link to the Trip memories: the Diario tab of the Trip shell replaces it", async () => {
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));
-    expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/memories"]`)?.textContent).toBe("Recuerdos");
+    expect(container.querySelector(`a[href="/trips/${itineraryId(1)}/memories"]`)).toBeNull();
   });
-  it("links to the balance from the header whatever the expense mode (provisional entry until T98)", async () => {
+  it("links to the balance from the header whatever the expense mode (it lives in the itinerary panel)", async () => {
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value: fixture() }));
     expect(container.querySelector(`.itinerary-header a[href="/trips/${itineraryId(1)}/balance"]`)?.textContent).toBe("Balance");
     const empty = await render(vi.fn().mockResolvedValue({ ok: true, value: { ...fixture(), days: [], activities: [], posts: [], transports: [] } }));

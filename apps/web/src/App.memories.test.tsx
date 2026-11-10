@@ -58,7 +58,7 @@ describe("App memories integration", () => {
     const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), posts: { create, list } });
     await type(container, "description", "Atardecer"); await submit(container);
     expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Atardecer" });
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.textContent).toContain("Recuerdo publicado.");
     expect(container.textContent).toContain("Atardecer");
   });
@@ -89,7 +89,8 @@ describe("App memories integration", () => {
     vi.stubGlobal("fetch", fetch);
     const container = await render(`/trips/${tripId}/memories/new`, { apiBaseUrl: "https://api.example.test", sessionStorage: storage(true) });
     await type(container, "description", "Atardecer"); await submit(container);
-    const call = fetch.mock.calls[1]!;
+    // The Trip shell also asks for the Trip name (GET); the POST is the one this test is about.
+    const call = fetch.mock.calls.find(([url, init]) => (url as string).endsWith("/posts") && (init as RequestInit | undefined)?.method === "POST")!;
     expect(call[0]).toBe(`https://api.example.test/trips/${tripId}/posts`);
     expect(call[1]).toEqual(expect.objectContaining({ method: "POST", headers: expect.objectContaining({ Authorization: "Bearer renewed" }) }));
     expect(JSON.parse(call[1].body as string)).toEqual({ id: expect.stringMatching(/^[0-9a-f]{24}$/), description: "Atardecer" });
@@ -241,7 +242,7 @@ describe("App memories new activity routes", () => {
     expect(container.querySelector("#post-link-summary")?.textContent).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
     await submit(container);
     expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Atardecer", newActivity: { title: "Cena", scheduledAt, durationMinutes: 90 } });
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.textContent).toContain("Recuerdo publicado y actividad creada. Vas a ir.");
   });
   it("relinks an existing memory to a new activity through the edit routes", async () => {
@@ -289,7 +290,7 @@ describe("App memories expense routes", () => {
     expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Atardecer");
     await submit(container);
     expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Atardecer", expense: { totalAmount: 25.5, currency: "ARS" } });
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
   it("opened by URL without a draft the expense routes go back to the composer", async () => {
     const container = await render(`/trips/${tripId}/memories/new/expense`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: {} });
@@ -341,7 +342,7 @@ describe("App memories detail route", () => {
     expect(container.querySelector(`a[href="/trips/${tripId}/memories/${parentId}"]`)?.textContent).toBe("Antes");
     expect(container.querySelector(`a[href="/trips/${tripId}/memories/${childId}"]`)?.textContent).toBe("Después");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
   it("flows from the diary to the detail, continues the memory and publishes it with only its parent", async () => {
     const childId = itineraryId(35);
@@ -357,7 +358,7 @@ describe("App memories detail route", () => {
     expect(container.querySelector("#post-link-summary")?.textContent).toBe("Recuerdo: Atardecer");
     await type(container, "description", "Continuación"); await submit(container);
     expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Continuación", parentPostId: postId });
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.textContent).toContain("Recuerdo publicado.");
   });
   it("cancels a continuation back to the detail it started from", async () => {
@@ -372,7 +373,7 @@ describe("App memories detail route", () => {
     expect(container.textContent).not.toContain("Nuevo recuerdo");
     expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al diario")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.querySelector(`li[data-memory="${postId}"]`)).not.toBeNull();
     expect(container.querySelector("#post-link-summary")).toBeNull();
   });
@@ -387,7 +388,7 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Descartar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
   it("cancelling a continuation started from the itinerary keeps the itinerary as the root origin", async () => {
     const value = itineraryFixture();
@@ -402,7 +403,7 @@ describe("App memories detail route", () => {
     expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al itinerario")?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
     expect(container.textContent).not.toContain("Volver al diario");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+    expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
     expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`)).not.toBeNull();
   });
   it("cancelling a composer opened with no app history replaces the entry so Volver does not reopen it", async () => {
@@ -415,7 +416,7 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.querySelector("#post-link-summary")).toBeNull();
   });
   it("Volver on a detail opened by direct URL goes to the diary", async () => {
@@ -423,7 +424,7 @@ describe("App memories detail route", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
     const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { list, get } });
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
   const openEditFromDetail = async () => {
     const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
@@ -440,7 +441,7 @@ describe("App memories detail route", () => {
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     expect(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Volver al diario")?.getAttribute("href")).toBe(`/trips/${tripId}/memories`);
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
   it("discarding a dirty edit opened from the detail returns to that detail and Volver does not reopen the editor", async () => {
     const container = await openEditFromDetail();
@@ -449,7 +450,7 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Descartar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
     expect(container.textContent).not.toContain("Editar recuerdo");
   });
   it("cancelling an edit opened from the detail of an itinerary post keeps the itinerary as root origin", async () => {
@@ -462,6 +463,6 @@ describe("App memories detail route", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cancelar") ?? null);
     expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Volver") ?? null);
-    expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
+    expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
   });
 });

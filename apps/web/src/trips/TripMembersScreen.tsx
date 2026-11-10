@@ -6,6 +6,7 @@ import { displayName } from "../profile/display-name.js";
 import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
+import { useInTripShell } from "./trip-context.js";
 
 export type TripSharing = {
   copyText: (text: string) => Promise<void>;
@@ -37,6 +38,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   sharing?: TripSharing;
 }) {
   const { tripId } = useParams();
+  const inShell = useInTripShell();
   const navigate = useNavigate();
   const location = useLocation();
   const [trip, setTrip] = useState<MemberTripDetail>();
@@ -185,14 +187,9 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
     }
   };
 
-  return (
-    <main className="app-shell trips-shell">
-      <section className="trips-panel" aria-labelledby="trip-members-title">
-        {/* Opened from the notices center (member.joined): the way back is that center. */}
-        {readOrigin(location.state, tripId ?? "").label === "avisos"
-          ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
-          : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
-        <h1 id="trip-members-title">Miembros e invitación</h1>
+  const body = (
+    <>
+        {inShell ? <h2 id="trip-members-title">Miembros e invitación</h2> : <h1 id="trip-members-title">Miembros e invitación</h1>}
         {loading ? <LoadingState label="Cargando miembros…" /> : null}
         {!loading && loadError ? (
           <div className="trips-state">
@@ -257,6 +254,17 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
             <Button error loading={deleting} loadingLabel="Eliminando…" onClick={() => void confirmDelete()}>Eliminar definitivamente</Button>
           </div>
         </Modal>
+    </>
+  );
+  if (inShell) return <section aria-labelledby="trip-members-title">{body}</section>;
+  return (
+    <main className="app-shell trips-shell">
+      <section className="trips-panel" aria-labelledby="trip-members-title">
+        {/* Opened from the notices center (member.joined): the way back is that center. */}
+        {readOrigin(location.state, tripId ?? "").label === "avisos"
+          ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
+          : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
+        {body}
       </section>
     </main>
   );

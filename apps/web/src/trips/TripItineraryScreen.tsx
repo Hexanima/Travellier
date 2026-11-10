@@ -25,6 +25,7 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
+import { useInTripShell, useTripName } from "./trip-context.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
@@ -61,6 +62,9 @@ export function TripItineraryScreen({ itinerary, activities, participations, mem
 function ItineraryContent({ tripId, itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, timeZone }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  // Inside the Trip shell the frame (main, way back, Trip heading, tabs) is the shell's; the Trip name is already known there.
+  const inShell = useInTripShell();
+  const shellName = useTripName();
   const location = useLocation();
   const navigate = useNavigate();
   const locationRef = useRef(location);
@@ -203,22 +207,16 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
-  return <main className="app-shell trips-shell itinerary-shell">
-    <div className="trips-panel">
-      {/* Opened from the notices center (state kept by the `?activity` changes): the way back is that center, never another Trip. */}
-      {readOrigin(location.state, tripId ?? "").label === "avisos"
-        ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
-        : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
+  const body = <>
       <header className="itinerary-header">
-        <h1>Itinerario</h1>
+        {inShell ? <h2>Itinerario</h2> : <h1>Itinerario</h1>}
         <p>El viaje, día a día. Horarios en tu zona local.</p>
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
-        {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/memories`}>Recuerdos</Link> : null}
-        {/* Provisional entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses): T98 gives it its place. */}
+        {/* Entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses). It lives in the itinerary panel: the balance opens outside the tabs. */}
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/balance`}>Balance</Link> : null}
-        {/* Provisional placement of the native calendar sync (T96) next to the .ics export (static copy): T98 gives them their place. */}
+        {/* The native calendar sync (T96) and the .ics export (static copy) stay in the itinerary panel. */}
         {state.kind === "ready" && calendarSync && tripId ? <CalendarSync service={calendarSync} tripId={tripId} itinerary={itinerary} loaded={state.value} timeZone={timeZone} /> : null}
-        {state.kind === "ready" ? <ExportIcsButton tripName={tripName} itinerary={state.value} timeZone={timeZone} {...icsExport}
+        {state.kind === "ready" ? <ExportIcsButton tripName={tripName || shellName} itinerary={state.value} timeZone={timeZone} {...icsExport}
           resolveTripName={trips && tripId ? async () => { const result = await trips.get(tripId); return result.ok ? result.value.name : undefined; } : undefined} /> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
@@ -310,6 +308,15 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         timeZone={timeZone} onClose={closeDialog}
         memories={members ? <TransportMemories tripId={tripId ?? ""} transportId={urlTransportEntry.id} itinerary={state.value} members={members} timeZone={timeZone}
           tab={tab} onTab={setTab} onGone={() => onTransportGone(urlTransportEntry.id)} onSettled={() => setPanelSettled(true)} /> : undefined} /> : null}
+  </>;
+  if (inShell) return body;
+  return <main className="app-shell trips-shell itinerary-shell">
+    <div className="trips-panel">
+      {/* Opened from the notices center (state kept by the `?activity` changes): the way back is that center, never another Trip. */}
+      {readOrigin(location.state, tripId ?? "").label === "avisos"
+        ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
+        : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
+      {body}
     </div>
   </main>;
 }

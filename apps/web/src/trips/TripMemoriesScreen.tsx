@@ -9,6 +9,7 @@ import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
+import { useInTripShell } from "./trip-context.js";
 import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
@@ -59,6 +60,7 @@ export function TripMemoriesScreen({ posts, timeZone = Intl.DateTimeFormat().res
 }
 
 function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & { tripId?: string }) {
+  const inShell = useInTripShell();
   const location = useLocation();
   const navigate = useNavigate();
   // Read once: the saved post is kept locally and the history entry is cleaned so going back does not repeat the notice.
@@ -99,15 +101,11 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
-  return <main className="app-shell trips-shell itinerary-shell">
-    <div className="trips-panel">
-      <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
+  const body = <>
       <header className="itinerary-header">
-        <h1>Recuerdos</h1>
+        {inShell ? <h2>Recuerdos</h2> : <h1>Recuerdos</h1>}
         <p>Lo que vive el grupo, del más reciente al más antiguo. Horarios en tu zona local.</p>
         <Link className="trips-settings-link" to={create}>Nuevo recuerdo</Link>
-        {/* Provisional entry to the gallery: the Posts/Fotos tabs of T98 replace it. */}
-        <Link className="trips-settings-link" to={`/trips/${tripId}/memories/photos`}>Fotos</Link>
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">{noticeText(saved)}</Feedback> : null}
       {alreadySaved ? <div className="activity-detail">
@@ -140,6 +138,12 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
           <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
         </ListItem>)}
       </List> : null}
+  </>;
+  if (inShell) return body;
+  return <main className="app-shell trips-shell itinerary-shell">
+    <div className="trips-panel">
+      <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
+      {body}
     </div>
   </main>;
 }
