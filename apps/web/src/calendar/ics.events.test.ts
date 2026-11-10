@@ -28,9 +28,47 @@ const withActivity = (patch: Record<string, unknown>, n = 8) => {
 const localAccessors = ["getHours", "getMinutes", "getSeconds", "getMilliseconds", "getDate", "getDay", "getMonth", "getFullYear"] as const;
 const utcOf = { getHours: "getUTCHours", getMinutes: "getUTCMinutes", getSeconds: "getUTCSeconds", getMilliseconds: "getUTCMilliseconds",
   getDate: "getUTCDate", getDay: "getUTCDay", getMonth: "getUTCMonth", getFullYear: "getUTCFullYear" } as const;
+const localSetters = ["setHours", "setDate", "setMonth", "setFullYear", "setMinutes", "setSeconds", "setMilliseconds"] as const;
+const isUtc = (zone: unknown) => zone === "UTC";
 function underZone<T>(offset: number, task: () => T): { value: T; localCalls: number } {
   let localCalls = 0;
+  const RealDate = globalThis.Date;
+  const RealIntlFormat = Intl.DateTimeFormat;
+  const formatProto = RealIntlFormat.prototype;
+  const zoneOf = (instance: Intl.DateTimeFormat) => RealIntlFormat.prototype.resolvedOptions.call(instance).timeZone;
+  const realFormatGetter = Object.getOwnPropertyDescriptor(formatProto, "format")!.get!;
+  const realFormatToParts = formatProto.formatToParts;
+  const realResolvedOptions = formatProto.resolvedOptions;
   try {
+    // Multi-argument `new Date(y, m, d, ...)` builds a LOCAL-time instant; the one-argument forms (timestamp, ISO string) and Date.UTC are fine.
+    globalThis.Date = new Proxy(RealDate, {
+      construct(target, args, newTarget) { if (args.length > 1) localCalls += 1; return Reflect.construct(target, args, newTarget); },
+    });
+    // Any Intl.DateTimeFormat must name `timeZone: "UTC"` explicitly, otherwise it would format in the process zone.
+    Intl.DateTimeFormat = new Proxy(RealIntlFormat, {
+      construct(target, args, newTarget) {
+        if (!isUtc((args[1] as Intl.DateTimeFormatOptions | undefined)?.timeZone)) localCalls += 1;
+        return Reflect.construct(target, args, newTarget);
+      },
+    });
+    const spyLoose = vi.spyOn as unknown as (target: object, name: string, access?: "get") => { mockImplementation: (impl: (this: unknown, ...args: unknown[]) => unknown) => void };
+    spyLoose(formatProto, "format", "get").mockImplementation(function (this: unknown) {
+      if (!isUtc(zoneOf(this as Intl.DateTimeFormat))) localCalls += 1;
+      return realFormatGetter.call(this as Intl.DateTimeFormat);
+    });
+    spyLoose(formatProto, "formatToParts").mockImplementation(function (this: unknown, ...rest: unknown[]) {
+      if (!isUtc(zoneOf(this as Intl.DateTimeFormat))) localCalls += 1;
+      return (realFormatToParts as (...args: unknown[]) => unknown).apply(this, rest);
+    });
+    spyLoose(formatProto, "resolvedOptions").mockImplementation(function (this: unknown) {
+      const options = realResolvedOptions.call(this as Intl.DateTimeFormat);
+      if (!isUtc(options.timeZone)) localCalls += 1;
+      return options;
+    });
+    for (const name of localSetters) {
+      const real = RealDate.prototype[name] as (...rest: unknown[]) => number;
+      spyLoose(Date.prototype, name).mockImplementation(function (this: unknown, ...rest: unknown[]) { localCalls += 1; return real.apply(this, rest); });
+    }
     for (const name of localAccessors) {
       vi.spyOn(Date.prototype, name).mockImplementation(function (this: Date) { localCalls += 1; return new Date(this.getTime() - offset * 60000)[utcOf[name]](); });
     }
@@ -41,6 +79,8 @@ function underZone<T>(offset: number, task: () => T): { value: T; localCalls: nu
     return { value: task(), localCalls };
   } finally {
     vi.restoreAllMocks();
+    globalThis.Date = RealDate;
+    Intl.DateTimeFormat = RealIntlFormat;
   }
 }
 const zones = [0, 180, -540, 720]; // UTC, Buenos Aires, Tokyo, a far zone
@@ -50,6 +90,29 @@ describe("ics events", () => {
     const instant = new Date("2026-09-25T12:00:00.000Z");
     const hours = zones.map((offset) => underZone(offset, () => instant.getHours()).value);
     expect(new Set(hours).size).toBe(zones.length);
+  });
+  it("the spy detects local-component Date use, unzoned Intl formatting and local setters (so localCalls === 0 is meaningful), and leaks nothing", () => {
+    const RealDate = globalThis.Date;
+    const RealIntl = Intl.DateTimeFormat;
+    const probes: Record<string, () => unknown> = {
+      "new Date(y, m, d)": () => new Date(2026, 0, 1),
+      "Intl.DateTimeFormat().format(new Date())": () => new Intl.DateTimeFormat().format(new Date()),
+      "Intl.DateTimeFormat with another zone": () => new Intl.DateTimeFormat("es", { timeZone: "America/Argentina/Buenos_Aires" }).formatToParts(new Date(0)),
+      "toLocaleString": () => new Date(0).toLocaleString(),
+      "setHours": () => new Date(0).setHours(3),
+      "getDay": () => new Date(0).getDay(),
+    };
+    for (const [name, probe] of Object.entries(probes)) expect(underZone(0, probe).localCalls, name).toBeGreaterThan(0);
+    // Allowed uses stay at zero: explicit UTC formatting, Date.UTC, timestamp / ISO construction and UTC accessors.
+    const allowed = underZone(0, () => [new Intl.DateTimeFormat("es", { timeZone: "UTC" }).format(new Date(0)), new Date(Date.UTC(2026, 0, 1)).getUTCHours(),
+      new Date("2026-01-01T00:00:00Z").getTime(), new Date(5).setUTCHours(1)]);
+    expect(allowed.localCalls).toBe(0);
+    expect(globalThis.Date).toBe(RealDate);
+    expect(Intl.DateTimeFormat).toBe(RealIntl);
+    expect(vi.isMockFunction(Date.prototype.getHours)).toBe(false);
+    expect(vi.isMockFunction(Date.prototype.setHours)).toBe(false);
+    expect(vi.isMockFunction(Intl.DateTimeFormat.prototype.formatToParts)).toBe(false);
+    expect(vi.isMockFunction(Intl.DateTimeFormat.prototype.resolvedOptions)).toBe(false);
   });
   it("emits the same bytes under different simulated process zones and never reads local time", () => {
     const baseline = build();
