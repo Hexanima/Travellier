@@ -49,11 +49,15 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   // Only the entry the grid pushed is undone with a step back; any other (a return from the detail, a reload) is cleaned in place and never leaves the screen.
   // Shared by the user's close and by the forced one below, so both leave the same history.
   const closing = useRef(false);
+  // A second close while the first is pending (history.go is asynchronous: the dialog stays mounted until popstate) is ignored, so it never steps back twice.
+  // The mark is cleared when the entry has no photo anymore and, as a safety net, whenever the location changes (so it can never block a later close).
   const closeViewer = () => {
+    if (closing.current) return;
     closing.current = true;
     if (isViewerEntry(location.state) && canGoBack(location)) navigate(-1);
     else navigate(here, { replace: true, state: withoutPhoto(location.state) });
   };
+  useEffect(() => { closing.current = false; }, [location.key]);
   useEffect(() => {
     if (!hasPhotoKey) { closing.current = false; return; }
     if (closing.current) return; // a close is already underway: do not navigate twice
@@ -83,6 +87,19 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
     gallery.loadMore();
   };
 
+  // Restarting from page 1 closes the viewer for good (same criterion as «Cerrar», so it does not reopen when the photo is on page 1) and, since the button
+  // and the thumbnails disappear, the focus goes to the stable heading of the gallery.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const focusHeading = useRef(false);
+  useEffect(() => {
+    if (focusHeading.current && phase === "initial-loading") { heading.current?.focus(); focusHeading.current = false; }
+  }, [phase]);
+  const restart = () => {
+    if (hasPhotoKey) closeViewer();
+    focusHeading.current = true;
+    gallery.restart();
+  };
+
   const day = useMemo(() => new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric" }), [timeZone]);
   const items = photos.map((item, index) => {
     const author = authorLabel(people, item.uploaderId);
@@ -103,17 +120,16 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   // With the viewer open (aria-modal) the notices live inside it and are not repeated in the page: a single alert is visible at any time.
   const inViewer = viewed !== undefined;
   const notice = failureText ?? (gallery.refreshFailed ? refreshText : undefined);
-  // The same action as outside the viewer: login (401), restart (rejected cursor), nothing (404/403) or retry. Restarting empties the list, which closes the
-  // viewer; once page 1 arrives a photo that is no longer there is closed with the same criterion as «Cerrar» (closeViewer).
+  // The same action as outside the viewer: login (401), restart (rejected cursor), nothing (404/403) or retry. Restarting closes the viewer for good (closeViewer).
   const retryNotice = failure ? (unavailable || failure.kind === "unauthorized" || rejectsCursor(failure) ? undefined : gallery.retry) : gallery.refreshFailed ? gallery.retryRefresh : undefined;
   const noticeAction = failure === undefined || unavailable ? undefined : failure.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
-    : rejectsCursor(failure) ? <Button onClick={gallery.restart}>Volver a cargar desde el inicio</Button> : undefined;
+    : rejectsCursor(failure) ? <Button onClick={restart}>Volver a cargar desde el inicio</Button> : undefined;
   const create = `/trips/${tripId}/memories/new`;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <Link className="trips-back" to={`/trips/${tripId}/memories`}>Volver a recuerdos</Link>
       <header className="itinerary-header">
-        <h1>Fotos</h1>
+        <h1 ref={heading} tabIndex={-1}>Fotos</h1>
         <p>Las fotos del viaje, de la más reciente a la más antigua. Horarios en tu zona local.</p>
       </header>
       {phase === "initial-loading" ? <LoadingState label="Cargando fotos…" /> : null}
@@ -121,7 +137,7 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
         <Feedback variant="error">{failureText}</Feedback>
         {failure.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : unavailable ? null
-          : rejectsCursor(failure) ? <Button onClick={gallery.restart}>Volver a cargar desde el inicio</Button>
+          : rejectsCursor(failure) ? <Button onClick={restart}>Volver a cargar desde el inicio</Button>
           : <Button onClick={gallery.retry}>Reintentar</Button>}
       </div> : null}
       {!failure && gallery.refreshFailed && !inViewer ? <div className="trips-state">

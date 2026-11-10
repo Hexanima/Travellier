@@ -8,9 +8,22 @@ import { GalleryProvider } from "./use-gallery.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
 import type { GalleryPage, GalleryPhoto } from "./trip-gallery-api.js";
 
+// Lets a test defer «navigate(-1)» (as BrowserRouter does: history.go is asynchronous) to reproduce the window between the close and the popstate.
+const gate = vi.hoisted(() => ({ defer: false, back: [] as (() => void)[] }));
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return { ...actual, useNavigate: () => {
+    const navigate = actual.useNavigate();
+    return ((...args: unknown[]) => {
+      if (gate.defer && args[0] === -1) gate.back.push(() => (navigate as (delta: number) => void)(-1));
+      else (navigate as (...rest: unknown[]) => void)(...args);
+    }) as NavigateFunction;
+  } };
+});
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
-afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks(); });
+afterEach(async () => { gate.defer = false; gate.back.length = 0; await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.restoreAllMocks(); });
 const tripId = itineraryId(1);
 const me = itineraryId(600);
 const path = `/trips/${tripId}/memories/photos`;
@@ -167,6 +180,48 @@ describe("TripPhotosScreen", () => {
     await act(async () => go(-1));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(thumb);
+  });
+  describe("double close while the step back is still pending (BrowserRouter: popstate arrives later)", () => {
+    const closeButton = () => Array.from(document.querySelectorAll("button")).find((item) => item.getAttribute("aria-label") === "Cerrar");
+    const escape = () => act(async () => { document.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    const flush = () => act(async () => { gate.back.splice(0).forEach((run) => run()); });
+    it("steps back only once on a double click on «Cerrar» and a later legitimate close still works", async () => {
+      const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)));
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      gate.defer = true;
+      await act(async () => { closeButton()!.click(); closeButton()!.click(); });
+      expect(gate.back).toHaveLength(1);
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(last().pathname).toBe(path);
+      await click(container.querySelector(`[data-photo="${itineraryId(3)}"] button`));
+      await click(closeButton());
+      expect(gate.back).toHaveLength(1);
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(last().pathname).toBe(path);
+    });
+    it("steps back only once on a repeated Escape", async () => {
+      const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)));
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      gate.defer = true;
+      await escape(); await escape();
+      expect(gate.back).toHaveLength(1);
+      await flush();
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(last().pathname).toBe(path);
+    });
+    it("does not stay blocked if the step back changed nothing and the user then opens another photo and closes it", async () => {
+      const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2)], null)));
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      gate.defer = true;
+      await click(closeButton());
+      expect(gate.back).toHaveLength(1);
+      gate.back.length = 0; // history.go had no effect: the viewer is still there
+      await click(Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Anterior"));
+      await click(closeButton());
+      expect(gate.back).toHaveLength(1);
+    });
   });
   it("replaces the entry when moving between photos so back closes in one step", async () => {
     const container = await mount(vi.fn().mockResolvedValue(page([photo(3), photo(2), photo(1)], null)));
@@ -329,9 +384,21 @@ describe("TripPhotosScreen", () => {
       expect(Array.from(container.querySelectorAll(".trips-panel > .trips-state"))).toHaveLength(0);
       expect(document.querySelector('[role="dialog"] [aria-live]')).toBeNull();
       const link = inDialog("Iniciar sesión")!;
+      expect(document.querySelector('[role="dialog"]')!.contains(link)).toBe(true);
       link.focus();
-      await act(async () => { link.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
-      expect(document.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).toBe(link);
+    });
+    it("wraps the focus inside the dialog: Tab from the last focusable goes to the first and Shift+Tab from the first goes to the last", async () => {
+      await openFailing(fail("unauthorized"));
+      const focusables = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"] a[href], [role="dialog"] button:not([disabled])'));
+      const first = focusables[0]!; const lastOne = focusables[focusables.length - 1]!;
+      expect(first).not.toBe(lastOne);
+      const press = (element: HTMLElement, shiftKey: boolean) => act(async () => { element.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true })); });
+      lastOne.focus();
+      await press(lastOne, false);
+      expect(document.activeElement).toBe(first);
+      await press(first, true);
+      expect(document.activeElement).toBe(lastOne);
     });
     it("offers «Volver a cargar desde el inicio» on a rejected cursor with the viewer open and restarts from page 1 without looping", async () => {
       const { list } = await openFailing(fail("validation", [{ field: "cursor" }]), [page([photo(3), photo(2)], null)]);
@@ -345,6 +412,31 @@ describe("TripPhotosScreen", () => {
       expect(thumbs(document)).toEqual([itineraryId(3), itineraryId(2)]);
       await act(async () => { await Promise.resolve(); });
       expect(list).toHaveBeenCalledTimes(3);
+    });
+    it("restarting with the viewer open closes it for good (as «Cerrar» does), does not reopen it although the photo is on page 1 and keeps the focus off the body", async () => {
+      const { list } = await openFailing(fail("validation", [{ field: "cursor" }]), [page([photo(3), photo(2)], null)]);
+      expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
+      await click(inDialog("Volver a cargar desde el inicio"));
+      await act(async () => { await Promise.resolve(); });
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(last().pathname).toBe(path);
+      expect(last().state).toBeNull();
+      expect(thumbs(document)).toEqual([itineraryId(3), itineraryId(2)]);
+      expect(list).toHaveBeenCalledTimes(3);
+      expect(list.mock.calls.filter((call) => call[1] && !("cursor" in (call[1] as object)))).toHaveLength(2); // first load and the single restart
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement?.closest("main")).not.toBeNull();
+    });
+    it("restarting with a viewer that has no viewer-entry mark closes it replacing the entry, never leaving the screen", async () => {
+      const restore = { anchor: `data-photo=${itineraryId(2)}`, scrollY: 0, panel: "photos" };
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockResolvedValueOnce(fail("validation", [{ field: "cursor" }])).mockResolvedValueOnce(page([photo(3), photo(2)], null));
+      await mount(list, [{ pathname: `/trips/${tripId}/memories/${itineraryId(502)}` }]);
+      await act(async () => go(path, { state: { photo: itineraryId(2), restore } }));
+      await click(next());
+      await click(inDialog("Volver a cargar desde el inicio"));
+      await act(async () => { await Promise.resolve(); });
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(last()).toMatchObject({ pathname: path, state: null });
     });
     it("keeps «Reintentar» inside the dialog for network and server failures and offers no action for a 404", async () => {
       for (const kind of ["network", "server"]) {
