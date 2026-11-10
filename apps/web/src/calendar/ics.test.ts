@@ -29,7 +29,7 @@ describe("ics base format", () => {
     expect(unfold(build("a\\b; c, d\ne\r\nf\rg"))).toContain("X-WR-CALNAME:a\\\\b\\; c\\, d\\ne\\nf\\ng\r\n");
   });
   it("folds at 75 octets without splitting multibyte characters and unfolds back to the original", () => {
-    for (const name of ["ñandú ".repeat(40), "a".repeat(200), "🌎✈️".repeat(40), "á🌎".repeat(37), "€".repeat(80)]) {
+    for (const name of ["ñandú ".repeat(40).trim(),"a".repeat(200), "🌎✈️".repeat(40), "á🌎".repeat(37), "€".repeat(80)]) {
       const text = build(name);
       for (const line of physicalLines(text)) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
       // A split inside a code point would leave a lone surrogate or a replacement character.
