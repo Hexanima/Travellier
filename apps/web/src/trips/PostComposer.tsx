@@ -7,7 +7,7 @@ import { PostPhotosSection } from "./PostPhotosSection.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
-import { draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { activityParam, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -40,6 +40,8 @@ const transportParam = (search: string) => queryId(search, "transportId");
 const parentParam = (search: string) => queryId(search, "parentPostId");
 /** Presentation only: the excerpt of the parent sent by its detail (the id is what travels). */
 const parentLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { parentLabel?: unknown }).parentLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
+/** Presentation only: the title of the activity sent by its dialog (the id is what travels). */
+const activityLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { activityLabel?: unknown }).activityLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
 
 export function PostComposer({ posts, itinerary, photos, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
@@ -126,8 +128,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const preloaded = postId ? null : transportParam(location.search);
   // A continuation opened from a detail preloads its parent (creation only); the parent wins over a transport and is not a change either.
   const preloadedParent = postId ? null : parentParam(location.search);
+  // A memory shared from an activity preloads it (creation only); precedence parent > activity > transport, so no relation is mixed (a child keeps none other).
+  const preloadedActivity = postId ? undefined : activityParam(location.search);
   const base: PostDraft = preloadedParent ? setLink(saved, { kind: "post", id: preloadedParent, label: parentLabelOf(location.state) })
-    : preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
+    : preloadedActivity ? setLink(saved, { kind: "activity", id: preloadedActivity, label: activityLabelOf(location.state) })
+    : preloaded &&saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
   const dirty = isDraftDirty(draft, base);
@@ -265,11 +270,16 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const removeTransport = () => { handle.setDraft(setTransport(draft, null)); setNotice(""); };
   // Leaving a continuation goes back to the detail it came from when that origin is valid for this Trip; otherwise to the diary.
   // From the detail with app history, `-1` returns to that exact entry (its state and root origin intact); otherwise the entry is replaced so Back never reopens the composer.
+  // The same applies to a memory shared from the activity dialog: `-1` returns to its entry (URL with `?activity&tab`). `history.go` is asynchronous, so a second
+  // Cancelar/Descartar while the first is pending is ignored (the mark is cleared if the location changes without leaving).
+  const leaving = useRef(false);
+  useEffect(() => { leaving.current = false; }, [location.key]);
   const leave = () => {
+    if (leaving.current) return;
     handle.clear();
     const origin = readOrigin(location.state, tripId ?? "");
     if (postId && origin.label !== "recuerdo") { navigate(listing); return; }
-    if (origin.label === "recuerdo" && canGoBack(location)) navigate(-1);
+    if ((origin.label === "recuerdo" || origin.label === "actividad") && canGoBack(location)) { leaving.current = true; navigate(-1); }
     else navigate(originHref(origin), { replace: true, state: withNoBack() });
   };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };

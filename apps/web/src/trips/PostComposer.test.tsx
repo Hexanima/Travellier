@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
@@ -10,15 +10,29 @@ import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
 import type { PostResponse } from "./trip-post-api.js";
 
+// Lets a test defer «navigate(-1)» (as BrowserRouter does: history.go is asynchronous) to reproduce the window before the popstate arrives.
+const gate = vi.hoisted(() => ({ defer: false, back: [] as (() => void)[] }));
+vi.mock("react-router-dom", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router-dom")>();
+  return { ...actual, useNavigate: () => {
+    const navigate = actual.useNavigate();
+    return ((...args: unknown[]) => {
+      if (gate.defer && args[0] === -1) gate.back.push(() => (navigate as (delta: number) => void)(-1));
+      else (navigate as (...rest: unknown[]) => void)(...args);
+    }) as NavigateFunction;
+  } };
+});
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
-afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
+afterEach(async () => { gate.defer = false; gate.back.length = 0; await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
 const tripId = itineraryId(1), otherTripId = itineraryId(2), postId = itineraryId(30), otherPostId = itineraryId(33), activityId = itineraryId(40), transportId = itineraryId(50);
 const itineraryResult = { ok: true, value: { activities: [{ id: activityId, title: "Paseo por el centro", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: null }] } };
 const saved = (extra: Partial<PostResponse> = {}): PostResponse => ({ id: postId, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-01-02T15:30:00.000Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
 function Detail() { const location = useLocation(); return <p data-testid="detail">DETALLE {location.pathname} {JSON.stringify(location.state)}</p>; }
+function ActivityOrigin() { const location = useLocation(); return <p data-testid="activity-origin">ITINERARIO {location.pathname}{location.search} {JSON.stringify(location.state)}</p>; }
 function Back() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(-1)}>atras</button>; }
 function Forward() { const navigate = useNavigate(); return <button type="button" onClick={() => navigate(1)}>adelante</button>; }
 type Entry = string | { pathname: string; search?: string; state?: unknown };
@@ -46,6 +60,7 @@ async function render(path: Entry | Entry[] = `/trips/${tripId}/memories/new`, o
       <Route path="new/activity" element={subform} />
       <Route path=":postId/edit/activity" element={subform} />
     </Route>
+    <Route path="/trips/:tripId/itinerary" element={<ActivityOrigin />} />
     <Route path="/login" element={<p>LOGIN</p>} />
   </Routes></MemoryRouter>));
   return { container, create, update, get, list, itineraryGet };
@@ -968,4 +983,188 @@ describe("PostComposer (continuation from a memory detail)", () => {
       expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="detail"]')).toBeNull();
     });
+});
+
+describe("PostComposer (share a memory of an activity)", () => {
+  const itineraryPath = `/trips/${tripId}/itinerary`;
+  const itinerarySearch = `?activity=${activityId}&tab=photos`;
+  const origin = { path: itineraryPath, search: itinerarySearch, label: "actividad" };
+  const entry = (extra: { search?: string; state?: unknown } = {}) => ({ pathname: newPath, search: extra.search ?? `?activityId=${activityId}`,
+    state: "state" in extra ? extra.state : { origin, activityLabel: "Paseo por el centro" } });
+  const itineraryEntry = { pathname: itineraryPath, search: itinerarySearch };
+  const origins = (container: HTMLElement) => container.querySelector('[data-testid="activity-origin"]')?.textContent ?? "";
+  const forward = async () => click(button(document.body, "adelante"));
+  const flushBack = () => act(async () => { gate.back.splice(0).forEach((run) => run()); });
+
+  it("preloads the activity as the link with the label sent by the activity dialog", async () => {
+    const { container } = await render(entry());
+    expect(summary(container)).toBe("Actividad: Paseo por el centro");
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+  });
+  it("shows a neutral label when no label was sent", async () => {
+    const { container } = await render(entry({ state: { origin } }));
+    expect(summary(container)).toBe("Actividad: actividad seleccionada");
+  });
+  it("does not count the preloaded activity as a change: cancelling asks nothing", async () => {
+    const { container } = await render([itineraryEntry, entry()]);
+    await click(button(container, "Cancelar"));
+    expect(dialog()).toBeNull();
+    expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+  });
+  it("publishes with the activityId only and still goes to the diary with the notice", async () => {
+    const { container, create } = await render([itineraryEntry, entry()]);
+    await field(container, "description", "Qué lindo"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Qué lindo", activityId });
+    expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain('"notice":"created"');
+    expect(container.querySelector('[data-testid="activity-origin"]')).toBeNull();
+  });
+  it("ignores ?activityId= when editing", async () => {
+    const { container, update } = await render({ pathname: editPath, search: `?activityId=${activityId}` });
+    expect(summary(container)).toBe("Sin vínculo");
+    await field(container, "description", "Editado"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Editado" });
+  });
+  it("discards an invalid activityId", async () => {
+    const { container, create } = await render(entry({ search: "?activityId=nope" }));
+    expect(summary(container)).toBe("Sin vínculo");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("the parent wins over the activity", async () => {
+    const { container, create } = await render(entry({ search: `?parentPostId=${otherPostId}&activityId=${activityId}`, state: { origin, parentLabel: "Otro recuerdo" } }));
+    expect(summary(container)).toBe("Recuerdo: Otro recuerdo");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", parentPostId: otherPostId });
+  });
+  it("the activity wins over a transport: no transport is shown nor sent", async () => {
+    const { container, create } = await render(entry({ search: `?activityId=${activityId}&transportId=${transportId}` }));
+    expect(container.textContent).not.toContain("Vinculado a un transporte");
+    expect(summary(container)).toBe("Actividad: Paseo por el centro");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", activityId });
+  });
+  it("a 422 on the activityId (it no longer exists) shows the existing link message once and keeps the draft", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "activityId", code: "not_found", message: "x" }] } });
+    const { container } = await render(entry(), { create });
+    await field(container, "description", "Hola"); await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["No pudimos aplicar el vínculo. Elegí otro."]);
+    expect(value(container, "description")).toBe("Hola");
+  });
+  it("«Vincular a» opens with Actividad preselected and «Crear actividad espontánea» enabled", async () => {
+    const { container } = await render(entry());
+    await click(linkButton(container));
+    expect(radio(container, "Actividad")!.checked).toBe(true);
+    expect(radio(container, "Sin vínculo")!.checked).toBe(false);
+    expect(button(container, "Crear actividad espontánea")).toBeDefined();
+    expect(button(container, "Crear actividad espontánea")!.disabled).toBe(false);
+  });
+  it("a spontaneous activity created from there is sent as newActivity without the activityId", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: withActivity() });
+    const { container } = await render(entry(), { create });
+    await field(container, "description", "Hola");
+    await addActivity(container);
+    expect(summary(container)).toBe("Actividad nueva: Cena · 25/09/2026 12:00 · 1 h 30 min");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", newActivity: newActivityBody });
+  });
+  it("Quitar actividad nueva after that leaves «Sin vínculo», not the preloaded activity", async () => {
+    const { container, create } = await render(entry());
+    await field(container, "description", "Hola");
+    await addActivity(container);
+    await click(button(container, "Quitar actividad nueva"));
+    expect(summary(container)).toBe("Sin vínculo");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
+  });
+  it("keeps the preloaded activity after going to the selector and cancelling", async () => {
+    const { container, create } = await render(entry());
+    await click(linkButton(container)); await click(button(container, "Cancelar"));
+    expect(summary(container)).toBe("Actividad: Paseo por el centro");
+    await field(container, "description", "Hola"); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola", activityId });
+  });
+
+  describe("leaving", () => {
+    it("Cancelar with history steps back exactly one entry (to the dialog URL), not a replace", async () => {
+      const { container } = await render([itineraryEntry, entry()]);
+      await click(button(container, "Cancelar"));
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+      await forward();
+      expect(container.querySelector('[name="description"]')).not.toBeNull(); // the composer entry was still ahead: it was a step back
+    });
+    it("Cancelar without history replaces the entry with the dialog URL and marks that nothing is behind", async () => {
+      const { container } = await render([entry()]);
+      await click(button(container, "Cancelar"));
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+      expect(origins(container)).toContain('"noBack":true');
+      await forward();
+      expect(container.querySelector('[name="description"]')).toBeNull(); // nothing was ahead: it was a replace
+    });
+    it("Descartar after confirming goes back with -1 when there is history", async () => {
+      const { container } = await render([itineraryEntry, entry()]);
+      await field(container, "description", "Borrador"); await click(button(container, "Cancelar"));
+      await click(button(dialog()!, "Descartar"));
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+      await forward();
+      expect(container.querySelector('[name="description"]')).not.toBeNull();
+    });
+    it("Descartar without history replaces with the dialog URL", async () => {
+      const { container } = await render([entry()]);
+      await field(container, "description", "Borrador"); await click(button(container, "Cancelar"));
+      await click(button(dialog()!, "Descartar"));
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+      expect(origins(container)).toContain('"noBack":true');
+    });
+    it("a double Cancelar while the step back is still pending steps back only once", async () => {
+      const { container } = await render([itineraryEntry, entry()]);
+      gate.defer = true;
+      await act(async () => { const cancel = button(container, "Cancelar")!; cancel.click(); cancel.click(); });
+      expect(gate.back).toHaveLength(1);
+      await flushBack();
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+    });
+    it("a double Descartar while the step back is still pending steps back only once", async () => {
+      const { container } = await render([itineraryEntry, entry()]);
+      await field(container, "description", "Borrador"); await click(button(container, "Cancelar"));
+      gate.defer = true;
+      await act(async () => { const discard = button(dialog()!, "Descartar")!; discard.click(); discard.click(); });
+      expect(gate.back).toHaveLength(1);
+      await flushBack();
+      expect(origins(container)).toContain(`${itineraryPath}${itinerarySearch}`);
+    });
+    it("without an origin it goes to the diary", async () => {
+      const { container } = await render(entry({ state: undefined }));
+      await click(button(container, "Cancelar"));
+      expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="activity-origin"]')).toBeNull();
+    });
+    it("an origin pointing to another trip goes to the diary", async () => {
+      const { container } = await render(entry({ state: { origin: { path: `/trips/${otherTripId}/itinerary`, search: itinerarySearch, label: "actividad" } } }));
+      await click(button(container, "Cancelar"));
+      expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+    });
+  });
+
+  describe("drafts", () => {
+    const genericEntry = { pathname: newPath, search: "" };
+    it("keeps the draft of the shared activity apart from the generic one", async () => {
+      const { container } = await render([genericEntry, entry()]);
+      await field(container, "description", "texto de la actividad");
+      await click(button(document.body, "atras"));
+      expect(value(container, "description")).toBe("");
+      expect(summary(container)).toBe("Sin vínculo");
+      await field(container, "description", "texto genérico");
+      await forward();
+      expect(value(container, "description")).toBe("texto de la actividad");
+      expect(summary(container)).toBe("Actividad: Paseo por el centro");
+    });
+    it("gives each activity its own draft", async () => {
+      const other = itineraryId(41);
+      const { container } = await render([entry({ search: `?activityId=${other}`, state: { origin, activityLabel: "Otra" } }), entry()]);
+      await field(container, "description", "texto de A");
+      await click(button(document.body, "atras"));
+      expect(value(container, "description")).toBe("");
+      expect(summary(container)).toBe("Actividad: Otra");
+    });
+  });
 });
