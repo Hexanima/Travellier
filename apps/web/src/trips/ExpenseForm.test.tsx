@@ -17,7 +17,7 @@ const tripId = itineraryId(1), withExpenseId = itineraryId(10), withoutExpenseId
 const newPath = `/trips/${tripId}/memories/new`, editPath = (id: string) => `/trips/${tripId}/memories/${id}/edit`;
 const itineraryOf = (change: (value: ReturnType<typeof itineraryFixture>) => void = () => undefined) => { const value = itineraryFixture(); change(value); return { ok: true, value }; };
 const seeded = (expense: ExpenseDraft | null = null): PostDraft =>
-  ({ values: { description: "Texto tipeado", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense } });
+  ({ values: { description: "Texto tipeado", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense, split: { payments: null, shares: null } } });
 let seed: PostDraft = seeded();
 function Probe() {
   const { postId } = useParams(); const handle = usePostDraft(postId ? `edit:${postId}` : "new");

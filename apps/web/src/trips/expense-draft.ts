@@ -58,7 +58,7 @@ export const expenseDraftFromSaved = (saved: SavedExpense): ExpenseDraft => {
 
 /**
  * Merge-patch of the expense: only the keys that change. Without a saved expense it is the whole creation (breakdown only when written).
- * Payments and shares never travel, so the server keeps them. The currency is always sent when the saved one is missing (legacy).
+ * Payments and shares are not part of this diff (see `splitInput`), so the server keeps them. The currency is always sent when the saved one is missing (legacy).
  * `{}` means there is nothing to send. An invalid draft sends nothing (the subform only commits valid ones).
  */
 export const diffExpense = (draft: ExpenseDraft, saved?: SavedExpense): ExpenseInput => {

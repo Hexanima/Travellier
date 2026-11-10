@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { addPhotos, markPhoto, movePhoto, removePhoto, type PhotoDraftItem } from "./post-draft.js";
 import { MAX_PHOTOS } from "./photo-limits.js";
-import { draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
+import type { SplitDraft } from "./expense-split.js";
+import type { SavedExpenseView } from "./trip-post-api.js";
+import { clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setSplit, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
 const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
-  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity, photos: [], expense: null } });
+  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity, photos: [], expense: null, split: { payments: null, shares: null } } });
 const post = (id = P): PostLink => ({ kind: "post", id });
 const activity = (id = A): PostLink => ({ kind: "activity", id });
 const saved = (extra: Partial<{ parentPostId: string | null; activityId: string | null; transportId: string | null }> = {}) =>
@@ -80,7 +82,7 @@ describe("post draft", () => {
   it("normalizes legacy data with parent and transport: the parent wins, the draft has no transport and the PATCH clears it", () => {
     const legacy = saved({ parentPostId: P, transportId: T });
     const fromSaved = draftFromPost(legacy);
-    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null });
+    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
     expect(prepareUpdate(fromSaved, legacy)).toEqual({ transportId: null });
   });
   it("normalizes legacy data with parent, activity and transport: the PATCH clears both", () => {
@@ -88,23 +90,23 @@ describe("post draft", () => {
     expect(prepareUpdate(draftFromPost(legacy), legacy)).toEqual({ activityId: null, transportId: null });
   });
   it("builds the link and transport from the saved post", () => {
-    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null });
-    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null });
-    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null });
-    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null });
+    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
   });
   it("setLink: a post drops the transport and the activity, an activity keeps the transport, null removes the link", () => {
-    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null });
-    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null });
-    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null });
-    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null });
+    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
   });
   it("setLink and setTransport keep the values and do not mutate the input", () => {
     const original = draft("x", "y", activity(), T);
     const next = setLink(original, post());
     expect(next.values).toEqual({ description: "x", mapsUrl: "y" });
-    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null });
-    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null });
+    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
     expect(setTransport(draft("x"), T).extras.transportId).toBe(T);
   });
   it("is dirty only when it differs from the base", () => {
@@ -136,17 +138,17 @@ describe("post draft with a new activity", () => {
     const next = setNewActivity(original, N);
     expect(next).toEqual(draft("x", "y", null, T, N));
     expect(original.extras.link).toEqual({ kind: "activity", id: A });
-    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N, photos: [], expense: null });
+    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null } });
     expect(setNewActivity(next, null).extras.newActivity).toBeNull();
   });
   it("choosing any link, or no link, discards the new activity and keeps the transport (except under a post)", () => {
     const withNew = draft("x", "", null, T, N);
-    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null });
-    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null });
-    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null });
+    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
   });
   it("setTransport keeps the new activity", () => {
-    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N, photos: [], expense: null });
+    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null } });
   });
   it("is dirty when the new activity appears, disappears or changes in any field", () => {
     expect(isDraftDirty(draft("Hola", "", null, null, N), draft("Hola"))).toBe(true);
@@ -318,5 +320,60 @@ describe("post draft expense", () => {
     const activityDraft: NewActivityDraft = { title: "Cena", date: "2026-09-25", time: "09:00", durationHours: "", durationMinutes: "" };
     const input = prepareCreate(withExpense(expense, draft("Hola", "", null, null, activityDraft)), resolved);
     expect(input).toEqual({ description: "Hola", newActivity: { title: "Cena", scheduledAt: resolved.scheduledAt }, expense: { totalAmount: 25.5, currency: "ARS" } });
+  });
+});
+
+describe("post draft payments and shares (T84)", () => {
+  const ana = "0000000000000000000000d1", beto = "0000000000000000000000d2";
+  const expense = { amount: "100", currency: "ARS" as const, breakdown: "" };
+  const split = (): SplitDraft => ({ payments: [{ key: "n1", userId: ana, unit: "amount", value: "40" }], shares: [{ key: "n2", userId: beto, unit: "remainder", value: "" }] });
+  const view = (extra: Partial<SavedExpenseView> = {}): SavedExpenseView => ({ postId: P, totalAmount: 100, currency: "ARS", breakdown: null, payments: [], shares: [],
+    completeness: { status: "incomplete", reasons: [] }, formerMemberIds: [], ...extra });
+  const stored = { totalAmount: 100, currency: "ARS" as const, breakdown: null };
+  it("starts untouched and setSplit changes only the split", () => {
+    expect(emptyDraft().extras.split).toEqual({ payments: null, shares: null });
+    expect(draftFromPost({ description: "Hola", mapsUrl: null }).extras.split).toEqual({ payments: null, shares: null });
+    const next = setSplit(setExpense(draft("Hola"), expense), split());
+    expect(next.extras.expense).toEqual(expense);
+    expect(next.extras.split).toEqual(split());
+  });
+  it("setExpense keeps the split, clearExpense removes both", () => {
+    const next = setSplit(setExpense(draft("Hola"), expense), split());
+    expect(setExpense(next, null).extras.split).toEqual(split());
+    const cleared = clearExpense(next);
+    expect(cleared.extras.expense).toBeNull();
+    expect(cleared.extras.split).toEqual({ payments: null, shares: null });
+  });
+  it("is dirty when the split differs from the base one", () => {
+    expect(isDraftDirty(setSplit(draft("Hola"), split()), draft("Hola"))).toBe(true);
+    expect(isDraftDirty(setSplit(draft("Hola"), { payments: null, shares: null }), draft("Hola"))).toBe(false);
+    expect(isDraftDirty(setSplit(draft("Hola"), split()), setSplit(draft("Hola"), split()))).toBe(false);
+  });
+  it("on create sends the lists together with the whole expense", () => {
+    expect(prepareCreate(setSplit(setExpense(draft("Hola"), expense), split()))).toEqual({ description: "Hola",
+      expense: { totalAmount: 100, currency: "ARS", payments: [{ userId: ana, unit: "amount", value: 40 }], shares: [{ userId: beto, unit: "remainder", value: null }] } });
+  });
+  it("on create never sends a split without an effective expense", () => {
+    expect(prepareCreate(setSplit(draft("Hola"), split()))).toEqual({ description: "Hola" });
+    expect(prepareCreate(setSplit(setExpense(draft("Hola"), { ...expense, amount: "" }), split()))).toEqual({ description: "Hola" });
+  });
+  it("on update sends only the lists that changed against the stored ones, even with an untouched expense", () => {
+    const original = saved({});
+    const storedView = view({ payments: [{ userId: ana, unit: "amount", value: 40 }], shares: [{ userId: beto, unit: "remainder", value: null }] });
+    const edited: SplitDraft = { payments: [{ key: "n1", userId: ana, unit: "amount", value: "45" }], shares: null };
+    expect(prepareUpdate(setSplit(draft("Hola"), edited), original, undefined, stored, storedView)).toEqual({ expense: { payments: [{ userId: ana, unit: "amount", value: 45 }] } });
+    expect(prepareUpdate(setSplit(draft("Hola"), split()), original, undefined, stored, storedView)).toEqual({});
+    expect(prepareUpdate(draft("Hola"), original, undefined, stored, storedView)).toEqual({});
+  });
+  it("on update combines the changed expense keys with the lists in one expense object", () => {
+    const original = saved({});
+    const input = prepareUpdate(setSplit(setExpense(draft("Hola"), { ...expense, amount: "200" }), { payments: [], shares: null }), original, undefined, stored,
+      view({ payments: [{ userId: ana, unit: "amount", value: 40 }] }));
+    expect(input).toEqual({ expense: { totalAmount: 200, payments: [] } });
+  });
+  it("sends the currency of a legacy expense together with the lists", () => {
+    const legacy = { totalAmount: 100, currency: null, breakdown: null };
+    const input = prepareUpdate(setSplit(setExpense(draft("Hola"), expense), split()), saved({}), undefined, legacy, view({ currency: null }));
+    expect(input.expense).toMatchObject({ currency: "ARS", payments: [{ userId: ana, unit: "amount", value: 40 }] });
   });
 });
