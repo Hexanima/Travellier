@@ -49,6 +49,7 @@ import {
   likeTripComment,
   unlikeTripComment,
   getTripPostLikes,
+  listUserNotifications,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -65,6 +66,7 @@ import { createMongoTripParticipationRepository } from "../adapters/mongodb/trip
 import { createMongoTripPostRepository } from "../adapters/mongodb/trip-post-repository.js";
 import { createMongoTripCommentRepository } from "../adapters/mongodb/trip-comment-repository.js";
 import { createMongoTripLikeRepository } from "../adapters/mongodb/trip-like-repository.js";
+import { createMongoUserNotificationQueryRepository } from "../adapters/mongodb/user-notification-repository.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -100,6 +102,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
   const missingStorage = () => Promise.resolve(err(new UnknownError("Object storage is not configured.")));
   const photoDependencies = storage ? { posts: postDependencies.posts, storage } : undefined;
   const commentDependencies = { comments: createMongoTripCommentRepository(database), createId, now: () => new Date() };
+  const notificationDependencies = { notifications: createMongoUserNotificationQueryRepository(database) };
   const likeDependencies = { likes: createMongoTripLikeRepository(database), createId, now: () => new Date() };
   return {
     ...createTripInvitationApi(database),
@@ -120,6 +123,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
     createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),
     updateComment: (payload) => updateTripPostComment.execute(commentDependencies, payload),
+    listNotifications: (payload) => listUserNotifications.execute(notificationDependencies, payload),
     likePost: (payload) => likeTripPost.execute(likeDependencies, payload),
     unlikePost: (payload) => unlikeTripPost.execute(likeDependencies, payload),
     likeComment: (payload) => likeTripComment.execute(likeDependencies, payload),
@@ -139,10 +143,10 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     getBalance: (payload) => getTripBalance.execute({ balance }, payload),
     list: (payload) => listUserTrips.execute({ trips }, payload),
     listPublic: (payload) => listPublicTrips.execute({ trips }, payload),
-    joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers }, payload),
+    joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers, now: () => new Date() }, payload),
     updateConfiguration: (payload) => updateTripConfiguration.execute({ trips }, payload),
     listMembers: (payload) => listTripMembers.execute({ members }, payload),
-    expelMember: (payload) => expelTripParticipant.execute({ members }, payload),
+    expelMember: (payload) => expelTripParticipant.execute({ members, now: () => new Date() }, payload),
     createDestination: (payload) => createJourneyDestination.execute({ ...journeyDependencies, createId, now: () => new Date() }, payload),
     listDestinations: (payload) => listJourneyDestinations.execute({ ...journeyDependencies, deletion }, payload),
     updateDestination: (payload) => updateJourneyDestination.execute(journeyDependencies, payload),

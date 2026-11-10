@@ -20,3 +20,4 @@ export * from "./storage-deletion-job-port.js";
 export * from "./photo-link-port.js";
 export * from "./trip-balance-query-port.js";
 export * from "./push-device-port.js";
+export * from "./trip-notification-port.js";

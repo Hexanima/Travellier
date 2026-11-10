@@ -7,6 +7,7 @@ import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
+import { emitToMembers } from "./notification-emission.js";
 
 export interface TripCommentPayload { tripId: ObjectId; postId: ObjectId; authenticatedUserId: ObjectId }
 export interface CreateTripPostCommentPayload extends TripCommentPayload { text: unknown }
@@ -47,7 +48,12 @@ export const createTripPostComment: UseCase<CreationDependencies, CreateTripPost
       authorId: payload.authenticatedUserId, text: payload.text, createdAt: now() }, { post: post.value });
     if (!comment.ok) return comment;
     const inserted = await scope.insert(comment.value);
-    return inserted.ok ? ok({ ...comment.value, authorIsFormerMember: false }) : inserted;
+    if (!inserted.ok) return inserted;
+    // Last write, same transaction: the event exists only if the comment does.
+    const emitted = await emitToMembers(scope, [{ type: "comment.created", tripId: payload.tripId, operationRef: comment.value.id,
+      actorId: payload.authenticatedUserId, exclude: [payload.authenticatedUserId], createdAt: comment.value.createdAt,
+      payload: { commentId: comment.value.id, postId: payload.postId, actorId: payload.authenticatedUserId } }]);
+    return emitted.ok ? ok({ ...comment.value, authorIsFormerMember: false }) : emitted;
   }),
 };
 

@@ -5,6 +5,7 @@ import type { TripRole } from "../entities/trip-member.js";
 import type { Trip } from "../entities/trip.js";
 import type { AsyncResult } from "../types/result.js";
 import type { ObjectId } from "../value-objects/object-id.js";
+import type { NotificationScope } from "./trip-notification-port.js";
 
 /** Every operation uses the same Trip and persistence snapshot. */
 export interface TripActivityReadScope {
@@ -15,7 +16,8 @@ export interface TripActivityReadScope {
   find: (activityId: ObjectId) => AsyncResult<Activity | undefined>;
 }
 
-export interface TripActivityScope extends TripActivityReadScope {
+/** `appendNotifications` is the last write of a create or edit that saved something (T91). */
+export interface TripActivityScope extends TripActivityReadScope, NotificationScope {
   /** Every participation of this user in the Trip. */
   listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
   /** `going` participations of the activity whose user is a current Trip member (former members keep theirs as a record). */

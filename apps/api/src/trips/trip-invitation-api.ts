@@ -8,7 +8,7 @@ import { createMongoTripInvitationRepositories } from "../adapters/mongodb/trip-
 export const createTripInvitationApi = (database: Db): TripInvitationApi => {
   const repositories = createMongoTripInvitationRepositories(database);
   return {
-    joinByCode: (payload) => joinTripByCode.execute(repositories, payload),
+    joinByCode: (payload) => joinTripByCode.execute({ ...repositories, now: () => new Date() }, payload),
     resolveInvitation: (payload) => resolveTripInvitation.execute(repositories, payload),
   };
 };

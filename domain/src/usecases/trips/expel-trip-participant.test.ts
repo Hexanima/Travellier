@@ -32,6 +32,11 @@ const participant: TripMember = {
   joinedAt,
 };
 
+const now = () => new Date("2026-10-04T12:00:00.789Z");
+/** The only notice of an expulsion: for the expelled user alone, with no actor and no data of the Trip. */
+const expulsionNotice = [{ eventKey: `member.expelled:${participant.id}:${participantUserId}`, type: "member.expelled", tripId, userId: participantUserId,
+  actorId: null, operationKey: `member.expelled:${participant.id}`, payload: { tripId }, createdAt: now() }];
+
 describe("expelTripParticipant", () => {
   it("allows an admin to expel a participant of the same trip", async () => {
     const memberships = new Map<ObjectId, TripMember>([
@@ -43,13 +48,13 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
     expect(findByTripAndUser).toHaveBeenNthCalledWith(1, tripId, adminUserId);
     expect(findByTripAndUser).toHaveBeenNthCalledWith(2, tripId, participantUserId);
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
     expect(result).toEqual({ ok: true, value: undefined });
   });
 
@@ -64,12 +69,12 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId, ...overrides },
     );
 
     expect(result).toEqual({ ok: true, value: undefined });
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
   });
 
   it("rejects a participant without reading or removing the target", async () => {
@@ -77,7 +82,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: participantUserId, targetUserId: adminUserId },
     );
 
@@ -91,7 +96,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -105,7 +110,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -118,7 +123,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -132,7 +137,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -147,7 +152,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -161,7 +166,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -175,7 +180,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -189,7 +194,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -206,7 +211,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(true));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
@@ -221,12 +226,23 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => err(databaseError));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 
     expect(result).toEqual(err(databaseError));
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId);
+    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
+  });
+
+  it("hands the persistence a single notice for the expelled user only, built from the membership and the operation time", async () => {
+    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) => ok(userId === adminUserId ? admin : participant));
+    const removeParticipant = vi.fn(async () => ok(true));
+    await expelTripParticipant.execute({ members: { findByTripAndUser, removeParticipant }, now }, { tripId, actorUserId: adminUserId, targetUserId: participantUserId });
+    const [, , , notices] = removeParticipant.mock.calls[0] as unknown as [unknown, unknown, unknown, typeof expulsionNotice];
+    expect(notices).toEqual(expulsionNotice);
+    expect(notices).toHaveLength(1);
+    expect(notices.some((notice) => notice.userId === adminUserId)).toBe(false);
+    expect(JSON.stringify(notices)).not.toContain(adminUserId);
   });
 
   it("reports a participant removed concurrently as missing", async () => {
@@ -235,7 +251,7 @@ describe("expelTripParticipant", () => {
     const removeParticipant = vi.fn(async () => ok(false));
 
     const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant } },
+      { members: { findByTripAndUser, removeParticipant }, now },
       { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
     );
 

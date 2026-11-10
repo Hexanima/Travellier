@@ -63,7 +63,7 @@ export const createMongoTripDeletionRepository = (database: Db): TripDeletionPor
                 attempts: 0, resolvedKeys: [], rejectedKeys: [], nextAttemptAt: createdAt }, options);
             }
             for (const name of ["tripMembers", "destinations", "transports", "itineraryDays", "activities",
-              "activityParticipations", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes"]) {
+              "activityParticipations", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes", "outboxEvents"]) {
               await database.collection(name).deleteMany({ tripId: mongoTripId }, options);
             }
             await database.collection("trips").deleteOne({ _id: mongoTripId }, options);

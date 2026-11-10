@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, TripActivityPort, TripActivityScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, TripActivityPort, TripActivityScope, TripNotificationDraft, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -29,6 +29,8 @@ describe("Trip activity use cases", () => {
       saveParticipation: async (p) => { participations.push(p); return domain.ok(p); },
       listGoingParticipants: async () => domain.ok([]),
       listGoingParticipationsByUsers: async () => domain.ok([]),
+      listMemberIds: async () => domain.ok([actor, other]),
+      appendNotifications: async () => domain.ok(undefined),
       insert: async (activity) => { records.push(activity); return domain.ok(undefined); },
       replace: async (activity) => { records = records.map((r) => r.id === activity.id ? activity : r); return domain.ok(undefined); },
       remove: async (activityId) => { records = records.filter((r) => r.id !== activityId); return domain.ok(undefined); },
@@ -201,6 +203,7 @@ describe("createTripActivity author participation (T52)", () => {
   const first = id(30), second = id(31), mine = new Date("2026-09-25T12:00:00.456Z");
   const wide = { ...day, endsAt: new Date("2026-09-25T20:00:00Z") };
   let recordsLocal: Activity[], parts: ActivityParticipation[], log: string[], failOn: string | undefined, ids: number;
+  let notificationsLocal: TripNotificationDraft[];
   const act = (n: ObjectId, at: string, durationMinutes: number | null): Activity => ({ id: n, tripId, dayId, title: "Plan", description: null,
     scheduledAt: new Date(at), durationMinutes, mapsUrl: null, createdBy: other, createdAt });
   const part = (activityId: ObjectId, userId: ObjectId, status: ActivityParticipation["status"]): ActivityParticipation =>
@@ -218,6 +221,11 @@ describe("createTripActivity author participation (T52)", () => {
         return domain.ok(p);
       },
       listGoingParticipants: async () => domain.ok([]), listGoingParticipationsByUsers: async () => domain.ok([]),
+      listMemberIds: async () => domain.ok([actor, other, id(77)]),
+      appendNotifications: async (drafts) => {
+        if (failOn === "append") return domain.err(new domain.UnknownError("append"));
+        notificationsLocal.push(...drafts); return domain.ok(undefined);
+      },
       insert: async (a) => {
         if (failOn === "insert") return domain.err(new domain.UnknownError("insert"));
         log.push(`insert:${a.id}`); recordsLocal.push(a); return domain.ok(undefined);
@@ -225,9 +233,9 @@ describe("createTripActivity author participation (T52)", () => {
       replace: async () => domain.ok(undefined), remove: async () => domain.ok(undefined),
     };
     return { withReadSnapshot: async (_, w) => w(scope), withTransaction: async (_, w) => {
-      const saved = { r: [...recordsLocal], p: [...parts] };
+      const saved = { r: [...recordsLocal], p: [...parts], n: [...notificationsLocal] };
       const result = await w(scope);
-      if (!result.ok) { recordsLocal = saved.r; parts = saved.p; }
+      if (!result.ok) { recordsLocal = saved.r; parts = saved.p; notificationsLocal = saved.n; }
       return result;
     } };
   };
@@ -236,7 +244,7 @@ describe("createTripActivity author participation (T52)", () => {
     { ...context, dayId, title: "Mio", scheduledAt: mine, durationMinutes, ...extra } as never);
   beforeEach(() => {
     recordsLocal = [act(first, "2026-09-25T11:30:00Z", 60), act(second, "2026-09-25T12:30:00Z", 30), act(id(32), "2026-09-25T16:00:00Z", 30)];
-    parts = []; log = []; failOn = undefined; ids = 200;
+    parts = []; log = []; failOn = undefined; ids = 200; notificationsLocal = [];
     parts = [part(first, actor, "going"), part(second, actor, "going"), part(id(32), actor, "going"), part(first, other, "going")];
   });
   const snapshot = () => [first, second].map((a) => { const r = recordsLocal.find((x) => x.id === a)!;
@@ -297,6 +305,26 @@ describe("createTripActivity author participation (T52)", () => {
     parts = [part(first, actor, "not_going"), part(second, actor, "pending")];
     expect(await run()).toMatchObject({ ok: true, value: { outcome: "created" } });
   });
+
+  describe("activity.created (T91)", () => {
+    it("is emitted to the other current members and never to the author", async () => {
+      parts = []; recordsLocal = [];
+      expect((await run()).ok).toBe(true);
+      expect(notificationsLocal).toEqual([other, id(77)].map((userId) => ({ eventKey: `activity.created:${id(200)}:${userId}`, type: "activity.created", tripId,
+        userId, actorId: actor, operationKey: `activity.created:${id(200)}`,
+        payload: { activityId: id(200), actorId: actor, scheduledAt: mine, durationMinutes: 60 }, createdAt })));
+    });
+    it("is not emitted while a confirmation is required nor when the creation is rejected", async () => {
+      expect(await run()).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+      expect((await run({}, 600)).ok).toBe(false);
+      expect(notificationsLocal).toEqual([]);
+    });
+    it.each(["insert", "save", "append"])("leaves no event when %s fails", async (step) => {
+      parts = []; recordsLocal = []; failOn = step;
+      expect((await run()).ok).toBe(false);
+      expect(notificationsLocal).toEqual([]); expect(recordsLocal).toEqual([]); expect(parts).toEqual([]);
+    });
+  });
 });
 
 describe("updateTripActivity decisionRequired (T53)", () => {
@@ -305,6 +333,7 @@ describe("updateTripActivity decisionRequired (T53)", () => {
   const now = new Date("2026-11-08T15:00:00.321Z");
   let partSeq = 0;
   let acts: Activity[], parts: ActivityParticipation[], members: Set<ObjectId>, writes: string[], reads: string[], failAt: number | undefined, replaced: Activity[];
+  let notifications: TripNotificationDraft[], appendFails: boolean, idSeq: number;
   const act = (n: ObjectId, at: string, durationMinutes: number | null): Activity => ({ id: n, tripId, dayId, title: "Plan", description: null,
     scheduledAt: new Date(at), durationMinutes, mapsUrl: null, createdBy: other, createdAt });
   const part = (activityId: ObjectId, userId: ObjectId, status: ActivityParticipation["status"], decisionRequired?: ActivityParticipation["decisionRequired"]): ActivityParticipation =>
@@ -323,24 +352,29 @@ describe("updateTripActivity decisionRequired (T53)", () => {
         parts = [...parts.filter((r) => !(r.activityId === p.activityId && r.userId === p.userId)), p];
         return domain.ok(p);
       },
+      listMemberIds: async () => domain.ok([...members]),
+      appendNotifications: async (drafts) => {
+        if (appendFails) return domain.err(new domain.UnknownError("append"));
+        notifications.push(...drafts); return domain.ok(undefined);
+      },
       insert: async () => domain.ok(undefined),
       replace: async (a) => { replaced.push(a); acts = acts.map((r) => r.id === a.id ? a : r); return domain.ok(undefined); },
       remove: async () => domain.ok(undefined),
     };
     return { withReadSnapshot: async (_, w) => w(scope), withTransaction: async (_, w) => {
-      const saved = { a: [...acts], p: [...parts] };
+      const saved = { a: [...acts], p: [...parts], n: [...notifications] };
       const result = await w(scope);
-      if (!result.ok) { acts = saved.a; parts = saved.p; }
+      if (!result.ok) { acts = saved.a; parts = saved.p; notifications = saved.n; }
       return result;
     } };
   };
-  const edit = (patch: Record<string, unknown>) => domain.updateTripActivity.execute({ activities: port(), now: () => now },
+  const edit = (patch: Record<string, unknown>) => domain.updateTripActivity.execute({ activities: port(), now: () => now, createId: () => id(900 + idSeq++) },
     { ...context, activityId: edited, ...patch } as never);
   const at = (hhmm: string) => new Date(`2026-09-25T${hhmm}:00Z`);
   beforeEach(() => {
     // edited: 10:00-11:00. planA 12:00-13:00 (user's other plan), planB 14:00 without duration.
     acts = [act(edited, "2026-09-25T10:00:00Z", 60), act(planA, "2026-09-25T12:00:00Z", 60), act(planB, "2026-09-25T14:00:00Z", null)];
-    members = new Set([actor, u1, u2, u3]); writes = []; reads = []; failAt = undefined; replaced = [];
+    members = new Set([actor, u1, u2, u3]); writes = []; reads = []; failAt = undefined; replaced = []; notifications = []; appendFails = false; idSeq = 0;
     parts = [part(edited, u1, "going"), part(planA, u1, "going"), part(edited, u2, "going")];
   });
   const stored = (a: ObjectId, u: ObjectId) => parts.find((p) => p.activityId === a && p.userId === u);
@@ -435,5 +469,101 @@ describe("updateTripActivity decisionRequired (T53)", () => {
     if (!result.ok) throw result.error;
     expect(result.value.affected.map((p) => p.userId)).toEqual([u1]);
     expect(result.value.affected[0]).toEqual(stored(edited, u1));
+  });
+
+  describe("events of an edit (T91)", () => {
+    const operation = id(900);
+    const unlinkedOf = (userId: ObjectId) => notifications.filter((n) => n.type === "activity.participant_unlinked" && n.userId === userId);
+    const updated = () => notifications.filter((n) => n.type === "activity.updated");
+
+    it("a schedule edit notifies only the affected participant of the unlinking and everyone else of the update", async () => {
+      expect((await edit({ scheduledAt: at("12:30") })).ok).toBe(true);
+      expect(notifications.filter((n) => n.type === "activity.participant_unlinked")).toEqual([{ eventKey: `activity.participant_unlinked:${operation}:${u1}`,
+        type: "activity.participant_unlinked", tripId, userId: u1, actorId: actor, operationKey: `activity.participant_unlinked:${operation}`, createdAt: now,
+        payload: { activityId: edited, reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: now,
+          newInterval: { startsAt: at("12:30"), durationMinutes: 60, endsAt: at("13:30") },
+          incompatibleActivities: [{ activityId: planA, reason: "overlap", scheduledAt: at("12:00"), durationMinutes: 60 }] } }]);
+      // Compatible participants (u2), non participants (u3) and the editor's peers get the update; the affected one only the unlinking.
+      expect(updated()).toEqual([u2, u3].map((userId) => ({ eventKey: `activity.updated:${operation}:${userId}`, type: "activity.updated", tripId, userId,
+        actorId: actor, operationKey: `activity.updated:${operation}`, createdAt: now,
+        payload: { activityId: edited, actorId: actor, changedFields: ["scheduledAt"] } })));
+      expect(unlinkedOf(u2)).toEqual([]);
+      expect(notifications.some((n) => n.userId === actor)).toBe(false);
+      expect(stored(edited, u1)).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict", changedAt: now } });
+    });
+
+    it("lists every incompatible activity of the affected participant", async () => {
+      acts.push(act(id(43), "2026-09-25T13:00:00Z", 60));
+      parts.push(part(id(43), u1, "going"));
+      expect((await edit({ scheduledAt: at("12:30") })).ok).toBe(true);
+      expect(unlinkedOf(u1)[0]!.payload).toMatchObject({ incompatibleActivities: [
+        { activityId: planA, reason: "overlap", durationMinutes: 60 }, { activityId: id(43), reason: "overlap", durationMinutes: 60 }] });
+    });
+
+    it("the editor, when affected, receives the unlinking and not the update", async () => {
+      parts.push(part(edited, actor, "going"), part(planA, actor, "going"));
+      expect((await edit({ scheduledAt: at("12:30") })).ok).toBe(true);
+      expect(unlinkedOf(actor)).toHaveLength(1);
+      expect(updated().some((n) => n.userId === actor)).toBe(false);
+      expect(unlinkedOf(actor)[0]!.userId).toBe(actor);
+    });
+
+    it("who was already pending is not notified of an unlinking again but still gets the update", async () => {
+      const prev = { reason: "schedule_conflict" as const, changedFields: ["durationMinutes" as const], changedAt: new Date("2026-11-01T00:00:00Z") };
+      parts = [part(edited, u1, "pending", prev), part(planA, u1, "going"), part(edited, u2, "going")];
+      expect((await edit({ scheduledAt: at("12:30") })).ok).toBe(true);
+      expect(notifications.filter((n) => n.type === "activity.participant_unlinked")).toEqual([]);
+      expect(updated().map((n) => n.userId)).toEqual([u1, u2, u3]);
+      expect(stored(edited, u1)!.decisionRequired).toEqual(prev);
+    });
+
+    it("a content or location edit emits only the update, with the changed fields, and never unlinks", async () => {
+      expect((await edit({ title: "Nuevo", mapsUrl: "https://maps.app.goo.gl/x", description: "Detalle" })).ok).toBe(true);
+      expect(updated().map((n) => [n.userId, (n.payload as { changedFields: string[] }).changedFields])).toEqual(
+        [u1, u2, u3].map((userId) => [userId, ["title", "description", "mapsUrl"]]));
+      expect(notifications.filter((n) => n.type === "activity.participant_unlinked")).toEqual([]);
+      expect(writes).toEqual([]);
+      expect(JSON.stringify(notifications)).not.toContain("Nuevo");
+    });
+
+    it("an edit of content and a compatible schedule lists both in canonical order", async () => {
+      expect((await edit({ scheduledAt: at("11:00"), title: "Otro" })).ok).toBe(true);
+      expect(updated()[0]!.payload).toMatchObject({ changedFields: ["title", "scheduledAt"] });
+      expect(notifications.filter((n) => n.type === "activity.participant_unlinked")).toEqual([]);
+    });
+
+    it("an edit that changes nothing, and the repetition of an applied edit, emit nothing", async () => {
+      expect((await edit({ title: "Plan", scheduledAt: at("10:00"), durationMinutes: 60 })).ok).toBe(true);
+      expect(notifications).toEqual([]);
+      expect((await edit({ title: "Nuevo" })).ok).toBe(true);
+      const applied = notifications.length;
+      expect(applied).toBeGreaterThan(0);
+      expect((await edit({ title: "Nuevo" })).ok).toBe(true);
+      expect(notifications).toHaveLength(applied);
+    });
+
+    it("a failure in the middle of the participations leaves no participation, marker nor event", async () => {
+      parts = [part(edited, u1, "going"), part(planA, u1, "going"), part(edited, u3, "going"), part(planA, u3, "going")];
+      const before = structuredClone(parts);
+      failAt = 1;
+      expect((await edit({ scheduledAt: at("12:30") })).ok).toBe(false);
+      expect(parts).toEqual(before);
+      expect(notifications).toEqual([]);
+    });
+
+    it("if the events cannot be written the edit is rolled back entirely", async () => {
+      const before = structuredClone(parts);
+      appendFails = true;
+      expect(await edit({ scheduledAt: at("12:30") })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(parts).toEqual(before);
+      expect(acts[0]!.scheduledAt).toEqual(at("10:00"));
+      expect(notifications).toEqual([]);
+    });
+
+    it("a rejected edit and the deletion of an activity emit nothing", async () => {
+      expect((await edit({ durationMinutes: 800 })).ok).toBe(false);
+      expect((await domain.deleteTripActivity.execute({ activities: port() }, { ...context, activityId: edited })).ok).toBe(true);
+      expect(notifications).toEqual([]);
+    });
   });
 });

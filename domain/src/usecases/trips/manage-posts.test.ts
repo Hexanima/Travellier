@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as domain from "../../index.js";
-import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostExpense, PostPhoto, TripPostPort, TripPostScope, TripRole } from "../../index.js";
+import type { Activity, ActivityParticipation, ItineraryDay, ObjectId, Post, PostExpense, PostPhoto, TripNotificationDraft, TripPostPort, TripPostScope, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -22,8 +22,9 @@ describe("Trip post use cases", () => {
   let expenseRecords: PostExpense[], members: ObjectId[];
   let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
-  let scope: TripPostScope, posts: TripPostPort, sequence: number;
+  let scope: TripPostScope, posts: TripPostPort, sequence: number, notifications: TripNotificationDraft[];
   beforeEach(() => {
+    notifications = [];
     role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; expenseRecords = []; members = [actor, id(41), id(42)]; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
@@ -59,6 +60,8 @@ describe("Trip post use cases", () => {
       listActivityIds: async () => domain.ok(activities.map((a) => a.id)),
       listTransportIds: async () => domain.ok(targets.transportId ? [targets.transportId.id] : []),
       listUserParticipations: async (userId) => domain.ok(participations.filter((p) => p.userId === userId)),
+      listMemberIds: async () => domain.ok([...members]),
+      appendNotifications: async (drafts) => { notifications.push(...drafts); return domain.ok(undefined); },
       saveParticipation: async (participation) => {
         const index = participations.findIndex((p) => p.activityId === participation.activityId && p.userId === participation.userId);
         if (index >= 0) participations[index] = participation; else participations.push(participation);
@@ -68,9 +71,9 @@ describe("Trip post use cases", () => {
     posts = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone({ records, activities, participations, photoRecords, expenseRecords });
+        const before = structuredClone({ records, activities, participations, photoRecords, expenseRecords, notifications });
         const result = await work(scope);
-        if (!result.ok) { expenseRecords = before.expenseRecords; photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
+        if (!result.ok) { notifications = before.notifications; expenseRecords = before.expenseRecords; photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
         return result;
       },
     };
@@ -1371,5 +1374,105 @@ describe("Trip post use cases", () => {
         });
       });
     });
+
+  describe("notifications (T91)", () => {
+    const withDuration = { ...newActivity, durationMinutes: 60 };
+    const recipients = [id(41), id(42)];
+    const publishedKey = (type: string, ref: ObjectId, user: ObjectId) => `${type}:${ref}:${user}`;
+    const link = (fields = {}) => domain.linkTripPostToNewActivity.execute(dependencies(), { ...context, postId, newActivity: withDuration, ...fields });
+    const state = () => structuredClone({ records, activities, participations, notifications });
+
+    it("a plain post emits post.created to the other members only, with ids and no text", async () => {
+      expect((await create({ description: "Texto privado" })).ok).toBe(true);
+      expect(notifications).toEqual(recipients.map((userId) => ({ eventKey: publishedKey("post.created", id(20), userId), type: "post.created", tripId, userId,
+        actorId: actor, operationKey: `post.created:${id(20)}`, payload: { postId: id(20), actorId: actor, activityId: null }, createdAt })));
+      expect(JSON.stringify(notifications)).not.toContain("Texto privado");
+    });
+
+    it("a post linked to an existing activity carries its id and emits no activity.created", async () => {
+      expect((await create({ activityId: links.activityId })).ok).toBe(true);
+      expect(notifications.map((n) => n.type)).toEqual(["post.created", "post.created"]);
+      expect(notifications[0]!.payload).toEqual({ postId: id(20), actorId: actor, activityId: links.activityId });
+    });
+
+    it("a post with a spontaneous activity emits post.created and activity.created for every other member", async () => {
+      const result = await create({ newActivity: withDuration });
+      expect(result).toMatchObject({ ok: true, value: { outcome: "created", activity: { id: id(21) } } });
+      expect(notifications.filter((n) => n.type === "post.created")).toEqual(recipients.map((userId) => expect.objectContaining({ userId,
+        payload: { postId: id(20), actorId: actor, activityId: id(21) } })));
+      expect(notifications.filter((n) => n.type === "activity.created")).toEqual(recipients.map((userId) => ({ eventKey: publishedKey("activity.created", id(21), userId),
+        type: "activity.created", tripId, userId, actorId: actor, operationKey: `activity.created:${id(21)}`,
+        payload: { activityId: id(21), actorId: actor, scheduledAt: withDuration.scheduledAt, durationMinutes: 60 }, createdAt })));
+      expect(notifications.some((n) => n.userId === actor)).toBe(false);
+    });
+
+    it("nobody is notified when the author is the only member", async () => {
+      members = [actor];
+      expect((await create({ newActivity: withDuration })).ok).toBe(true);
+      expect(notifications).toEqual([]);
+    });
+
+    it("a required plan-change confirmation writes no events", async () => {
+      activities = [{ id: id(50), tripId, dayId, title: "Plan", description: null, mapsUrl: null, scheduledAt: new Date("2026-09-25T12:30:00Z"), durationMinutes: 60,
+        createdBy: id(9), createdAt }];
+      participations = [{ id: id(80), tripId, activityId: id(50), userId: actor, status: "going", updatedAt: createdAt }];
+      expect(await create({ newActivity: withDuration })).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+      records = [seedPost()];
+      expect(await link()).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
+      expect(notifications).toEqual([]);
+    });
+
+    it.each(["insert", "insertActivity", "saveParticipation", "appendNotifications"] as const)("saves nothing and leaves no event when %s fails", async (method) => {
+      scope[method] = async () => domain.err(new domain.UnknownError("failed"));
+      const before = state();
+      expect(await create({ newActivity: withDuration })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(state()).toEqual(before);
+    });
+
+    it("a failed plain post leaves no event", async () => {
+      scope.appendNotifications = async () => domain.err(new domain.UnknownError("failed"));
+      expect(await create({ description: "Hola" })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(records).toEqual([]);
+      expect(notifications).toEqual([]);
+    });
+
+    it("the retry of a saved post (same postId) answers the save without repeating events", async () => {
+      const clientId = id(500);
+      expect((await create({ postId: clientId, newActivity: withDuration })).ok).toBe(true);
+      const saved = notifications.map((n) => n.eventKey);
+      expect(saved).toHaveLength(4);
+      expect((await create({ postId: clientId, newActivity: withDuration })).ok).toBe(true);
+      expect(notifications.map((n) => n.eventKey)).toEqual(saved);
+      expect((await create({ postId: id(501), description: "Hola" })).ok).toBe(true);
+      const plain = notifications.length;
+      expect((await create({ postId: id(501), description: "Hola" })).ok).toBe(true);
+      expect(notifications).toHaveLength(plain);
+    });
+
+    it("linking a post to a new activity emits only activity.created, and its retry emits nothing more", async () => {
+      records = [seedPost({ authorId: actor })];
+      const clientActivity = id(600);
+      expect(await link({ newActivity: { ...withDuration, id: clientActivity } })).toMatchObject({ ok: true, value: { outcome: "linked" } });
+      expect(notifications).toEqual(recipients.map((userId) => ({ eventKey: publishedKey("activity.created", clientActivity, userId), type: "activity.created",
+        tripId, userId, actorId: actor, operationKey: `activity.created:${clientActivity}`,
+        payload: { activityId: clientActivity, actorId: actor, scheduledAt: withDuration.scheduledAt, durationMinutes: 60 }, createdAt })));
+      expect(await link({ newActivity: { ...withDuration, id: clientActivity } })).toMatchObject({ ok: true });
+      expect(notifications).toHaveLength(2);
+    });
+
+    it("a failed link leaves no event", async () => {
+      records = [seedPost({ authorId: actor })];
+      scope.appendNotifications = async () => domain.err(new domain.UnknownError("failed"));
+      const before = state();
+      expect(await link()).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(state()).toEqual(before);
+    });
+
+    it("editing a post emits nothing", async () => {
+      records = [seedPost({ authorId: actor })];
+      expect((await update({ description: "Editado" })).ok).toBe(true);
+      expect(notifications).toEqual([]);
+    });
+  });
   });
 });

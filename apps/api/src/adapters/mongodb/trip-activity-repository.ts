@@ -3,6 +3,7 @@ import { ActivityNotFoundError, err, ok, TaggedError, TripNotFoundError, Unknown
   type AsyncResult, type ObjectId, type TripActivityPort, type TripActivityScope, type TripRole } from "app-domain";
 import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
 import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
+import { createOutboxStore } from "./outbox-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripActivityScope => {
@@ -10,6 +11,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
   const activities = database.collection<ActivityDocument>("activities");
   const store = createParticipationStore(database.collection<ParticipationDocument>("activityParticipations"), tripId, session);
   return {
+    ...createOutboxStore(database, tripId, session),
     findMemberRole: async (userId) => {
       const member = await database.collection<{ role: TripRole }>("tripMembers")
         .findOne({ ...query, userId: new MongoObjectId(userId) }, options);

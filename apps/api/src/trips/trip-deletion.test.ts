@@ -51,7 +51,7 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     url: `/trips/${trip}`, authenticatedUserId: domainId(actor) }, { trips: createTripApi(database) });
 
   const tripCollections = ["tripMembers", "destinations", "transports", "itineraryDays", "activities",
-    "activityParticipations", "activityVotes", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes"];
+    "activityParticipations", "activityVotes", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes", "outboxEvents"];
 
   it.each(["transports", "itineraryDays", "activities", "posts"])("reports destination records from %s for hiding deletion", async (collection) => {
     await database.collection(collection).insertOne({ tripId, destinationId: firstId });
@@ -74,7 +74,7 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     for (const name of tripCollections) {
       const fields = () => ({ userId: new ObjectId(), destinationId: new ObjectId(), direction: "outbound",
         activityId: new ObjectId(), postId: new ObjectId(), commentId: new ObjectId(), date: new Date(), type: "activity", order: 1,
-        s3Key: `trips/seed/${new ObjectId().toHexString()}.jpg` });
+        s3Key: `trips/seed/${new ObjectId().toHexString()}.jpg`, eventKey: new ObjectId().toHexString() });
       if (name !== "destinations" && name !== "tripMembers") await database.collection(name).insertOne({ tripId, ...fields() });
       await database.collection(name).insertOne({ tripId: otherTripId, ...fields() });
     }
@@ -109,6 +109,24 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     expect(remaining).toHaveLength(1);
     expect(remaining[0]!._id.toHexString()).toBe(seeded[otherTripId.toHexString()]);
     expect(remaining[0]!.tripId).toEqual(otherTripId);
+  });
+
+  it("deletes the real events and personal notices of the deleted Trip only (T91)", async () => {
+    await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
+    const otherTripId = new ObjectId(), otherUser = new ObjectId(), peer = new ObjectId(), otherPeer = new ObjectId();
+    await database.collection("trips").insertOne({ _id: otherTripId, inviteCode: "VIAJE-OTHER" });
+    await database.collection("tripMembers").insertMany([{ tripId, userId: peer, role: "participant", joinedAt: new Date() },
+      { tripId: otherTripId, userId: otherUser, role: "participant", joinedAt: new Date() }, { tripId: otherTripId, userId: otherPeer, role: "participant", joinedAt: new Date() }]);
+    const api = createTripApi(database);
+    for (const [trip, user] of [[tripId, userId], [otherTripId, otherUser]] as const) {
+      const post = await api.createPost!({ tripId: domainId(trip), authenticatedUserId: domainId(user), description: "Recuerdo" });
+      if (!post.ok) throw post.error;
+    }
+    expect(await database.collection("outboxEvents").countDocuments({ tripId })).toBe(1);
+    expect(await database.collection("outboxEvents").countDocuments({ tripId: otherTripId })).toBe(1);
+    expect((await deleteTripRequest()).statusCode).toBe(204);
+    expect(await database.collection("outboxEvents").countDocuments({ tripId })).toBe(0);
+    expect(await database.collection("outboxEvents").countDocuments({ tripId: otherTripId })).toBe(1);
   });
 
   it("deletes only the real likes of the deleted Trip, created through the likes API", async () => {

@@ -73,6 +73,8 @@ import {
   type PostPhotoView,
   type ListTripPhotosPayload,
   type TripPhotoPage,
+  type ListUserNotificationsPayload,
+  type UserNotificationPage,
   type PostEditableFields,
   type CommentView,
   type TripCommentPayload,
@@ -160,6 +162,8 @@ export interface TripApi extends TripInvitationApi {
   getPostPhotos?: (payload: PostPhotoPayload) => AsyncResult<PostPhotoView[]>;
   getPhoto?: (payload: PhotoPayload) => AsyncResult<PostPhotoView>;
   listPhotos?: (payload: ListTripPhotosPayload) => AsyncResult<TripPhotoPage>;
+  /** Personal notices of the authenticated user (T91); read-only. */
+  listNotifications?: (payload: ListUserNotificationsPayload) => AsyncResult<UserNotificationPage>;
   listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
   createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
   updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
@@ -543,6 +547,25 @@ const parsePhotoListQuery = (search: string):
   return { invalidId: false, payload };
 };
 
+const notificationListParameters = ["limit", "cursor"] as const;
+
+/**
+ * Query of `GET /notifications`. An unknown or repeated parameter is a 422 that does not echo what was sent (in particular a `userId`:
+ * the user is always the one of the session). `limit` and `cursor` travel raw: the use case validates them.
+ */
+const parseNotificationListQuery = (search: string): Result<Pick<ListUserNotificationsPayload, "limit" | "cursor">, ValidationError> => {
+  const params = new URLSearchParams(search), payload: Pick<ListUserNotificationsPayload, "limit" | "cursor"> = {};
+  const issues: ValidationIssue[] = [];
+  for (const key of new Set(params.keys())) {
+    if (!(notificationListParameters as readonly string[]).includes(key)) issues.push({ field: "query", code: "unknown_parameter", message: "The query has an unsupported parameter." });
+    else if (params.getAll(key).length > 1) issues.push({ field: "query", code: "duplicate_parameter", message: "A query parameter was sent more than once." });
+  }
+  if (issues.length > 0) return err(new ValidationError(issues));
+  if (params.has("limit")) payload.limit = params.get("limit");
+  if (params.has("cursor")) payload.cursor = params.get("cursor");
+  return ok(payload);
+};
+
 const activityPayload = (payload: Record<string, unknown>, creating: boolean): Result<Partial<ActivityEditableFields>, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Activity ${field} is ${code === "required" ? "required" : "invalid"}.` },
@@ -650,9 +673,12 @@ const unavailableResponse = (): ApiResponse =>
   });
 
 export const handleApiRequest = async (
-  request: ApiRequest,
+  requestWithQuery: ApiRequest,
   dependencies: ApiDependencies = {},
 ): Promise<ApiResponse> => {
+  // Routes without declared query parameters ignore the query string: they match on the path only.
+  // Only /notifications and /trips/:id/photos read it, from `requestWithQuery.url`.
+  const request: ApiRequest = { ...requestWithQuery, url: requestWithQuery.url?.split("?")[0] };
   if (request.method === "GET" && request.url === "/health") {
     return jsonResponse(200, await createHealthResponse());
   }
@@ -800,7 +826,19 @@ export const handleApiRequest = async (
     }
   }
 
-  const photoListMatch = request.method === "GET" ? request.url?.match(/^\/trips\/([^/?]+)\/photos(?:\?(.*))?$/) : null;
+  const notificationListMatch = request.method === "GET" ? requestWithQuery.url?.match(/^\/notifications(?:\?(.*))?$/) : null;
+  if (notificationListMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const query = parseNotificationListQuery(notificationListMatch[1] ?? "");
+    if (!query.ok) return errorResponse(query.error);
+    const trips = dependencies.trips;
+    if (!trips?.listNotifications) return unavailableResponse();
+    const result = await trips.listNotifications({ authenticatedUserId: request.authenticatedUserId, ...query.value });
+    return result.ok ? jsonResponse(200, { notifications: result.value.notifications.map(({ id, type, tripId, actorId, payload, createdAt }) =>
+      ({ id, type, tripId, actorId, payload, createdAt })), nextCursor: result.value.nextCursor }) : errorResponse(result.error);
+  }
+
+  const photoListMatch = request.method === "GET" ? requestWithQuery.url?.match(/^\/trips\/([^/?]+)\/photos(?:\?(.*))?$/) : null;
   if (photoListMatch) {
     if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
     const tripId = createObjectId(photoListMatch[1] ?? "");

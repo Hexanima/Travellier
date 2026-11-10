@@ -13,6 +13,8 @@ import {
   type TripRole,
 } from "app-domain";
 
+import { createOutboxStore } from "./outbox-store.js";
+
 type MembershipDocument = {
   _id: MongoObjectId;
   tripId: MongoObjectId;
@@ -82,7 +84,7 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
         return err(unknownError());
       }
     },
-    removeParticipant: async (membershipId, tripId, userId) => {
+    removeParticipant: async (membershipId, tripId, userId, notifications) => {
       const session = database.client.startSession();
       try {
         const removed = await session.withTransaction(async () => {
@@ -97,7 +99,10 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
             userId: new MongoObjectId(userId),
             role: "participant",
           }, { session });
-          return result.deletedCount === 1;
+          if (result.deletedCount !== 1) return false;
+          // Last write, same transaction: the notice exists only if the membership was really deleted.
+          await createOutboxStore(database, tripId, session).appendNotifications(notifications);
+          return true;
         }, { readConcern: { level: "snapshot" }, readPreference: "primary" });
         return removed === undefined ? err(unknownError()) : ok(removed);
       } catch {
