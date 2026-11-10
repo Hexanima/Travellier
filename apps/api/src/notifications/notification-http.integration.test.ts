@@ -134,6 +134,26 @@ describe("notification inbox HTTP API", () => {
     expect(second.notifications.map((n) => n.id)).toEqual(all.slice(2, 4).map((n) => n.id));
   });
 
+  it("pages with limit=1 over a createdAt tie of the same recipient without skipping or repeating, ordered by _id desc", async () => {
+    // post.created and activity.created of a spontaneous activity share the same createdAt.
+    await post(author, { description: "Con actividad", newActivity: { title: "Cena", scheduledAt: occurrence, durationMinutes: 60 } });
+    const tie = new Date("2026-09-25T12:30:00.000Z");
+    await db.collection("outboxEvents").updateMany({ userId: reader }, { $set: { createdAt: tie } });
+    const stored = await db.collection("outboxEvents").find({ userId: reader }).sort({ _id: -1 }).toArray();
+    expect(stored.map((event) => event.type).sort()).toEqual(["activity.created", "post.created"]);
+    expect(new Set(stored.map((event) => event.createdAt.getTime())).size).toBe(1);
+    const seen: string[] = [];
+    let cursor: string | null = null, requests = 0;
+    do {
+      const next = await page(`/notifications?limit=1${cursor === null ? "" : `&cursor=${cursor}`}`);
+      expect(next.notifications).toHaveLength(1);
+      seen.push(next.notifications[0]!.id);
+      cursor = next.nextCursor; requests += 1;
+    } while (cursor !== null && requests < 5);
+    expect(seen).toEqual(stored.map((event) => event._id.toHexString()));
+    expect(new Set(seen).size).toBe(2);
+  });
+
   it.each([["limit=0"], ["limit=61"], ["limit=abc"], ["limit=1.5"], ["cursor=basura"], ["limit=2&limit=3"], ["since=1"]])("answers 422 with the invalid field for %s", async (query) => {
     const response = await get(`/notifications?${query}`);
     expect(response.statusCode).toBe(422);
