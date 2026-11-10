@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripsListScreen } from "./TripScreens.js";
+import { formatTripRange } from "./trip-range.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
 import { resetRememberedFilter } from "./trips-filter-memory.js";
 
@@ -110,5 +111,12 @@ describe("Trips list tabs", () => {
     await act(async () => [...container.querySelectorAll("button")].find((b) => b.textContent === "Reintentar")!.click());
     expect(list).toHaveBeenCalledTimes(2);
     expect(names(container)).toEqual(["Terminado"]);
+  });
+
+  it("shows the local dates of each Trip, or that they are pending, without affecting the tab", async () => {
+    const container = await renderTrips(ok([future, undated]));
+    const items = [...container.querySelectorAll(".trips-item")];
+    expect(items[0]?.querySelector(".trips-dates")?.textContent).toBe(formatTripRange(future.startAt, future.endAt));
+    expect(items[1]?.querySelector(".trips-dates")?.textContent).toBe("Fechas por definir");
   });
 });

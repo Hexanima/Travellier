@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, TextField } from "../components/index.js";
 import { classifyTrips, nextBoundaryMs, parseFilter, type TripFilter } from "./trip-list-filter.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
+import { formatTripRange } from "./trip-range.js";
 import { getRememberedFilter, rememberFilter } from "./trips-filter-memory.js";
 import { useTripRefresh } from "./use-trip-refresh.js";
 
@@ -140,6 +141,8 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                   <div>
                     <h2>{trip.name}</h2>
                     <p className="trips-destination">{trip.primaryDestination.name}</p>
+                    {/* Provisional: the final presentation of the dates comes with the approved design. */}
+                    <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                   </div>
                   <Link className="trips-settings-link" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
