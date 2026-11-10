@@ -32,6 +32,21 @@ describe("gallery pages model", () => {
     expect(next[1]).toBe(pages[1]);
     expect(replacePage(pages, 7, makePage(null, { photos: [], nextCursor: null }))).toBe(pages);
   });
+  it("drops the photos the fresh answer no longer has, so no old url keeps a new expiry, and keeps the cursors", () => {
+    let pages = appendPage([], makePage(null, { photos: [photo(1, "old1", 500), photo(2, "old2", 500), photo(3, "old3", 400)], nextCursor: "c1" }));
+    pages = appendPage(pages, makePage("c1", { photos: [photo(4, "old4", 800)], nextCursor: null }));
+    const next = replacePage(pages, 0, makePage(null, { photos: [photo(1, "new1", 5000), photo(2, "new2", 6000)], nextCursor: "other" }));
+    expect(ids(next)).toEqual([itineraryId(1), itineraryId(2), itineraryId(4)]);
+    expect(next[0]).toMatchObject({ cursor: null, nextCursor: "c1", expiresAtMs: 5000 });
+    expect(isStale(next[0]!, 4000, 500)).toBe(false);
+    expect(next[1]).toBe(pages[1]);
+  });
+  it("can leave a page without photos, never stale, keeping its next cursor", () => {
+    const pages = appendPage([], makePage(null, { photos: [photo(1, "old1", 500)], nextCursor: "c1" }));
+    const next = replacePage(pages, 0, makePage(null, { photos: [photo(9, "x", 5000)], nextCursor: "other" }));
+    expect(next[0]).toMatchObject({ photos: [], nextCursor: "c1", expiresAtMs: Number.POSITIVE_INFINITY });
+    expect(currentCursor(next)).toBe("c1");
+  });
   it("is stale from the margin before the expiry, inclusive", () => {
     const page = makePage(null, { photos: [photo(1, "u", 100_000)], nextCursor: null });
     expect(isStale(page, 69_999, 30_000)).toBe(false);

@@ -86,9 +86,25 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
         failedPages.current.delete(id);
         commit((current) => {
           const index = current.pages.findIndex((page) => page.cursor === cursor);
-          return { ...current, pages: replacePage(current.pages, index, makePage(cursor, result.value)), refreshFailed: failedPages.current.size > 0 };
+          const pages = replacePage(current.pages, index, makePage(cursor, result.value));
+          // A photo whose url changed gets another chance; one that already failed with this very url and came back unchanged is shown as failed.
+          const before = new Map((current.pages[index]?.photos ?? []).map((photo) => [photo.id, photo.url]));
+          const failed = new Set(current.failed);
+          for (const photo of pages[index]?.photos ?? []) {
+            if (before.get(photo.id) !== photo.url) failed.delete(photo.id);
+            else if (tried.current.get(photo.id) === photo.url) failed.add(photo.id);
+          }
+          return { ...current, pages, failed, refreshFailed: failedPages.current.size > 0 };
         });
-      } else { failedPages.current.add(id); commit((current) => ({ ...current, refreshFailed: true })); }
+      } else {
+        failedPages.current.add(id);
+        // Photos waiting for this refresh cannot get a new url now: they show the placeholder (and «Reintentar»).
+        commit((current) => {
+          const failed = new Set(current.failed);
+          for (const photo of current.pages.find((page) => page.cursor === cursor)?.photos ?? []) if (tried.current.get(photo.id) === photo.url) failed.add(photo.id);
+          return { ...current, failed, refreshFailed: true };
+        });
+      }
     });
   }, [enqueue, request, now, commit]);
 
@@ -150,7 +166,10 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
     const photo = page?.photos.find((item) => item.id === photoId);
     if (!page || !photo) return;
     const markFailed = () => commit((current) => ({ ...current, failed: new Set(current.failed).add(photoId) }));
-    if (tried.current.get(photoId) === photo.url) return; // the refresh for this url is already requested
+    if (tried.current.get(photoId) === photo.url) { // this url already asked for a refresh
+      if (!pending.current.has(pageKey(page.cursor))) markFailed(); // the refresh ended and the url did not change: no silent broken image
+      return;
+    }
     if (tried.current.has(photoId)) { markFailed(); return; } // the refreshed url failed too
     tried.current.set(photoId, photo.url);
     if (pending.current.has(pageKey(page.cursor))) return; // the page is already being refreshed: wait for its new urls
@@ -163,7 +182,7 @@ export function useGalleryPages(filter: GalleryFilter = {}): GalleryPages {
   const retryImage = useCallback((photoId: string) => {
     const page = stateRef.current.pages.find((item) => item.photos.some((photo) => photo.id === photoId));
     if (!page) return;
-    tried.current.set(photoId, page.photos.find((photo) => photo.id === photoId)!.url);
+    tried.current.delete(photoId); // a real refresh: the next error on this photo is judged against what the refresh brings
     commit((current) => { const failed = new Set(current.failed); failed.delete(photoId); return { ...current, failed }; });
     lastRefresh.current.set(pageKey(page.cursor), now());
     refreshPage(page.cursor, generation.current);

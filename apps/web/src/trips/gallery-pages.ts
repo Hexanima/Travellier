@@ -16,13 +16,18 @@ export const appendPage = (pages: readonly GalleryPageData[], page: GalleryPageD
   return [...pages, { ...page, photos }];
 };
 
-/** Refreshes the signed urls and expiry of a page; its photos, order, cursor and the next cursor stay, and so do the other pages. */
+/**
+ * Refreshes the signed urls and expiry of a page. The answer is the server truth for that cursor: a photo it no longer has is dropped (an old url
+ * must never inherit a new expiry), so the page may end up with fewer photos than the limit. Order, cursor and next cursor stay (the next page
+ * still starts where this one ended), and so do the other pages. Photos that only the answer has are not added: they belong to another page.
+ */
 export const replacePage = (pages: readonly GalleryPageData[], index: number, fresh: GalleryPageData): GalleryPageData[] => {
   const current = pages[index];
   if (!current) return pages as GalleryPageData[];
   const byId = new Map(fresh.photos.map((photo) => [photo.id, photo]));
-  const photos = current.photos.map((photo) => { const next = byId.get(photo.id); return next ? { ...photo, url: next.url, expiresAtMs: next.expiresAtMs } : photo; });
-  return pages.map((page, position) => position === index ? { ...current, photos, expiresAtMs: fresh.expiresAtMs } : page);
+  const photos = current.photos.flatMap((photo) => { const next = byId.get(photo.id); return next ? [{ ...photo, url: next.url, expiresAtMs: next.expiresAtMs }] : []; });
+  const expiresAtMs = Math.min(Number.POSITIVE_INFINITY, ...photos.map((photo) => photo.expiresAtMs));
+  return pages.map((page, position) => position === index ? { ...current, photos, expiresAtMs } : page);
 };
 
 export const flatten = (pages: readonly GalleryPageData[]): GalleryPhoto[] => pages.flatMap((page) => page.photos);

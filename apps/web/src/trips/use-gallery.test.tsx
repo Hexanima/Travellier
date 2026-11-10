@@ -160,6 +160,68 @@ describe("useGalleryPages", () => {
     await act(async () => api.loadMore());
     expect(list).toHaveBeenLastCalledWith(tripId, { cursor: "c2" });
   });
+  it("refreshing page 1 with a photo less and an intruder leaves a coherent state: no duplicates and no expired url kept", async () => {
+    let clock = NOW;
+    const { list } = tracked(async (cursor, call) => {
+      await Promise.resolve();
+      if (call === 1) return page([photo(5, "a5", NOW + 300_000), photo(4, "a4", NOW + 300_000), photo(3, "a3", NOW + 300_000)], "c1");
+      if (call === 2) return page([photo(2, "a2", NOW + 900_000)], null);
+      if (cursor === undefined) return page([photo(99, "intruder", clock + 300_000), photo(5, "b5", clock + 300_000), photo(4, "b4", clock + 300_000)], "other");
+      return page([photo(2, "b2", clock + 300_000)], null);
+    });
+    await mount(list, { now: () => clock });
+    await act(async () => api.loadMore());
+    await act(async () => go("/elsewhere"));
+    clock = NOW + 280_000;
+    await act(async () => go(path, { state: { photo: itineraryId(5) } }));
+    await flush(); await flush(); await flush();
+    expect(ids()).toEqual([itineraryId(5), itineraryId(4), itineraryId(2)]);
+    expect(new Set(ids()).size).toBe(ids().length);
+    expect(urls()).toEqual(["b5", "b4", "a2"]);
+    expect(api.hasMore).toBe(false);
+    // The shortened page 1 is no longer stale because of the photo that left: a second return refreshes nothing.
+    const calls = list.mock.calls.length;
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    await flush();
+    expect(list.mock.calls.length).toBe(calls);
+  });
+  it("marks the photo as failed when the refresh gives back the same url, instead of staying silently broken", async () => {
+    const refresh = deferred<unknown>();
+    const list = vi.fn().mockResolvedValueOnce(page([photo(5, "same")], null)).mockReturnValueOnce(refresh.promise);
+    await mount(list);
+    await act(async () => { api.imageError(itineraryId(5)); api.imageError(itineraryId(5)); });
+    expect(api.failed.size).toBe(0);
+    await act(async () => refresh.resolve(page([photo(5, "same")], null)));
+    await flush();
+    expect(list).toHaveBeenCalledTimes(2);
+    expect([...api.failed]).toEqual([itineraryId(5)]);
+    await act(async () => api.imageError(itineraryId(5)));
+    expect([...api.failed]).toEqual([itineraryId(5)]);
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+  it("marks the photo as failed when its refresh fails", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([photo(5, "a5")], null)).mockResolvedValueOnce(fail("network"));
+    await mount(list);
+    await act(async () => api.imageError(itineraryId(5)));
+    await flush();
+    expect(api.refreshFailed).toBe(true);
+    expect([...api.failed]).toEqual([itineraryId(5)]);
+  });
+  it("«Reintentar» on a failed image forces a real refresh even when the url did not change, and fails again if it still does not load", async () => {
+    const list = vi.fn().mockResolvedValue(page([photo(5, "same")], null));
+    await mount(list);
+    await act(async () => api.imageError(itineraryId(5)));
+    await flush();
+    expect(api.failed.size).toBe(1);
+    await act(async () => api.retryImage(itineraryId(5)));
+    expect(api.failed.size).toBe(0);
+    await flush();
+    expect(list).toHaveBeenCalledTimes(3);
+    await act(async () => api.imageError(itineraryId(5)));
+    await flush();
+    expect(api.failed.size).toBe(1);
+    expect(list).toHaveBeenCalledTimes(3);
+  });
   it("does not refresh in parallel with «Cargar más»: the refresh waits in the same queue", async () => {
     let clock = NOW;
     const second = deferred<unknown>();
