@@ -639,4 +639,18 @@ describe("api app", () => {
     expect(getAvatarUrl).toHaveBeenCalledWith({ authenticatedUserId: "507f1f77bcf86cd799439011" });
     expect(response).toMatchObject({ statusCode: 200, body: JSON.stringify({ url: "https://s3.example.test/view" }) });
   });
+  it("routes GET /trips/:tripId/balance to the balance use case", async () => {
+    const trip = "507f1f77bcf86cd799439012", user = "507f1f77bcf86cd799439011";
+    const balance = { tripId: trip, expenseMode: "balance", currencies: [], excludedExpenses: [], includedExpenseCount: 0 };
+    const getBalance = vi.fn().mockResolvedValue({ ok: true, value: balance });
+    const ok = await handleApiRequest({ method: "GET", url: `/trips/${trip}/balance`, authenticatedUserId: user } as never, { trips: { getBalance } } as never);
+    expect(getBalance).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user });
+    expect(ok).toMatchObject({ statusCode: 200, body: JSON.stringify({ balance }) });
+    expect((await handleApiRequest({ method: "GET", url: `/trips/${trip}/balance` } as never, { trips: { getBalance } } as never)).statusCode).toBe(401);
+    expect((await handleApiRequest({ method: "GET", url: "/trips/x/balance", authenticatedUserId: user } as never, { trips: { getBalance } } as never)).statusCode).toBe(400);
+    expect((await handleApiRequest({ method: "GET", url: `/trips/${trip}/balance`, authenticatedUserId: user } as never, { trips: {} } as never)).statusCode).toBe(503);
+    const missing = vi.fn().mockResolvedValue({ ok: false, error: { tag: "TripNotFoundError" } });
+    expect((await handleApiRequest({ method: "GET", url: `/trips/${trip}/balance`, authenticatedUserId: user } as never, { trips: { getBalance: missing } } as never)).statusCode).toBe(404);
+    expect(getBalance).toHaveBeenCalledTimes(1);
+  });
 });
