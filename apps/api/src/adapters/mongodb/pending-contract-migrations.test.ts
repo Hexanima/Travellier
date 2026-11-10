@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { describePostExpense, resolveExpense } from "app-domain";
+import { describePostExpense, hasLegacyPaymentsGap, resolveExpense } from "app-domain";
+import { auditMongoContracts } from "./contract-audit.js";
 import { migrateMongoSchema } from "./migrations.js";
+import { expenseGapCases, gapOwnPayer, gapPayer } from "../../../test/expense-gap-cases.js";
 import { toPostExpense, type PostExpenseDocument } from "./post-expense-store.js";
 import { legacyIds, seedVersion3Fixture, snapshotDocuments, version3Indexes } from "../../../test/legacy-contract-fixture.js";
 
@@ -146,6 +148,24 @@ describe("incremental pending contracts", () => {
       }
       expect(after.find(({ _id }) => _id.equals(invalid._id))).not.toHaveProperty("payments");
       expect(after.find(({ _id }) => _id.equals(missing._id))).not.toHaveProperty("payments");
+    });
+
+    it.each(expenseGapCases)("read, migration 0006 and audit classify the same document alike: $name", async ({ fields, legacy }) => {
+      const stored = await insertExpense(fields);
+      const read = toPostExpense(stored as unknown as PostExpenseDocument);
+      const audited = (await auditMongoContracts(database)).findings
+        .some(({ code, documentId }) => code === "expense_legacy_paid_by" && documentId.equals(stored._id));
+      await migrateMongoSchema(database);
+      const [after] = await expenses();
+      // (a) read
+      expect(hasLegacyPaymentsGap(fields.payments) && fields.paidBy instanceof ObjectId).toBe(legacy);
+      const ownRows = Array.isArray(fields.payments) && fields.payments.some((row) => row?.userId instanceof ObjectId);
+      expect(read.payments).toEqual(legacy ? [{ userId: gapPayer.toHexString(), unit: "percent", value: 100 }]
+        : ownRows ? [{ userId: gapOwnPayer.toHexString(), unit: "amount", value: 10 }] : []);
+      // (b) migration: adapted exactly, or the document stays byte-identical
+      expect(after).toEqual(legacy ? { ...stored, payments: [{ userId: gapPayer, unit: "percent", value: 100 }] } : stored);
+      // (c) audit
+      expect(audited).toBe(legacy);
     });
 
     it("one gap rule: payments null or absent is adapted once (reruns identical); [] , own payments and a null paidBy with null payments are untouched", async () => {
