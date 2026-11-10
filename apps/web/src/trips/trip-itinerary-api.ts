@@ -13,7 +13,10 @@ export type ItineraryPostContext = {
   placement: "activity" | "transport" | "independent";
 };
 /** The post's day is no longer part of the client contract: a legacy `dayId` is tolerated but ignored at runtime. */
-export type ItineraryPostResponse = Omit<ActiveItineraryResponse["posts"][number], "dayId" | "context"> & { context: ItineraryPostContext };
+/** `paidBy` may be absent in older payloads (the validator accepts it); null or absent means nobody is recorded as payer. */
+type ItineraryExpenseResponse = Omit<NonNullable<ActiveItineraryResponse["posts"][number]["expense"]>, "paidBy"> & { paidBy?: string | null };
+export type ItineraryPostResponse = Omit<ActiveItineraryResponse["posts"][number], "dayId" | "context" | "expense"> &
+  { context: ItineraryPostContext; expense: ItineraryExpenseResponse | null };
 export type TripItineraryResponse = Omit<ActiveItineraryResponse, "activities" | "posts" | "unplacedPosts"> & {
   // durationMinutes stays optional on the client: older payloads and fixtures may omit it; null or absent means no duration.
   activities: (Omit<ActiveItineraryResponse["activities"][number], "durationMinutes"> &
