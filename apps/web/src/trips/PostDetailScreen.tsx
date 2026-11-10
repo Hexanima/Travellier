@@ -139,6 +139,8 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
       <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{format(post.createdAt)}</time></p>
       {rootActivityId ? <p className="itinerary-secondary">Vinculado a una actividad</p> : null}
       {post.transportId ? <p className="itinerary-secondary">Vinculado a un transporte</p> : null}
+      {/* Only a direct link: the detail does not carry the root transport of a chain. */}
+      {post.transportId ? <Link className="trips-settings-link" to={`/trips/${tripId}/itinerary?transport=${post.transportId}`} state={{ origin }}>Ver transporte</Link> : null}
       <PostLikeControl likes={likes} />
       <div className="memory-actions">
         <Link className="trips-settings-link" to={`/trips/${tripId}/memories/new?parentPostId=${post.id}`}

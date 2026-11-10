@@ -108,6 +108,13 @@ describe("PostDetailScreen content", () => {
     expect(withTransport.container.textContent).toContain("Vinculado a un transporte");
     expect(withTransport.container.textContent).not.toContain("Vinculado a una actividad");
   });
+  it("offers «Ver transporte» only for a post linked directly to a transport, pointing to its detail in the itinerary", async () => {
+    const withTransport = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { transportId: itineraryId(9) } }))));
+    const link = byText(withTransport.container, "a", "Ver transporte");
+    expect(link?.getAttribute("href")).toBe(`/trips/${itineraryId(1)}/itinerary?transport=${itineraryId(9)}`);
+    const without = await open(vi.fn().mockResolvedValue(ok(detail(5, { rootActivityId: itineraryId(8) }))));
+    expect(byText(without.container, "a", "Ver transporte")).toBeUndefined();
+  });
   it("shows the immediate parent and the direct children as links to their detail, and nothing else", async () => {
     const get = vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { parentPostId: itineraryId(3) }, parent: summary(3), children: [summary(7), summary(6, { description: null })] })));
     const { container } = await open(get);
