@@ -4,6 +4,7 @@ import { Button, Feedback, List, ListItem, LoadingState } from "../components/in
 import type { TripFailure } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectItineraryView, type ItineraryViewItem } from "./trip-itinerary-view.js";
+import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey, type ExpenseTotals } from "./expense-format.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityClock, formatActivityRange } from "./activity-time-format.js";
 import { ActivityDialog, type ActivityDialogRequest } from "./ActivityDialog.js";
@@ -25,7 +26,21 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
-const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+/** Attribution of an expense as the server read it: where it was counted (activity or publication) and when it happened. */
+type Attribution = { source: "activity" | "publication"; occurredAt: string; publishedAt: string };
+/** Per currency, never mixed; amounts with no currency are counted but not added. */
+function ExpenseLines({ totals, empty }: { totals: ExpenseTotals; empty?: string }) {
+  return <>
+    {totals.byCurrency.map((entry) => <p className="itinerary-expense-total" key={entry.currency} data-expense-currency={entry.currency}>
+      <strong>{formatCents(entry.totalCents, entry.currency)}</strong> · <span>{plural(entry.expenseCount, "gasto", "gastos")}</span></p>)}
+    {totals.withoutCurrency.expenseCount > 0 ? <p className="itinerary-expense-total itinerary-expense-total--no-currency">
+      {plural(totals.withoutCurrency.expenseCount, "gasto sin moneda indicada", "gastos sin moneda indicada")} (no se suman)</p> : null}
+    {totals.invalidAmount.expenseCount > 0 ? <p className="itinerary-expense-total itinerary-expense-total--no-currency">
+      {plural(totals.invalidAmount.expenseCount, "gasto con importe no válido", "gastos con importe no válido")} (no se suman)</p> : null}
+    {totals.expenseCount === 0 && empty ? <p>{empty}</p> : null}
+  </>;
+}
 
 export function TripItineraryScreen({ itinerary, activities, participations, members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
@@ -152,7 +167,14 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const missingActivity = state.kind === "ready" && activities !== undefined && creating === undefined && urlActivity !== undefined && !removedIds.current.has(urlActivity) && !state.value.activities.some((a) => a.id === urlActivity) ? urlActivity : undefined;
   useEffect(() => { if (missingActivity) onRemoved(missingActivity, "gone"); }, [missingActivity]); // eslint-disable-line react-hooks/exhaustive-deps
   const setTab = (next: ActivityTab) => updateParams((params) => { params.set("tab", next); });
-  const { days, outsidePosts } = state.kind === "ready" ? projectItineraryView(state.value, timeZone) : { days: [], outsidePosts: [] };
+  const view = useMemo(() => state.kind === "ready" ? projectItineraryView(state.value, timeZone) : undefined, [state, timeZone]);
+  const { days, outsidePosts } = view ?? { days: [], outsidePosts: [] };
+  const attributions = useMemo(() => new Map((state.kind === "ready" ? state.value.expenses : []).map((row) => [row.postId, row as Attribution] as const)), [state]);
+  const outsideExpensesRef = useRef<HTMLElement>(null);
+  const showOutsideExpenses = () => {
+    outsideExpensesRef.current?.focus({ preventScroll: true });
+    outsideExpensesRef.current?.scrollIntoView?.({ block: "start" });
+  };
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
@@ -180,6 +202,11 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
+      {state.kind === "ready" && view && view.tripExpenses.expenseCount > 0 ? <section className="itinerary-trip-expenses" aria-labelledby="itinerary-trip-expenses">
+        <h2 id="itinerary-trip-expenses">Gastos del viaje</h2>
+        <ExpenseLines totals={view.tripExpenses} />
+        {view.outsideExpensePosts.length > 0 ? <Button onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
+      </section> : null}
       {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
         <h2>Todavía no hay itinerario</h2>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
@@ -202,7 +229,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
                 ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setCreating({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone}
+                {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
                   disabled={refreshing} onActivity={activities ? openDetail : undefined} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
@@ -210,16 +237,26 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
           </div>
           <div className="itinerary-expenses" data-itinerary-expenses>
             <p><strong>Gastos del día</strong><span>{state.value.expenseMode === "balance" ? "Modo balance" : "Modo registro"}</span></p>
-            {day.expenseSummary.expenseCount > 0 ? <p className="itinerary-expense-total"><strong>{amount(day.expenseSummary.totalAmount)}</strong>
-              <span>{day.expenseSummary.expenseCount} {day.expenseSummary.expenseCount === 1 ? "gasto registrado" : "gastos registrados"}</span></p>
-              : <p>Sin gastos registrados.</p>}
+            <ExpenseLines totals={day.expenseSummary} empty="Sin gastos registrados." />
           </div>
         </section>)}
       </div> : null}
       {state.kind === "ready" && outsidePosts.length > 0 ? <section className="itinerary-outside-posts" aria-labelledby="itinerary-outside-posts">
         <h2 id="itinerary-outside-posts">Publicaciones fuera del itinerario</h2>
         <List className="itinerary-posts">
-          {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId ?? ""} post={post} publication={publication} /></ListItem>)}
+          {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId ?? ""} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
+        </List>
+      </section> : null}
+      {state.kind === "ready" && view && view.outsideExpensePosts.length > 0 ? <section ref={outsideExpensesRef} tabIndex={-1} className="itinerary-outside-expenses" aria-labelledby="itinerary-outside-expenses">
+        <h2 id="itinerary-outside-expenses">Gastos fuera del itinerario</h2>
+        <ExpenseLines totals={view.outsideExpenses} />
+        <List className="itinerary-posts">
+          {view.outsideExpensePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-outside-expense={post.id}>
+            <p className="itinerary-post-description"><PostLink tripId={tripId ?? ""} postId={post.id} anchor={itineraryAnchor(post.id)} label="itinerario">
+              {post.description ?? "Post sin descripción."}</PostLink></p>
+            <p className="itinerary-post-expense"><strong>{formatExpenseAmount(post.expense!)}</strong>{post.expense!.breakdown ? <span>{post.expense!.breakdown}</span> : null}</p>
+            <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
+          </ListItem>)}
         </List>
       </section> : null}
       {state.kind === "ready" && confirmingId && confirming?.kind === "ready" && confirming.confirming ? <div className="participation-conflict-layer"><ParticipationConflictModal
@@ -239,7 +276,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   </main>;
 }
 
-function AgendaItem({ tripId, item, publication, timeZone, onActivity, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+function AgendaItem({ tripId, item, publication, timeZone, attributions, onActivity, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+  attributions: ReadonlyMap<string, Attribution>;
   onActivity?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
   const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
   return <ListItem className="itinerary-item" data-itinerary-item={item.id}>
@@ -251,7 +289,7 @@ function AgendaItem({ tripId, item, publication, timeZone, onActivity, disabled,
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Recuerdos de ${transportLabels[item.transport.type]}`}>
-          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} /></ListItem>)}
+          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List> : null}
       </> : item.kind === "activity" ? <>
         <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
@@ -260,21 +298,24 @@ function AgendaItem({ tripId, item, publication, timeZone, onActivity, disabled,
           {" · "}Duración {formatDuration(item.activity.durationMinutes!)}</p> : null}
         {participation}
         {item.posts.length > 0 ? <List className="itinerary-posts" aria-label={`Posts de ${item.activity.title}`}>
-          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} /></ListItem>)}
+          {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List> : null}
-      </> : <PostSummary tripId={tripId} post={item.post} publication={publication} />}
+      </> : <PostSummary tripId={tripId} post={item.post} publication={publication} timeZone={timeZone} attribution={attributions.get(item.post.id)} />}
     </div>
   </ListItem>;
 }
 
-function PostSummary({ tripId, post, publication }: { tripId: string; post: ItineraryPostResponse; publication: Intl.DateTimeFormat }) {
+function PostSummary({ tripId, post, publication, timeZone, attribution }: { tripId: string; post: ItineraryPostResponse; publication: Intl.DateTimeFormat; timeZone: string; attribution?: Attribution }) {
+  // Only when the expense was counted on an activity of another local day than the publication one.
+  const moved = post.expense !== null && attribution?.source === "activity" && localDayKey(attribution.occurredAt, timeZone) !== localDayKey(attribution.publishedAt, timeZone);
   return <div data-itinerary-post={post.id} tabIndex={-1}>
     <p className="itinerary-post-description"><PostLink tripId={tripId} postId={post.id} anchor={itineraryAnchor(post.id)} label="itinerario">
       {post.description ?? "Post sin descripción."}</PostLink></p>
     <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
     {post.context.rootTransportId !== null ? <p className="itinerary-secondary">Vinculado a transporte</p> : null}
     {post.context.parentPostId !== null ? <p className="itinerary-secondary">Relacionado con otro post</p> : null}
-    {post.expense !== null ? <p className="itinerary-post-expense"><strong>Gasto: {amount(post.expense.totalAmount)}</strong>
+    {post.expense !== null ? <p className="itinerary-post-expense"><strong>Gasto: {formatExpenseAmount(post.expense)}</strong>
       {post.expense.breakdown ? <span>{post.expense.breakdown}</span> : null}</p> : null}
+    {moved && attribution ? <p className="itinerary-secondary">Gasto del {formatLocalDate(attribution.occurredAt, timeZone)} · Publicado {formatLocalDate(attribution.publishedAt, timeZone)}</p> : null}
   </div>;
 }

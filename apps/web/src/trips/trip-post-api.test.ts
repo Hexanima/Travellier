@@ -186,3 +186,49 @@ describe("post HTTP adapter with a new activity", () => {
     expect(sent(fetch).body).toEqual({ description: "Texto" });
   });
 });
+
+describe("post HTTP adapter with an expense", () => {
+  const stored = (extra: Record<string, unknown> = {}) => ({ id: itineraryId(40), tripId, postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena",
+    paidBy: null, payments: [], shares: [], createdAt: "2026-09-25T10:00:00.123Z", ...extra });
+  it("creates sending only totalAmount, currency and breakdown, even when payments or shares are forced", async () => {
+    const { api, fetch } = setup({ post: post(), expense: stored() }, 201);
+    const forced = { description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena", payments: [{ amount: 1 }], shares: [{ amount: 1 }], paidBy: itineraryId(2) } } as PostInput;
+    const result = await api.create(tripId, forced);
+    expect(sent(fetch).body).toEqual({ description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena" } });
+    expect(result).toEqual({ ok: true, value: { ...post(), expense: { postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena" } } });
+  });
+  it("updates with a merge-patch that keeps explicit null breakdown and never sends expense: null", async () => {
+    const { api, fetch } = setup({ post: post(), expense: stored({ breakdown: null }) });
+    await api.update(tripId, itineraryId(5), { expense: { breakdown: null } });
+    expect(sent(fetch).body).toEqual({ expense: { breakdown: null } });
+    await api.update(tripId, itineraryId(5), { description: "x", expense: null } as unknown as PostInput);
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ description: "x" });
+  });
+  it("omits undefined keys of the expense", async () => {
+    const { api, fetch } = setup({ post: post(), expense: stored() }, 201);
+    await api.create(tripId, { expense: { totalAmount: 5, currency: "USD", breakdown: undefined } });
+    expect(sent(fetch).body).toEqual({ expense: { totalAmount: 5, currency: "USD" } });
+  });
+  it.each([["missing", undefined], ["of another post", stored({ postId: itineraryId(6) })], ["with an invalid currency", stored({ currency: "BRL" })],
+    ["with a non finite amount", stored({ totalAmount: "25" })]])("is a server failure when an expense was sent and the response expense is %s", async (_name, value) => {
+    expect(await setup({ post: post(), expense: value }, 201).api.create(tripId, { expense: { totalAmount: 1, currency: "ARS" } })).toEqual({ ok: false, error: { kind: "server" } });
+    expect(await setup({ post: post(), expense: value }).api.update(tripId, itineraryId(5), { expense: { totalAmount: 1 } })).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("accepts a legacy expense without currency in the response", async () => {
+    const result = await setup({ post: post(), expense: stored({ currency: null }) }).api.update(tripId, itineraryId(5), { expense: { currency: "EUR" } });
+    expect(result.ok && result.value.expense?.currency).toBe(null);
+  });
+  it("does not require an expense in the response when none was sent", async () => {
+    expect(await setup({ post: post() }, 201).api.create(tripId, { description: "Texto" })).toStrictEqual({ ok: true, value: post() });
+    expect(await setup({ post: post(), expense: stored() }, 201).api.create(tripId, { description: "Texto" })).toStrictEqual({ ok: true, value: post() });
+  });
+  it("keeps the expense validation fields from a 422", async () => {
+    const fields = [{ field: "expense.totalAmount", code: "invalid", message: "x" }, { field: "expense.payments[0].amount", code: "exceeds_total", message: "y" }];
+    expect(await setup({ error: { code: "ValidationError", message: "x", fields } }, 422).api.update(tripId, itineraryId(5), { expense: { totalAmount: 1 } }))
+      .toEqual({ ok: false, error: { kind: "validation", fields } });
+  });
+  it("maps a 409 ExpenseConflictError to a generic server failure", async () => {
+    expect(await setup({ error: { code: "ExpenseConflictError", message: "x" } }, 409).api.create(tripId, { expense: { totalAmount: 1, currency: "ARS" } }))
+      .toEqual({ ok: false, error: { kind: "server" } });
+  });
+});

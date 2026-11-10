@@ -1,0 +1,155 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
+import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
+import { TripItineraryScreen } from "./TripItineraryScreen.js";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const roots: ReturnType<typeof createRoot>[] = [];
+afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
+const BA = "America/Argentina/Buenos_Aires";
+const fixture = () => itineraryFixture() as TripItineraryResponse;
+async function render(value: TripItineraryResponse, timeZone = BA) {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${itineraryId(1)}/itinerary`]}>
+    <Routes><Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get: vi.fn().mockResolvedValue({ ok: true, value }) } as TripItineraryApi} timeZone={timeZone} />} /></Routes>
+  </MemoryRouter>));
+  return container;
+}
+const second = (value: TripItineraryResponse, n: number, extra: Partial<NonNullable<TripItineraryResponse["posts"][number]["expense"]>>, createdAt = "2026-09-25T14:30:00.000Z") => {
+  const post = { ...fixture().posts[0], id: itineraryId(n), description: "Taxi", createdAt, expense: { ...fixture().posts[0].expense!, id: itineraryId(n + 100), postId: itineraryId(n), ...extra } };
+  value.posts.push(post);
+  return post;
+};
+const tripSection = (container: HTMLElement) => container.querySelector('section[aria-labelledby="itinerary-trip-expenses"]');
+const outsideSection = (container: HTMLElement) => container.querySelector<HTMLElement>('section[aria-labelledby="itinerary-outside-expenses"]');
+const dayExpenses = (container: HTMLElement) => container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')!;
+const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
+const button = (container: ParentNode, prefix: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.startsWith(prefix));
+
+describe("itinerary screen expenses", () => {
+  it("summarizes the Trip by currency at the top and offers no outside shortcut when nothing is outside", async () => {
+    const container = await render(fixture());
+    expect(tripSection(container)?.querySelector("h2")?.textContent).toBe("Gastos del viaje");
+    expect(tripSection(container)?.textContent).toContain("ARS 25,50 · 1 gasto");
+    expect(button(container, "Ver gastos fuera del itinerario")).toBeUndefined();
+    expect(outsideSection(container)).toBeNull();
+  });
+  it("shows no Trip expenses section without expenses, and the day says so", async () => {
+    const value = fixture(); value.posts[0].expense = null;
+    const container = await render(value);
+    expect(tripSection(container)).toBeNull();
+    expect(dayExpenses(container).textContent).toContain("Sin gastos registrados.");
+  });
+  it("keeps currencies apart in the Trip and in the day, one line each, in ARS, EUR, USD order", async () => {
+    const value = fixture();
+    value.posts[0].expense!.currency = "USD";
+    second(value, 41, { totalAmount: 10.5, currency: "ARS" });
+    second(value, 42, { totalAmount: 3, currency: "ARS" });
+    second(value, 43, { totalAmount: 2, currency: "EUR" });
+    const container = await render(value);
+    for (const scope of [tripSection(container)!, dayExpenses(container)]) {
+      expect(Array.from(scope.querySelectorAll("[data-expense-currency]")).map((line) => line.textContent))
+        .toEqual(["ARS 13,50 · 2 gastos", "EUR 2,00 · 1 gasto", "USD 25,50 · 1 gasto"]);
+    }
+  });
+  it("counts an expense without currency apart and shows its amount flagged, never summing or assuming ARS", async () => {
+    const value = fixture();
+    value.posts[0].expense!.currency = null;
+    const container = await render(value);
+    expect(tripSection(container)?.textContent).toContain("1 gasto sin moneda indicada (no se suman)");
+    expect(tripSection(container)?.querySelector("[data-expense-currency]")).toBeNull();
+    expect(dayExpenses(container).textContent).toContain("1 gasto sin moneda indicada (no se suman)");
+    expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] .itinerary-post-expense strong`)?.textContent).toBe("Gasto: 25,50 (moneda sin indicar)");
+  });
+  it("labels an amount that cannot be represented as invalid, not as a missing currency, and never sums it", async () => {
+    const value = fixture();
+    value.posts[0].expense!.totalAmount = -5;
+    const container = await render(value);
+    expect(tripSection(container)?.textContent).toContain("1 gasto con importe no válido (no se suman)");
+    expect(tripSection(container)?.textContent).not.toContain("sin moneda");
+    expect(tripSection(container)?.querySelector("[data-expense-currency]")).toBeNull();
+    expect(dayExpenses(container).textContent).toContain("1 gasto con importe no válido (no se suman)");
+    expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] .itinerary-post-expense strong`)?.textContent).toBe("Gasto: importe no válido (ARS)");
+  });
+  it("lists the expenses outside the itinerary with a link to the post and moves the focus there from the Trip summary", async () => {
+    const value = fixture();
+    value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    value.posts[0].expense!.currency = "EUR";
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    const container = await render(value);
+    expect(tripSection(container)?.textContent).toContain("EUR 25,50 · 1 gasto");
+    const section = outsideSection(container)!;
+    expect(section.querySelector("h2")?.textContent).toBe("Gastos fuera del itinerario");
+    const item = section.querySelector(`[data-outside-expense="${itineraryId(10)}"]`)!;
+    expect(item.querySelector("a")?.getAttribute("href")).toBe(`/trips/${itineraryId(1)}/memories/${itineraryId(10)}`);
+    expect(item.textContent).toContain("Almuerzo junto al río");
+    expect(item.textContent).toContain("EUR 25,50");
+    expect(item.textContent).toContain("Almuerzo");
+    expect(item.textContent).toContain("Publicado");
+    expect(dayExpenses(container).textContent).toContain("Sin gastos registrados.");
+    const shortcut = button(container, "Ver gastos fuera del itinerario (1)");
+    expect(shortcut).toBeDefined();
+    await click(shortcut);
+    expect(document.activeElement).toBe(section);
+    expect(section.getAttribute("tabindex")).toBe("-1");
+    expect(scroll).toHaveBeenCalledTimes(1);
+  });
+  it("works without scrollIntoView (it is not available everywhere)", async () => {
+    const value = fixture(); value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView = undefined;
+    const container = await render(value);
+    await click(button(container, "Ver gastos fuera del itinerario"));
+    expect(document.activeElement).toBe(outsideSection(container));
+  });
+  it("counts every outside expense in the shortcut and keeps the one-render-per-post rule for the memory itself", async () => {
+    const value = fixture();
+    value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    second(value, 41, { totalAmount: 1, currency: "USD" }, "2026-11-01T12:00:00.000Z");
+    const container = await render(value);
+    expect(button(container, "Ver gastos fuera del itinerario (2)")).toBeDefined();
+    expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(10)}"]`)).toHaveLength(1);
+    expect(outsideSection(container)?.querySelectorAll("[data-outside-expense]")).toHaveLength(2);
+  });
+  it("lists a transport post published outside the trip dates among the outside expenses", async () => {
+    const value = fixture();
+    value.posts[1].createdAt = "2027-01-01T12:00:00.000Z";
+    value.posts[1].expense = { ...value.posts[0].expense!, id: itineraryId(44), postId: value.posts[1].id, totalAmount: 7 };
+    const container = await render(value);
+    expect(outsideSection(container)?.querySelector(`[data-outside-expense="${itineraryId(11)}"]`)).not.toBeNull();
+    expect(dayExpenses(container).textContent).toContain("ARS 25,50 · 1 gasto");
+  });
+
+  describe("attributed date", () => {
+    const attributed = (occurredAt: string, publishedAt: string, source: "activity" | "publication" = "activity") => {
+      const value = fixture();
+      linkPost(value.posts[0], { activityId: itineraryId(8) });
+      value.activities[0].postIds = [itineraryId(10)];
+      value.posts[0].createdAt = publishedAt;
+      value.expenses[0] = { ...value.expenses[0]!, source, rootActivityId: itineraryId(8), occurredAt, publishedAt };
+      return value;
+    };
+    const line = (container: HTMLElement) => container.querySelector(`[data-itinerary-post="${itineraryId(10)}"]`)?.textContent ?? "";
+    it("shows the expense date and the publication date when the activity day differs from the publication day", async () => {
+      const container = await render(attributed("2026-09-25T12:00:00.123Z", "2026-09-26T15:00:00.000Z"));
+      expect(line(container)).toMatch(/Gasto del 25 .* 2026 · Publicado 26 .* 2026/);
+    });
+    it.each([[BA, false], ["UTC", true]])("compares the local day in %s, not the UTC one (01:30Z vs 13:00Z of the day before)", async (zone, shown) => {
+      const container = await render(attributed("2026-09-26T01:30:00.000Z", "2026-09-25T13:00:00.000Z"), zone);
+      expect(line(container).includes("Gasto del")).toBe(shown);
+    });
+    it("shows nothing when both dates are the same day", async () => {
+      const container = await render(attributed("2026-09-25T12:00:00.123Z", "2026-09-25T15:00:00.000Z"));
+      expect(line(container)).not.toContain("Gasto del");
+    });
+    it("shows nothing for an expense counted on its publication", async () => {
+      const container = await render(attributed("2026-09-25T12:00:00.123Z", "2026-09-26T15:00:00.000Z", "publication"));
+      expect(line(container)).not.toContain("Gasto del");
+    });
+  });
+});

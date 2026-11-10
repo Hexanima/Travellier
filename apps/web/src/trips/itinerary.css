@@ -36,6 +36,12 @@
 .itinerary-expenses span { display: block; color: #526270; font-size: .875rem; margin-top: 4px; }
 .itinerary-expense-total { text-align: right; }
 .itinerary-expense-total strong { font-size: 1.25rem; }
+.itinerary-expenses { flex-wrap: wrap; }
+.itinerary-expenses .itinerary-expense-total span { display: inline; margin-top: 0; }
+.itinerary-trip-expenses, .itinerary-outside-expenses { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--ui-color-border); }
+.itinerary-trip-expenses p, .itinerary-outside-expenses p { margin: 0; line-height: 1.45; }
+.itinerary-trip-expenses .itinerary-expense-total, .itinerary-outside-expenses > .itinerary-expense-total { text-align: left; }
+.itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-primary, currentColor); outline-offset: 4px; }
 .itinerary-shell ::selection { color: #fff; background: var(--ui-color-accent); }
 .activity-create { margin-bottom: var(--ui-space-4); }
 .activity-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
@@ -87,6 +93,8 @@
 .memory-detail .memory-actions { display: flex; flex-wrap: wrap; gap: 16px; }
 .memory-detail > .ui-button { align-self: flex-start; }
 .post-link-section, .post-link-transport, .post-link-panel { display: grid; gap: 8px; }
+.post-link-section, .post-expense-section { display: grid; gap: 8px; }
+.post-expense-section p { margin: 0; }
 .post-link-section p, .post-link-transport p { margin: 0; }
 .post-link-options { display: grid; gap: 4px; }
 .post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }

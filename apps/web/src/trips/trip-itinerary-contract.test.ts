@@ -101,18 +101,22 @@ describe("itinerary contract with the real read model", () => {
     // The removed activity's chain is now projected by publication.
     expect(items.filter((item) => item.kind === "post").map((item) => item.id)).toEqual(expect.arrayContaining([id(38), id(39), id(35), id(36)]));
   });
-  it("adds up the same expenses as the server, except those without a day", async () => {
+  it("adds up the same expenses per currency as the server in UTC, and lists the ones without a day apart", async () => {
     const { itinerary, result } = await read();
     if (!result.ok) throw new Error("rejected");
     const view = projectItineraryView(result.value, "UTC");
-    const sum = (summaries: { totalAmount: number; expenseCount: number }[]) =>
-      ({ totalAmount: summaries.reduce((total, s) => total + s.totalAmount, 0), expenseCount: summaries.reduce((count, s) => count + s.expenseCount, 0) });
     const unplaced = (itinerary.unplacedPosts as TripItineraryResponse["posts"]).filter((post) => post.expense !== null);
-    // The server totals in cents per currency (all ARS here); the local view still adds decimals.
-    const server = { totalAmount: itinerary.days.reduce((total, day) => total + day.expenseSummary.byCurrency.reduce((cents, c) => cents + c.totalCents, 0), 0) / 100,
-      expenseCount: itinerary.days.reduce((count, day) => count + day.expenseSummary.expenseCount, 0) };
-    expect(sum(view.days.map((day) => day.expenseSummary))).toEqual(server);
-    expect(sum(view.days.map((day) => day.expenseSummary))).toEqual({ totalAmount: 27, expenseCount: 4 });
+    // Local days in UTC are the server's canonical slices: same totals per currency, in cents.
+    const cents = (days: { expenseSummary: { byCurrency: { currency: string; totalCents: number }[]; expenseCount: number } }[]) =>
+      ({ ars: days.reduce((total, day) => total + (day.expenseSummary.byCurrency.find((entry) => entry.currency === "ARS")?.totalCents ?? 0), 0),
+        expenseCount: days.reduce((count, day) => count + day.expenseSummary.expenseCount, 0) });
+    expect(cents(view.days)).toEqual(cents(itinerary.days));
+    expect(cents(view.days)).toEqual({ ars: 2700, expenseCount: 4 });
+    // Only what no day claims is listed outside, and the Trip total is days plus outside.
+    expect(view.outsideExpensePosts.map((post) => post.id)).toEqual(unplaced.map((post) => post.id));
+    expect(view.outsideExpenses.byCurrency).toEqual([{ currency: "ARS", totalCents: 10000, expenseCount: 1 }]);
+    expect(view.tripExpenses.byCurrency).toEqual([{ currency: "ARS", totalCents: 12700, expenseCount: 5 }]);
+    expect(itinerary.expenseSummary.outsideItinerary.expenseCount).toBe(1);
     expect(unplaced.map((post) => post.expense!.totalAmount)).toEqual([100]);
   });
 });
@@ -170,7 +174,7 @@ describe("itinerary contract after removing an activity (T55 persistence contrac
     if (!kept.result.ok || !removed.result.ok) throw new Error("rejected");
     const totals = (value: TripItineraryResponse) => view(value).days.map((day) => day.expenseSummary);
     expect(totals(removed.result.value)).toEqual(totals(kept.result.value));
-    expect(totals(removed.result.value).reduce((sum, day) => sum + day.totalAmount, 0)).toBe(27);
+    expect(view(removed.result.value).tripExpenses.byCurrency).toEqual([{ currency: "ARS", totalCents: 12700, expenseCount: 5 }]);
     expect(removed.result.value.posts.find((post) => post.id === id(32))!.expense).toMatchObject({ totalAmount: 12 });
   });
 });

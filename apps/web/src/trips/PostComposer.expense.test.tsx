@@ -1,0 +1,335 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExpenseForm } from "./ExpenseForm.js";
+import { PostComposer } from "./PostComposer.js";
+import { PostLinkPicker } from "./PostLinkPicker.js";
+import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
+import { MemoriesLayout } from "./TripMemoriesScreen.js";
+import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
+import type { PostResponse } from "./trip-post-api.js";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const roots: ReturnType<typeof createRoot>[] = [];
+afterEach(async () => { vi.useRealTimers(); await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
+const zone = "America/Argentina/Buenos_Aires";
+const tripId = itineraryId(1), withExpenseId = itineraryId(10), withoutExpenseId = itineraryId(11);
+const saved = (id: string, extra: Partial<PostResponse> = {}): PostResponse => ({ id, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
+  activityId: null, parentPostId: null, transportId: null, createdAt: "2026-09-25T13:00:00.123Z", ...extra });
+function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
+type Mocks = Partial<Record<"create" | "update" | "itineraryGet", ReturnType<typeof vi.fn>>>;
+async function render(path: string, mocks: Mocks = {}) {
+  const itineraryGet = mocks.itineraryGet ?? vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() });
+  const itinerary = { get: itineraryGet };
+  const create = mocks.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved(itineraryId(60)) });
+  const update = mocks.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved(withExpenseId) });
+  const get = vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null } }));
+  const composer = <PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone={zone} />;
+  const expenseForm = <ExpenseForm itinerary={itinerary} />;
+  const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={zone} spontaneousActivity />;
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
+    <nav><Link to={`/trips/${tripId}/memories/new/activity`}>nav-activity</Link></nav><Routes>
+    <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
+      <Route index element={<Listing />} />
+      <Route path="new" element={composer} /><Route path=":postId/edit" element={composer} />
+      <Route path="new/link" element={picker} /><Route path=":postId/edit/link" element={picker} />
+      <Route path="new/expense" element={expenseForm} /><Route path=":postId/edit/expense" element={expenseForm} />
+      <Route path="new/activity" element={<SpontaneousActivityForm itinerary={itinerary} timeZone={zone} />} />
+    </Route></Routes></MemoryRouter>));
+  return { container, create, update, itineraryGet };
+}
+async function type(container: HTMLElement, name: string, value: string) {
+  const element = container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLTextAreaElement;
+  expect(element, `Field ${name}`).not.toBeNull();
+  const proto = element.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  await act(async () => { Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
+}
+const choose = async (container: HTMLElement, value: string) => {
+  const element = container.querySelector('select[name="currency"]') as HTMLSelectElement;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("change", { bubbles: true })); });
+};
+const submit = async (container: HTMLElement) => act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+const button = (container: ParentNode, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
+const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
+const expenseButton = (container: HTMLElement) => container.querySelector('button[name="expense"]') as HTMLButtonElement;
+const alerts = (container: HTMLElement) => Array.from(container.querySelectorAll('[role="alert"]')).map((item) => item.textContent);
+const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
+const newPath = `/trips/${tripId}/memories/new`, editPath = (id: string) => `/trips/${tripId}/memories/${id}/edit`;
+/** Opens the subform from the composer, fills it and accepts: back in the composer. */
+async function addExpense(container: HTMLElement, amount = "25,50", currency = "ARS", breakdown = "") {
+  await click(expenseButton(container));
+  await type(container, "amount", amount); await choose(container, currency);
+  if (breakdown) await type(container, "breakdown", breakdown);
+  await click(button(container, "Aceptar"));
+}
+
+describe("PostComposer expense (create)", () => {
+  it("shows an empty Gasto section with Agregar gasto and nothing to remove", async () => {
+    const { container, itineraryGet } = await render(newPath);
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("Sin gasto");
+    expect(expenseButton(container).textContent).toBe("Agregar gasto");
+    expect(button(container, "Quitar gasto")).toBeUndefined();
+    expect(itineraryGet).not.toHaveBeenCalled();
+  });
+  it("opens the subform keeping the typed text, and comes back with the summary, the focus on the button and the draft intact", async () => {
+    const { container } = await render(newPath);
+    await type(container, "description", "Cena rica");
+    await addExpense(container, "25,5", "ARS", "vino");
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Cena rica");
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("Gasto: ARS 25,50 · vino");
+    expect(expenseButton(container).textContent).toBe("Editar gasto");
+    expect(document.activeElement).toBe(expenseButton(container));
+    // Entering again preloads what was typed.
+    await click(expenseButton(container));
+    expect((container.querySelector('[name="amount"]') as HTMLInputElement).value).toBe("25,5");
+    await click(button(container, "Cancelar"));
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+  });
+  it("removes a new expense and gives the focus to the button", async () => {
+    const { container } = await render(newPath);
+    await addExpense(container);
+    await click(button(container, "Quitar gasto"));
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("Sin gasto");
+    expect(expenseButton(container).textContent).toBe("Agregar gasto");
+    expect(button(container, "Quitar gasto")).toBeUndefined();
+  });
+  it("Descartar after adding an expense discards it with the draft", async () => {
+    const { container } = await render(newPath);
+    await type(container, "description", "Cena");
+    await addExpense(container);
+    await click(button(container, "Cancelar"));
+    await click(button(container, "Descartar"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("publishes text and expense in a single POST", async () => {
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Cena rica");
+    await addExpense(container, "25,50", "EUR", "vino");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Cena rica", expense: { totalAmount: 25.5, currency: "EUR", breakdown: "vino" } });
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("publishes text, a new activity and an expense in a single POST", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-09-25T15:30:00.000Z"));
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Cena rica");
+    await addExpense(container);
+    await click(Array.from(container.querySelectorAll("a")).find((link) => link.textContent === "nav-activity"));
+    await type(container, "title", "Cena");
+    await click(button(container, "Aceptar"));
+    expect(container.querySelector("#post-link-summary")?.textContent).toContain("Actividad nueva: Cena");
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+    await submit(container);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]![1]).toEqual({ description: "Cena rica", newActivity: { title: "Cena", scheduledAt: "2026-09-25T15:30:00.000Z" }, expense: { totalAmount: 25.5, currency: "ARS" } });
+  });
+  it("an expense alone does not count as content", async () => {
+    const { container, create } = await render(newPath);
+    await addExpense(container);
+    await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(alerts(container)).toEqual(["Escribí un texto o agregá una ubicación."]);
+  });
+  it("a network failure keeps the draft, warns to check before retrying and a retry sends the same input", async () => {
+    const create = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce({ ok: true, value: saved(itineraryId(60)) });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Cena");
+    await addExpense(container);
+    await submit(container);
+    expect(container.textContent).toContain("Revisá tus recuerdos antes de reintentar");
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+    await submit(container);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[1]![1]).toEqual(create.mock.calls[0]![1]);
+  });
+  it("is a server failure, not a success, when the response does not confirm the expense", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "server" } });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Cena");
+    await addExpense(container);
+    await submit(container);
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+  });
+  it.each([
+    [[{ field: "expense.totalAmount", code: "invalid", message: "x" }], "Revisá el importe del gasto."],
+    [[{ field: "expense.totalAmount", code: "required", message: "x" }], "Revisá el importe del gasto."],
+    [[{ field: "expense.currency", code: "required", message: "x" }], "Elegí la moneda del gasto."],
+    [[{ field: "expense.currency", code: "invalid", message: "x" }], "Elegí la moneda del gasto."],
+    [[{ field: "expense.breakdown", code: "invalid", message: "x" }], "No pudimos guardar el gasto. Revisá sus datos."],
+  ])("maps a 422 %j to one alert and focuses the expense button, keeping the draft", async (fields, message) => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields } });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Cena");
+    await addExpense(container);
+    await submit(container);
+    expect(alerts(container)).toEqual([message]);
+    expect(document.activeElement).toBe(expenseButton(container));
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+    expect(container.querySelector("[aria-live]")).toBeNull();
+  });
+});
+
+describe("PostComposer expense (edit)", () => {
+  it("while the saved expense loads the button is aria-disabled without losing focus, the text stays editable and the message is shown", async () => {
+    const pending = deferred<unknown>();
+    const { container, update } = await render(editPath(withExpenseId), { itineraryGet: vi.fn().mockReturnValue(pending.promise) });
+    expect(container.querySelector('section[aria-label="Gasto"] [role="status"]')?.textContent).toContain("Cargando gasto");
+    expect(expenseButton(container).getAttribute("aria-disabled")).toBe("true");
+    expect(expenseButton(container).disabled).toBe(false);
+    expenseButton(container).focus();
+    await click(expenseButton(container));
+    expect(document.activeElement).toBe(expenseButton(container));
+    expect(container.querySelector('input[name="amount"]')).toBeNull();
+    await type(container, "description", "Editado");
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Editado");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado" });
+  });
+  it("shows the saved expense once loaded, offers Editar gasto and says it cannot be removed", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    const section = container.querySelector('section[aria-label="Gasto"]')!;
+    expect(section.textContent).toContain("Gasto: ARS 25,50 · Almuerzo");
+    expect(expenseButton(container).textContent).toBe("Editar gasto");
+    expect(expenseButton(container).getAttribute("aria-disabled")).toBeNull();
+    expect(button(container, "Quitar gasto")).toBeUndefined();
+    expect(section.textContent).toContain("El gasto guardado no se puede quitar");
+  });
+  it("a memory without expense offers Agregar gasto", async () => {
+    const { container } = await render(editPath(withoutExpenseId));
+    expect(expenseButton(container).textContent).toBe("Agregar gasto");
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("Sin gasto");
+  });
+  it("an itinerary error shows a single alert with Reintentar and recovers; the text stays editable", async () => {
+    const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce({ ok: true, value: itineraryFixture() });
+    const { container } = await render(editPath(withExpenseId), { itineraryGet });
+    expect(alerts(container)).toHaveLength(1);
+    expect(alerts(container)[0]).toContain("No pudimos cargar el gasto");
+    expect(expenseButton(container).getAttribute("aria-disabled")).toBe("true");
+    await type(container, "description", "Editado");
+    await click(button(container, "Reintentar"));
+    expect(itineraryGet).toHaveBeenCalledTimes(2);
+    expect(alerts(container)).toEqual([]);
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 25,50");
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Editado");
+  });
+  it("a rejected itinerary request is an error too", async () => {
+    const { container } = await render(editPath(withExpenseId), { itineraryGet: vi.fn().mockRejectedValue(new Error("down")) });
+    expect(alerts(container)[0]).toContain("No pudimos cargar el gasto");
+  });
+  it("changing only the expense saves it in a PATCH with just the changed keys, and keeps payments out of it", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await click(expenseButton(container));
+    expect((container.querySelector('[name="amount"]') as HTMLInputElement).value).toBe("25,50");
+    await type(container, "amount", "30");
+    await click(button(container, "Aceptar"));
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 30,00");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: { totalAmount: 30 } });
+  });
+  it("saves text and expense together in one PATCH", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await type(container, "description", "Editado");
+    await click(expenseButton(container));
+    await type(container, "breakdown", "Almuerzo y postre");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado", expense: { breakdown: "Almuerzo y postre" } });
+  });
+  it("adding an expense to a memory without one sends the whole expense", async () => {
+    const { container, update } = await render(editPath(withoutExpenseId));
+    await addExpense(container, "10", "USD");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withoutExpenseId, { expense: { totalAmount: 10, currency: "USD" } });
+  });
+  it("opening the subform and accepting without changes sends nothing", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await click(expenseButton(container));
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("No hay cambios para guardar.");
+  });
+  it("Cancelar with no expense change does not ask to discard", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    await click(expenseButton(container));
+    await click(button(container, "Aceptar"));
+    await click(button(container, "Cancelar"));
+    expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+  });
+  it("Cancelar with a changed expense asks before discarding", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    await click(expenseButton(container));
+    await type(container, "amount", "30"); await click(button(container, "Aceptar"));
+    await click(button(container, "Cancelar"));
+    expect(document.body.textContent).toContain("Descartar cambios");
+  });
+  it("a payments conflict (exceeds_total) shows its specific message, keeps the draft and focuses the button", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.payments", code: "exceeds_total", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { update });
+    await click(expenseButton(container));
+    await type(container, "amount", "1"); await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)).toEqual(["El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en pagos y reparto (próximamente)."]);
+    expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 1,00");
+    expect(document.activeElement).toBe(expenseButton(container));
+  });
+  it("a shares conflict uses the same message", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.shares[0].amount", code: "exceeds_total", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { update });
+    await click(expenseButton(container));
+    await type(container, "amount", "1"); await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)[0]).toContain("pagos o partes fijas");
+  });
+  it("sends no expense when the draft expense is not confirmed against the saved one (still loading)", async () => {
+    const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: true, value: itineraryFixture() }).mockResolvedValueOnce({ ok: true, value: itineraryFixture() }).mockReturnValue(new Promise(() => undefined));
+    const { container, update } = await render(editPath(withExpenseId), { itineraryGet });
+    await click(expenseButton(container));
+    await type(container, "amount", "30"); await click(button(container, "Aceptar"));
+    await submit(container);
+    // Back from the subform the composer reads the saved expense again: until it is ready the change is not sent.
+    expect(update).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Esperá a que cargue el gasto guardado");
+  });
+
+  describe("attributed date", () => {
+    const withAttribution = (source: "activity" | "publication", occurredAt: string, publishedAt: string) => vi.fn().mockImplementation(async () => {
+      const value = itineraryFixture();
+      value.expenses[0] = { ...value.expenses[0]!, source, occurredAt, publishedAt };
+      return { ok: true, value };
+    });
+    it("shows both dates, read only, when the attributed local day differs from the publication one", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("activity", "2026-09-26T15:00:00.000Z", "2026-09-25T13:00:00.123Z") });
+      const text = container.querySelector('section[aria-label="Gasto"]')!.textContent!;
+      expect(text).toMatch(/Gasto atribuido al 26 .* 2026 \(actividad\) · Publicado el 25 .* 2026/);
+    });
+    it("compares the local day, not the UTC one: 01:30Z and 23:00Z of the day before are the same local day", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("activity", "2026-09-26T01:30:00.000Z", "2026-09-25T13:00:00.123Z") });
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
+    });
+    it("shows nothing when the attribution is by publication, even if the days differ", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("publication", "2026-09-26T15:00:00.000Z", "2026-09-25T13:00:00.123Z") });
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
+    });
+    it("stops showing the saved attribution once the draft changes the link, since it is recalculated on save", async () => {
+      const { container } = await render(editPath(withExpenseId), { itineraryGet: withAttribution("activity", "2026-09-26T15:00:00.000Z", "2026-09-25T13:00:00.123Z") });
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).toContain("Gasto atribuido");
+      await click(button(container, "Vincular a"));
+      const radio = (label: string) => Array.from(container.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector('input[type="radio"]');
+      await click(radio("Actividad")); await click(radio("Paseo por el centro")); await click(button(container, "Aceptar"));
+      const section = container.querySelector('section[aria-label="Gasto"]')!.textContent!;
+      expect(section).not.toContain("Gasto atribuido");
+      expect(section).toContain("Se recalcula al guardar");
+    });
+    it("shows nothing when both dates are the same day", async () => {
+      const { container } = await render(editPath(withExpenseId));
+      expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
+    });
+  });
+});

@@ -3,11 +3,13 @@ import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
+import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./expense-draft.js";
+import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey } from "./expense-format.js";
 import { PostPhotosSection } from "./PostPhotosSection.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
-import { activityParam, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { activityParam, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -21,6 +23,17 @@ export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" |
 /** A conflict answer waits here for an explicit decision: the same entry is resent with the confirmation, or dropped on cancel. */
 type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfirmation; stale: boolean };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse } | { kind: "error"; error: TripFailure };
+/** The stored expense (and the dates it is attributed to) as read from the itinerary, which is where a post carries it. */
+type ExpenseLoad = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpense; attribution?: { source: "activity" | "publication"; occurredAt: string; publishedAt: string } };
+const expenseNotice = "El gasto guardado no se puede quitar: solo se puede editar.";
+const expenseWaitMessage = "Esperá a que cargue el gasto guardado para guardar los cambios.";
+const exceedsMessage = "El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en pagos y reparto (próximamente).";
+const expenseFieldMessage = (field: string, code: string): string | undefined => {
+  if (/^expense\.(payments|shares)\b/.test(field) && code === "exceeds_total") return exceedsMessage;
+  if (field === "expense.totalAmount" && (code === "invalid" || code === "required")) return "Revisá el importe del gasto.";
+  if (field === "expense.currency" && (code === "invalid" || code === "required")) return "Elegí la moneda del gasto.";
+  return field.startsWith("expense.") ? "No pudimos guardar el gasto. Revisá sus datos." : undefined;
+};
 const missingContentMessage = "Escribí un texto o agregá una ubicación.";
 const missingContentWithPhotosMessage = "Escribí un texto, agregá una ubicación o elegí una foto.";
 const fieldMessages: Record<string, string> = { description: "Revisá el texto del recuerdo.", mapsUrl: "Revisá el link de la ubicación." };
@@ -59,6 +72,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   useEffect(() => { if (returnedPending) clearReturned(); }, [returnedPending, clearReturned]);
   const [notice, setNotice] = useState(entry?.notice ?? "");
   const focusLink = useRef(entry?.focus === "link");
+  const focusExpense = useRef(entry?.focus === "expense");
+  const expenseRef = useRef<HTMLButtonElement>(null);
   const linkRef = useRef<HTMLButtonElement>(null);
   const [loaded, setLoaded] = useState<Loaded>(postId ? { kind: "loading" } : { kind: "ready" });
   const [attempt, setAttempt] = useState(0);
@@ -113,16 +128,20 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   // The fields are disabled while saving: focus the first one with an error once the save has settled.
   useEffect(() => {
     if (!focusPending.current || saving) return;
-    const first = missingContent ? "description" : ["description", "mapsUrl", "link", "activity"].find((name) => errors[name]);
+    const first = missingContent ? "description" : ["description", "mapsUrl", "link", "activity", "expense"].find((name) => errors[name]);
     if (first) formRef.current?.querySelector<HTMLElement>(`[name="${first}"]`)?.focus();
     focusPending.current = false;
   }, [errors, saving, missingContent]);
-  // Back from the selector: the focus returns to the button that opened it.
+  // Back from a subform: the focus returns to the button that opened it.
   useEffect(() => {
-    if (!focusLink.current || loaded.kind !== "ready") return;
-    linkRef.current?.focus(); focusLink.current = false;
+    if (loaded.kind !== "ready") return;
+    if (focusLink.current) { linkRef.current?.focus(); focusLink.current = false; }
+    if (focusExpense.current) { expenseRef.current?.focus(); focusExpense.current = false; }
   }, [loaded.kind]);
 
+  const [expenseLoad, setExpenseLoad] = useState<ExpenseLoad>(postId ? { kind: "loading" } : { kind: "ready" });
+  const [expenseAttempt, setExpenseAttempt] = useState(0);
+  const savedExpense = expenseLoad.kind === "ready" ? expenseLoad.saved : undefined;
   const saved: PostDraft = existing ? draftFromPost(existing) : emptyDraft();
   // A transport preloaded from its detail (creation only) is part of the base (it is not a change); a continuation memory keeps no transport.
   const preloaded = postId ? null : transportParam(location.search);
@@ -135,7 +154,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     : preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
-  const dirty = isDraftDirty(draft, base);
+  // The base carries the stored expense only to compare: the draft keeps `null` («untouched») until the expense is edited.
+  const dirty = isDraftDirty(draft, setExpense(base, savedExpense ? expenseDraftFromSaved(savedExpense) : null));
   const newActivity = draft.extras.newActivity;
   // Async photo work (selection, uploads) changes the draft long after the render that started it: it reads and writes the latest one here.
   const draftRef = useRef(draft);
@@ -154,6 +174,23 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     });
     return itineraryRequest.current;
   };
+  // Editing: read what is stored for the expense (the itinerary is where the post carries it). A failure is shown with a retry, never silent.
+  useEffect(() => {
+    if (!postId || loaded.kind !== "ready" || !tripId) return;
+    let cancelled = false;
+    setExpenseLoad({ kind: "loading" });
+    void loadItinerary().then((value) => {
+      if (cancelled) return;
+      if (!value) { setExpenseLoad({ kind: "error" }); return; }
+      try {
+        const stored = [...value.posts, ...value.unplacedPosts].find((item) => item.id === postId)?.expense;
+        const row = value.expenses.find((item) => item.postId === postId);
+        setExpenseLoad({ kind: "ready", ...(stored ? { saved: { totalAmount: stored.totalAmount, currency: stored.currency, breakdown: stored.breakdown } } : {}),
+          ...(row ? { attribution: { source: row.source, occurredAt: row.occurredAt, publishedAt: row.publishedAt } } : {}) });
+      } catch { setExpenseLoad({ kind: "error" }); }
+    });
+    return () => { cancelled = true; };
+  }, [postId, tripId, loaded.kind, expenseAttempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const wantsItinerary = newActivity !== null;
   useEffect(() => { if (wantsItinerary && tripId) void loadItinerary(); }, [wantsItinerary, tripId]); // eslint-disable-line react-hooks/exhaustive-deps
   const update = (field: "description" | "mapsUrl", value: string) => {
@@ -175,6 +212,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         } else if (field === "photos") mapped.photos ??= photosFieldMessage;
         else if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
         else if (field in fieldMessages) mapped[field] = fieldMessages[field]!;
+        else if (expenseFieldMessage(field, code ?? "")) {
+          // A payments conflict is the most specific answer; otherwise the first expense problem wins.
+          const message = expenseFieldMessage(field, code ?? "")!;
+          if (message === exceedsMessage || mapped.expense === undefined) mapped.expense = message;
+        }
         else if (newActivity !== null && activityMessage(field, code ?? "")) mapped.activity ??= activityMessage(field, code ?? "")!;
       }
       setErrors(mapped); focusPending.current = Object.keys(mapped).some((name) => name !== "photos");
@@ -214,7 +256,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const buildInput = (source: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
     // Same selection as the input's `photos` (uploaded ones, in order): index i of a 422 `photos[i]` is the photo with this id.
     sentPhotoIds.current = source.extras.photos.filter((item) => item.status === "uploaded" && item.key !== undefined).map((item) => item.localId);
-    return existing ? prepareUpdate(source, existing, resolved) : prepareCreate(source, resolved);
+    return existing ? prepareUpdate(source, existing, resolved, savedExpense) : prepareCreate(source, resolved);
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -226,6 +268,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
     if (!hasContent(draft) && (!existing || textChanged)) { setMissingContent(true); focusPending.current = true; return; }
     const resolved = resolveActivity();
     if (resolved === "invalid") return;
+    // A changed expense is a merge-patch against the stored one: it cannot be built until that is known.
+    if (existing && draft.extras.expense !== null && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
     if (!photos || draft.extras.photos.length === 0) {
       const input = buildInput(draft, resolved);
       if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
@@ -263,6 +307,14 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   // The draft is materialized first: in an edit it does not exist until something changes, and the selector needs it.
   const openPicker = () => { handle.setDraft(draft); navigate(`${composerPath}/link${location.search}`, { state: { fromComposer: true } }); };
   const openActivity = () => { handle.setDraft(draft); navigate(`${composerPath}/activity${location.search}`, { state: { fromComposer: true } }); };
+  const openExpense = () => {
+    if (expenseLoad.kind !== "ready") return;
+    handle.setDraft(draft); navigate(`${composerPath}/expense${location.search}`, { state: { fromComposer: true } });
+  };
+  const removeExpense = () => {
+    handle.setDraft(setExpense(draft, null)); setNotice(""); setErrors((current) => { const next = { ...current }; delete next.expense; return next; });
+    expenseRef.current?.focus();
+  };
   const removeActivity = () => {
     handle.setDraft(setNewActivity(draft, null)); setNotice(""); setErrors((current) => { const next = { ...current }; delete next.activity; return next; });
     linkRef.current?.focus();
@@ -290,6 +342,17 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const conflictAlert: ReactNode = photoConflict ? <>Revisá tus recuerdos antes de reintentar; puede que ya esté publicado. <Link to={listing}>Ver recuerdos</Link></> : undefined;
   const photoAlert: ReactNode = photoError || errors.photos || conflictAlert || photosCtl.message || undefined;
   const hasText = draft.values.description.trim() !== "" || draft.values.mapsUrl.trim() !== "";
+  // What the section shows: the expense of the draft if it was edited, otherwise the stored one.
+  const typed = draft.extras.expense !== null ? validateExpense(draft.extras.expense) : undefined;
+  const expenseText = typed?.ok ? `${formatCents(typed.cents, typed.value.currency)}${typed.value.breakdown ? ` · ${typed.value.breakdown}` : ""}`
+    : typed ? "sin completar" : savedExpense ? `${formatExpenseAmount(savedExpense)}${savedExpense.breakdown ? ` · ${savedExpense.breakdown}` : ""}` : undefined;
+  // The stored attribution only describes the stored link: if the draft changed the parent, activity or transport it is recalculated on save.
+  const linkChanged = draft.extras.link?.kind !== saved.extras.link?.kind || draft.extras.link?.id !== saved.extras.link?.id
+    || draft.extras.transportId !== saved.extras.transportId || draft.extras.newActivity !== null;
+  const storedAttribution = expenseLoad.kind === "ready" && savedExpense && expenseLoad.attribution?.source === "activity"
+    && localDayKey(expenseLoad.attribution.occurredAt, timeZone) !== localDayKey(expenseLoad.attribution.publishedAt, timeZone) ? expenseLoad.attribution : undefined;
+  const attribution = linkChanged ? undefined : storedAttribution;
+  const attributionStale = linkChanged && storedAttribution !== undefined;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <header className="itinerary-header">
@@ -344,10 +407,26 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
           {errors.link ? <p className="ui-field__error" id="post-link-error" role="alert">{errors.link}</p> : null}
           {notice ? <Feedback>{notice}</Feedback> : null}
         </section>
+        <section className="post-expense-section" aria-label="Gasto">
+          <p id="post-expense-summary">{expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
+          {attributionStale ? <p id="post-expense-attribution" className="itinerary-secondary">Se recalcula al guardar</p> : null}
+          {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al {formatLocalDate(attribution.occurredAt, timeZone)} (actividad) · Publicado el {formatLocalDate(attribution.publishedAt, timeZone)}</p> : null}
+          {existing && savedExpense ? <p className="itinerary-secondary">{expenseNotice}</p> : null}
+          {expenseLoad.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
+          {expenseLoad.kind === "error" ? <div className="trips-state">
+            <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente. Podés seguir editando el texto.</Feedback>
+            <Button onClick={() => setExpenseAttempt((value) => value + 1)}>Reintentar</Button>
+          </div> : null}
+          <button ref={expenseRef} name="expense" type="button" className="ui-button" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
+            aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution || attributionStale ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
+            {draft.extras.expense !== null || savedExpense ? "Editar gasto" : "Agregar gasto"}</button>
+          {draft.extras.expense !== null && !savedExpense ? <Button disabled={saving} onClick={removeExpense}>Quitar gasto</Button> : null}
+          {errors.expense ? <p className="ui-field__error" id="post-expense-error" role="alert">{errors.expense}</p> : null}
+        </section>
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" && !photoConflict ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
-          {(newActivity || draft.extras.photos.length > 0) && (failure.kind === "network" || failure.kind === "server") ? ` ${retryHint}` : ""}</Feedback> : null}
-        {failure?.kind === "validation" && !errors.link && !errors.activity && !errors.photos ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
+          {(newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${retryHint}` : ""}</Feedback> : null}
+        {failure?.kind === "validation" && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}
         </Button>

@@ -262,6 +262,43 @@ describe("App memories new activity routes", () => {
   });
 });
 
+describe("App memories expense routes", () => {
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+  const itinerary = () => ({ get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) });
+  const select = async (container: HTMLElement, value: string) => {
+    const element = container.querySelector('select[name="currency"]') as HTMLSelectElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+  it("creates a memory with an expense through the composer and its subform, in a single POST", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, value: saved() });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const container = await render(`/trips/${tripId}/memories/new`, { auth, sessionStorage: storage(true), itinerary: { get: vi.fn() }, posts: { create, list } });
+    await type(container, "description", "Atardecer");
+    await click(container.querySelector('button[name="expense"]'));
+    expect(container.querySelector("h1")?.textContent).toBe("Agregar gasto");
+    await type(container, "amount", "25,50"); await select(container, "ARS");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Aceptar") ?? null);
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    expect((container.querySelector('[name="description"]') as HTMLTextAreaElement).value).toBe("Atardecer");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Atardecer", expense: { totalAmount: 25.5, currency: "ARS" } });
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdos");
+  });
+  it("opened by URL without a draft the expense routes go back to the composer", async () => {
+    const container = await render(`/trips/${tripId}/memories/new/expense`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: {} });
+    expect(container.querySelector("h1")?.textContent).toBe("Nuevo recuerdo");
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
+    const edit = await render(`/trips/${tripId}/memories/${postId}/edit/expense`, { auth, sessionStorage: storage(true), itinerary: itinerary(), posts: { get } });
+    expect(edit.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+  });
+  it("without a session the expense route redirects to login and requests nothing", async () => {
+    const api = itinerary();
+    const container = await render(`/trips/${tripId}/memories/new/expense`, { auth: {}, sessionStorage: storage(false), itinerary: api, posts: {} });
+    expect(container.textContent).toContain("Iniciar sesión");
+    expect(api.get).not.toHaveBeenCalled();
+  });
+});
+
 describe("App memories detail route", () => {
   beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
   const detail = (extra: Record<string, unknown> = {}) => ({ post: saved(), parent: null, children: [], rootActivityId: null, ...extra });

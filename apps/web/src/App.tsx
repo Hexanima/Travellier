@@ -39,6 +39,7 @@ import type { PostPhotoDeps } from './trips/use-post-photos.js'
 import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
 import { SpontaneousActivityForm } from './trips/SpontaneousActivityForm.js'
+import { ExpenseForm } from './trips/ExpenseForm.js'
 import { MemoriesLayout, TripMemoriesScreen } from './trips/TripMemoriesScreen.js'
 import { TripContentLayout } from './trips/TripContentLayout.js'
 import { PostDetailScreen } from './trips/PostDetailScreen.js'
@@ -366,6 +367,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
           <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
           <Route path=":postId/edit/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
+          <Route path="new/expense" element={<ExpenseForm itinerary={tripItinerary} />} />
+          <Route path=":postId/edit/expense" element={<ExpenseForm itinerary={tripItinerary} />} />
         </Route>
         </Route>
         <Route path="/profile" element={
