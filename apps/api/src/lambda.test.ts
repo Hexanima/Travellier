@@ -376,4 +376,26 @@ describe("Lambda API handler", () => {
       body: JSON.stringify({ refreshToken: "refresh-token" }),
     });
   });
+  it("protects the push device routes and passes the push API with the authenticated user (T89)", async () => {
+    const register = vi.fn().mockResolvedValue({ ok: true, value: { id: "507f1f77bcf86cd799439022", provider: "fcm", platform: "android", tokenHint: "****abcd", registeredAt: new Date(0) } });
+    const createPushDeviceApi = vi.fn().mockResolvedValue({ register, revoke: vi.fn(), revokeByToken: vi.fn() });
+    const handler = createLambdaHandler({
+      loadRuntimeConfig: async () => ({ environment: "dev", mongo: { uri: "mongodb://example", databaseName: "test" }, jwtSecret, photoBucketName: "test" }),
+      createPushDeviceApi,
+    });
+    const body = JSON.stringify({ provider: "fcm", platform: "android", token: "tok-0123456789-abcd" });
+    const request = { rawPath: "/push-devices", body, requestContext: { http: { method: "PUT" } } };
+    for (const unauthenticated of [request, { ...request, rawPath: "/push-devices/revoke", requestContext: { http: { method: "POST" } } },
+      { ...request, rawPath: "/push-devices/507f1f77bcf86cd799439022", requestContext: { http: { method: "DELETE" } } },
+      { ...request, headers: { authorization: "Bearer not-a-jwt" } }]) {
+      expect((await handler(unauthenticated)).statusCode).toBe(401);
+    }
+    expect(createPushDeviceApi).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+
+    const response = await handler({ ...request, headers: { authorization: `Bearer ${createAccessToken(authenticatedUserId)}` } });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).device).toMatchObject({ provider: "fcm", tokenHint: "****abcd" });
+    expect(register).toHaveBeenCalledWith({ authenticatedUserId, input: { provider: "fcm", platform: "android", token: "tok-0123456789-abcd" } });
+  });
 });

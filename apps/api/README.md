@@ -83,6 +83,7 @@ Las nuevas migraciones son aditivas y se ejecutan después de `0001–0003`, cuy
 | --- | --- |
 | `0004-publication-and-personal-agenda-indexes` | `posts.tripId_createdAt_desc`: `{ tripId: 1, createdAt: -1 }`; `activityParticipations.tripId_userId_status`: `{ tripId: 1, userId: 1, status: 1 }`. |
 | `0005-notification-outbox-indexes` | `outboxEvents.eventKey_unique`: `{ eventKey: 1 }` único; `outboxEvents.status_availableAt`: `{ status: 1, availableAt: 1 }`. |
+| `0007-push-device-indexes` | `pushDevices.provider_token_unique`: `{ provider: 1, token: 1 }` único; `pushDevices.userId`: `{ userId: 1 }`. Colección nueva de T89, sin TTL (no está en el PRD; ver «API de dispositivos push (T89)»). |
 
 Se mantienen todos los índices anteriores, incluidos los únicos de membresías, participaciones, likes, gastos, posiciones de destinos, direcciones de transporte e identidad de itinerario, además del TTL de refresh tokens. No se quitan índices heredados de `dayId` ni se borra `activityVotes`.
 
@@ -179,6 +180,24 @@ Código del worker de limpieza de S3, **sin cablear ni desplegar** (ver `docs/in
 - `sweepAbandonedPhotoUploads` / `runAbandonedPhotoSweep`: entrada manual `{ "kind": "photoSweep", "stage": "<stage>" }`. Lista `trips/` por páginas y borra solo claves con el formato exacto de foto, con antigüedad ≥24 h (se rechaza un mínimo inferior a 1 h 15 min) y sin vínculo en `postPhotos`, consultado por página y de nuevo antes de cada borrado. También limpia Trips ya dados de baja. Sin cursor: cada corrida reinicia. No tiene schedule y requiere `s3:ListBucket` (pendiente de decisión).
 - Migración `0005-storage-deletion-job-indexes`: agrega índices `{ status, nextAttemptAt }` y `{ tripId }` y completa los trabajos legados sin borrar nada. La confirmación de fotos de T72 no cambió: una carrera entre el barrido y la confirmación de un objeto de ~24 h queda documentada en `docs/REVISION_PENDIENTE.md` (T73).
 - No se verificó contra S3 ni MongoDB reales.
+
+## API de dispositivos push (T89)
+
+Registro de los tokens de push del dispositivo, ligados al usuario autenticado (el cliente Capacitor es T90; el despacho a FCM/APNs y la política de tokens inválidos por respuesta del proveedor son T92). T89 solo toca MongoDB: no llama a AWS/SNS ni cambia `serverless.yml`, IAM ni infraestructura (la API Lambda no necesita permisos nuevos). Todas las rutas son autenticadas (JWT) y el usuario sale **solo** del JWT; `userId`/`id` del body se ignoran. Ninguna otra ruta depende del registro: usar la app no exige permiso push.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| PUT | `/push-devices` con `{ provider, platform, token }` | 200 `{ device: { id, provider, platform, tokenHint, registeredAt } }`, siempre 200 (alta o repetición) |
+| DELETE | `/push-devices/:id` | 204 idempotente |
+| POST | `/push-devices/revoke` con `{ provider, token }` | 204 idempotente |
+
+- Combinaciones válidas: `fcm` + `android` y `apns` + `ios` (iOS usa APNs directo, T45); cualquier otra, proveedor/plataforma desconocidos o token inválido → 422 `ValidationError` con `fields`. Token: texto de 1 a 4096 caracteres ASCII visibles (`[\x21-\x7E]`), sin espacios ni control, con trim. Body no JSON → 400. `:id` que no es ObjectId → 422.
+- `PUT` es un upsert por `(provider, token)`: si no existe lo crea; si es del mismo usuario actualiza `platform`, `updatedAt` y `lastRegisteredAt` conservando `id` y `createdAt`; si es de **otro** usuario lo reasigna al autenticado (el anterior lo pierde, sin aviso), de modo que un token nunca pertenece a dos cuentas tras un cambio de cuenta. La reasignación no cuenta contra el límite de quien la recibe y siempre se realiza (no crea un documento nuevo).
+- Revocar solo borra si el `userId` coincide; un dispositivo inexistente, ajeno o ya revocado también responde 204 (no revela existencia). Se revoca también por body (no por path/query) para que el token no aparezca en la URL que registra el logger. No hay GET de listado.
+- Límite provisorio de 10 dispositivos por usuario, aplicable solo a documentos **nuevos**: al registrar un token nuevo con 10 ya registrados se desaloja el dispositivo propio más antiguo (menor `lastRegisteredAt`, desempate por `_id`) en la misma transacción y se inserta el nuevo; no hay 409 por límite. Re-registrar un token propio y reasignar uno ajeno no desalojan nada. El límite es **blando**: una ráfaga de N registros simultáneos de tokens nuevos puede excederlo hasta N; el exceso se corrige en el siguiente registro por desalojo del más antiguo; afecta solo a la propia cuenta.
+- `pushDevices` guarda `{ _id, userId: ObjectId, provider, platform, token, createdAt, updatedAt, lastRegisteredAt }`. El token se guarda crudo (hace falta para enviar) y **nunca** se devuelve (solo `tokenHint`: los últimos 4 caracteres; si es corto, oculto), ni se registra en logs ni aparece en errores; el cifrado en reposo del dato es de la infraestructura (Atlas). `/auth/logout` no revoca dispositivos: el cliente de T90 debe revocar antes de cerrar sesión.
+- El caso de uso `removeInvalidPushDevices` (dominio) borra tokens por proveedor sin filtrar por usuario; lo consumirá T92 y **no** se expone por HTTP.
+- Verificado con MongoDB efímero (`mongodb-memory-server`); no se probó con FCM/APNs/SNS, dispositivos ni Atlas reales.
 
 ## API de participación (T38)
 

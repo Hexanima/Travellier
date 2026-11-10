@@ -10,7 +10,7 @@ import {
   STORAGE_DELETION_MIGRATION_ID,
   migrateMongoSchema,
 } from "./migrations.js";
-import { EXPENSE_PAYMENTS_MIGRATION_ID, OUTBOX_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID } from "./pending-contract-migrations.js";
+import { EXPENSE_PAYMENTS_MIGRATION_ID, OUTBOX_MIGRATION_ID, PUBLICATION_AGENDA_MIGRATION_ID, PUSH_DEVICE_MIGRATION_ID } from "./pending-contract-migrations.js";
 
 const prdCollections = [
   "users",
@@ -140,11 +140,11 @@ describe("MongoDB schema migration", () => {
       .toArray();
 
     expect(collections.map(({ name }) => name).sort()).toEqual(
-      [...prdCollections, "outboxEvents", "storageDeletionJobs", "_migrations"].sort(),
+      [...prdCollections, "outboxEvents", "storageDeletionJobs", "pushDevices", "_migrations"].sort(),
     );
     expect((await database.collection("_migrations").find().toArray()).map(({ id }) => id).sort()).toEqual(
       [MONGO_MIGRATION_ID, JOURNEY_MIGRATION_ID, ITINERARY_MIGRATION_ID, POST_PHOTO_MIGRATION_ID, STORAGE_DELETION_MIGRATION_ID,
-        PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID, EXPENSE_PAYMENTS_MIGRATION_ID].sort(),
+        PUBLICATION_AGENDA_MIGRATION_ID, OUTBOX_MIGRATION_ID, EXPENSE_PAYMENTS_MIGRATION_ID, PUSH_DEVICE_MIGRATION_ID].sort(),
     );
   });
 

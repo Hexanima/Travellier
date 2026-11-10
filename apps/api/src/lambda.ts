@@ -2,6 +2,7 @@ import {
   handleApiRequest,
   type ApiResponse,
   type AuthenticationApi,
+  type PushDeviceApi,
   type TripApi,
 } from "./app.js";
 import {
@@ -13,6 +14,7 @@ import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
+import { createPushDeviceApi } from "./push/push-device-api.js";
 import { createTripApi } from "./trips/trip-api.js";
 
 export interface ApiGatewayHttpApiEvent {
@@ -38,6 +40,7 @@ export interface LambdaHandlerDependencies {
     runtimeConfig: LambdaRuntimeConfig,
   ) => Promise<AuthenticationApi>;
   createTripApi?: (runtimeConfig: LambdaRuntimeConfig) => Promise<TripApi>;
+  createPushDeviceApi?: (runtimeConfig: LambdaRuntimeConfig) => Promise<PushDeviceApi>;
   handleRequest?: typeof handleApiRequest;
 }
 
@@ -82,6 +85,7 @@ export const createLambdaHandler = ({
   loadRuntimeConfig,
   createAuthenticationApi: buildAuthenticationApi,
   createTripApi: buildTripApi,
+  createPushDeviceApi: buildPushDeviceApi,
   handleRequest = handleApiRequest,
 }: LambdaHandlerDependencies) =>
   async (
@@ -120,6 +124,7 @@ export const createLambdaHandler = ({
 
     const auth = await buildAuthenticationApi?.(runtimeConfig);
     const trips = await buildTripApi?.(runtimeConfig);
+    const pushDevices = await buildPushDeviceApi?.(runtimeConfig);
 
     return handleRequest(
       {
@@ -128,7 +133,11 @@ export const createLambdaHandler = ({
         body: requestBody(event),
         authenticatedUserId: authenticatedRequest.authenticatedUserId,
       },
-      { ...(auth === undefined ? {} : { auth }), ...(trips === undefined ? {} : { trips }) },
+      {
+        ...(auth === undefined ? {} : { auth }),
+        ...(trips === undefined ? {} : { trips }),
+        ...(pushDevices === undefined ? {} : { pushDevices }),
+      },
     );
   };
 
@@ -136,6 +145,7 @@ const secretValueReader = createSecretsManagerSecretValueReader();
 let runtimeConfig: LambdaRuntimeConfig | undefined;
 let authenticationApi: Promise<AuthenticationApi> | undefined;
 let tripApi: Promise<TripApi> | undefined;
+let pushDeviceApi: Promise<PushDeviceApi> | undefined;
 let databaseConnection: ReturnType<typeof connectMongoDatabase> | undefined;
 
 const loadDatabase = (configuration: LambdaRuntimeConfig) =>
@@ -172,8 +182,14 @@ const createRuntimeTripApi = async (configuration: LambdaRuntimeConfig): Promise
   return tripApi;
 };
 
+const createRuntimePushDeviceApi = async (configuration: LambdaRuntimeConfig): Promise<PushDeviceApi> => {
+  pushDeviceApi ??= loadDatabase(configuration).then(({ database }) => createPushDeviceApi(database));
+  return pushDeviceApi;
+};
+
 export const handler = createLambdaHandler({
   loadRuntimeConfig,
   createAuthenticationApi: createRuntimeAuthenticationApi,
   createTripApi: createRuntimeTripApi,
+  createPushDeviceApi: createRuntimePushDeviceApi,
 });
