@@ -142,3 +142,6 @@
 .activity-memories__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .activity-memories__list li { display: grid; gap: 4px; min-width: 0; }
 .activity-memories__list img { display: block; width: 4rem; aspect-ratio: 1 / 1; object-fit: cover; }
+/* Provisional structure of the .ics export (no final tokens): T98 places it. */
+.ics-export { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
+.ics-export-notice, .ics-export-empty { margin: 0; color: #526270; line-height: 1.5; }

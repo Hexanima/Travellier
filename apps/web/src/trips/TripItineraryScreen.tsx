@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
-import type { TripFailure } from "./trip-management-api.js";
+import type { TripFailure, TripManagementApi } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectItineraryView, type ItineraryViewItem } from "./trip-itinerary-view.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey, type ExpenseTotals } from "./expense-format.js";
@@ -19,10 +19,15 @@ import { itineraryAnchor, noticesOrigin, originLabel, readOrigin } from "./post-
 import { ActivityMemories } from "./ActivityMemories.js";
 import { readActivityParams, type ActivityTab } from "./activity-memories.js";
 import type { TripMembersApi } from "./trip-members-api.js";
+import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
-type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; members?: Pick<TripMembersApi, "list">; timeZone?: string };
+type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; members?: Pick<TripMembersApi, "list">; timeZone?: string;
+  /** Known Trip name for the .ics; without it `trips` is asked when exporting and a fixed name is the last fallback. */
+  tripName?: string; trips?: Pick<TripManagementApi, "get">;
+  /** Test seam for the export clock and download. */
+  icsExport?: Pick<ComponentProps<typeof ExportIcsButton>, "download" | "now"> };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
@@ -42,12 +47,12 @@ function ExpenseLines({ totals, empty }: { totals: ExpenseTotals; empty?: string
   </>;
 }
 
-export function TripItineraryScreen({ itinerary, activities, participations, members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
+export function TripItineraryScreen({ itinerary, activities, participations, members, tripName, trips, icsExport, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
-  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} timeZone={timeZone} />;
+  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} tripName={tripName} trips={trips} icsExport={icsExport} timeZone={timeZone} />;
 }
 
-function ItineraryContent({ tripId, itinerary, activities, participations, members, timeZone }: Props & { tripId?: string; timeZone: string }) {
+function ItineraryContent({ tripId, itinerary, activities, participations, members, tripName, trips, icsExport, timeZone }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const location = useLocation();
@@ -191,6 +196,9 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/memories`}>Recuerdos</Link> : null}
         {/* Provisional entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses): T98 gives it its place. */}
         {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/balance`}>Balance</Link> : null}
+        {/* Provisional placement of the .ics export (static copy; the native calendar is T96): T98 gives it its place. */}
+        {state.kind === "ready" ? <ExportIcsButton tripName={tripName} itinerary={state.value} timeZone={timeZone} {...icsExport}
+          resolveTripName={trips && tripId ? async () => { const result = await trips.get(tripId); return result.ok ? result.value.name : undefined; } : undefined} /> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
       {state.kind === "ready" && notice ? <div ref={noticeRef} tabIndex={-1}><Feedback variant={notice.variant}>{notice.text}</Feedback></div> : null}

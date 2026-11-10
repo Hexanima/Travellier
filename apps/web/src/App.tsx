@@ -469,7 +469,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           </TripRoute>
         }>
         <Route path="/trips/:tripId/itinerary" element={
-          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} />
+          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} />
         } />
         <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
