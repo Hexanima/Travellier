@@ -44,3 +44,16 @@ describe("totalsOf", () => {
     expect(totalsOf([])).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, expenseCount: 0 });
   });
 });
+
+describe("local dates", () => {
+  it("compares the day in the given zone, not in UTC", async () => {
+    const { localDayKey } = await import("./expense-format.js");
+    expect(localDayKey("2026-09-26T01:30:00.000Z", "America/Argentina/Buenos_Aires")).toBe("2026-09-25");
+    expect(localDayKey("2026-09-26T01:30:00.000Z", "UTC")).toBe("2026-09-26");
+  });
+  it("formats a date for display in the given zone", async () => {
+    const { formatLocalDate } = await import("./expense-format.js");
+    expect(formatLocalDate("2026-09-26T01:30:00.000Z", "America/Argentina/Buenos_Aires")).toContain("25");
+    expect(formatLocalDate("2026-09-26T01:30:00.000Z", "UTC")).toContain("26");
+  });
+});

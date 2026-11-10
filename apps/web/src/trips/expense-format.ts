@@ -31,3 +31,9 @@ export const totalsOf = (posts: readonly WithExpense[]): ExpenseTotals => {
   }
   return { byCurrency: expenseCurrencies.flatMap((currency) => byCurrency.get(currency) ?? []), withoutCurrency: { expenseCount: without }, expenseCount: count };
 };
+
+/** Local calendar day (`YYYY-MM-DD`) of an instant in the given zone, to compare dates the way the person sees them. */
+export const localDayKey = (instant: string, timeZone: string): string =>
+  new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(instant));
+export const formatLocalDate = (instant: string, timeZone: string): string =>
+  new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric" }).format(new Date(instant));
