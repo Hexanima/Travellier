@@ -190,9 +190,9 @@ describe("post HTTP adapter with a new activity", () => {
 describe("post HTTP adapter with an expense", () => {
   const stored = (extra: Record<string, unknown> = {}) => ({ id: itineraryId(40), tripId, postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena",
     paidBy: null, payments: [], shares: [], createdAt: "2026-09-25T10:00:00.123Z", ...extra });
-  it("creates sending only totalAmount, currency and breakdown, even when payments or shares are forced", async () => {
+  it("creates sending only totalAmount, currency and breakdown, even when paidBy or non-list payments and shares are forced", async () => {
     const { api, fetch } = setup({ post: post(), expense: stored() }, 201);
-    const forced = { description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena", payments: [{ amount: 1 }], shares: [{ amount: 1 }], paidBy: itineraryId(2) } } as PostInput;
+    const forced = { description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena", payments: null, shares: "x", paidBy: itineraryId(2) } } as unknown as PostInput;
     const result = await api.create(tripId, forced);
     expect(sent(fetch).body).toEqual({ description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena" } });
     expect(result).toEqual({ ok: true, value: { ...post(), expense: { postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena" } } });
@@ -230,5 +230,51 @@ describe("post HTTP adapter with an expense", () => {
   it("maps a 409 ExpenseConflictError to a generic server failure", async () => {
     expect(await setup({ error: { code: "ExpenseConflictError", message: "x" } }, 409).api.create(tripId, { expense: { totalAmount: 1, currency: "ARS" } }))
       .toEqual({ ok: false, error: { kind: "server" } });
+  });
+});
+
+describe("post HTTP adapter with payments and shares (T84)", () => {
+  const stored = (extra: Record<string, unknown> = {}) => ({ id: itineraryId(40), tripId, postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena",
+    payments: [], shares: [], completeness: { status: "incomplete", reasons: ["missing_payments", "missing_shares"] }, formerMemberIds: [], createdAt: "2026-09-25T10:00:00.123Z", ...extra });
+  const ana = itineraryId(30), beto = itineraryId(31);
+  it("sends the rows with an allow list: only userId, unit and value, null value for remainder and excluded", async () => {
+    const { api, fetch } = setup({ post: post(), expense: stored() }, 201);
+    const forced = { totalAmount: 100, currency: "ARS", payments: [{ userId: ana, unit: "amount", value: 40, paidBy: beto, extra: 1 }],
+      shares: [{ userId: ana, unit: "remainder", value: null, key: "k1" }, { userId: beto, unit: "excluded", value: null }, { userId: beto, unit: "percent", value: 10 }] };
+    await api.create(tripId, { expense: forced } as unknown as PostInput);
+    expect(sent(fetch).body).toEqual({ expense: { totalAmount: 100, currency: "ARS", payments: [{ userId: ana, unit: "amount", value: 40 }],
+      shares: [{ userId: ana, unit: "remainder", value: null }, { userId: beto, unit: "excluded", value: null }, { userId: beto, unit: "percent", value: 10 }] } });
+  });
+  it("sends an empty list to clear it, but never null or a non-list", async () => {
+    const { api, fetch } = setup({ post: post(), expense: stored() });
+    await api.update(tripId, itineraryId(5), { expense: { payments: [], shares: [] } });
+    expect(sent(fetch).body).toEqual({ expense: { payments: [], shares: [] } });
+    await api.update(tripId, itineraryId(5), { description: "x", expense: { payments: null, shares: {} } } as unknown as PostInput);
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ description: "x" });
+  });
+  const detail = (expense: unknown) => ({ post: post(), parent: null, children: [], rootActivityId: null, ...(expense === undefined ? {} : { expense }) });
+  it("parses the full expense of the detail", async () => {
+    const saved = stored({ payments: [{ userId: ana, unit: "percent", value: 100 }], shares: [{ userId: ana, unit: "remainder", value: null }, { userId: beto, unit: "amount", value: 5 }],
+      completeness: { status: "incomplete", reasons: ["payments_not_covering_total"] }, formerMemberIds: [beto] });
+    const result = await setup(detail(saved)).api.get(tripId, itineraryId(5));
+    expect(result.ok && result.value.expense).toEqual({ postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena",
+      payments: [{ userId: ana, unit: "percent", value: 100 }], shares: [{ userId: ana, unit: "remainder", value: null }, { userId: beto, unit: "amount", value: 5 }],
+      completeness: { status: "incomplete", reasons: ["payments_not_covering_total"] }, formerMemberIds: [beto] });
+  });
+  it("has no expense key when the server sends none and accepts a legacy null currency", async () => {
+    const none = await setup(detail(undefined)).api.get(tripId, itineraryId(5));
+    expect(none.ok && "expense" in none.value).toBe(false);
+    const legacy = await setup(detail(stored({ currency: null }))).api.get(tripId, itineraryId(5));
+    expect(legacy.ok && legacy.value.expense?.currency).toBe(null);
+  });
+  it.each([["null", null], ["of another post", stored({ postId: itineraryId(6) })], ["without payments", stored({ payments: undefined })],
+    ["with a bad unit", stored({ payments: [{ userId: ana, unit: "remainder", value: null }] })],
+    ["with a bad value", stored({ shares: [{ userId: ana, unit: "amount", value: "5" }] })],
+    ["with a bad user", stored({ shares: [{ userId: "x", unit: "excluded", value: null }] })],
+    ["with a remainder carrying a value", stored({ shares: [{ userId: ana, unit: "remainder", value: 3 }] })],
+    ["with a bad completeness", stored({ completeness: { status: "x", reasons: [] } })],
+    ["with bad former members", stored({ formerMemberIds: ["z"] })],
+    ["with an invalid currency", stored({ currency: "BRL" })]])("rejects a detail whose expense is %s", async (_name, value) => {
+    expect(await setup(detail(value)).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
   });
 });
