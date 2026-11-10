@@ -106,16 +106,19 @@ const flush = async () => { for (let i = 0; i < 5; i += 1) await act(async () =>
 const statuses = () => Array.from(document.querySelectorAll('[role="status"]')).map((item) => item.textContent ?? "");
 
 describe("activity dialog in the URL", () => {
-  it("opening the activity sets ?activity=<id> by replacing the entry, so Back leaves the itinerary as before", async () => {
+  it("opening the activity sets ?activity=<id> on its own entry: Back closes the dialog on the itinerary and a second Back leaves it", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openActivity(container);
     expect(here).toBe(`${itineraryPath}?activity=${A}`);
     expect(document.querySelector(".activity-dialog")).not.toBeNull();
     expect(tab("memories")!.getAttribute("aria-selected")).toBe("true");
     await click(document.querySelector('[data-testid="atras"]'));
+    expect(here).toBe(itineraryPath);
+    expect(document.querySelector(".activity-dialog")).toBeNull();
+    await click(document.querySelector('[data-testid="atras"]'));
     expect(here).toBe(memoriesPath);
   });
-  it("changing the tab sets &tab= by replacing the entry", async () => {
+  it("changing the tab sets &tab= by replacing the entry (one Back closes the dialog, whatever the tab)", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openActivity(container);
     await click(tab("photos"));
@@ -124,9 +127,11 @@ describe("activity dialog in the URL", () => {
     await click(tab("memories"));
     expect(here).toBe(`${itineraryPath}?activity=${A}&tab=memories`);
     await click(document.querySelector('[data-testid="atras"]'));
+    expect(here).toBe(itineraryPath);
+    await click(document.querySelector('[data-testid="atras"]'));
     expect(here).toBe(memoriesPath);
   });
-  it("closing the dialog clears activity and tab, by replacing the entry", async () => {
+  it("closing the dialog pops its entry, clearing activity and tab", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openActivity(container);
     await click(tab("photos"));

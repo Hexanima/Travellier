@@ -78,19 +78,31 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const [creating, setCreating] = useState<Extract<ActivityDialogRequest, { kind: "create" }>>();
   const detail = useMemo<ActivityDialogRequest | undefined>(() => urlActivity ? { kind: "detail", activityId: urlActivity } : undefined, [urlActivity]);
   const dialog = creating ?? detail;
-  const updateParams = (change: (params: URLSearchParams) => void) => {
+  // Opening a detail pushes its own entry (marked `dialogPushed`), so the device Back closes it and lands on the itinerary exactly as it was; closing from the
+  // screen (X, save, remove) pops that same entry instead of piling another one. A detail opened by a deep link or a returning link has no mark: it is replaced.
+  // Tab changes inside the dialog replace the entry and keep its state.
+  const updateParams = (change: (params: URLSearchParams) => void, push = false) => {
     const current = locationRef.current;
     const params = new URLSearchParams(current.search);
     change(params);
     const search = params.toString();
-    navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, { replace: true, state: current.state });
+    const { noBack: _noBack, ...kept } = (typeof current.state === "object" && current.state !== null ? current.state : {}) as Record<string, unknown>;
+    navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, push ? { state: { ...kept, dialogPushed: true } } : { replace: true, state: current.state });
   };
-  const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); });
-  const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); });
+  const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); }, true);
+  const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); }, true);
+  // The entry already being popped: a second close before the router lands must not pop again (it would leave the itinerary).
+  const popping = useRef<string>();
   const closeDialog = () => {
     setCreating(undefined);
-    const params = new URLSearchParams(locationRef.current.search);
-    if (params.has("activity") || params.has("transport") || params.has("tab")) updateParams((next) => { next.delete("activity"); next.delete("transport"); next.delete("tab"); });
+    const current = locationRef.current;
+    const params = new URLSearchParams(current.search);
+    if (!(params.has("activity") || params.has("transport") || params.has("tab"))) return;
+    if ((current.state as { dialogPushed?: unknown } | null)?.dialogPushed === true) {
+      if (popping.current === current.key) return;
+      popping.current = current.key;
+      navigate(-1);
+    } else updateParams((next) => { next.delete("activity"); next.delete("transport"); next.delete("tab"); });
   };
   const [panelSettled, setPanelSettled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);

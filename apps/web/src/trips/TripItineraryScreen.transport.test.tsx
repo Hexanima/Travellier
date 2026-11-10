@@ -108,13 +108,16 @@ const statuses = () => Array.from(document.querySelectorAll('[role="status"]')).
 const MEMORY_11 = itineraryId(11);
 
 describe("transport dialog in the URL", () => {
-  it("opening sets ?transport=<id> by replacing the entry, so Back leaves the itinerary as before", async () => {
+  it("opening sets ?transport=<id> on its own entry: Back closes the dialog on the itinerary and a second Back leaves it", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openTransport(container);
     expect(here).toBe(`${itineraryPath}?transport=${TR}`);
     expect(dialogOpen()).toBe(true);
     expect(document.querySelector(".transport-dialog h3")!.textContent).toBe("Auto");
     expect(tab("memories")!.getAttribute("aria-selected")).toBe("true");
+    await click(document.querySelector('[data-testid="atras"]'));
+    expect(here).toBe(itineraryPath);
+    expect(dialogOpen()).toBe(false);
     await click(document.querySelector('[data-testid="atras"]'));
     expect(here).toBe(memoriesPath);
   });
@@ -124,7 +127,7 @@ describe("transport dialog in the URL", () => {
     expect(button.closest("h4")).not.toBeNull();
     expect(button.disabled).toBe(false);
   });
-  it("changing the tab sets &tab= and closing clears transport and tab, both by replacing the entry", async () => {
+  it("changing the tab sets &tab= by replacing the entry and closing pops the dialog entry", async () => {
     const { container } = await mount({ entries: [memoriesPath, itineraryPath] });
     await openTransport(container);
     await click(tab("photos"));
