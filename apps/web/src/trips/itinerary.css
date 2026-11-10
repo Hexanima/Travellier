@@ -164,3 +164,7 @@
 .itinerary-day-strip { display: flex; gap: 8px; overflow-x: auto; padding: 0; margin: 0; list-style: none; }
 .itinerary-day-chip { flex: none; }
 .itinerary-day-chip[aria-current="date"] { font-weight: 700; text-decoration: underline; }
+.itinerary-destination-banner { width: 100%; text-align: left; }
+.destination-picker { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.destination-picker__stop { width: 100%; text-align: left; }
+.destination-picker__when { display: block; }
