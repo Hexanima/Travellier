@@ -11,6 +11,7 @@ import { legacyIds, seedVersion3Fixture, snapshotDocuments, version3Indexes } fr
 const publicationVersion = "0004-publication-and-personal-agenda-indexes";
 const eventVersion = "0005-notification-outbox-indexes";
 const expensePaymentsVersion = "0006-adapt-legacy-expense-paid-by";
+const pushDeviceVersion = "0007-push-device-indexes";
 let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
@@ -42,6 +43,25 @@ describe("incremental pending contracts", () => {
     expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
     await database.collection("outboxEvents").insertOne({ eventKey: "operation-1", tripId: legacyIds.trip });
     await expect(database.collection("outboxEvents").insertOne({ eventKey: "operation-1", tripId: legacyIds.trip })).rejects.toMatchObject({ code: 11000 });
+  });
+
+  it("versions the push device indexes (unique provider+token and userId) without a TTL (T89)", async () => {
+    await migrateMongoSchema(database);
+    expect(await database.listCollections({ name: "pushDevices" }).hasNext()).toBe(true);
+    const indexes = await database.collection("pushDevices").listIndexes().toArray();
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "provider_token_unique", key: { provider: 1, token: 1 }, unique: true }));
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "userId", key: { userId: 1 } }));
+    expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
+    expect(await database.collection("_migrations").countDocuments({ id: pushDeviceVersion })).toBe(1);
+  });
+
+  it("applies 0007 twice without touching existing push devices", async () => {
+    await migrateMongoSchema(database);
+    const device = { userId: new ObjectId(), provider: "fcm", platform: "android", token: "tok", createdAt: new Date(), updatedAt: new Date(), lastRegisteredAt: new Date() };
+    await database.collection("pushDevices").insertOne({ ...device });
+    await migrateMongoSchema(database);
+    expect(await database.collection("_migrations").countDocuments({ id: pushDeviceVersion })).toBe(1);
+    expect(await database.collection("pushDevices").find({}, { projection: { _id: 0 } }).toArray()).toEqual([device]);
   });
 
   it("upgrades 0003 without changing any BSON document, reference or old index", async () => {

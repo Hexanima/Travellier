@@ -2,6 +2,8 @@ import type { Db, IndexDescription } from "mongodb";
 
 export const PUBLICATION_AGENDA_MIGRATION_ID = "0004-publication-and-personal-agenda-indexes";
 export const OUTBOX_MIGRATION_ID = "0005-notification-outbox-indexes";
+/** `pushDevices` is not defined by the PRD (T89): additive indexes only; the unique pair makes registration idempotent across accounts. */
+export const PUSH_DEVICE_MIGRATION_ID = "0007-push-device-indexes";
 
 const pendingMigrations: {
   id: string;
@@ -19,6 +21,13 @@ const pendingMigrations: {
     collections: [{ name: "outboxEvents", indexes: [
       { key: { eventKey: 1 }, name: "eventKey_unique", unique: true },
       { key: { status: 1, availableAt: 1 }, name: "status_availableAt" },
+    ] }],
+  },
+  {
+    id: PUSH_DEVICE_MIGRATION_ID,
+    collections: [{ name: "pushDevices", indexes: [
+      { key: { provider: 1, token: 1 }, name: "provider_token_unique", unique: true },
+      { key: { userId: 1 }, name: "userId" },
     ] }],
   },
 ];
