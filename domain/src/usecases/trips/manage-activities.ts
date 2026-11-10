@@ -1,6 +1,7 @@
 import { createActivity, type Activity } from "../../entities/activity.js";
 import { createActivityParticipation, type ActivityParticipation, type ParticipationDecisionRequired } from "../../entities/activity-participation.js";
 import { findAgendaConflicts, type ActivityConflict } from "../../entities/activity-conflict.js";
+import { activityUpdatedFields, participantUnlinkedPayload } from "../../entities/trip-notification.js";
 import { ActivityNotFoundError } from "../../errors/activity-not-found-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
@@ -10,6 +11,7 @@ import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
 import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
+import { emitToMembers, type MemberNotification } from "./notification-emission.js";
 
 export interface TripActivityPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface ActivityDetailPayload extends TripActivityPayload { activityId: ObjectId }
@@ -28,7 +30,7 @@ export type UpdateTripActivityPayload = ActivityDetailPayload & Partial<Activity
 /** `affected` lists the participations moved to pending with a decision marker (for notifications); it is not exposed over HTTP. */
 export type UpdateTripActivityResult = { activity: Activity; affected: ActivityParticipation[] };
 interface Dependencies { activities: TripActivityPort }
-interface UpdateDependencies extends Dependencies { now: () => Date }
+interface UpdateDependencies extends Dependencies { createId: () => ObjectId; now: () => Date }
 interface CreationDependencies extends Dependencies { createId: () => ObjectId; now: () => Date }
 
 const authorize = async (scope: TripActivityReadScope, payload: TripActivityPayload) => {
@@ -72,7 +74,12 @@ export const createTripActivity: UseCase<CreationDependencies, CreateTripActivit
     if (!inserted.ok) return inserted;
     const saved = await applyAuthorPlan(scope, { activity: activity.value, userId, tripId: payload.tripId,
       conflicts: plan.value.conflicts, records: records.value, createId, updatedAt: createdAt });
-    return saved.ok ? ok({ outcome: "created" as const, activity: activity.value, participation: saved.value }) : saved;
+    if (!saved.ok) return saved;
+    // Last write, same transaction: the event exists only if the activity does.
+    const emitted = await emitToMembers(scope, [{ type: "activity.created", tripId: payload.tripId, operationRef: activity.value.id, actorId: userId,
+      exclude: [userId], createdAt, payload: { activityId: activity.value.id, actorId: userId, scheduledAt: activity.value.scheduledAt,
+        durationMinutes: activity.value.durationMinutes } }]);
+    return emitted.ok ? ok({ outcome: "created" as const, activity: activity.value, participation: saved.value }) : emitted;
   }),
 };
 
@@ -102,17 +109,20 @@ export const changedScheduleFields = (before: Activity, after: Activity): Partic
 };
 
 /**
- * Pure: the decision marker for a going participant of the edited activity, or undefined when the new schedule is compatible
- * with the rest of that user's agenda. Reuses the agenda conflict rule; reusable by T57 when schedules are relocated.
+ * Pure: the decision marker for a going participant of the edited activity plus ALL the plans that now conflict, or undefined when the
+ * new schedule is compatible with the rest of that user's agenda. Reuses the agenda conflict rule; reusable by T57 when schedules are relocated.
  */
 export const computeDecisionRequired = (input: { edited: Activity; userId: ObjectId; tripId: ObjectId; activities: readonly Activity[];
-  userGoing: readonly ActivityParticipation[]; changedFields: ParticipationDecisionRequired["changedFields"]; changedAt: Date }): ParticipationDecisionRequired | undefined =>
-  findAgendaConflicts({ candidate: input.edited, userId: input.userId, tripId: input.tripId, activities: input.activities,
-    participations: input.userGoing }).length === 0 ? undefined
-    : { reason: "schedule_conflict", changedFields: [...input.changedFields], changedAt: new Date(input.changedAt.getTime()) };
+  userGoing: readonly ActivityParticipation[]; changedFields: ParticipationDecisionRequired["changedFields"]; changedAt: Date }):
+  { decisionRequired: ParticipationDecisionRequired; conflicts: ActivityConflict[] } | undefined => {
+  const conflicts = findAgendaConflicts({ candidate: input.edited, userId: input.userId, tripId: input.tripId, activities: input.activities,
+    participations: input.userGoing });
+  return conflicts.length === 0 ? undefined
+    : { decisionRequired: { reason: "schedule_conflict", changedFields: [...input.changedFields], changedAt: new Date(input.changedAt.getTime()) }, conflicts };
+};
 
 export const updateTripActivity: UseCase<UpdateDependencies, UpdateTripActivityPayload, UpdateTripActivityResult, TaggedError> = {
-  execute: ({ activities, now }, payload) => activities.withTransaction(payload.tripId, async (scope) => {
+  execute: ({ activities, createId, now }, payload) => activities.withTransaction(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
     if (!trip.ok) return trip;
     const current = await find(scope, payload);
@@ -130,32 +140,46 @@ export const updateTripActivity: UseCase<UpdateDependencies, UpdateTripActivityP
     if (!validated.ok) return validated;
     const activity = validated.value;
     const changedFields = changedScheduleFields(current.value, activity);
+    // An edit that changes no stored field is not an event (also covers the retry of an edit that was already applied).
+    const updatedFields = activityUpdatedFields(current.value, activity);
     const saved = await scope.replace(activity);
     if (!saved.ok) return saved;
-    if (changedFields.length === 0) return ok({ activity, affected: [] });
-    // Review each current going participant's agenda with the new schedule; one UTC instant per edit.
-    const changedAt = now();
-    const going = await scope.listGoingParticipants(activity.id);
-    if (!going.ok) return going;
-    // Already pending (with or without marker) users are not in `going` and are never touched.
-    const users = going.value.map((p) => p.userId);
-    if (users.length === 0) return ok({ activity, affected: [] });
-    const [all, goingByUser] = [await scope.list(), await scope.listGoingParticipationsByUsers(users)];
-    if (!all.ok) return all;
-    if (!goingByUser.ok) return goingByUser;
+    if (updatedFields.length === 0) return ok({ activity, affected: [] });
+    // One operation id and one UTC instant per edit: they key and date the update and every unlinking of it.
+    const changedAt = now(), operationId = createId();
     const affected: ActivityParticipation[] = [];
-    for (const participation of going.value) {
-      const decisionRequired = computeDecisionRequired({ edited: activity, userId: participation.userId, tripId: payload.tripId,
-        activities: all.value, userGoing: goingByUser.value.filter((p) => p.userId === participation.userId), changedFields, changedAt });
-      if (decisionRequired === undefined) continue;
-      const pending = createActivityParticipation({ id: participation.id, tripId: participation.tripId, activityId: participation.activityId,
-        userId: participation.userId, status: "pending", updatedAt: changedAt, decisionRequired });
-      if (!pending.ok) return pending;
-      const written = await scope.saveParticipation(pending.value);
-      if (!written.ok) return written;
-      affected.push(written.value);
+    const unlinked: MemberNotification[] = [];
+    if (changedFields.length > 0) {
+      // Review each current going participant's agenda with the new schedule.
+      const going = await scope.listGoingParticipants(activity.id);
+      if (!going.ok) return going;
+      // Already pending (with or without marker) users are not in `going` and are never touched nor notified again.
+      const users = going.value.map((p) => p.userId);
+      if (users.length > 0) {
+        const [all, goingByUser] = [await scope.list(), await scope.listGoingParticipationsByUsers(users)];
+        if (!all.ok) return all;
+        if (!goingByUser.ok) return goingByUser;
+        for (const participation of going.value) {
+          const review = computeDecisionRequired({ edited: activity, userId: participation.userId, tripId: payload.tripId,
+            activities: all.value, userGoing: goingByUser.value.filter((p) => p.userId === participation.userId), changedFields, changedAt });
+          if (review === undefined) continue;
+          const pending = createActivityParticipation({ id: participation.id, tripId: participation.tripId, activityId: participation.activityId,
+            userId: participation.userId, status: "pending", updatedAt: changedAt, decisionRequired: review.decisionRequired });
+          if (!pending.ok) return pending;
+          const written = await scope.saveParticipation(pending.value);
+          if (!written.ok) return written;
+          affected.push(written.value);
+          unlinked.push({ type: "activity.participant_unlinked", tripId: payload.tripId, operationRef: operationId, actorId: payload.authenticatedUserId,
+            only: [participation.userId], createdAt: changedAt,
+            payload: participantUnlinkedPayload({ activity, changedFields, changedAt, conflicts: review.conflicts }) });
+        }
+      }
     }
-    return ok({ activity, affected });
+    // Last writes of the edit, same transaction: the update goes to the members except the editor and the unlinked ones, who get their own notice.
+    const emitted = await emitToMembers(scope, [{ type: "activity.updated", tripId: payload.tripId, operationRef: operationId, actorId: payload.authenticatedUserId,
+      exclude: [payload.authenticatedUserId, ...affected.map((p) => p.userId)], createdAt: changedAt,
+      payload: { activityId: activity.id, actorId: payload.authenticatedUserId, changedFields: updatedFields } }, ...unlinked]);
+    return emitted.ok ? ok({ activity, affected }) : emitted;
   }),
 };
 
