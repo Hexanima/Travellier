@@ -27,6 +27,8 @@ import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
 import { useInTripShell, useTripName } from "./trip-state.js";
 import { Heading } from "./Heading.js";
+import { DestinationPicker } from "./DestinationPicker.js";
+import { destinationChoices, destinationForDate } from "./trip-itinerary-destinations.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
@@ -223,10 +225,30 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const chipRefs = useRef(new Map<string, HTMLElement>());
   const tapped = useRef(false);
   const revealed = useRef<string | undefined>(undefined);
+  // Destination selector (NAV-03/04): `?destination=<id>` is written only by choosing in the selector. It decides which stop the banner shows when
+  // several share a date; an unknown or foreign id is ignored (the URL is not rewritten). Opening and closing the selector is local state.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const choices = useMemo(() => state.kind === "ready" ? destinationChoices(state.value, timeZone, days) : [], [state, timeZone, days]);
+  const destinationParam = new URLSearchParams(location.search).get("destination") ?? undefined;
+  const currentDestination = selectedDate ? choices.find((choice) => choice.id === destinationForDate(choices, selectedDate, destinationParam,
+    days.find((day) => day.date === selectedDate)?.segments ?? [])) : undefined;
   const pickDay = (date: string) => {
     if (date === selectedDate) return;
     tapped.current = true;
-    updateParams((params) => { params.set("day", date); });
+    updateParams((params) => {
+      params.set("day", date);
+      // The chosen stop is kept only while the date belongs to its range.
+      const kept = choices.find((choice) => choice.id === params.get("destination"));
+      if (params.has("destination") && !(kept?.status === "complete" && kept.firstDay! <= date && date <= kept.lastDay!)) params.delete("destination");
+    });
+  };
+  const chooseDestination = (id: string) => {
+    const choice = choices.find((item) => item.id === id);
+    if (!choice || choice.status !== "complete" || choice.firstDay === null) return;
+    setPickerOpen(false);
+    // A day change reveals its chip through the effect below; the same day needs the explicit reveal.
+    if (choice.firstDay === selectedDate) chipRefs.current.get(choice.firstDay)?.scrollIntoView?.({ block: "nearest", inline: "center" });
+    updateParams((params) => { params.set("destination", id); params.set("day", choice.firstDay!); });
   };
   useEffect(() => {
     // A tap leaves the strip where it is; a day that comes from outside (a restored URL) is brought into view. The default first day needs nothing.
@@ -282,6 +304,12 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
         <Link to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
       </section> : null}
+      {state.kind === "ready" && choices.length > 0 ? <>
+        <button type="button" className="ui-button itinerary-destination-banner" aria-haspopup="dialog" onClick={() => setPickerOpen(true)}>
+          {currentDestination ? `Destino: ${currentDestination.name} · Ver destinos` : "Ver destinos"}</button>
+        {pickerOpen ? <DestinationPicker choices={choices} current={currentDestination?.id} timeZone={timeZone}
+          onSelect={chooseDestination} onClose={() => setPickerOpen(false)} /> : null}
+      </> : null}
       {state.kind === "ready" && days.length > 0 ? <nav aria-label="Días del viaje">
         <ul className="itinerary-day-strip">
           {days.map((day) => <li key={day.date}><button type="button" className="ui-button itinerary-day-chip" data-day={day.date} aria-current={day.date === selectedDate ? "date" : undefined}
