@@ -170,7 +170,10 @@ describe("itinerary screen expenses", () => {
       removed.activities = removed.activities.filter((activity) => activity.id !== itineraryId(8)); linkPost(removed.posts[0], {});
       removed.posts[0].createdAt = "2026-10-03T12:00:00.000Z";
       await settled(removed);
-      expect(removed.days[1].items.map((entry) => entry.id)).toEqual([itineraryId(10), itineraryId(9)]);
+      // Published outside every day, the post is no longer placed: the backend returns it in unplacedPosts, not in the day items.
+      expect(removed.days[1].items.map((entry) => entry.id)).toEqual([itineraryId(9)]);
+      expect(removed.posts.map((post) => post.id)).not.toContain(itineraryId(10));
+      expect(removed.unplacedPosts.map((post) => post.id)).toEqual([itineraryId(10)]);
       expect(removed.expenses[0]).toMatchObject({ source: "publication", rootActivityId: null, dayId: null });
       expect(removed.expenseSummary.outsideItinerary.expenseCount).toBe(1);
       const after = await reload(first, removed);

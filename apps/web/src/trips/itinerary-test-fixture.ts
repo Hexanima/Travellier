@@ -70,25 +70,76 @@ export const itineraryFixture = () => {
 };
 
 /**
- * Leaves the expense state of a payload the way the real backend would return it after a change: the day items only list
- * activities and transports that exist, and `expenses[]`, every day summary and the Trip summary are recomputed with the
- * domain's own attribution (root activity's day, else the canonical band containing the publication, else outside).
+ * Publication slice of an instant, as the backend resolves it (domain/src/usecases/trips/get-trip-itinerary.ts, `dayForInstant`,
+ * lines ~40-44; not exported by app-domain): days by `order`, the one with `[startsAt, endsAt)` containing the instant
+ * (open when `endsAt` is null), else the lowest-order one with the same UTC date. Pure UTC.
+ */
+export const bandOf = (days: readonly { id: string; date: string; startsAt: string; endsAt: string | null; order: number }[], iso: string): string | null => {
+  const at = Date.parse(iso), ordered = [...days].sort((a, b) => a.order - b.order);
+  return (ordered.find((day) => Date.parse(day.startsAt) <= at && (day.endsAt === null || at < Date.parse(day.endsAt))) ??
+    ordered.find((day) => day.date.slice(0, 10) === iso.slice(0, 10)))?.id ?? null;
+};
+
+/**
+ * Leaves a payload the way the real backend would return it after a change (same rules as `compose` in
+ * domain/src/usecases/trips/get-trip-itinerary.ts, lines ~54-135): links to missing activities or transports are dropped, each post
+ * lands on its root activity's day, else on its publication slice, else on its transit day, and posts with no day move to
+ * `unplacedPosts`. Day items are rebuilt (activities by `dayId`, transports by direction, independent placed posts), and
+ * `postIds`, `expenses[]`, every day summary and the Trip summary are recomputed with the domain's own attribution.
  * Mutates and returns the same object; the caller is responsible for the activities, links and dates it changed.
  */
 export const settleItinerary = (value: TripItineraryResponse): TripItineraryResponse => {
+  const days = [...value.days].sort((a, b) => a.order - b.order);
+  const dayIds = new Set(days.map((day) => day.id));
+  value.activities = value.activities.filter((activity) => dayIds.has(activity.dayId));
   const activities = new Map(value.activities.map((activity) => [activity.id, activity]));
-  const transports = new Set(value.transports.map((transport) => transport.id));
-  for (const day of value.days) day.items = day.items.filter((entry) => entry.kind === "post" || (entry.kind === "activity" ? activities.has(entry.id) : transports.has(entry.id)));
-  const bandOf = (iso: string) => value.days.find((day) => Date.parse(day.startsAt) <= Date.parse(iso) && (day.endsAt === null || Date.parse(iso) < Date.parse(day.endsAt)))?.id ?? null;
+  const transports = new Map(value.transports.map((transport) => [transport.id, transport]));
+  const all = [...value.posts, ...value.unplacedPosts].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id));
+  const byId = new Map(all.map((post) => [post.id, post]));
   const asId = (text: string | null) => text as unknown as ObjectId;
-  const attributions = [...value.posts, ...value.unplacedPosts].flatMap((post) => {
+  const resolved = all.map((post) => {
+    const root = byId.get(post.context.rootPostId) ?? post;
+    const activityId = [post.activityId, root.activityId].find((id) => id != null && activities.has(id)) ?? null;
+    const transportId = [post.transportId, root.transportId].find((id) => id != null && transports.has(id)) ?? null;
+    const transport = transportId === null ? undefined : transports.get(transportId);
+    const transitDayId = transport === undefined ? null : days.find((day) => day.destinationId === transport.destinationId &&
+      day.type === (transport.direction === "outbound" ? "transit_out" : "transit_return"))?.id ?? null;
+    const dayId = activityId !== null ? activities.get(activityId)!.dayId : bandOf(days, post.createdAt) ?? transitDayId;
+    post.activityId = post.activityId !== null && activities.has(post.activityId) ? post.activityId : null;
+    post.transportId = post.transportId !== null && transports.has(post.transportId) ? post.transportId : null;
+    post.context = { parentPostId: post.context.parentPostId !== null && byId.has(post.context.parentPostId) ? post.context.parentPostId : null,
+      rootPostId: root.id, rootActivityId: activityId, rootTransportId: transportId,
+      placement: activityId !== null ? "activity" : transportId !== null ? "transport" : "independent" };
+    return { post, activityId, transportId, dayId };
+  });
+  const placed = resolved.filter((entry) => entry.dayId !== null), placedIds = new Set(placed.map((entry) => entry.post.id));
+  for (const entry of resolved) entry.post.parentPostId = entry.dayId !== null && entry.post.context.parentPostId !== null && !placedIds.has(entry.post.context.parentPostId)
+    ? null : entry.post.context.parentPostId;
+  value.posts = placed.map((entry) => entry.post);
+  value.unplacedPosts = resolved.filter((entry) => entry.dayId === null).map((entry) => entry.post);
+  for (const activity of value.activities) activity.postIds = placed.filter((entry) => entry.activityId === activity.id).map((entry) => entry.post.id);
+  for (const transport of value.transports) transport.postIds = placed.filter((entry) => entry.transportId === transport.id).map((entry) => entry.post.id);
+  const rank = { transport: 0, activity: 1, post: 2 };
+  for (const day of value.days) {
+    const items: { kind: "transport" | "activity" | "post"; id: string; at: string }[] =
+      value.activities.filter((activity) => activity.dayId === day.id).map((activity) => ({ kind: "activity", id: activity.id, at: activity.scheduledAt }));
+    for (const transport of value.transports) {
+      if (transport.destinationId === day.destinationId && ((day.type === "transit_out" && transport.direction === "outbound") ||
+        (day.type === "transit_return" && transport.direction === "return"))) {
+        items.push({ kind: "transport", id: transport.id, at: new Date(Math.max(Date.parse(day.startsAt), Date.parse(transport.departureAt))).toISOString() });
+      }
+    }
+    for (const entry of placed) if (entry.dayId === day.id && entry.post.context.placement === "independent") items.push({ kind: "post", id: entry.post.id, at: entry.post.createdAt });
+    day.items = items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || rank[a.kind] - rank[b.kind] || a.id.localeCompare(b.id));
+  }
+  const attributions = all.flatMap((post) => {
     if (post.expense === null) return [];
     const activity = post.context.rootActivityId === null ? undefined : activities.get(post.context.rootActivityId);
     return [attributeExpense({
       expense: { id: asId(post.expense.id), postId: asId(post.id), totalAmount: post.expense.totalAmount, currency: post.expense.currency },
       post: { createdAt: new Date(post.createdAt) }, rootPostId: asId(post.context.rootPostId),
       activity: activity ? { id: asId(activity.id), dayId: asId(activity.dayId), scheduledAt: new Date(activity.scheduledAt) } : null,
-      publicationDayId: asId(bandOf(post.createdAt)),
+      publicationDayId: asId(bandOf(days, post.createdAt)),
     })];
   }).sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || String(a.expenseId).localeCompare(String(b.expenseId)));
   const wire = <T,>(data: T) => JSON.parse(JSON.stringify(data)) as T;
