@@ -132,7 +132,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   const preloadedActivity = postId ? undefined : activityParam(location.search);
   const base: PostDraft = preloadedParent ? setLink(saved, { kind: "post", id: preloadedParent, label: parentLabelOf(location.state) })
     : preloadedActivity ? setLink(saved, { kind: "activity", id: preloadedActivity, label: activityLabelOf(location.state) })
-    : preloaded &&saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
+    : preloaded && saved.extras.transportId === null && saved.extras.link?.kind !== "post" ? setTransport(saved, preloaded) : saved;
   // An existing draft (for example after a subform or an error) always wins over the saved values.
   const draft: PostDraft = handle.draft ?? base;
   const dirty = isDraftDirty(draft, base);
