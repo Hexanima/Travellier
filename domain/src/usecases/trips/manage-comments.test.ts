@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import * as domain from "../../index.js";
-import type { Comment, ObjectId, TripCommentPort, TripCommentScope, TripRole } from "../../index.js";
+import type { Comment, ObjectId, TripCommentPort, TripCommentScope, TripNotificationDraft, TripRole } from "../../index.js";
 
 const id = (n: number): ObjectId => {
   const parsed = domain.createObjectId(n.toString(16).padStart(24, "0"));
@@ -15,9 +15,11 @@ const seed = (fields: Partial<Comment> = {}): Comment => ({ id: id(10), tripId, 
 describe("Trip comment use cases", () => {
   let role: TripRole | undefined, tripExists: boolean, posts: Record<string, { id: ObjectId; tripId: ObjectId }>;
   let records: Comment[], members: ObjectId[], sequence: number, writes: number, transactionError: boolean;
+  let notifications: TripNotificationDraft[], appendError: boolean;
   let scope: TripCommentScope, comments: TripCommentPort;
   beforeEach(() => {
     role = "participant"; tripExists = true; records = []; members = [actor, id(9)]; sequence = 20; writes = 0; transactionError = false;
+    notifications = []; appendError = false;
     posts = { [postId]: { id: postId, tripId }, [otherPostId]: { id: otherPostId, tripId }, [id(6)]: { id: id(6), tripId: otherTripId } };
     scope = {
       findMemberRole: async () => domain.ok(role),
@@ -26,15 +28,20 @@ describe("Trip comment use cases", () => {
       findComment: async (cid, pid) => domain.ok(records.find((c) => c.id === cid && c.tripId === tripId && c.postId === pid)),
       listComments: async (pid) => domain.ok(records.filter((c) => c.tripId === tripId && c.postId === pid)),
       listMemberUserIds: async (userIds) => domain.ok(userIds.filter((u) => members.includes(u))),
+      listMemberIds: async () => domain.ok([...members]),
+      appendNotifications: async (drafts) => {
+        if (appendError) return domain.err(new domain.UnknownError("outbox down"));
+        notifications.push(...drafts); return domain.ok(undefined);
+      },
       insert: async (comment) => { writes++; records.push(comment); return domain.ok(undefined); },
       replaceText: async (comment) => { writes++; records = records.map((c) => c.id === comment.id ? { ...c, text: comment.text } : c); return domain.ok(undefined); },
     };
     comments = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone(records);
+        const before = structuredClone(records), notificationsBefore = [...notifications];
         const result = await work(scope);
-        if (!result.ok || transactionError) { records = before; return result.ok ? domain.err(new domain.UnknownError("boom")) : result; }
+        if (!result.ok || transactionError) { records = before; notifications = notificationsBefore; return result.ok ? domain.err(new domain.UnknownError("boom")) : result; }
         return result;
       },
     };
@@ -49,6 +56,51 @@ describe("Trip comment use cases", () => {
     expect(await create({ authorId: id(99), id: id(99), createdAt: new Date(0), text: "  Hola  " }))
       .toEqual({ ok: true, value: { id: id(20), tripId, postId, authorId: actor, text: "Hola", createdAt, authorIsFormerMember: false } });
     expect(records).toHaveLength(1);
+  });
+
+  describe("notifications (T91)", () => {
+    it("emits comment.created to the other current members and not to the author, with ids and no text", async () => {
+      members = [actor, id(9), id(8)];
+      const created = await create({ text: "Texto privado" });
+      expect(created.ok).toBe(true);
+      expect(notifications.map((n) => n.userId)).toEqual([id(9), id(8)]);
+      expect(notifications).toEqual([id(9), id(8)].map((userId) => ({ eventKey: `comment.created:${id(20)}:${userId}`, type: "comment.created", tripId, userId,
+        actorId: actor, operationKey: `comment.created:${id(20)}`, payload: { commentId: id(20), postId, actorId: actor }, createdAt })));
+      expect(JSON.stringify(notifications)).not.toContain("Texto privado");
+    });
+
+    it("does not notify former members nor the author when alone", async () => {
+      members = [actor];
+      expect((await create()).ok).toBe(true);
+      expect(notifications).toEqual([]);
+    });
+
+    it("emits nothing when the comment is rejected", async () => {
+      expect((await create({ text: "  " })).ok).toBe(false);
+      role = undefined;
+      expect((await create()).ok).toBe(false);
+      expect(notifications).toEqual([]);
+    });
+
+    it("does not emit when editing a comment", async () => {
+      records = [seed()];
+      expect((await update()).ok).toBe(true);
+      expect(notifications).toEqual([]);
+    });
+
+    it("if the events cannot be written the comment is not saved either", async () => {
+      appendError = true;
+      expect(await create()).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(records).toEqual([]);
+      expect(notifications).toEqual([]);
+    });
+
+    it("if the transaction fails after the events, none of them remains", async () => {
+      transactionError = true;
+      expect((await create()).ok).toBe(false);
+      expect(records).toEqual([]);
+      expect(notifications).toEqual([]);
+    });
   });
 
   it("rejects invalid text without writing", async () => {

@@ -1,6 +1,7 @@
 import { ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
 import { CommentNotFoundError, createObjectId, err, ok, TaggedError, TripNotFoundError, UnknownError,
   type AsyncResult, type Comment, type ObjectId, type TripCommentPort, type TripCommentScope, type TripRole } from "app-domain";
+import { createOutboxStore } from "./outbox-store.js";
 
 type CommentDocument = { _id: MongoObjectId; postId: MongoObjectId; authorId: MongoObjectId; tripId: MongoObjectId;
   text: string; createdAt: Date };
@@ -19,7 +20,9 @@ export const commentsQuery = (tripId: MongoObjectId, postId: MongoObjectId) =>
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripCommentScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
   const comments = database.collection<CommentDocument>("comments");
+  const outbox = createOutboxStore(database, tripId, session);
   return {
+    ...outbox,
     findMemberRole: async (userId) => {
       const member = await database.collection<{ role: TripRole }>("tripMembers")
         .findOne({ ...query, userId: new MongoObjectId(userId) }, options);

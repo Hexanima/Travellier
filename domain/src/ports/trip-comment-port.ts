@@ -2,6 +2,7 @@ import type { Comment } from "../entities/comment.js";
 import type { Post } from "../entities/post.js";
 import type { TripRole } from "../entities/trip-member.js";
 import type { Trip } from "../entities/trip.js";
+import type { NotificationScope } from "./trip-notification-port.js";
 import type { AsyncResult } from "../types/result.js";
 import type { ObjectId } from "../value-objects/object-id.js";
 
@@ -19,7 +20,8 @@ export interface TripCommentReadScope {
   listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
 }
 
-export interface TripCommentScope extends TripCommentReadScope {
+/** `appendNotifications` is the last write of `insert`'s operation (T91). */
+export interface TripCommentScope extends TripCommentReadScope, NotificationScope {
   insert: (comment: Comment) => AsyncResult<void>;
   /** Changes only the text of an existing comment of this post and Trip. */
   replaceText: (comment: Comment) => AsyncResult<void>;

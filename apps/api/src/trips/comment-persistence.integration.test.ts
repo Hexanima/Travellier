@@ -77,6 +77,52 @@ describe("comment persistence and transactions", () => {
     expect(await snapshot()).toEqual(before);
   });
 
+  describe("notifications (T91)", () => {
+    const events = (type = "comment.created") => f.db.collection("outboxEvents").find({ type }).sort({ userId: 1 }).toArray();
+    const snapshotWithEvents = async () => [...(await snapshot()), await f.db.collection("outboxEvents").find().sort({ _id: 1 }).toArray()];
+
+    it("stores one comment.created per other member with exact ids and no text, never for the author", async () => {
+      const post = await createPost(); const other = await addMember("participant"); const admin = await addMember("admin");
+      const created = await comment(post.id, "Texto privado");
+      const stored = await events();
+      expect(stored.map((event) => event.userId.toHexString()).sort()).toEqual([other.toHexString(), admin.toHexString()].sort());
+      for (const event of stored) {
+        expect(event).toMatchObject({ tripId: f.trip, type: "comment.created", status: "pending", actorId: f.actor,
+          eventKey: `comment.created:${created.id}:${event.userId}`, operationKey: `comment.created:${created.id}`,
+          payload: { commentId: new ObjectId(created.id), postId: new ObjectId(post.id), actorId: f.actor }, createdAt: new Date(created.createdAt) });
+        expect(JSON.stringify(event)).not.toContain("Texto privado");
+      }
+    });
+
+    it("does not emit when a comment is edited or rejected", async () => {
+      const post = await createPost(); await addMember("participant");
+      const created = await comment(post.id);
+      const before = await events();
+      expect((await f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Nuevo" })).ok).toBe(true);
+      expect((await f.api.createComment!({ ...payload(post.id), text: "  " })).ok).toBe(false);
+      expect(await events()).toEqual(before);
+    });
+
+    it("saves nothing when the events cannot be written", async () => {
+      const post = await createPost(); await addMember("participant"); const before = await snapshotWithEvents();
+      const collection = f.db.collection("outboxEvents"), original = f.db.collection.bind(f.db);
+      vi.spyOn(collection, "bulkWrite").mockRejectedValueOnce(new Error("forced failure"));
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "outboxEvents" ? collection : original(key, options));
+      expect(await f.api.createComment!({ ...payload(post.id), text: "Hola" })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(await snapshotWithEvents()).toEqual(before);
+    });
+
+    it("leaves no event when the transaction fails after writing them", async () => {
+      const post = await createPost(); await addMember("participant"); const before = await snapshotWithEvents();
+      const collection = f.db.collection("outboxEvents"), original = f.db.collection.bind(f.db);
+      const real = collection.bulkWrite.bind(collection) as (...args: unknown[]) => Promise<unknown>;
+      vi.spyOn(collection, "bulkWrite").mockImplementationOnce((async (...args: unknown[]) => { await real(...args); throw new Error("after write"); }) as never);
+      vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === "outboxEvents" ? collection : original(key, options));
+      expect(await f.api.createComment!({ ...payload(post.id), text: "Hola" })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(await snapshotWithEvents()).toEqual(before);
+    });
+  });
+
   it("GET uses a snapshot without changing the Trip revision or content", async () => {
     const post = await createPost(); await comment(post.id); const before = await snapshot();
     const listed = await f.api.listComments!(payload(post.id));
@@ -149,6 +195,8 @@ describe("comment persistence and transactions", () => {
     expect(expelled.ok).toBe(true);
     expect(await f.db.collection("comments").find({ tripId: f.trip }).toArray()).toMatchObject([{ authorId: f.actor, text: "Hola" }]);
     expect(await f.api.listComments!(payload(post.id, admin))).toMatchObject({ ok: true, value: [{ authorIsFormerMember: true }] });
+    // The comment saw the author still inside the Trip: its event reached the admin (the author is never notified of their own comment).
+    expect((await f.db.collection("outboxEvents").find({ type: "comment.created" }).toArray()).map((event) => event.userId)).toEqual([admin]);
   });
 
   concurrent("makes a comment wait for an in-flight expulsion and then fail without writing", async () => {
@@ -166,6 +214,8 @@ describe("comment persistence and transactions", () => {
     expect(expelled.ok).toBe(true);
     expect(created).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
     expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
+    // The waiting comment failed after the expulsion: no event was written for it.
+    expect(await f.db.collection("outboxEvents").countDocuments({ type: "comment.created" })).toBe(0);
   });
 
   concurrent("makes Trip deletion wait for an in-flight comment and leaves no orphan comment", async () => {
