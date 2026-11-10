@@ -13,7 +13,6 @@ const isDuplicateKey = (error: unknown) => typeof error === "object" && error !=
 const createScope = (database: Db, tripId: ObjectId, session: ClientSession): TripLikeScope => {
   const mongoTripId = new MongoObjectId(tripId), query = { tripId: mongoTripId }, options = { session };
   const postLikes = database.collection("postLikes"), commentLikes = database.collection("commentLikes");
-  const ids = (values: ObjectId[]) => values.map((value) => new MongoObjectId(value));
   return {
     findMemberRole: async (userId) => {
       const member = await database.collection<{ role: TripRole }>("tripMembers")
