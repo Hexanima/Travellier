@@ -280,6 +280,38 @@ describe("joint post save and idempotent retry", () => {
         expect(JSON.parse(response.body).error).toEqual({ code: "PostRequestConflictError", message: expect.any(String) });
         expect(await data()).toEqual(before);
       });
+
+      // listActivities is per Trip, so another Trip's activity id is invisible to the pre-check: validation and agenda review run first and the
+      // generic 409 only comes from the insert. These fix the real answers before that point (no writes, no reason, no owner revealed).
+      it("a new activity id owned by another Trip with an agenda conflict answers the confirmation 409 (ParticipationConflictError), without reason or writes", async () => {
+        const created = JSON.parse((await post({ description: "Original" })).body).post, id = newId(), otherTrip = await otherTripWith();
+        await seedActivity("Plan A", "2026-09-25T12:30:00Z");
+        await f.db.collection("activities").insertOne({ _id: new ObjectId(id), tripId: otherTrip, title: "Ajena" });
+        const before = await data();
+        for (const response of [await patch(created.id, { newActivity: { ...withDuration(), id } }), await post({ description: "Nuevo", newActivity: { ...withDuration(), id } })]) {
+          expect(response.statusCode, response.body).toBe(409);
+          const error = JSON.parse(response.body).error;
+          expect(error.code).toBe("ParticipationConflictError");
+          expect(error).not.toHaveProperty("reason");
+          expect(response.body).not.toContain(hex(otherTrip));
+        }
+        expect(await data()).toEqual(before);
+      });
+
+      it("a new activity id owned by another Trip outside the destination window answers 422 without reason or writes", async () => {
+        const created = JSON.parse((await post({ description: "Original" })).body).post, id = newId(), otherTrip = await otherTripWith();
+        await f.db.collection("activities").insertOne({ _id: new ObjectId(id), tripId: otherTrip, title: "Ajena" });
+        const before = await data();
+        const outside = { title: "Cena", scheduledAt: "2030-01-01T12:00:00Z", durationMinutes: 60, id };
+        for (const response of [await patch(created.id, { newActivity: outside }), await post({ description: "Nuevo", newActivity: outside })]) {
+          expect(response.statusCode, response.body).toBe(422);
+          const error = JSON.parse(response.body).error;
+          expect(error.code).toBe("ValidationError");
+          expect(error).not.toHaveProperty("reason");
+          expect(response.body).not.toContain(hex(otherTrip));
+        }
+        expect(await data()).toEqual(before);
+      });
     });
 
     describe("PATCH with newActivity.id", () => {
