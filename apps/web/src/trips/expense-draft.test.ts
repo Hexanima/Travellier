@@ -21,6 +21,16 @@ describe("parseAmount", () => {
   it("rejects an amount that is not a safe number", () => {
     expect(parseAmount("99999999999999999999")).toEqual({ ok: false, code: "invalid" });
   });
+  it.each(["70368744177664,01", "70368744177664.01", "70368744177664,04", "70368744177665,01", "90071992547409,91", "90071992547409,99", "900719925474099,99", "99999999999999999999,99"])(
+    "rejects %s: the number that travels would not represent exactly the typed text", (raw) => {
+      expect(parseAmount(raw)).toEqual({ ok: false, code: "invalid" });
+    });
+  it.each([["70368744177663,99", 7036874417766399], ["70368744177664,00", 7036874417766400], ["70368744177664,50", 7036874417766450], ["9007199254740,99", 900719925474099],
+    ["1000000000000,01", 100000000000001]])("accepts %s, exactly representable", (raw, cents) => {
+    const parsed = parseAmount(raw);
+    expect(parsed.ok && parsed.cents).toBe(cents);
+    expect(parsed.ok && parsed.amount).toBe(Number(raw.replace(",", ".")));
+  });
 });
 
 describe("validateExpense", () => {

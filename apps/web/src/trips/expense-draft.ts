@@ -23,10 +23,14 @@ export const parseAmount = (raw: string): ParsedAmount => {
   if (!match || (match[2] === "" && text.length > match[1]!.length)) return { ok: false, code: "invalid" };
   const fraction = match[2] ?? "";
   if (fraction.length > 2) return { ok: false, code: "precision" };
-  const amount = Number(`${match[1]}${fraction === "" ? "" : `.${fraction}`}`);
+  // Exact cents from the text (never from a float), and the number that travels must give them back: otherwise it would silently be another amount.
+  const exact = BigInt(match[1]!) * 100n + BigInt(fraction.padEnd(2, "0") || "0");
+  if (exact <= 0n || exact > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, code: "invalid" };
+  const cents = Number(exact);
+  const amount = Number(`${match[1]}.${fraction.padEnd(2, "0")}`);
   const converted = toCents(amount);
-  if (!converted.ok || converted.value <= 0 || !Number.isSafeInteger(converted.value)) return { ok: false, code: "invalid" };
-  return { ok: true, cents: converted.value, amount };
+  if (!converted.ok || converted.value !== cents || amount !== cents / 100) return { ok: false, code: "invalid" };
+  return { ok: true, cents, amount };
 };
 
 export const validateExpense = (draft: ExpenseDraft):
