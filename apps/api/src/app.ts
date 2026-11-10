@@ -68,6 +68,10 @@ import {
   type TripCommentPayload,
   type CreateTripPostCommentPayload,
   type UpdateTripPostCommentPayload,
+  type TripPostLikePayload,
+  type TripCommentLikePayload,
+  type LikeState,
+  type TripPostLikesView,
   type Result,
   createObjectId,
   ValidationError,
@@ -135,6 +139,11 @@ export interface TripApi extends TripInvitationApi {
   listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
   createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
   updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
+  likePost?: (payload: TripPostLikePayload) => AsyncResult<LikeState>;
+  unlikePost?: (payload: TripPostLikePayload) => AsyncResult<LikeState>;
+  likeComment?: (payload: TripCommentLikePayload) => AsyncResult<LikeState>;
+  unlikeComment?: (payload: TripCommentLikePayload) => AsyncResult<LikeState>;
+  getPostLikes?: (payload: TripPostLikePayload) => AsyncResult<TripPostLikesView>;
   getActivityParticipation?: (payload: ActivityDetailPayload) => AsyncResult<ActivityParticipation | null>;
   setActivityParticipation?: (payload: SetTripActivityParticipationPayload) => AsyncResult<SetTripActivityParticipationResult>;
   createActivity?: (payload: CreateTripActivityPayload) => AsyncResult<CreateTripActivityResult>;
@@ -634,6 +643,35 @@ export const handleApiRequest = async (
     if (!result.ok) return errorResponse(result.error);
     if (result.value.outcome === "saved") return jsonResponse(200, { participation: result.value.participation });
     return participationConflictResponse(result.value);
+  }
+
+  // Likes are idempotent PUT/DELETE; identity comes only from the token and no body is required or read.
+  const postLikeMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/like$/);
+  const commentLikeMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/comments\/([^/?]+)\/like$/);
+  const postLikesMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/likes$/);
+  const likeWrite = request.method === "PUT" || request.method === "DELETE";
+  if ((likeWrite && (postLikeMatch || commentLikeMatch)) || (request.method === "GET" && postLikesMatch)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const found = (postLikeMatch ?? commentLikeMatch ?? postLikesMatch)!;
+    const tripId = createObjectId(found[1] ?? ""), postId = createObjectId(found[2] ?? "");
+    const commentId = commentLikeMatch ? createObjectId(commentLikeMatch[3] ?? "") : undefined;
+    if (!tripId.ok || !postId.ok || (commentId !== undefined && !commentId.ok)) return invalidRequestResponse();
+    const context = { tripId: tripId.value, postId: postId.value, authenticatedUserId: request.authenticatedUserId }, trips = dependencies.trips;
+    if (postLikesMatch) {
+      if (!trips?.getPostLikes) return unavailableResponse();
+      const result = await trips.getPostLikes(context);
+      return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+    }
+    if (commentId?.ok) {
+      const operation = request.method === "PUT" ? trips?.likeComment : trips?.unlikeComment;
+      if (!operation) return unavailableResponse();
+      const result = await operation({ ...context, commentId: commentId.value });
+      return result.ok ? jsonResponse(200, { like: result.value }) : errorResponse(result.error);
+    }
+    const operation = request.method === "PUT" ? trips?.likePost : trips?.unlikePost;
+    if (!operation) return unavailableResponse();
+    const result = await operation(context);
+    return result.ok ? jsonResponse(200, { like: result.value }) : errorResponse(result.error);
   }
 
   const commentMatch = request.url?.match(/^\/trips\/([^/?]+)\/posts\/([^/?]+)\/comments(?:\/([^/?]+))?$/);
