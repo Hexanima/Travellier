@@ -86,7 +86,7 @@ El cliente registra el token del dispositivo en la API (`PUT /push-devices`, T89
 - **Android:** el `google-services.json` real del proyecto Firebase se inyecta en build/CI desde un secreto (por ejemplo, base64 en un secret de GitHub decodificado en `apps/web/android/app/google-services.json` justo antes de `cap sync` y del `assemble`). El archivo está ignorado por Git y no debe versionarse. El job `android-native` actual no se modifica y compila sin él (push no funciona en ese APK).
 - **iOS:** no hay credenciales de Firebase en el cliente. Se necesitan el entitlement `aps-environment`, el perfil y la firma del equipo Apple Developer, en macOS.
 - La clave `.p8` de APNs y las credenciales FCM de envío viven solo en el servidor (T45/T92), nunca en el cliente ni en el repositorio.
-- `src/push/credentials-contract.test.ts` verifica que esos archivos no estén rastreados, que Android ignore `google-services.json` y que `src/` y `android/` no contengan claves privadas, claves `AIza…` ni valores de configuración FCM.
+- `src/push/credentials-contract.test.ts` verifica que esos archivos no estén rastreados, que Android ignore `google-services.json` y que `src/`, `android/` e `ios/` (incluidos `.xcconfig`, `.entitlements`, `.storyboard`, `.pbxproj` y `.plist`) no contengan `BEGIN PRIVATE KEY`, claves `AIza…`, referencias `AuthKey_*.p8` ni valores de configuración FCM; omite binarios y archivos de más de 1 MiB.
 
 ### No verificado
 
