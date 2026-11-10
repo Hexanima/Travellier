@@ -162,7 +162,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         // A 401 leaves no authentication to revoke with: forget the push registration locally.
         pushRef.current?.reset()
         // The rejected session is over: neither its foreground announcement nor an action waiting for a session survives it (it could be opened by another account).
-        opener.current?.discard()
+        if (session.current !== undefined) opener.current?.discard()
         setNoticeAnnounced(false)
         session.current = undefined
         setHasSession(false)
@@ -349,6 +349,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       }
 
       if (result?.error.kind === 'unauthorized') {
+        // A rejected refresh at cold start drops the pending action: the client does not know the notice's account.
+        opener.current?.discard()
         await queueStorageOperation(() => storage.clear())
         return
       }

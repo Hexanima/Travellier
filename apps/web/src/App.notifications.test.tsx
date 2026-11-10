@@ -292,6 +292,25 @@ describe("App opening notices from a push", () => {
     expect(native.push.requestPermissions).not.toHaveBeenCalled();
   });
 
+  it("on a native platform the opener listens through the capabilities port: it opens from the action and never registers a token", async () => {
+    const { Capacitor } = await import("@capacitor/core");
+    vi.spyOn(Capacitor, "isNativePlatform").mockReturnValue(true);
+    vi.spyOn(Capacitor, "getPlatform").mockReturnValue("android");
+    const callbacks = new Map<string, (event: unknown) => void>();
+    native.push.addListener.mockImplementation(async (name: string, callback: (event: unknown) => void) => { callbacks.set(name, callback); return { remove: vi.fn(async () => undefined) }; });
+    const fetch = makeFetch();
+    try {
+      await render("/trips", fetch, { push: { resume: vi.fn(), reset: vi.fn(), revokeBeforeLogout: vi.fn() } as unknown as PushDeviceService, trips: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) } as never });
+      expect(native.push.addListener.mock.calls.map(([name]) => name)).toEqual(["registration", "registrationError", "pushNotificationReceived", "pushNotificationActionPerformed"]);
+      expect(native.push.requestPermissions).not.toHaveBeenCalled();
+      expect(native.push.register).not.toHaveBeenCalled();
+      await act(async () => { callbacks.get("registration")!({ value: "device-token" }); });
+      expect(calls(fetch).some((call) => call.includes("/push"))).toBe(false);
+      await act(async () => { callbacks.get("pushNotificationActionPerformed")!({ notification: { id: "n", data: { notificationId: itineraryId(901), type: "activity.created", tripId, activityId } } }); });
+      expect(pathOf()).toBe(`/trips/${tripId}/itinerary?activity=${activityId}`);
+    } finally { vi.mocked(Capacitor.isNativePlatform).mockRestore(); vi.mocked(Capacitor.getPlatform).mockRestore(); native.push.addListener.mockReset(); }
+  });
+
   it("starts listening early, closes the listener on unmount and tolerates an unsupported port", async () => {
     const { port, listen, stop } = fakePort();
     await render("/trips", makeFetch(), { noticePort: port });
@@ -379,6 +398,30 @@ describe("App opening notices from a push", () => {
     };
     await type("email", "nico@example.test"); await type("password", "secret-pass");
     await act(async () => { document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(pathOf()).toBe(`/trips/${tripId}/itinerary?activity=${activityId}`);
+  });
+
+  it("a failed login (401 without a token) does not drop the pending action: the right login resumes it once", async () => {
+    const t = fakePort();
+    let logins = 0;
+    const base = makeFetch();
+    const fetch = vi.fn().mockImplementation(async (url: string, request: RequestInit) => {
+      if (new URL(url).pathname === "/auth/login") { logins += 1; if (logins === 1) return json({ error: { code: "InvalidCredentialsError", message: "x" } }, 401); }
+      return base(url, request);
+    });
+    await render("/", fetch, { noticePort: t.port }, false);
+    await t.action(data("activity.created", { activityId }));
+    expect(pathOf()).toBe("/login");
+    const type = async (name: string, value: string) => {
+      const element = document.querySelector(`[name=${name}]`) as HTMLInputElement;
+      await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
+    };
+    const submit = async () => { await type("email", "nico@example.test"); await type("password", "secret-pass"); await act(async () => { document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); };
+    await submit();
+    expect(logins).toBe(1);
+    expect(pathOf()).toBe("/login");
+    await submit();
+    expect(logins).toBe(2);
     expect(pathOf()).toBe(`/trips/${tripId}/itinerary?activity=${activityId}`);
   });
 
