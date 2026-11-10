@@ -90,3 +90,16 @@
 .post-link-section p, .post-link-transport p { margin: 0; }
 .post-link-options { display: grid; gap: 4px; }
 .post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.memory-tabs { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.memory-tab.ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.memory-tab.ui-button[aria-selected="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); }
+.memory-panel[hidden] { display: none; }
+.comments-panel, .comment-list, .comment-form, .comment-item { display: grid; gap: var(--ui-space-3); }
+.comment-list { list-style: none; margin: 0; padding: 0; }
+.comment-item { padding: var(--ui-space-3); border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius); }
+.comment-author, .comment-text, .comment-count { margin: 0; }
+.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
+.comment-actions .ui-button, .like-button { min-height: 44px; min-width: 44px; }
+.like-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
+.like-control, .post-like, .like-error { display: grid; gap: var(--ui-space-2); justify-items: start; }
