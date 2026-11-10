@@ -13,7 +13,14 @@ export type NewActivityDraft = { title: string; date: string; time: string; dura
  */
 export type PhotoDraftItem = { localId: string; reference: string; previewUrl?: string; contentType: string; sizeBytes: number;
   status: "selected" | "uploaded" | "failed"; key?: string; uploadedAt?: number; failure?: string };
-export type PostDraft = { values: { description: string; mapsUrl: string };
+export type PostDraft = {
+  /**
+   * Retry keys of the current publication attempt, created by the composer when it first builds an input (never stored between sessions):
+   * `attemptId` is the id of the post being created and `activityAttemptId` the id of the activity a PATCH creates. They live as long as
+   * the draft: success, discarding or a rejected id drops them; failures, cancelled confirmations and subforms keep them. Not a change.
+   */
+  attemptId?: string; activityAttemptId?: string;
+  values: { description: string; mapsUrl: string };
   /**
    * Subforms extend the draft here; the composer contract does not change. `expense` is `null` for «no expense» when creating and
    * for «untouched» when editing (an expense is never removed from a saved memory).
@@ -90,12 +97,12 @@ const photosInput = (draft: PostDraft): Pick<PostInput, "photos"> => {
 };
 /**
  * Only when the draft carries a new activity and the caller resolved it: description and maps do not travel with it (T67),
- * the day is derived by the server and a null duration is omitted.
+ * the day is derived by the server and a null duration is omitted. Only a PATCH carries the retry id of the activity (`withId`): a POST ignores it.
  */
-const newActivityInput = (draft: PostDraft, resolved?: ResolvedNewActivity): Pick<PostInput, "newActivity"> => {
+const newActivityInput = (draft: PostDraft, resolved?: ResolvedNewActivity, withId = false): Pick<PostInput, "newActivity"> => {
   const activity = draft.extras.newActivity;
   if (activity === null || resolved === undefined) return {};
-  return { newActivity: { title: activity.title.trim(), scheduledAt: resolved.scheduledAt,
+  return { newActivity: { ...(withId && draft.activityAttemptId !== undefined ? { id: draft.activityAttemptId } : {}), title: activity.title.trim(), scheduledAt: resolved.scheduledAt,
     ...(resolved.durationMinutes !== null ? { durationMinutes: resolved.durationMinutes } : {}) } };
 };
 /**
@@ -110,7 +117,7 @@ const expenseInput = (draft: PostDraft, saved?: SavedExpense, view?: SavedExpens
 };
 export const prepareCreate = (draft: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
   const description = clean(draft.values.description), mapsUrl = clean(draft.values.mapsUrl), links = desired(draft);
-  return { ...(description !== null ? { description } : {}), ...(mapsUrl !== null ? { mapsUrl } : {}),
+  return { ...(draft.attemptId !== undefined ? { id: draft.attemptId } : {}), ...(description !== null ? { description } : {}), ...(mapsUrl !== null ? { mapsUrl } : {}),
     ...(links.parentPostId !== null ? { parentPostId: links.parentPostId } : {}), ...(links.activityId !== null ? { activityId: links.activityId } : {}),
     ...(links.transportId !== null ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft), ...expenseInput(draft) };
 };
@@ -126,7 +133,7 @@ export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: Reso
   return { ...(description !== clean(original.description ?? "") ? { description } : {}), ...(mapsUrl !== clean(original.mapsUrl ?? "") ? { mapsUrl } : {}),
     ...(links.parentPostId !== (original.parentPostId ?? null) ? { parentPostId: links.parentPostId } : {}),
     ...(!withActivity && links.activityId !== (original.activityId ?? null) ? { activityId: links.activityId } : {}),
-    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft), ...expenseInput(draft, savedExpense, savedView) };
+    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved, true), ...photosInput(draft), ...expenseInput(draft, savedExpense, savedView) };
 };
 
 const idParam = (search: string, name: string): string | undefined => {

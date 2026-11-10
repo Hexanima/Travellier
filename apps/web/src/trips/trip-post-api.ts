@@ -7,7 +7,7 @@ import { valid as validParticipation, type ParticipationResponse } from "./trip-
 export type PostResponse = { id: string; tripId: string; authorId: string; description: string | null; mapsUrl: string | null;
   activityId: string | null; parentPostId: string | null; transportId: string | null; createdAt: string };
 /** Only content fields: the publication date and the day are decided by the server and can never be sent. */
-export type NewActivityInput = { title: string; scheduledAt: string; durationMinutes?: number | null; description?: string | null; mapsUrl?: string | null };
+export type NewActivityInput = { id?: string; title: string; scheduledAt: string; durationMinutes?: number | null; description?: string | null; mapsUrl?: string | null };
 export type ExpensePaymentRow = { userId: string; unit: "amount" | "percent"; value: number };
 export type ExpenseShareRow = { userId: string; unit: "amount" | "percent" | "remainder" | "excluded"; value: number | null };
 /**
@@ -17,7 +17,7 @@ export type ExpenseShareRow = { userId: string; unit: "amount" | "percent" | "re
 export type ExpenseInput = { totalAmount?: number; currency?: "ARS" | "EUR" | "USD"; breakdown?: string | null;
   payments?: ExpensePaymentRow[]; shares?: ExpenseShareRow[] };
 /** `newActivity` creates the activity together with the post; the server derives its day, so `dayId` is never sent. */
-export type PostInput = { description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null;
+export type PostInput = { id?: string; description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null;
   newActivity?: NewActivityInput; photos?: { key: string }[]; expense?: ExpenseInput };
 /** What the server stored for the expense (the currency is null only in legacy data); payments and shares are read from the post detail. */
 export type SavedExpenseResponse = { postId: string; totalAmount: number; currency: "ARS" | "EUR" | "USD" | null; breakdown: string | null };
