@@ -47,6 +47,18 @@ describe("post origin", () => {
     expect(originLabel("itinerario")).toBe("Volver al itinerario");
     expect(originLabel("recuerdo")).toBe("Volver al recuerdo");
   });
+  it("accepts the activity label and the activity dialog search; rejects a malicious search", () => {
+    const path = `/trips/${tripId}/itinerary`;
+    const search = "?activity=000000000000000000000005&tab=photos";
+    const origin = { path, search, anchor: memoryAnchor("000000000000000000000006"), scrollY: 10, label: "actividad" };
+    expect(readOrigin({ origin }, tripId)).toEqual(origin);
+    expect(originHref(readOrigin({ origin }, tripId))).toBe(`${path}${search}`);
+    expect(originLabel("actividad")).toBe("Volver a la actividad");
+    expect(buildOrigin({ pathname: path, search }, "actividad")).toEqual({ path, search, label: "actividad" });
+    expect(readOrigin({ origin: { path, search: "?activity=1#x", label: "actividad" } }, tripId)).toEqual(diary);
+    expect(readOrigin({ origin: { path, search: "?a=//evil", label: "actividad" } }, tripId)).toEqual(diary);
+    expect(readOrigin({ origin: { path, search: "?activity=1 2", label: "actividad" } }, tripId)).toEqual(diary);
+  });
   it("reads a valid restore and ignores a malformed one", () => {
     const anchor = memoryAnchor("000000000000000000000005");
     expect(readRestore({ restore: { anchor, scrollY: 300 } })).toEqual({ anchor, scrollY: 300 });

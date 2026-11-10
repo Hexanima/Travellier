@@ -196,8 +196,18 @@ describe("post draft with a new activity", () => {
     expect(draftKeyFor({ search: "?parentPostId=nope" })).toBe("new");
     expect(draftKeyFor({ search: `?parentPostId=${A}` })).not.toBe(draftKeyFor({ search: `?parentPostId=${P}` }));
   });
+  it("derives a draft key per valid activity of `?activityId=`, after the edited post and the parent", () => {
+    expect(draftKeyFor({ search: `?activityId=${A}` })).toBe(`new:activity:${A}`);
+    expect(draftKeyFor({ search: "?activityId=nope" })).toBe("new");
+    expect(draftKeyFor({ search: `?activityId=${A.toUpperCase()}x` })).toBe("new");
+    expect(draftKeyFor({ search: `?activityId=${A}` })).not.toBe("new");
+    expect(draftKeyFor({ search: `?activityId=${A}` })).not.toBe(draftKeyFor({ search: `?activityId=${P}` }));
+    expect(draftKeyFor({ search: `?parentPostId=${P}&activityId=${A}` })).toBe(`new:parent:${P}`);
+    expect(draftKeyFor({ postId: P, search: `?activityId=${A}` })).toBe(`edit:${P}`);
+    expect(draftKeyFor({ search: `?activityId=${A}&transportId=${T}` })).toBe(`new:activity:${A}`);
+  });
   describe("photos", () => {
-    const photo = (n: number, extra: Partial<PhotoDraftItem> = {}): PhotoDraftItem =>
+    const photo =(n: number, extra: Partial<PhotoDraftItem> = {}): PhotoDraftItem =>
       ({ localId: `p${n}`, reference: `file:///${n}.jpg`, contentType: "image/jpeg", sizeBytes: 100 + n, status: "selected", ...extra });
     const withPhotos = (...items: PhotoDraftItem[]): PostDraft => addPhotos(draft("Hola"), items).draft;
     const uploaded = (n: number) => photo(n, { status: "uploaded", key: `trips/t/photos/k${n}`, uploadedAt: 1000 });

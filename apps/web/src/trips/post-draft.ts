@@ -105,9 +105,21 @@ export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: Reso
     ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft) };
 };
 
-/** Key of the shared draft: one per edited post, one per continuation parent (valid `?parentPostId=`), and a generic one for the rest of creations. */
+const idParam = (search: string, name: string): string | undefined => {
+  const value = new URLSearchParams(search).get(name);
+  return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : undefined;
+};
+/** The activity to share a memory of (valid `?activityId=`), or undefined. */
+export const activityParam = (search: string): string | undefined => idParam(search, "activityId");
+
+/**
+ * Key of the shared draft: one per edited post, one per continuation parent (valid `?parentPostId=`), one per activity to share
+ * (valid `?activityId=`), and a generic one for the rest of creations.
+ */
 export const draftKeyFor = ({ postId, search }: { postId?: string; search: string }): string => {
   if (postId) return `edit:${postId}`;
-  const parent = new URLSearchParams(search).get("parentPostId");
-  return parent !== null && /^[0-9a-f]{24}$/.test(parent) ? `new:parent:${parent}` : "new";
+  const parent = idParam(search, "parentPostId");
+  if (parent !== undefined) return `new:parent:${parent}`;
+  const activity = activityParam(search);
+  return activity !== undefined ? `new:activity:${activity}` : "new";
 };
