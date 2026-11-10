@@ -26,6 +26,7 @@ import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
 import { useInTripShell, useTripName } from "./trip-state.js";
+import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
@@ -65,6 +66,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const [attempt, setAttempt] = useState(0);
   // Inside the Trip shell the frame (main, way back, Trip heading, tabs) is the shell's; the Trip name is already known there.
   const inShell = useInTripShell();
+  // Inside the shell the screen heading is h2 (the Trip name is the h1), so its sections are h3, the bands h4 and the items h5.
+  const sub = inShell ? 3 : 2;
   const shellName = useTripName();
   const location = useLocation();
   const navigate = useNavigate();
@@ -270,12 +273,12 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
       {state.kind === "ready" && view && view.tripExpenses.expenseCount > 0 ? <section className="itinerary-trip-expenses" aria-labelledby="itinerary-trip-expenses">
-        <h2 id="itinerary-trip-expenses">Gastos del viaje</h2>
+        <Heading level={sub} id="itinerary-trip-expenses">Gastos del viaje</Heading>
         <ExpenseLines totals={view.tripExpenses} />
         {view.outsideExpensePosts.length > 0 ? <Button onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
       </section> : null}
       {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
-        <h2>Todavía no hay itinerario</h2>
+        <Heading level={sub}>Todavía no hay itinerario</Heading>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
         <Link to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
       </section> : null}
@@ -288,12 +291,12 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       </nav> : null}
       {state.kind === "ready" ? <div className="itinerary-days">
         {shownDays.map((day) => <section className="itinerary-day" key={day.date} data-itinerary-date={day.date} aria-labelledby={`day-${day.date}`}>
-          <h2 id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></h2>
+          <Heading level={sub} id={`day-${day.date}`}><time dateTime={day.date}>{calendar.format(new Date(`${day.date}T00:00:00Z`))}</time></Heading>
           <div className="itinerary-bands">
             {day.segments.map((segment, index) => <section key={segment.key} className={`itinerary-band itinerary-band--${segment.type}`}
               data-itinerary-kind={segment.type} aria-labelledby={`band-${segment.key}`}>
               <header className="itinerary-band-header">
-                <div><h3 id={`band-${segment.key}`}>{bandLabels[segment.type]}</h3><p>{segment.destinationName}</p></div>
+                <div><Heading level={sub + 1 as 3 | 4} id={`band-${segment.key}`}>{bandLabels[segment.type]}</Heading><p>{segment.destinationName}</p></div>
                 <p className="itinerary-range">
                   {segment.endsAt === null ? "Desde " : null}<time dateTime={segment.startsAt}>{formatActivityClock(segment.startsAt, timeZone)}</time>
                   {segment.endsAt !== null && segment.endsAt !== segment.startsAt ? <> – <time dateTime={segment.endsAt}>{formatActivityClock(segment.endsAt, timeZone)}</time></> : null}
@@ -303,7 +306,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
                 ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setCreating({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
-                {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
+                {segment.items.map((item) => <AgendaItem titleLevel={sub + 2 as 4 | 5} tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone} attributions={attributions}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
                   disabled={refreshing} onActivity={activities ? openDetail : undefined} onTransport={openTransport} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
@@ -316,13 +319,13 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         </section>)}
       </div> : null}
       {state.kind === "ready" && outsidePosts.length > 0 ? <section className="itinerary-outside-posts" aria-labelledby="itinerary-outside-posts">
-        <h2 id="itinerary-outside-posts">Publicaciones fuera del itinerario</h2>
+        <Heading level={sub} id="itinerary-outside-posts">Publicaciones fuera del itinerario</Heading>
         <List className="itinerary-posts">
           {outsidePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId ?? ""} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List>
       </section> : null}
       {state.kind === "ready" && view && view.outsideExpensePosts.length > 0 ? <section ref={outsideExpensesRef} tabIndex={-1} className="itinerary-outside-expenses" aria-labelledby="itinerary-outside-expenses">
-        <h2 id="itinerary-outside-expenses">Gastos fuera del itinerario</h2>
+        <Heading level={sub} id="itinerary-outside-expenses">Gastos fuera del itinerario</Heading>
         <ExpenseLines totals={view.outsideExpenses} />
         <List className="itinerary-posts">
           {view.outsideExpensePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-outside-expense={post.id}>
@@ -363,7 +366,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   </main>;
 }
 
-function AgendaItem({ tripId, item, publication, timeZone, attributions, onActivity, onTransport, disabled, participation }: { tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
+function AgendaItem({ titleLevel, tripId, item, publication, timeZone, attributions, onActivity, onTransport, disabled, participation }: { titleLevel: 4 | 5; tripId: string; item: ItineraryViewItem; publication: Intl.DateTimeFormat; timeZone: string;
   attributions: ReadonlyMap<string, Attribution>;
   onActivity?: (id: string) => void; onTransport?: (id: string) => void; disabled: boolean; participation?: ReactNode }) {
   const range = item.kind === "activity" ? formatActivityRange(item.activity, timeZone) : undefined;
@@ -371,7 +374,7 @@ function AgendaItem({ tripId, item, publication, timeZone, attributions, onActiv
     <time className="itinerary-item-time" dateTime={item.at}>{range?.start ?? formatActivityClock(item.at, timeZone)}</time>
     <div className="itinerary-item-content">
       {item.kind === "transport" ? <>
-        <h4>{onTransport ? <Button className="transport-title" disabled={disabled} onClick={() => onTransport(item.id)}>{transportLabels[item.transport.type]}</Button> : transportLabels[item.transport.type]}</h4>
+        <Heading level={titleLevel}>{onTransport ? <Button className="transport-title" disabled={disabled} onClick={() => onTransport(item.id)}>{transportLabels[item.transport.type]}</Button> : transportLabels[item.transport.type]}</Heading>
         <p>{item.transport.departurePlace} → {item.transport.arrivalPlace}</p>
         <p className="itinerary-secondary">Salida <time dateTime={item.transport.departureAt}>{publication.format(new Date(item.transport.departureAt))}</time>
           <br />Llegada <time dateTime={item.transport.arrivalAt}>{publication.format(new Date(item.transport.arrivalAt))}</time></p>
@@ -379,7 +382,7 @@ function AgendaItem({ tripId, item, publication, timeZone, attributions, onActiv
           {item.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id}><PostSummary tripId={tripId} post={post} publication={publication} timeZone={timeZone} attribution={attributions.get(post.id)} /></ListItem>)}
         </List> : null}
       </> : item.kind === "activity" ? <>
-        <h4>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</h4>
+        <Heading level={titleLevel}>{onActivity ? <Button className="activity-title" disabled={disabled} onClick={() => onActivity(item.id)}>{item.activity.title}</Button> : item.activity.title}</Heading>
         {item.activity.description ? <p>{item.activity.description}</p> : null}
         {range?.endIso ? <p className="itinerary-secondary">Hasta <time dateTime={range.endIso}>{range.end}</time>{range.endDateLabel ? ` del ${range.endDateLabel}` : ""}
           {" · "}Duración {formatDuration(item.activity.durationMinutes!)}</p> : null}

@@ -6,6 +6,7 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import { useGalleryPages } from "./use-gallery.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { useInTripShell } from "./trip-state.js";
+import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
 export type TripPhotosScreenProps = { members: Pick<TripMembersApi, "list">; timeZone?: string };
@@ -29,7 +30,7 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   const heading = useRef<HTMLHeadingElement>(null);
   const create = `/trips/${tripId}/memories/new`;
   const empty = <section className="trips-empty">
-    <h2>Todavía no hay fotos</h2>
+    <Heading level={inShell ? 3 : 2}>Todavía no hay fotos</Heading>
     <p>Las fotos aparecen cuando alguien las agrega a un recuerdo.</p>
     <Link to={create}>Nuevo recuerdo</Link>
   </section>;

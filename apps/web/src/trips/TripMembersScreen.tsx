@@ -7,6 +7,7 @@ import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 import { useInTripShell } from "./trip-state.js";
+import { Heading } from "./Heading.js";
 
 export type TripSharing = {
   copyText: (text: string) => Promise<void>;
@@ -39,6 +40,8 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
 }) {
   const { tripId } = useParams();
   const inShell = useInTripShell();
+  // Inside the shell the screen heading is h2 (the Trip name is the h1): sections are h3 and «Eliminar viaje» h4.
+  const sub = inShell ? 3 : 2;
   const navigate = useNavigate();
   const location = useLocation();
   const [trip, setTrip] = useState<MemberTripDetail>();
@@ -201,7 +204,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
           <>
             <p className="trip-config-name">{trip.name} · {trip.primaryDestination.name}</p>
             <section className="trip-members-section" aria-labelledby="trip-invite-title">
-              <h2 id="trip-invite-title">Invitar al viaje</h2>
+              <Heading level={sub} id="trip-invite-title">Invitar al viaje</Heading>
               <p>Compartí el código o el enlace con quienes querés sumar.</p>
               <p className="trip-invite-code"><strong>{trip.inviteCode}</strong></p>
               <div className="trip-members-actions">
@@ -212,7 +215,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
             </section>
             {message ? <Feedback variant={message.error ? "error" : "success"}>{message.text}</Feedback> : null}
             <section className="trip-members-section" aria-labelledby="trip-member-list-title">
-              <h2 id="trip-member-list-title">Integrantes</h2>
+              <Heading level={sub} id="trip-member-list-title">Integrantes</Heading>
               <List aria-label="Integrantes del viaje">
                 {memberList.members.map((member) => (
                   <ListItem key={member.id} className="trip-member-item">
@@ -224,7 +227,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
             </section>
             {canExpel ? (
               <section className="trip-members-section trip-members-admin" aria-labelledby="trip-member-admin-title">
-                <h2 id="trip-member-admin-title">Administración</h2>
+                <Heading level={sub} id="trip-member-admin-title">Administración</Heading>
                 <p>Solo los administradores pueden expulsar participantes.</p>
                 {memberList.members.filter((member) => member.role === "participant").map((member) => (
                   <div className="trip-member-admin-row" key={member.id}>
@@ -232,7 +235,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
                     <Button error disabled={deleting} data-member-action="expel" aria-label={`Expulsar a ${displayName(member.name)}`} onClick={() => { setTarget(member); setExpelError(undefined); }}>Expulsar</Button>
                   </div>
                 ))}
-                <h3>Eliminar viaje</h3>
+                <Heading level={sub + 1 as 3 | 4}>Eliminar viaje</Heading>
                 <p>Elimina el grupo para todos sus integrantes y borra sus registros asociados. Esta acción no se puede deshacer.</p>
                 <Button error disabled={expelling || deleting} onClick={() => { setDeleteOpen(true); setDeleteError(undefined); }}>Eliminar viaje</Button>
               </section>

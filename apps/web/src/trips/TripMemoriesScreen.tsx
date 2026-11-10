@@ -10,6 +10,7 @@ import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
 import { useInTripShell } from "./trip-state.js";
+import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
@@ -126,7 +127,7 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
       {state.kind === "ready" && state.posts.length === 0 ? <section className="trips-empty">
-        <h2>Todavía no hay recuerdos.</h2>
+        <Heading level={inShell ? 3 : 2}>Todavía no hay recuerdos.</Heading>
         <p>Publicá el primero para empezar el diario del viaje.</p>
         <Link to={create}>Crear el primer recuerdo</Link>
       </section> : null}
