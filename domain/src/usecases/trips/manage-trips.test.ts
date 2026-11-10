@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createObjectId, err, InviteCodeConflictError, ok, type Trip } from "../../index.js";
+import { createObjectId, err, InviteCodeConflictError, ok, UnknownError, type Trip, type TripListItem, type TripManagementPort } from "../../index.js";
 import { createTrip, getTrip, joinPublicTrip, listPublicTrips, listUserTrips, updateTripConfiguration } from "./index.js";
 
 const id = (value: string) => {
@@ -89,6 +89,14 @@ describe("Trip use cases", () => {
     } as never, { authenticatedUserId: userId });
     expect(seen).toEqual([userId]);
     expect(result).toEqual(ok([view]));
+  });
+
+  it("returns the derived startAt and endAt supplied by the port and propagates errors", async () => {
+    const item: TripListItem = { ...view, startAt: new Date("2026-10-01T10:00:00.123Z"), endAt: null };
+    const port: Pick<TripManagementPort, "listForMember"> = { listForMember: async () => ok([item]) };
+    expect(await listUserTrips.execute({ trips: port } as never, { authenticatedUserId: userId })).toEqual(ok([item]));
+    const failing: Pick<TripManagementPort, "listForMember"> = { listForMember: async () => err(new UnknownError("boom")) };
+    expect(await listUserTrips.execute({ trips: failing } as never, { authenticatedUserId: userId })).toMatchObject({ ok: false });
   });
 
   it("lists public previews through the public-trip lookup", async () => {

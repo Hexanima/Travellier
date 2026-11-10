@@ -9,6 +9,12 @@ export interface TripView extends Trip {
   primaryDestination: TripDestination;
 }
 
+/** Elemento de Mis viajes: fechas UTC derivadas de los transportes (no persistidas). */
+export interface TripListItem extends TripView {
+  startAt: Date | null;
+  endAt: Date | null;
+}
+
 export interface PublicTripPreview {
   id: ObjectId;
   name: string;
@@ -33,7 +39,7 @@ export interface TripConfigurationUpdate {
 export interface TripManagementPort<TError extends TaggedError = TaggedError> {
   createWithAdminAndDestination: (record: TripCreationRecord) => AsyncResult<void, TError>;
   findByIdForViewer: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripDetail | undefined, TError>;
-  listForMember: (userId: ObjectId) => AsyncResult<TripView[], TError>;
+  listForMember: (userId: ObjectId) => AsyncResult<TripListItem[], TError>;
   listPublic: () => AsyncResult<PublicTripPreview[], TError>;
   updateConfigurationForMember: (
     tripId: ObjectId,
