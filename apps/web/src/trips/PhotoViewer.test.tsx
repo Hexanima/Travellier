@@ -131,6 +131,16 @@ describe("PhotoViewer", () => {
     await act(async () => button("Reintentar").click());
     expect(p.onRetryImage).toHaveBeenCalledWith(itineraryId(2));
   });
+  it("renders the notice action inside the dialog only together with a notice, keeping the single alert", async () => {
+    const onAction = vi.fn();
+    const { render } = await mount(props({ notice: "Tu sesión venció.", noticeAction: <button type="button" onClick={onAction}>Acción</button> }));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    await act(async () => Array.from(dialog.querySelectorAll("button")).find((item) => item.textContent === "Acción")!.click());
+    expect(onAction).toHaveBeenCalledTimes(1);
+    await render(props({ noticeAction: <button type="button">Acción</button> }));
+    expect(document.querySelector('[role="dialog"]')!.textContent).not.toContain("Acción");
+  });
   it("shows the notice as the single alert of the dialog, without aria-live next to it, and retries from inside", async () => {
     const onRetryNotice = vi.fn();
     const { render } = await mount(props({ notice: "No pudimos cargar las fotos.", onRetryNotice }));

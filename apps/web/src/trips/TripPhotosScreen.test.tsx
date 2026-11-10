@@ -227,6 +227,38 @@ describe("TripPhotosScreen", () => {
     expect(last()).toMatchObject({ pathname: path, state: null });
     expect(container.querySelector("ul.photo-grid")).not.toBeNull();
   });
+  it("a forced close (the open photo vanished after a refresh) undoes the grid entry with a step back, never leaving a duplicated entry", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], null)).mockResolvedValueOnce(page([photo(3)], null));
+    const container = await mount(list);
+    await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+    expect(last().state).toEqual({ photo: itineraryId(2), viewerEntry: true });
+    const before = seen.length;
+    await act(async () => document.querySelector("img")!.dispatchEvent(new Event("error")));
+    await act(async () => { await Promise.resolve(); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(thumbs(container)).toEqual([itineraryId(3)]);
+    expect(last()).toMatchObject({ pathname: path, state: null });
+    expect(alerts(document)).toHaveLength(0);
+    expect(seen.length - before).toBeLessThan(8); // no loop
+    await act(async () => go(-1)); // the first step back leaves the grid: no duplicated entry behind
+    expect(last().pathname).toBe(`/trips/${tripId}/memories`);
+  });
+  it("a reload (first entry) with a viewerEntry photo missing from page 1 cleans the state in place, without leaving the screen nor looping", async () => {
+    seen.length = 0;
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const list = vi.fn().mockResolvedValue(page([photo(2)], null));
+    await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: path, state: { photo: itineraryId(77), viewerEntry: true } }]}><Spy />
+      <GalleryProvider list={list as never} now={() => NOW}><Routes>
+        <Route path="/trips/:tripId/memories/photos" element={<TripPhotosScreen members={members as never} timeZone="America/Argentina/Buenos_Aires" />} />
+      </Routes></GalleryProvider></MemoryRouter>));
+    await act(async () => { await Promise.resolve(); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(last()).toMatchObject({ pathname: path, state: null });
+    expect(thumbs(container)).toEqual([itineraryId(2)]);
+    expect(alerts(document)).toHaveLength(0);
+    expect(seen.length).toBeLessThan(8);
+  });
   it("closes without leaving the screen when there is nothing behind the viewer", async () => {
     const list = vi.fn().mockResolvedValue(page([photo(2)], null));
     const container = await mount(list, [{ pathname: path, state: { noBack: true } }]);
@@ -278,6 +310,56 @@ describe("TripPhotosScreen", () => {
       expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 2 de 3");
       await click(next());
       expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Foto 3 de 3");
+    });
+    const openFailing = async (failure: unknown, extra: unknown[] = []) => {
+      const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], "c1")).mockResolvedValueOnce(failure);
+      for (const item of extra) list.mockResolvedValueOnce(item);
+      const container = await mount(list);
+      await click(container.querySelector(`[data-photo="${itineraryId(2)}"] button`));
+      await click(next());
+      return { list, container };
+    };
+    const inDialog = (text: string) => Array.from(document.querySelectorAll('[role="dialog"] a, [role="dialog"] button')).find((item) => item.textContent === text) as HTMLElement | undefined;
+    it("offers the login link inside the dialog on a 401 with the viewer open, once and inside the focus trap", async () => {
+      const { container } = await openFailing(fail("unauthorized"));
+      expect(alerts(document)).toHaveLength(1);
+      expect(dialogAlerts()[0]!.textContent).toContain("Volvé a iniciar sesión");
+      expect(inDialog("Iniciar sesión")?.getAttribute("href")).toBe("/login");
+      expect(inDialog("Reintentar")).toBeUndefined();
+      expect(Array.from(container.querySelectorAll(".trips-panel > .trips-state"))).toHaveLength(0);
+      expect(document.querySelector('[role="dialog"] [aria-live]')).toBeNull();
+      const link = inDialog("Iniciar sesión")!;
+      link.focus();
+      await act(async () => { link.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
+      expect(document.querySelector('[role="dialog"]')!.contains(document.activeElement)).toBe(true);
+    });
+    it("offers «Volver a cargar desde el inicio» on a rejected cursor with the viewer open and restarts from page 1 without looping", async () => {
+      const { list } = await openFailing(fail("validation", [{ field: "cursor" }]), [page([photo(3), photo(2)], null)]);
+      expect(alerts(document)).toHaveLength(1);
+      expect(dialogAlerts()[0]!.textContent).toContain("desde el inicio");
+      expect(inDialog("Reintentar")).toBeUndefined();
+      await click(inDialog("Volver a cargar desde el inicio"));
+      expect(list).toHaveBeenCalledTimes(3);
+      expect(list).toHaveBeenLastCalledWith(tripId, {});
+      expect(alerts(document)).toHaveLength(0);
+      expect(thumbs(document)).toEqual([itineraryId(3), itineraryId(2)]);
+      await act(async () => { await Promise.resolve(); });
+      expect(list).toHaveBeenCalledTimes(3);
+    });
+    it("keeps «Reintentar» inside the dialog for network and server failures and offers no action for a 404", async () => {
+      for (const kind of ["network", "server"]) {
+        document.body.replaceChildren();
+        await openFailing(fail(kind));
+        expect(alerts(document)).toHaveLength(1);
+        expect(inDialog("Reintentar")).toBeTruthy();
+        expect(inDialog("Iniciar sesión")).toBeUndefined();
+        expect(inDialog("Volver a cargar desde el inicio")).toBeUndefined();
+      }
+      document.body.replaceChildren();
+      await openFailing(fail("not-found"));
+      expect(alerts(document)).toHaveLength(1);
+      expect(dialogAlerts()[0]!.textContent).toContain("no están disponibles");
+      for (const text of ["Reintentar", "Iniciar sesión", "Volver a cargar desde el inicio"]) expect(inDialog(text)).toBeUndefined();
     });
     it("announces the load in progress inside the dialog and not outside it", async () => {
       const second = deferred<unknown>();

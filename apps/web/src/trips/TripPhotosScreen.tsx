@@ -46,9 +46,18 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
 
   // A photo in the state that cannot be shown (malformed, or not among the loaded ones) is dropped; pages are not auto-loaded to find it.
   const hasPhotoKey = typeof location.state === "object" && location.state !== null && "photo" in location.state;
+  // Only the entry the grid pushed is undone with a step back; any other (a return from the detail, a reload) is cleaned in place and never leaves the screen.
+  // Shared by the user's close and by the forced one below, so both leave the same history.
+  const closing = useRef(false);
+  const closeViewer = () => {
+    closing.current = true;
+    if (isViewerEntry(location.state) && canGoBack(location)) navigate(-1);
+    else navigate(here, { replace: true, state: withoutPhoto(location.state) });
+  };
   useEffect(() => {
-    if (!hasPhotoKey) return;
-    if (openId === undefined || (settled && !photos.some((item) => item.id === openId))) navigate(here, { replace: true, state: withoutPhoto(location.state) });
+    if (!hasPhotoKey) { closing.current = false; return; }
+    if (closing.current) return; // a close is already underway: do not navigate twice
+    if (openId === undefined || (settled && !photos.some((item) => item.id === openId))) closeViewer();
   }, [hasPhotoKey, openId, settled, photos]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Closing the viewer returns the focus to the thumbnail of the last photo it showed.
@@ -82,8 +91,6 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
       onOpen: () => navigate(here, { state: { photo: item.id, viewerEntry: true } }), onError: () => gallery.imageError(item.id), onRetry: () => gallery.retryImage(item.id) };
   });
   const select = (id: string) => navigate(here, { replace: true, state: { ...stateOf(location.state), photo: id } });
-  // Only the entry the grid pushed is undone with a step back; any other (a return from the detail, a reload) is cleaned in place and never leaves the screen.
-  const close = () => { if (isViewerEntry(location.state) && canGoBack(location)) navigate(-1); else navigate(here, { replace: true, state: withoutPhoto(location.state) }); };
   const viewed = viewing ? photos.find((item) => item.id === viewing) : undefined;
 
   const failure = phase === "initial-error" || phase === "more-error" ? error : undefined;
@@ -96,7 +103,11 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   // With the viewer open (aria-modal) the notices live inside it and are not repeated in the page: a single alert is visible at any time.
   const inViewer = viewed !== undefined;
   const notice = failureText ?? (gallery.refreshFailed ? refreshText : undefined);
-  const retryNotice = failure ? (failure.kind === "network" || failure.kind === "server" ? gallery.retry : undefined) : gallery.refreshFailed ? gallery.retryRefresh : undefined;
+  // The same action as outside the viewer: login (401), restart (rejected cursor), nothing (404/403) or retry. Restarting empties the list, which closes the
+  // viewer; once page 1 arrives a photo that is no longer there is closed with the same criterion as «Cerrar» (closeViewer).
+  const retryNotice = failure ? (unavailable || failure.kind === "unauthorized" || rejectsCursor(failure) ? undefined : gallery.retry) : gallery.refreshFailed ? gallery.retryRefresh : undefined;
+  const noticeAction = failure === undefined || unavailable ? undefined : failure.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
+    : rejectsCursor(failure) ? <Button onClick={gallery.restart}>Volver a cargar desde el inicio</Button> : undefined;
   const create = `/trips/${tripId}/memories/new`;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
@@ -130,7 +141,7 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
       </> : null}
       {viewed ? <PhotoViewer photos={photos} photoId={viewed.id} hasMore={hasMore} loadingMore={phase === "more-loading"} timeZone={timeZone}
         authorOf={(item) => authorLabel(people, item.uploaderId)} postHref={(item) => `/trips/${tripId}/memories/${item.postId}`}
-        onSelect={select} onLoadMore={() => gallery.loadMore()} onClose={close} failed={gallery.failed.has(viewed.id)} notice={notice} onRetryNotice={retryNotice}
+        onSelect={select} onLoadMore={() => gallery.loadMore()} onClose={closeViewer} failed={gallery.failed.has(viewed.id)} notice={notice} onRetryNotice={retryNotice} noticeAction={noticeAction}
         onOpenPost={(item) => openPostFrom(navigate, location, { tripId, postId: item.postId, anchor: photoAnchor(item.id), label: "fotos", viewer: true, panel: "photos" })}
         onImageError={gallery.imageError} onRetryImage={gallery.retryImage} /> : null}
     </div>
