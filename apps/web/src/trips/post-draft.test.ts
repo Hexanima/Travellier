@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { addPhotos, markPhoto, movePhoto, removePhoto, type PhotoDraftItem } from "./post-draft.js";
+import { MAX_PHOTOS } from "./photo-limits.js";
 import { draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setLink, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
 const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
-  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity } });
+  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity, photos: [] } });
 const post = (id = P): PostLink => ({ kind: "post", id });
 const activity = (id = A): PostLink => ({ kind: "activity", id });
 const saved = (extra: Partial<{ parentPostId: string | null; activityId: string | null; transportId: string | null }> = {}) =>
@@ -78,7 +80,7 @@ describe("post draft", () => {
   it("normalizes legacy data with parent and transport: the parent wins, the draft has no transport and the PATCH clears it", () => {
     const legacy = saved({ parentPostId: P, transportId: T });
     const fromSaved = draftFromPost(legacy);
-    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
+    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [] });
     expect(prepareUpdate(fromSaved, legacy)).toEqual({ transportId: null });
   });
   it("normalizes legacy data with parent, activity and transport: the PATCH clears both", () => {
@@ -86,23 +88,23 @@ describe("post draft", () => {
     expect(prepareUpdate(draftFromPost(legacy), legacy)).toEqual({ activityId: null, transportId: null });
   });
   it("builds the link and transport from the saved post", () => {
-    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
-    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
-    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null });
-    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
+    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [] });
+    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [] });
+    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [] });
+    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [] });
   });
   it("setLink: a post drops the transport and the activity, an activity keeps the transport, null removes the link", () => {
-    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
-    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
-    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
-    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null });
+    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [] });
+    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [] });
+    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [] });
+    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [] });
   });
   it("setLink and setTransport keep the values and do not mutate the input", () => {
     const original = draft("x", "y", activity(), T);
     const next = setLink(original, post());
     expect(next.values).toEqual({ description: "x", mapsUrl: "y" });
-    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
-    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null });
+    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [] });
+    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [] });
     expect(setTransport(draft("x"), T).extras.transportId).toBe(T);
   });
   it("is dirty only when it differs from the base", () => {
@@ -134,17 +136,17 @@ describe("post draft with a new activity", () => {
     const next = setNewActivity(original, N);
     expect(next).toEqual(draft("x", "y", null, T, N));
     expect(original.extras.link).toEqual({ kind: "activity", id: A });
-    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N });
+    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N, photos: [] });
     expect(setNewActivity(next, null).extras.newActivity).toBeNull();
   });
   it("choosing any link, or no link, discards the new activity and keeps the transport (except under a post)", () => {
     const withNew = draft("x", "", null, T, N);
-    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null });
-    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null });
-    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null });
+    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [] });
+    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [] });
+    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [] });
   });
   it("setTransport keeps the new activity", () => {
-    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N });
+    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N, photos: [] });
   });
   it("is dirty when the new activity appears, disappears or changes in any field", () => {
     expect(isDraftDirty(draft("Hola", "", null, null, N), draft("Hola"))).toBe(true);
@@ -193,5 +195,75 @@ describe("post draft with a new activity", () => {
     expect(draftKeyFor({ search: `?parentPostId=${A}` })).toBe(`new:parent:${A}`);
     expect(draftKeyFor({ search: "?parentPostId=nope" })).toBe("new");
     expect(draftKeyFor({ search: `?parentPostId=${A}` })).not.toBe(draftKeyFor({ search: `?parentPostId=${P}` }));
+  });
+  describe("photos", () => {
+    const photo = (n: number, extra: Partial<PhotoDraftItem> = {}): PhotoDraftItem =>
+      ({ localId: `p${n}`, reference: `file:///${n}.jpg`, contentType: "image/jpeg", sizeBytes: 100 + n, status: "selected", ...extra });
+    const withPhotos = (...items: PhotoDraftItem[]): PostDraft => addPhotos(draft("Hola"), items).draft;
+    const uploaded = (n: number) => photo(n, { status: "uploaded", key: `trips/t/photos/k${n}`, uploadedAt: 1000 });
+    it("starts without photos both empty and from a saved post", () => {
+      expect(emptyDraft().extras.photos).toEqual([]);
+      expect(draftFromPost({ description: "x", mapsUrl: null }).extras.photos).toEqual([]);
+    });
+    it("keeps the photos when the link, the new activity or the transport change", () => {
+      const base = withPhotos(photo(1), photo(2));
+      expect(setLink(base, post()).extras.photos.map((item) => item.localId)).toEqual(["p1", "p2"]);
+      expect(setNewActivity(base, { title: "t", date: "", time: "", durationHours: "", durationMinutes: "" }).extras.photos).toHaveLength(2);
+      expect(setNewActivity(base, null).extras.photos).toHaveLength(2);
+      expect(setTransport(base, T).extras.photos).toHaveLength(2);
+    });
+    it("is dirty when photos are added, removed or reordered against the base", () => {
+      const base = draft("Hola");
+      expect(isDraftDirty(base, base)).toBe(false);
+      const one = withPhotos(photo(1));
+      expect(isDraftDirty(one, base)).toBe(true);
+      expect(isDraftDirty(removePhoto(one, "p1"), base)).toBe(false);
+      const two = withPhotos(photo(1), photo(2));
+      expect(isDraftDirty(two, withPhotos(photo(1), photo(2)))).toBe(false);
+      expect(isDraftDirty(movePhoto(two, "p2", -1), two)).toBe(true);
+      expect(isDraftDirty(markPhoto(two, "p1", { status: "failed", failure: "network" }), two)).toBe(false);
+    });
+    it("counts a photo as content", () => {
+      expect(hasContent(draft(""))).toBe(false);
+      expect(hasContent(addPhotos(draft(" "), [photo(1)]).draft)).toBe(true);
+    });
+    it("sends only uploaded photos as keys, in order, when creating", () => {
+      const next = withPhotos(uploaded(1), photo(2), uploaded(3));
+      expect(prepareCreate(next).photos).toEqual([{ key: "trips/t/photos/k1" }, { key: "trips/t/photos/k3" }]);
+      expect(prepareCreate(draft("Hola"))).not.toHaveProperty("photos");
+      expect(prepareCreate(withPhotos(photo(1)))).not.toHaveProperty("photos");
+    });
+    it("counts photos as a change when updating, and keeps an untouched update empty", () => {
+      expect(prepareUpdate(draft("Hola"), saved())).toEqual({});
+      const onlyPhotos = prepareUpdate(withPhotos(uploaded(2), uploaded(1)), saved());
+      expect(onlyPhotos).toEqual({ photos: [{ key: "trips/t/photos/k2" }, { key: "trips/t/photos/k1" }] });
+      expect(Object.keys(onlyPhotos).length).toBe(1);
+    });
+    it("addPhotos caps at the limit and reports what was dropped", () => {
+      const many = Array.from({ length: MAX_PHOTOS + 3 }, (_, index) => photo(index));
+      const result = addPhotos(draft("x"), many);
+      expect(result.draft.extras.photos).toHaveLength(MAX_PHOTOS);
+      expect(result.dropped).toBe(3);
+      expect(result.draft.extras.photos[0]!.localId).toBe("p0");
+      const again = addPhotos(result.draft, [photo(99)]);
+      expect(again.dropped).toBe(1);
+      expect(again.draft).toBe(result.draft);
+    });
+    it("removePhoto removes only that one and movePhoto swaps with the neighbour, staying put at the edges", () => {
+      const three = withPhotos(photo(1), photo(2), photo(3));
+      expect(removePhoto(three, "p2").extras.photos.map((item) => item.localId)).toEqual(["p1", "p3"]);
+      expect(removePhoto(three, "zz")).toBe(three);
+      expect(movePhoto(three, "p3", -1).extras.photos.map((item) => item.localId)).toEqual(["p1", "p3", "p2"]);
+      expect(movePhoto(three, "p1", 1).extras.photos.map((item) => item.localId)).toEqual(["p2", "p1", "p3"]);
+      expect(movePhoto(three, "p1", -1)).toBe(three);
+      expect(movePhoto(three, "p3", 1)).toBe(three);
+    });
+    it("markPhoto replaces the status data of one photo without leaking stale fields", () => {
+      const next = markPhoto(withPhotos(uploaded(1), photo(2)), "p1", { status: "failed", failure: "expired" });
+      expect(next.extras.photos[0]).toEqual(photo(1, { status: "failed", failure: "expired" }));
+      const back = markPhoto(next, "p1", { status: "uploaded", key: "trips/t/photos/n", uploadedAt: 5 });
+      expect(back.extras.photos[0]).toEqual(photo(1, { status: "uploaded", key: "trips/t/photos/n", uploadedAt: 5 }));
+      expect(back.extras.photos[1]).toEqual(photo(2));
+    });
   });
 });

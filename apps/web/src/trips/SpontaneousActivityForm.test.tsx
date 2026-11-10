@@ -17,7 +17,7 @@ const newPath = `/trips/${tripId}/memories/new`, editPath = `/trips/${tripId}/me
 // The fixture's activity slice is 10:00-18:00Z (07:00-15:00 in Buenos Aires).
 const itineraryOf = () => ({ ok: true, value: itineraryFixture() });
 const seeded = (extras: Partial<PostDraft["extras"]> = {}): PostDraft =>
-  ({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" }, extras: { link: null, transportId: null, newActivity: null, ...extras } });
+  ({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" }, extras: { link: null, transportId: null, newActivity: null, photos: [], ...extras } });
 let seed: PostDraft = seeded();
 function Probe() {
   const { postId: id } = useParams(); const handle = usePostDraft(id ? `edit:${id}` : "new");
