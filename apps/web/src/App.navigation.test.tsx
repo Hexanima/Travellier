@@ -255,3 +255,22 @@ describe("changing Trip does not reuse the state of the previous one", () => {
     expect(document.querySelector<HTMLTextAreaElement>('[name="description"]')!.value).toBe("");
   });
 });
+
+describe("system Back (native port simulated)", () => {
+  const fakeBack = () => {
+    let listener: ((event: { canGoBack: boolean }) => void) | undefined;
+    const remove = vi.fn().mockResolvedValue(undefined);
+    return { port: { addListener: vi.fn(async (_n: "backButton", fn: (event: { canGoBack: boolean }) => void) => { listener = fn; return { remove }; }), exitApp: vi.fn().mockResolvedValue(undefined) },
+      press: (canGoBack: boolean) => act(async () => listener!({ canGoBack })) };
+  };
+  it("Back from a Trip root opened as the first entry (deep link) goes to Mis viajes and then exits the app", async () => {
+    const back = fakeBack();
+    await render([`/trips/${A}/itinerary`], props({ nativeBack: back.port }));
+    await back.press(false);
+    expect(here.path).toBe("/trips");
+    expect(back.port.exitApp).not.toHaveBeenCalled();
+    await back.press(false);
+    expect(back.port.exitApp).toHaveBeenCalledTimes(1);
+    expect(back.port.addListener).toHaveBeenCalledTimes(1);
+  });
+});

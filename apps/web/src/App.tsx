@@ -12,6 +12,8 @@ import { createNativeSessionStorage, type NativeSessionStorage } from './auth/na
 import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
+import { BackButtonHandler } from './navigation/BackButtonHandler.js'
+import type { NativeBackButtonApi } from './navigation/back-button.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { ExternalLinkContext } from './trips/external-link-context.js'
 import { createPhotoFileReader } from './native/photo-file.js'
@@ -63,6 +65,8 @@ type AppProps = {
   apiBaseUrl?: string
   sessionStorage?: NativeSessionStorage
   nativeApp?: NativeAppUrlApi
+  /** System Back (Android). Defaults to Capacitor on a native platform and to nothing on the web. */
+  nativeBack?: NativeBackButtonApi
   trips?: Partial<TripInvitationApi & TripManagementApi>
   journey?: Partial<TripJourneyApi>
   members?: Partial<TripMembersApi>
@@ -114,7 +118,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, nativeBack, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -431,6 +435,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   return (
     <>
+      <BackButtonHandler nativeBack={nativeBack} />
       <AppUrlListener nativeApp={nativeApp} onNavigate={() => { deepLinkReceived.current = true }} onReady={() => setLaunchChecked(true)} />
       {hasSession && noticeAnnounced && location.pathname !== '/notifications'
         ? <Feedback variant="info">Tenés un aviso nuevo. <Link to="/notifications">Ver avisos</Link> <Button onClick={() => setNoticeAnnounced(false)}>Descartar</Button></Feedback>
