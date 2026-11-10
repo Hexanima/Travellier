@@ -3,7 +3,8 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams, type NavigateFunction } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TripProvider, useInTripShell } from "./trip-context.js";
+import { TripProvider } from "./trip-context.js";
+import { useInTripShell } from "./trip-state.js";
 import { TripShell } from "./TripShell.js";
 import { noticesOrigin } from "./post-origin.js";
 

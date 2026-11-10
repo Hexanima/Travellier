@@ -9,7 +9,7 @@ import { memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
-import { useInTripShell } from "./trip-context.js";
+import { useInTripShell } from "./trip-state.js";
 import "./itinerary.css";
 
 export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };

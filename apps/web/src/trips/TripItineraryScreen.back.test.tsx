@@ -111,7 +111,7 @@ describe("itinerary: Back with a dialog open", () => {
     expect(here.state).toEqual({ origin, dialogPushed: true });
   });
   it("a dialog opened by a deep link has no mark: closing replaces the entry and Back leaves the itinerary", async () => {
-    const { container } = await mount(["/trips", `${itinerary}?activity=${A}`]);
+    await mount(["/trips", `${itinerary}?activity=${A}`]);
     expect(dialogOpen()).toBe(true);
     expect(flagged()).toBe(false);
     await click(byText(document, "Cerrar"));

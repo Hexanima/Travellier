@@ -25,7 +25,7 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
-import { useInTripShell, useTripName } from "./trip-context.js";
+import { useInTripShell, useTripName } from "./trip-state.js";
 import "./itinerary.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
@@ -86,13 +86,14 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
     const params = new URLSearchParams(current.search);
     change(params);
     const search = params.toString();
-    const { noBack: _noBack, ...kept } = (typeof current.state === "object" && current.state !== null ? current.state : {}) as Record<string, unknown>;
+    const kept = { ...(typeof current.state === "object" && current.state !== null ? current.state : {}) } as Record<string, unknown>;
+    delete kept.noBack; // there is an entry behind the new one
     navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, push ? { state: { ...kept, dialogPushed: true } } : { replace: true, state: current.state });
   };
   const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); }, true);
   const openTransport = (transportId: string) => updateParams((params) => { params.delete("activity"); params.set("transport", transportId); params.delete("tab"); }, true);
   // The entry already being popped: a second close before the router lands must not pop again (it would leave the itinerary).
-  const popping = useRef<string>();
+  const popping = useRef<string | undefined>(undefined);
   const closeDialog = () => {
     setCreating(undefined);
     const current = locationRef.current;
@@ -218,7 +219,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const shownDays = days.filter((day) => day.date === selectedDate);
   const chipRefs = useRef(new Map<string, HTMLElement>());
   const tapped = useRef(false);
-  const revealed = useRef<string>();
+  const revealed = useRef<string | undefined>(undefined);
   const pickDay = (date: string) => {
     if (date === selectedDate) return;
     tapped.current = true;

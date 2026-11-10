@@ -5,7 +5,7 @@ import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import { useGalleryPages } from "./use-gallery.js";
 import { useRestorePosition } from "./use-restore-position.js";
-import { useInTripShell } from "./trip-context.js";
+import { useInTripShell } from "./trip-state.js";
 import "./itinerary.css";
 
 export type TripPhotosScreenProps = { members: Pick<TripMembersApi, "list">; timeZone?: string };

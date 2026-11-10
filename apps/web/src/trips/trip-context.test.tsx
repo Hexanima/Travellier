@@ -2,7 +2,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ShellFrame, TripProvider, useInTripShell, useTripName } from "./trip-context.js";
+import { ShellFrame, TripProvider } from "./trip-context.js";
+import { useInTripShell, useTripName } from "./trip-state.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];

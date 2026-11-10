@@ -6,7 +6,7 @@ import { displayName } from "../profile/display-name.js";
 import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
-import { useInTripShell } from "./trip-context.js";
+import { useInTripShell } from "./trip-state.js";
 
 export type TripSharing = {
   copyText: (text: string) => Promise<void>;

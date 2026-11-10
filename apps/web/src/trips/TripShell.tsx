@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Tabs, type TabItem } from "../components/index.js";
-import { ShellFrame, useTripName } from "./trip-context.js";
+import { ShellFrame } from "./trip-context.js";
+import { useTripName } from "./trip-state.js";
 import { canGoBack, noticesOrigin, originLabel, readOrigin, withNoBack } from "./post-origin.js";
 import { rootTabOf, tabPath, type DiaryPanel, type TripTab } from "./trip-tabs.js";
 import "./itinerary.css";
