@@ -1,4 +1,5 @@
 import { MAX_PHOTOS } from "./photo-limits.js";
+import { diffExpense, sameExpense, type ExpenseDraft, type SavedExpense } from "./expense-draft.js";
 import type { PostInput, PostResponse } from "./trip-post-api.js";
 
 /** `label` is presentation only: it never enters the dirty comparison or the request body. */
@@ -12,16 +13,19 @@ export type NewActivityDraft = { title: string; date: string; time: string; dura
 export type PhotoDraftItem = { localId: string; reference: string; previewUrl?: string; contentType: string; sizeBytes: number;
   status: "selected" | "uploaded" | "failed"; key?: string; uploadedAt?: number; failure?: string };
 export type PostDraft = { values: { description: string; mapsUrl: string };
-  /** Subforms extend the draft here (expense will add keys); the composer contract does not change. */
-  extras: { link: PostLink | null; transportId: string | null; newActivity: NewActivityDraft | null; photos: PhotoDraftItem[] } };
+  /**
+   * Subforms extend the draft here; the composer contract does not change. `expense` is `null` for «no expense» when creating and
+   * for «untouched» when editing (an expense is never removed from a saved memory).
+   */
+  extras: { link: PostLink | null; transportId: string | null; newActivity: NewActivityDraft | null; photos: PhotoDraftItem[]; expense: ExpenseDraft | null } };
 /** The activity already resolved against the itinerary (instant in UTC and duration), computed by the composer at submit time. */
 export type ResolvedNewActivity = { scheduledAt: string; durationMinutes: number | null };
 type Saved = Pick<PostResponse, "description" | "mapsUrl"> & Partial<Pick<PostResponse, "parentPostId" | "activityId" | "transportId">>;
-export const emptyDraft = (): PostDraft => ({ values: { description: "", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [] } });
+export const emptyDraft = (): PostDraft => ({ values: { description: "", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense: null } });
 /** A parent wins over an activity and a transport (legacy data may carry them): the next PATCH normalizes it. */
 export const draftFromPost = (post: Saved): PostDraft => ({ values: { description: post.description ?? "", mapsUrl: post.mapsUrl ?? "" },
   extras: { link: post.parentPostId ? { kind: "post", id: post.parentPostId } : post.activityId ? { kind: "activity", id: post.activityId } : null,
-    transportId: post.parentPostId ? null : post.transportId ?? null, newActivity: null, photos: [] } });
+    transportId: post.parentPostId ? null : post.transportId ?? null, newActivity: null, photos: [], expense: null } });
 /**
  * A child keeps no other direct relation: choosing a post drops the transport (the activity is the link itself).
  * The new activity shares the same control, so any choice (including «Sin vínculo») discards it.
@@ -31,6 +35,8 @@ export const setLink = (draft: PostDraft, link: PostLink | null): PostDraft =>
 /** A new activity replaces the link (the server links the post to the activity it creates); the transport stays. */
 export const setNewActivity = (draft: PostDraft, value: NewActivityDraft | null): PostDraft =>
   ({ ...draft, extras: { ...draft.extras, link: value === null ? draft.extras.link : null, newActivity: value } });
+/** The expense typed in its subform; `null` removes a new one (or leaves a saved one untouched). */
+export const setExpense = (draft: PostDraft, expense: ExpenseDraft | null): PostDraft => ({ ...draft, extras: { ...draft.extras, expense } });
 export const setTransport = (draft: PostDraft, transportId: string | null): PostDraft => ({ ...draft, extras: { ...draft.extras, transportId } });
 const withPhotos = (draft: PostDraft, photos: PhotoDraftItem[]): PostDraft => ({ ...draft, extras: { ...draft.extras, photos } });
 /** Appends up to the per-post limit; `dropped` counts what did not fit. */
@@ -61,7 +67,7 @@ export const isDraftDirty = (draft: PostDraft, base: PostDraft): boolean =>
   draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl ||
   (draft.extras.link?.kind ?? null) !== (base.extras.link?.kind ?? null) || (draft.extras.link?.id ?? null) !== (base.extras.link?.id ?? null) ||
   draft.extras.transportId !== base.extras.transportId || !sameNewActivity(draft.extras.newActivity, base.extras.newActivity) ||
-  !samePhotos(draft.extras.photos, base.extras.photos);
+  !samePhotos(draft.extras.photos, base.extras.photos) || (draft.extras.expense !== null && !sameExpense(draft.extras.expense, base.extras.expense));
 const sameNewActivity = (a: NewActivityDraft | null, b: NewActivityDraft | null) => a === b ||
   (a !== null && b !== null && a.title === b.title && a.date === b.date && a.time === b.time && a.durationHours === b.durationHours && a.durationMinutes === b.durationMinutes);
 /** Provisional client rule: text, a location or a photo is required to publish (see docs/REVISION_PENDIENTE.md, T65 and T74). The link does not count (T66). */
@@ -84,25 +90,31 @@ const newActivityInput = (draft: PostDraft, resolved?: ResolvedNewActivity): Pic
   return { newActivity: { title: activity.title.trim(), scheduledAt: resolved.scheduledAt,
     ...(resolved.durationMinutes !== null ? { durationMinutes: resolved.durationMinutes } : {}) } };
 };
+/** Only when the draft carries an expense with something to send (payments and shares never travel). */
+const expenseInput = (draft: PostDraft, saved?: SavedExpense): Pick<PostInput, "expense"> => {
+  if (draft.extras.expense === null) return {};
+  const expense = diffExpense(draft.extras.expense, saved);
+  return Object.keys(expense).length > 0 ? { expense } : {};
+};
 export const prepareCreate = (draft: PostDraft, resolved?: ResolvedNewActivity): PostInput => {
   const description = clean(draft.values.description), mapsUrl = clean(draft.values.mapsUrl), links = desired(draft);
   return { ...(description !== null ? { description } : {}), ...(mapsUrl !== null ? { mapsUrl } : {}),
     ...(links.parentPostId !== null ? { parentPostId: links.parentPostId } : {}), ...(links.activityId !== null ? { activityId: links.activityId } : {}),
-    ...(links.transportId !== null ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft) };
+    ...(links.transportId !== null ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft), ...expenseInput(draft) };
 };
 /**
  * Only changed fields; clearing one sends null; `{}` means there is nothing to save (the API rejects an empty PATCH).
  * With a new activity `activityId` is never sent (the activity replaces it, without deleting the old one) and
  * `parentPostId: null` is sent only when the post had a parent (the server rejects a new activity under a parent otherwise).
- * Uploaded photos count as a change: a PATCH only adds them.
+ * Uploaded photos count as a change: a PATCH only adds them. The expense travels as a merge-patch against `savedExpense` (the stored one, if any).
  */
-export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: ResolvedNewActivity): PostInput => {
+export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: ResolvedNewActivity, savedExpense?: SavedExpense): PostInput => {
   const description = clean(draft.values.description), mapsUrl = clean(draft.values.mapsUrl), links = desired(draft);
   const withActivity = draft.extras.newActivity !== null;
   return { ...(description !== clean(original.description ?? "") ? { description } : {}), ...(mapsUrl !== clean(original.mapsUrl ?? "") ? { mapsUrl } : {}),
     ...(links.parentPostId !== (original.parentPostId ?? null) ? { parentPostId: links.parentPostId } : {}),
     ...(!withActivity && links.activityId !== (original.activityId ?? null) ? { activityId: links.activityId } : {}),
-    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft) };
+    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved), ...photosInput(draft), ...expenseInput(draft, savedExpense) };
 };
 
 const idParam = (search: string, name: string): string | undefined => {
