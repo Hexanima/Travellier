@@ -32,7 +32,8 @@ const roots: ReturnType<typeof createRoot>[] = [];
 let events: string[] = [];
 type Call = { url: string; method: string; authorization: string | undefined; body: unknown };
 let calls: Call[] = [];
-let revokeBehavior: "ok" | "fail" | "hang" = "ok";
+let revokeBehavior: "ok" | "fail" | "hang" | "late401" = "ok";
+let releaseLate401: () => void = () => undefined;
 
 const sessions: Record<string, { accessToken: string; refreshToken: string }> = {
   "r-A": { accessToken: "access-A", refreshToken: "r-A" },
@@ -58,6 +59,7 @@ const fakeFetch = vi.fn(async (url: string, init: RequestInit) => {
     events.push(`revoke:${headers.Authorization}`);
     if (revokeBehavior === "fail") throw new Error("offline");
     if (revokeBehavior === "hang") return new Promise<Response>(() => undefined);
+    if (revokeBehavior === "late401") return new Promise<Response>((resolve) => { releaseLate401 = () => resolve(json({ error: { code: "Unauthorized", message: "x" } }, 401)); });
     return new Response(null, { status: 204 });
   }
   return json({}, 404);
@@ -219,6 +221,32 @@ describe("App push registration wiring (Capacitor native, mocked plugin)", () =>
     expect(puts[1]).toMatchObject({ authorization: "Bearer access-B", body: { token: TOKEN_B } });
     expect(puts.filter((call) => call.authorization === "Bearer access-B").every((call) => (call.body as { token: string }).token !== TOKEN_A)).toBe(true);
     expect(calls.indexOf(revokes()[0])).toBeLessThan(calls.indexOf(puts[1]));
+  });
+
+  it("a late 401 of the outgoing session's revoke does not close the new session nor reset its push registration", async () => {
+    permission("granted");
+    const container = await render(createStorage("r-A"), "/login", launch(true));
+    await emitToken(TOKEN_A);
+    revokeBehavior = "late401";
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => {
+      (container.querySelector("[name=email]") as HTMLInputElement).value = "b@example.test";
+      (container.querySelector("[name=password]") as HTMLInputElement).value = "secret-pass";
+      container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(pathOf(container)).toBe("/trips");
+    await emitToken(TOKEN_B);
+    expect(put().at(-1)).toMatchObject({ authorization: "Bearer access-B", body: { token: TOKEN_B } });
+    const unregisters = native.push.unregister.mock.calls.length;
+    await act(async () => { releaseLate401(); await vi.advanceTimersByTimeAsync(0); });
+    expect(pathOf(container)).toBe("/trips");
+    expect(native.push.unregister).toHaveBeenCalledTimes(unregisters);
+    expect(container.querySelector("a[href=\"/profile\"]")).not.toBeNull();
+    // B is still authenticated: the next request carries its bearer and does not end the session.
+    await act(async () => { container.querySelector("a[href=\"/profile\"]")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+    expect(pathOf(container)).toBe("/profile");
+    expect(calls.filter((call) => call.url.endsWith("/profile")).at(-1)?.authorization).toBe("Bearer access-B");
   });
 
   it("a 401 resets locally without revoking", async () => {

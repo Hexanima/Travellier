@@ -143,7 +143,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       baseUrl: apiBaseUrl,
       fetch: (input, init) => globalThis.fetch(input, init),
       getAccessToken: async () => session.current?.accessToken ?? null,
-      onUnauthorized: () => {
+      onUnauthorized: (requestAccessToken) => {
+        // A late 401 of a request made by an outgoing session (e.g. the logout revoke) must not close the active one.
+        if (requestAccessToken !== (session.current?.accessToken ?? null)) return
         // A 401 leaves no authentication to revoke with: forget the push registration locally.
         pushRef.current?.reset()
         session.current = undefined
@@ -186,7 +188,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       port: createCapacitorCapabilities().push,
       api: {
         register: (input) => (pushDevices?.register ?? defaultPushDevices.current?.register ?? failed)(input),
-        revoke: (input) => (pushDevices?.revoke ?? defaultPushDevices.current?.revoke ?? failed)(input),
+        revoke: (input, options) => (pushDevices?.revoke ?? defaultPushDevices.current?.revoke ?? failed)(input, options),
       },
     })
   }
@@ -321,7 +323,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   // Never throws; the push service bounds the wait, so closing or switching a session never depends on it.
   const revokePush = async () => {
-    try { await pushRef.current?.revokeBeforeLogout() } catch { /* best effort */ }
+    const accessToken = session.current?.accessToken
+    try { await pushRef.current?.revokeBeforeLogout(accessToken === undefined ? undefined : { accessToken }) } catch { /* best effort */ }
   }
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
