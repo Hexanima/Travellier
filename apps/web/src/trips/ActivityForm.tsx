@@ -5,6 +5,7 @@ import { initialActivityValues, prepareActivityInput, type ActivityFormContext, 
 import type { ActivityInput, ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
+import { LocationPreview } from "./LocationPreview.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import type { ParticipationResponse } from "./trip-participation-api.js";
 import { toLocalDateTime } from "./transport-local-time.js";
@@ -121,6 +122,7 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
       onChange={(event) => update("description", event.target.value)} />
     <TextField label="Vínculo de Maps (opcional)" name="mapsUrl" type="text" inputMode="url" value={values.mapsUrl} loading={saving} error={errors.mapsUrl}
       onChange={(event) => update("mapsUrl", event.target.value)} />
+    <LocationPreview value={values.mapsUrl} context="composer" />
     {message ? <Feedback>{message}</Feedback> : null}
     {failure ? <Feedback variant="error">{failure.kind === "validation" ? "Revisá los datos de la actividad."
       : failure.kind === "unauthorized" ? <>Tu sesión venció. <a href="/login">Iniciar sesión</a></>
