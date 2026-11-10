@@ -4,6 +4,7 @@ export * from "./trip.js";
 export * from "./trip-member.js";
 export * from "./trip-destination.js";
 export * from "./transport.js";
+export * from "./trip-schedule.js";
 export * from "./itinerary-day.js";
 export * from "./activity-schedule.js";
 export * from "./activity-conflict.js";
