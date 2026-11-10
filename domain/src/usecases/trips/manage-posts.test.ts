@@ -1322,6 +1322,18 @@ describe("Trip post use cases", () => {
             expect(everything()).toEqual(before);
           });
 
+          it.each<[string, Record<string, unknown>]>([["same content", {}], ["another content", { description: "Distinta" }]])(
+            "a post already linked to the same activity id created by ANOTHER member is a generic conflict (no reason) without writes (%s)", async (_, difference) => {
+              expect(await linkWithId()).toMatchObject({ ok: true });
+              activities = activities.map((activity) => activity.id === clientActivity ? { ...activity, createdBy: id(77) } : activity);
+              const before = everything(), spies = writers();
+              const result = await linkWithId(difference);
+              expect(result).toMatchObject(conflict);
+              expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+              expect(calls(spies)).toBe(0);
+              expect(everything()).toEqual(before);
+            });
+
           it.each<[string, Partial<Activity>]>([["another creator", { createdBy: id(77) }], ["another Trip", { tripId: otherTripId }]])(
             "an occupied activity id of %s stays the generic conflict (no reason)", async (_, fields) => {
               activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: actor, ...fields }];

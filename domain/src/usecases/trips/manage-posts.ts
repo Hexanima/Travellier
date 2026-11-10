@@ -267,6 +267,8 @@ const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewA
   const saved = await readSavedPost(scope, post, payload.authenticatedUserId);
   if (!saved.ok) return saved;
   const { photos, expenseRecord, activity, participation, expense } = saved.value, wanted = payload.newActivity;
+  // An activity with that id created by someone else is not the requester's save: generic conflict, no reason.
+  if (activity !== undefined && activity.createdBy !== payload.authenticatedUserId) return requestConflict();
   const fields = ["description", "mapsUrl", "parentPostId", "transportId"] as const;
   const postSame = fields.every((field) => !Object.hasOwn(payload, field) || payload[field] === undefined || payload[field] === post[field]);
   const photosSame = keys === undefined || keys.every((key) => photos.some((photo) => photo.s3Key === key));
