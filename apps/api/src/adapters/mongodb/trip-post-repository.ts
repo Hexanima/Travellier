@@ -74,6 +74,11 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
     findPhoto: photos.findPhoto,
     findPhotosByKeys: photos.findPhotosByKeys,
     insertPhotos: photos.insertPhotos,
+    listMemberUserIds: async (userIds) => {
+      const members = await database.collection<{ userId: MongoObjectId }>("tripMembers")
+        .find({ ...query, userId: { $in: userIds.map((userId) => new MongoObjectId(userId)) } }, { ...options, projection: { userId: 1 } }).toArray();
+      return ok(members.map((member) => domainId(member.userId)));
+    },
     findExpense: expenses.findExpense,
     insertExpense: expenses.insertExpense,
     updateExpenseFields: expenses.updateExpenseFields,
