@@ -57,6 +57,15 @@ describe("push device API: revoke", () => {
     expect(request).toEqual({ url: "https://api.test/push-devices/revoke", method: "POST", body: { provider: "fcm", token: TOKEN } });
     expect(request.url).not.toContain(TOKEN);
   });
+  it("revokes with an explicit bearer without asking for the current one", async () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
+    const getAccessToken = vi.fn(async () => "current-bearer");
+    const api = createPushDeviceApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken, onUnauthorized: vi.fn() }));
+    expect(await api.revoke({ provider: "fcm", token: TOKEN }, { accessToken: "outgoing-bearer" })).toEqual({ ok: true, value: undefined });
+    expect(getAccessToken).not.toHaveBeenCalled();
+    expect(fetch.mock.calls[0][1].headers).toMatchObject({ Authorization: "Bearer outgoing-bearer" });
+    expect(sent(fetch).body).toEqual({ provider: "fcm", token: TOKEN });
+  });
   it("maps failures without the token", async () => {
     expect(await setup({ error: { code: "ValidationError", message: TOKEN, fields: [{ field: "token", code: "invalid", message: TOKEN }] } }, 422).api.revoke({ provider: "fcm", token: TOKEN })).toMatchObject({ ok: false, error: { kind: "validation" } });
     const failed = await setup({ error: { code: "ValidationError", message: TOKEN, fields: [{ field: "token", code: "invalid", message: TOKEN }] } }, 422).api.revoke({ provider: "fcm", token: TOKEN });

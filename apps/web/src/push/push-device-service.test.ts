@@ -374,3 +374,133 @@ describe("push device service: logout and session changes", () => {
     expect(state(service)).toBe("registered");
   });
 });
+
+describe("push device service: late PUT after logout, registration timeout and concurrent logout", () => {
+  const BEARER = "fake-bearer-SENTINEL-OUT";
+  const hang = <T,>() => new Promise<T>(() => undefined);
+
+  it("revokes with the outgoing bearer a PUT that answers after the logout limit, without touching the new user's state", async () => {
+    const { api, service, emit } = setup();
+    let finish: (value: never) => void = () => undefined;
+    api.register.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve as typeof finish; }));
+    await service.resume();
+    emit(A);
+    await flush();
+    api.revoke.mockImplementationOnce(() => hang());
+    const done = vi.fn();
+    void service.revokeBeforeLogout({ accessToken: BEARER }).then(done);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(done).toHaveBeenCalledWith({ revoked: false });
+    expect(api.revoke).toHaveBeenCalledTimes(1);
+    await service.resume();
+    emit(B);
+    await flush();
+    expect(service.getStatus()).toEqual({ state: "registered", tokenHint: "****2222" });
+    finish(record("****1111") as never);
+    await flush();
+    expect(api.revoke).toHaveBeenCalledTimes(2);
+    expect(api.revoke).toHaveBeenLastCalledWith({ provider: "fcm", token: A.token }, { accessToken: BEARER });
+    expect(service.getStatus()).toEqual({ state: "registered", tokenHint: "****2222" });
+    await service.revokeBeforeLogout();
+    expect(api.revoke).toHaveBeenLastCalledWith({ provider: "fcm", token: B.token });
+  });
+  it("ignores a late revoke that is rejected, fails or hangs, and does not revoke a late failed PUT", async () => {
+    for (const outcome of ["reject", "fail", "hang", "put-fails"] as const) {
+      const { api, service, emit } = setup();
+      let finish: (value: never) => void = () => undefined;
+      api.register.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve as typeof finish; }));
+      await service.resume();
+      emit(A);
+      await flush();
+      api.revoke.mockImplementationOnce(() => hang());
+      void service.revokeBeforeLogout({ accessToken: BEARER });
+      await vi.advanceTimersByTimeAsync(3000);
+      if (outcome === "reject") api.revoke.mockRejectedValueOnce(new Error("401"));
+      if (outcome === "fail") api.revoke.mockResolvedValueOnce({ ok: false, error: { kind: "unauthorized" } } as never);
+      if (outcome === "hang") api.revoke.mockImplementationOnce(() => hang());
+      finish((outcome === "put-fails" ? { ok: false, error: { kind: "server" } } : record("****1111")) as never);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.revoke).toHaveBeenCalledTimes(outcome === "put-fails" ? 1 : 2);
+      expect(service.getStatus()).toEqual({ state: "off" });
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+  it("a PUT interrupted by reset (401) is not revoked", async () => {
+    const { api, service, emit } = setup();
+    let finish: (value: never) => void = () => undefined;
+    api.register.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve as typeof finish; }));
+    await service.resume();
+    emit(A);
+    await flush();
+    service.reset();
+    finish(record("****1111") as never);
+    await flush();
+    expect(api.revoke).not.toHaveBeenCalled();
+  });
+
+  it("without any event the registration ends in a retryable error after 15 s, and a late token is still accepted", async () => {
+    const { port, service, emit } = setup();
+    await service.resume();
+    await vi.advanceTimersByTimeAsync(14999);
+    expect(state(service)).toBe("registering");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(service.getStatus()).toEqual({ state: "error" });
+    emit(A);
+    await flush();
+    expect(service.getStatus()).toEqual({ state: "registered", tokenHint: "****1111" });
+    expect(port.register).toHaveBeenCalledTimes(1);
+  });
+  it("enable retries after the timeout", async () => {
+    const { port, service, emit } = setup();
+    await service.enable();
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(state(service)).toBe("error");
+    await service.enable();
+    expect(port.register).toHaveBeenCalledTimes(2);
+    expect(state(service)).toBe("registering");
+    emit(A);
+    await flush();
+    expect(state(service)).toBe("registered");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("the timeout does not fire once the token arrived and honors registrationTimeoutMs", async () => {
+    const { service, emit } = setup();
+    await service.resume();
+    emit(A);
+    await flush();
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(state(service)).toBe("registered");
+    const custom = setup();
+    const service2 = createPushDeviceService({ port: custom.port, api: custom.api, registrationTimeoutMs: 500 });
+    await service2.resume();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(state(service2)).toBe("error");
+  });
+  it("logout clears the registration timer", async () => {
+    const { service } = setup();
+    await service.resume();
+    await service.revokeBeforeLogout();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(state(service)).toBe("off");
+  });
+
+  it("concurrent revokeBeforeLogout calls share one operation and result", async () => {
+    const { api, port, service, emit } = setup();
+    await service.resume();
+    emit(A);
+    await flush();
+    api.revoke.mockImplementationOnce(() => hang());
+    const first = service.revokeBeforeLogout({ accessToken: BEARER });
+    await vi.advanceTimersByTimeAsync(1000);
+    const second = service.revokeBeforeLogout({ accessToken: BEARER });
+    expect(second).toBe(first);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await first).toEqual({ revoked: false });
+    expect(await second).toEqual({ revoked: false });
+    expect(api.revoke).toHaveBeenCalledTimes(1);
+    expect(port.unregister).toHaveBeenCalledTimes(1);
+    await service.revokeBeforeLogout();
+    expect(port.unregister).toHaveBeenCalledTimes(1);
+  });
+});

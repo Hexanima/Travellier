@@ -11,7 +11,7 @@ export type PushDeviceApi = {
   /** Idempotent upsert of this device token for the authenticated user. */
   register: (input: PushRegistration) => Promise<TripResult<PushDeviceRecord>>;
   /** The token travels in the body, never in the URL; 204 also when it was unknown. */
-  revoke: (input: { provider: PushProvider; token: string }) => Promise<TripResult<undefined>>;
+  revoke: (input: { provider: PushProvider; token: string }, options?: { accessToken?: string }) => Promise<TripResult<undefined>>;
 };
 
 const serverFailure: TripResult<never> = { ok: false, error: { kind: "server" } };
@@ -36,8 +36,10 @@ export const createPushDeviceApi = (client: Pick<HttpClient, "put" | "post">): P
       !isTimestamp(device.registeredAt) || device.provider !== input.provider || device.platform !== input.platform) return serverFailure;
     return { ok: true, value: { id: device.id, tokenHint: device.tokenHint, registeredAt: device.registeredAt } };
   },
-  revoke: async (input) => {
-    const result = await client.post<unknown>("/push-devices/revoke", { provider: input.provider, token: input.token });
+  revoke: async (input, options) => {
+    // An explicit bearer (the outgoing session's) is sent as is; the current one is not consulted.
+    const result = await client.post<unknown>("/push-devices/revoke", { provider: input.provider, token: input.token },
+      options?.accessToken ? { authenticated: false, headers: { Authorization: `Bearer ${options.accessToken}` } } : undefined);
     return result.ok ? { ok: true, value: undefined } : failure(result.error, input.token);
   },
 });

@@ -23,13 +23,17 @@ export type PushDeviceService = {
   resume: () => Promise<void>;
   /** Explicit user action: asks for the permission when still undecided, then registers. */
   enable: () => Promise<void>;
-  /** Revokes the token on the server (bounded), unregisters and resets; never throws and never blocks logout for long. */
-  revokeBeforeLogout: () => Promise<{ revoked: boolean }>;
+  /**
+   * Revokes the token on the server (bounded), unregisters and resets; never throws and never blocks logout for long.
+   * `accessToken` is the outgoing session's bearer: PUTs still in flight are revoked with it when they answer late.
+   * Concurrent calls share the same operation.
+   */
+  revokeBeforeLogout: (options?: { accessToken?: string }) => Promise<{ revoked: boolean }>;
   /** Local reset (e.g. after a 401): no authentication, so nothing is revoked. */
   reset: () => void;
 };
 
-type Dependencies = { port: PushRegistrationPort; api: PushDeviceApi; revokeTimeoutMs?: number };
+type Dependencies = { port: PushRegistrationPort; api: PushDeviceApi; revokeTimeoutMs?: number; registrationTimeoutMs?: number };
 
 const busyStates: readonly PushStatus["state"][] = ["requesting", "registering", "registered"];
 const same = (a: NativePushToken, b: NativePushToken) => a.token === b.token && a.provider === b.provider;
@@ -37,7 +41,7 @@ const safe = (operation: () => unknown): Promise<void> => {
   try { return Promise.resolve(operation()).then(() => undefined, () => undefined); } catch { return Promise.resolve(); }
 };
 
-export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: Dependencies): PushDeviceService => {
+export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000, registrationTimeoutMs = 15000 }: Dependencies): PushDeviceService => {
   let status: PushStatus = { state: "unsupported" };
   const listeners = new Set<() => void>();
   // The token lives only here, in memory.
@@ -49,6 +53,10 @@ export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: D
   let started = false;
   let loggingOut = false;
   let generation = 0;
+  let registrationTimer: ReturnType<typeof setTimeout> | undefined;
+  let logoutInFlight: Promise<{ revoked: boolean }> | undefined;
+  // Generations ended by a logout: the outgoing bearer and whether the logout already took its snapshot of tokens.
+  const outgoing = new Map<number, { bearer: string | undefined; snapshotted: boolean }>();
   let chain: Promise<void> = Promise.resolve();
   let entry: { promise: Promise<void>; generation: number } | undefined;
 
@@ -62,13 +70,17 @@ export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: D
     const promise = new Promise<false>((resolve) => { id = setTimeout(() => resolve(false), revokeTimeoutMs); });
     return { promise, cancel: () => clearTimeout(id) };
   };
-  const revokeOne = async (value: NativePushToken): Promise<boolean> => {
-    try { return (await api.revoke({ provider: value.provider, token: value.token })).ok; } catch { return false; }
+  const clearRegistrationTimer = () => { if (registrationTimer !== undefined) clearTimeout(registrationTimer); registrationTimer = undefined; };
+  const revokeOne = async (value: NativePushToken, bearer?: string): Promise<boolean> => {
+    try {
+      const input = { provider: value.provider, token: value.token };
+      return (await (bearer === undefined ? api.revoke(input) : api.revoke(input, { accessToken: bearer }))).ok;
+    } catch { return false; }
   };
-  const revokeBounded = async (values: readonly NativePushToken[]): Promise<boolean> => {
+  const revokeBounded = async (values: readonly NativePushToken[], bearer?: string): Promise<boolean> => {
     const limit = deadline();
     try {
-      return await Promise.race([Promise.all(values.map(revokeOne)).then((results) => results.every(Boolean)), limit.promise]);
+      return await Promise.race([Promise.all(values.map((value) => revokeOne(value, bearer))).then((results) => results.every(Boolean)), limit.promise]);
     } finally { limit.cancel(); }
   };
   const closeAndUnregister = () => {
@@ -97,7 +109,12 @@ export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: D
     const index = pending.indexOf(value);
     if (index >= 0) pending.splice(index, 1);
     if (current !== generation) {
-      if (result?.ok && loggingOut) orphans.push(value);
+      const ended = outgoing.get(current);
+      if (result?.ok && ended) {
+        // Still an orphan: the logout revokes it if it has not taken its snapshot yet; otherwise revoke it now with the outgoing bearer.
+        if (!ended.snapshotted && loggingOut) orphans.push(value);
+        else void revokeBounded([value], ended.bearer);
+      }
       return;
     }
     if (!result?.ok) { setStatus({ state: "error" }); return; }
@@ -111,25 +128,59 @@ export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: D
   const start = async (current: number): Promise<void> => {
     started = true;
     setStatus({ state: "registering" });
+    clearRegistrationTimer();
+    registrationTimer = setTimeout(() => {
+      registrationTimer = undefined;
+      if (current === generation && status.state === "registering") setStatus({ state: "error" });
+    }, registrationTimeoutMs);
     if (!stop) {
       const listened = await port.listen({
         onToken: (value) => {
           if (current !== generation) return;
+          clearRegistrationTimer();
           chain = chain.then(() => handleToken(value, current)).catch(() => undefined);
         },
-        onError: () => { if (current === generation && status.state !== "registered") setStatus({ state: "error" }); },
+        onError: () => { if (current === generation && status.state !== "registered") { clearRegistrationTimer(); setStatus({ state: "error" }); } },
       });
       if (current !== generation) { if (listened.ok) void safe(listened.value); return; }
-      if (!listened.ok) { setStatus({ state: "error" }); return; }
+      if (!listened.ok) { clearRegistrationTimer(); setStatus({ state: "error" }); return; }
       stop = listened.value;
     }
     const registered = await port.register();
     if (current !== generation) return;
-    if (!registered.ok) setStatus({ state: registered.error.kind === "denied" ? "denied" : "error" });
+    if (!registered.ok) { clearRegistrationTimer(); setStatus({ state: registered.error.kind === "denied" ? "denied" : "error" }); }
   };
 
   const permissionStatus = (permission: NativePermissionState): PushStatus => permission === "denied" ? { state: "denied" } : { state: "off" };
   const granted = (permission: NativePermissionState) => permission === "granted" || permission === "limited";
+
+  const logout = async (bearer: string | undefined): Promise<{ revoked: boolean }> => {
+    const ended = { bearer, snapshotted: false };
+    outgoing.set(generation, ended);
+    generation += 1;
+    clearRegistrationTimer();
+    if (!started && !token && pending.length === 0) { ended.snapshotted = true; clearMemory(); offUnlessUnknown(); return { revoked: false }; }
+    loggingOut = true;
+    const limit = deadline();
+    let revoked = false;
+    try {
+      // Let an in-flight PUT settle so that its token is also revoked, in order.
+      await Promise.race([chain, limit.promise]);
+      const known = [token, ...orphans, ...pending].filter((value): value is NativePushToken => value !== undefined)
+        .filter((value, index, all) => all.findIndex((other) => same(other, value)) === index);
+      ended.snapshotted = true;
+      clearMemory();
+      if (known.length > 0) revoked = await Promise.race([revokeBounded(known, bearer), limit.promise]);
+    } catch { revoked = false; }
+    ended.snapshotted = true;
+    await Promise.race([closeAndUnregister(), limit.promise]);
+    limit.cancel();
+    loggingOut = false;
+    clearMemory();
+    chain = Promise.resolve();
+    offUnlessUnknown();
+    return { revoked };
+  };
 
   return {
     getStatus: () => status,
@@ -170,30 +221,15 @@ export const createPushDeviceService = ({ port, api, revokeTimeoutMs = 3000 }: D
         await start(current);
       });
     },
-    revokeBeforeLogout: async () => {
-      generation += 1;
-      if (!started && !token && pending.length === 0) { clearMemory(); offUnlessUnknown(); return { revoked: false }; }
-      loggingOut = true;
-      const limit = deadline();
-      let revoked = false;
-      try {
-        // Let an in-flight PUT settle so that its token is also revoked, in order.
-        await Promise.race([chain, limit.promise]);
-        const known = [token, ...orphans, ...pending].filter((value): value is NativePushToken => value !== undefined)
-          .filter((value, index, all) => all.findIndex((other) => same(other, value)) === index);
-        clearMemory();
-        if (known.length > 0) revoked = await Promise.race([revokeBounded(known), limit.promise]);
-      } catch { revoked = false; }
-      await Promise.race([closeAndUnregister(), limit.promise]);
-      limit.cancel();
-      loggingOut = false;
-      clearMemory();
-      chain = Promise.resolve();
-      offUnlessUnknown();
-      return { revoked };
+    revokeBeforeLogout: (options) => {
+      if (logoutInFlight) return logoutInFlight;
+      const promise: Promise<{ revoked: boolean }> = logout(options?.accessToken).finally(() => { if (logoutInFlight === promise) logoutInFlight = undefined; });
+      logoutInFlight = promise;
+      return promise;
     },
     reset: () => {
       generation += 1;
+      clearRegistrationTimer();
       const had = started;
       clearMemory();
       chain = Promise.resolve();
