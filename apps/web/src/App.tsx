@@ -33,6 +33,8 @@ import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
 import { createTripCommentApi, type TripCommentApi } from './trips/trip-comment-api.js'
 import { createTripLikeApi, type TripLikeApi } from './trips/trip-like-api.js'
 import { createTripPhotoApi, type TripPhotoApi } from './trips/trip-photo-api.js'
+import { createTripGalleryApi, type TripGalleryApi } from './trips/trip-gallery-api.js'
+import { TripPhotosScreen } from './trips/TripPhotosScreen.js'
 import type { PostPhotoDeps } from './trips/use-post-photos.js'
 import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
@@ -56,6 +58,8 @@ type AppProps = {
   likes?: Partial<TripLikeApi>
   /** Reservation of photo uploads; the default uses the authenticated client. */
   photos?: Partial<TripPhotoApi>
+  /** Gallery of the Trip photos (signed read urls); the default uses the authenticated client. */
+  gallery?: Partial<TripGalleryApi>
   /** Device side of the photo upload (picker, file reader, direct transfer); the defaults are the Capacitor ones and request no permission until used. */
   devicePhotos?: Partial<Omit<PostPhotoDeps, 'api'>>
 }
@@ -80,7 +84,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, photos, devicePhotos }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, photos, gallery, devicePhotos }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -101,6 +105,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultComments = useRef<TripCommentApi | undefined>(undefined)
   const defaultLikes = useRef<TripLikeApi | undefined>(undefined)
   const defaultPhotos = useRef<TripPhotoApi | undefined>(undefined)
+  const defaultGallery = useRef<TripGalleryApi | undefined>(undefined)
   const defaultDevicePhotos = useRef<Partial<Omit<PostPhotoDeps, 'api'>>>({})
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
@@ -136,6 +141,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultComments.current = createTripCommentApi(client)
     defaultLikes.current = createTripLikeApi(client)
     defaultPhotos.current = createTripPhotoApi(client)
+    defaultGallery.current = createTripGalleryApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -149,6 +155,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeComments = comments ?? defaultComments.current
   const activeLikes = likes ?? defaultLikes.current
   const activePhotos = photos ?? defaultPhotos.current
+  const activeGallery = gallery ?? defaultGallery.current
+  // Stable reference: the gallery hook depends on it.
+  const galleryProvider = useMemo(() => ({
+    list: activeGallery?.list ?? (async () => ({ ok: false as const, error: { kind: 'server' as const } })),
+  }), [activeGallery])
   const tripComments = useMemo<TripCommentApi>(() => ({
     list: activeComments?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeComments?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -343,11 +354,12 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="/trips/:tripId/memories" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <MemoriesLayout />
+            <MemoriesLayout gallery={galleryProvider} />
           </TripRoute>
         }>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
+          <Route path="photos" element={<TripPhotosScreen members={tripMembers} />} />
           <Route path=":postId" element={<PostDetailScreen posts={tripPosts} members={tripMembers} comments={tripComments} likes={tripLikes} />} />
           <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
           <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
