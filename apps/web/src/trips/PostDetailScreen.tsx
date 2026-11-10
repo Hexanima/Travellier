@@ -1,13 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import { safeMapsUrl } from "./safe-maps-url.js";
 import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
+import { CommentsPanel, PostLikeControl } from "./PostComments.js";
 import type { TripFailure } from "./trip-management-api.js";
+import type { TripCommentApi } from "./trip-comment-api.js";
+import type { TripLikeApi } from "./trip-like-api.js";
+import type { TripMembersApi } from "./trip-members-api.js";
 import type { PostDetail, PostSummary, TripPostApi } from "./trip-post-api.js";
+import { useLikes } from "./use-likes.js";
 import "./itinerary.css";
 
-export type PostDetailScreenProps = { posts: Pick<TripPostApi, "get">; timeZone?: string };
+export type PostDetailScreenProps = { posts: Pick<TripPostApi, "get">; members: Pick<TripMembersApi, "list">; comments: TripCommentApi;
+  likes: Pick<TripLikeApi, "summary" | "setPostLike" | "setCommentLike">; timeZone?: string };
+type Interaction = Pick<PostDetailScreenProps, "members" | "comments" | "likes">;
+type Panel = "children" | "comments";
+const panels: readonly { id: Panel; label: string }[] = [{ id: "children", label: "Continuaciones" }, { id: "comments", label: "Comentarios" }];
 type LoadState = { kind: "loading" } | { kind: "ready"; detail: PostDetail } | { kind: "error"; error: TripFailure };
 
 const noText = "Recuerdo sin texto.";
@@ -20,12 +29,12 @@ const excerpt = (text: string | null, max: number): string | undefined => {
 /** Only the restore data of an origin travels back, so its place (anchor and scroll) is recovered. */
 const restoreOf = (origin: PostOrigin) => origin.anchor !== undefined && origin.scrollY !== undefined ? { restore: { anchor: origin.anchor, scrollY: origin.scrollY } } : undefined;
 
-export function PostDetailScreen({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostDetailScreenProps) {
+export function PostDetailScreen({ posts, members, comments, likes, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostDetailScreenProps) {
   const { tripId, postId } = useParams();
-  return <DetailContent key={`${tripId}/${postId}`} tripId={tripId} postId={postId} get={posts.get} timeZone={timeZone} />;
+  return <DetailContent key={`${tripId}/${postId}`} tripId={tripId} postId={postId} get={posts.get} timeZone={timeZone} interaction={{ members, comments, likes }} />;
 }
 
-function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; postId?: string; get: TripPostApi["get"]; timeZone: string }) {
+function DetailContent({ tripId, postId, get, timeZone, interaction }: { tripId?: string; postId?: string; get: TripPostApi["get"]; timeZone: string; interaction: Interaction }) {
   const location = useLocation();
   const navigate = useNavigate();
   const title = useRef<HTMLHeadingElement>(null);
@@ -65,11 +74,6 @@ function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; pos
   const goBack = () => { if (canGoBack(location)) navigate(-1); else navigate(originHref(origin), { state: restoreOf(origin) }); };
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
-  const here = `/trips/${tripId}/memories/${postId}`;
-  const summaryItem = (item: PostSummary) => <ListItem className="itinerary-nested-post" key={item.id}>
-    <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${item.id}`} state={{ origin }}>{excerpt(item.description, 140) ?? noText}</Link>
-    <p className="itinerary-secondary">Publicado <time dateTime={item.createdAt}>{publication.format(new Date(item.createdAt))}</time></p>
-  </ListItem>;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel memory-detail">
       <Button onClick={goBack}>Volver</Button>
@@ -90,35 +94,70 @@ function DetailContent({ tripId, postId, get, timeZone }: { tripId?: string; pos
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
-      {state.kind === "ready" ? (() => {
-        const { post, parent, children, rootActivityId } = state.detail;
-        const label = excerpt(post.description, 80);
-        return <>
-          <section className="activity-detail" aria-labelledby="memory-content-title">
-            <h2 id="memory-content-title">Contenido</h2>
-            <p className="itinerary-post-description">{post.description?.trim() ? post.description : noText}</p>
-            {safeMapsUrl(post.mapsUrl) ? <a className="trips-settings-link" href={safeMapsUrl(post.mapsUrl)} rel="noopener noreferrer">Ver ubicación</a> : null}
-            <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
-            {rootActivityId ? <p className="itinerary-secondary">Vinculado a una actividad</p> : null}
-            {post.transportId ? <p className="itinerary-secondary">Vinculado a un transporte</p> : null}
-            <div className="memory-actions">
-              <Link className="trips-settings-link" to={`/trips/${tripId}/memories/new?parentPostId=${post.id}`}
-                state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo"), ...(label ? { parentLabel: label } : {}) }}>Continuar recuerdo</Link>
-              <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo") }}>Editar</Link>
-            </div>
-          </section>
-          {parent || post.parentPostId ? <section className="activity-detail" aria-labelledby="memory-previous-title">
-            <h2 id="memory-previous-title">Recuerdo anterior</h2>
-            {parent ? <List className="itinerary-posts memories-list" aria-label="Recuerdo anterior">{summaryItem(parent)}</List>
-              : <p className="itinerary-secondary">El recuerdo anterior ya no está disponible.</p>}
-          </section> : null}
-          <section className="activity-detail" aria-labelledby="memory-children-title">
-            <h2 id="memory-children-title">Continuaciones</h2>
-            {children.length > 0 ? <List className="itinerary-posts memories-list" aria-label="Continuaciones">{children.map(summaryItem)}</List>
-              : <p className="itinerary-secondary">Todavía no hay continuaciones.</p>}
-          </section>
-        </>;
-      })() : null}
+      {state.kind === "ready" && tripId && postId ? <ReadyContent tripId={tripId} postId={postId} detail={state.detail} origin={origin} publication={publication}
+        interaction={interaction} /> : null}
     </div>
   </main>;
+}
+
+/**
+ * Mounted once the detail is ready and kept while it refreshes: the comments and the likes are requested here once, and the active panel, the lists
+ * and the typed texts are not rebuilt by refreshing or by interacting.
+ */
+function ReadyContent({ tripId, postId, detail, origin, publication, interaction }: { tripId: string; postId: string; detail: PostDetail; origin: PostOrigin;
+  publication: Intl.DateTimeFormat; interaction: Interaction }) {
+  const { post, parent, children, rootActivityId } = detail;
+  const likes = useLikes(tripId, postId, interaction.likes);
+  const [panel, setPanel] = useState<Panel>("children");
+  const tabs = useRef<Record<Panel, HTMLButtonElement | null>>({ children: null, comments: null });
+  const label = excerpt(post.description, 80);
+  const here = `/trips/${tripId}/memories/${postId}`;
+  const format = (iso: string) => publication.format(new Date(iso));
+  const summaryItem = (item: PostSummary) => <ListItem className="itinerary-nested-post" key={item.id}>
+    <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${item.id}`} state={{ origin }}>{excerpt(item.description, 140) ?? noText}</Link>
+    <p className="itinerary-secondary">Publicado <time dateTime={item.createdAt}>{format(item.createdAt)}</time></p>
+  </ListItem>;
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const target = event.key === "ArrowRight" ? (index + 1) % panels.length : event.key === "ArrowLeft" ? (index + panels.length - 1) % panels.length
+      : event.key === "Home" ? 0 : event.key === "End" ? panels.length - 1 : undefined;
+    if (target === undefined) return;
+    event.preventDefault();
+    setPanel(panels[target].id);
+    tabs.current[panels[target].id]?.focus();
+  };
+  return <>
+    <section className="activity-detail" aria-labelledby="memory-content-title">
+      <h2 id="memory-content-title">Contenido</h2>
+      <p className="itinerary-post-description">{post.description?.trim() ? post.description : noText}</p>
+      {safeMapsUrl(post.mapsUrl) ? <a className="trips-settings-link" href={safeMapsUrl(post.mapsUrl)} rel="noopener noreferrer">Ver ubicación</a> : null}
+      <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{format(post.createdAt)}</time></p>
+      {rootActivityId ? <p className="itinerary-secondary">Vinculado a una actividad</p> : null}
+      {post.transportId ? <p className="itinerary-secondary">Vinculado a un transporte</p> : null}
+      <PostLikeControl likes={likes} />
+      <div className="memory-actions">
+        <Link className="trips-settings-link" to={`/trips/${tripId}/memories/new?parentPostId=${post.id}`}
+          state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo"), ...(label ? { parentLabel: label } : {}) }}>Continuar recuerdo</Link>
+        <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo") }}>Editar</Link>
+      </div>
+    </section>
+    {parent || post.parentPostId ? <section className="activity-detail" aria-labelledby="memory-previous-title">
+      <h2 id="memory-previous-title">Recuerdo anterior</h2>
+      {parent ? <List className="itinerary-posts memories-list" aria-label="Recuerdo anterior">{summaryItem(parent)}</List>
+        : <p className="itinerary-secondary">El recuerdo anterior ya no está disponible.</p>}
+    </section> : null}
+    <div className="memory-tabs" role="tablist" aria-label="Continuaciones y comentarios">
+      {panels.map(({ id, label: name }, index) => <button key={id} type="button" role="tab" className="ui-button memory-tab" id={`memory-tab-${id}`}
+        aria-selected={panel === id} aria-controls={`memory-panel-${id}`} tabIndex={panel === id ? 0 : -1} ref={(node) => { tabs.current[id] = node; }}
+        onClick={() => setPanel(id)} onKeyDown={(event) => onKeyDown(event, index)}>{name}</button>)}
+    </div>
+    <section className="activity-detail memory-panel" id="memory-panel-children" role="tabpanel" aria-labelledby="memory-tab-children" hidden={panel !== "children"}>
+      <h2 id="memory-children-title">Continuaciones</h2>
+      {children.length > 0 ? <List className="itinerary-posts memories-list" aria-label="Continuaciones">{children.map(summaryItem)}</List>
+        : <p className="itinerary-secondary">Todavía no hay continuaciones.</p>}
+    </section>
+    <section className="activity-detail memory-panel" id="memory-panel-comments" role="tabpanel" aria-labelledby="memory-tab-comments" hidden={panel !== "comments"}>
+      <h2 id="memory-comments-title">Comentarios</h2>
+      <CommentsPanel tripId={tripId} postId={postId} comments={interaction.comments} members={interaction.members} likes={likes} format={format} />
+    </section>
+  </>;
 }

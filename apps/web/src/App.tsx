@@ -26,6 +26,8 @@ import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
 import { createTripManagementApi, type TripManagementApi } from './trips/trip-management-api.js'
 import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-api.js'
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
+import { createTripCommentApi, type TripCommentApi } from './trips/trip-comment-api.js'
+import { createTripLikeApi, type TripLikeApi } from './trips/trip-like-api.js'
 import { PostComposer } from './trips/PostComposer.js'
 import { PostLinkPicker } from './trips/PostLinkPicker.js'
 import { SpontaneousActivityForm } from './trips/SpontaneousActivityForm.js'
@@ -44,6 +46,8 @@ type AppProps = {
   activities?: Partial<TripActivityApi>
   participations?: Partial<TripParticipationApi>
   posts?: Partial<TripPostApi>
+  comments?: Partial<TripCommentApi>
+  likes?: Partial<TripLikeApi>
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -66,7 +70,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -84,6 +88,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const defaultActivities = useRef<TripActivityApi | undefined>(undefined)
   const defaultParticipations = useRef<TripParticipationApi | undefined>(undefined)
   const defaultPosts = useRef<TripPostApi | undefined>(undefined)
+  const defaultComments = useRef<TripCommentApi | undefined>(undefined)
+  const defaultLikes = useRef<TripLikeApi | undefined>(undefined)
   const defaultSessionStorage = useRef<NativeSessionStorage | undefined>(undefined)
   const restoredSession = useRef(false)
   const sessionRevision = useRef(0)
@@ -115,6 +121,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     defaultActivities.current = createTripActivityApi(client)
     defaultParticipations.current = createTripParticipationApi(client)
     defaultPosts.current = createTripPostApi(client)
+    defaultComments.current = createTripCommentApi(client)
+    defaultLikes.current = createTripLikeApi(client)
   }
 
   const activeAuth = auth ?? defaultAuth.current
@@ -125,6 +133,18 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const activeActivities = activities ?? defaultActivities.current
   const activeParticipations = participations ?? defaultParticipations.current
   const activePosts = posts ?? defaultPosts.current
+  const activeComments = comments ?? defaultComments.current
+  const activeLikes = likes ?? defaultLikes.current
+  const tripComments = useMemo<TripCommentApi>(() => ({
+    list: activeComments?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    create: activeComments?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    update: activeComments?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeComments])
+  const tripLikes = useMemo<TripLikeApi>(() => ({
+    summary: activeLikes?.summary ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    setPostLike: activeLikes?.setPostLike ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    setCommentLike: activeLikes?.setCommentLike ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+  }), [activeLikes])
   const tripPosts = useMemo<TripPostApi>(() => ({
     list: activePosts?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     get: activePosts?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -301,7 +321,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         }>
           <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
-          <Route path=":postId" element={<PostDetailScreen posts={tripPosts} />} />
+          <Route path=":postId" element={<PostDetailScreen posts={tripPosts} members={tripMembers} comments={tripComments} likes={tripLikes} />} />
           <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} />} />
           <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
           <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
