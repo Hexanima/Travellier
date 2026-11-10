@@ -74,7 +74,7 @@ describe("ExpenseForm", () => {
     expect(field(container, "currency").value).toBe("");
     expect(Array.from(field(container, "currency").options).map((option) => option.textContent)).toEqual(["Elegí la moneda", "ARS", "EUR", "USD"]);
     expect(field(container, "breakdown").value).toBe("");
-    expect(container.textContent).toContain("Pagos y reparto se configuran en otra sección");
+    expect(container.textContent).toContain("«Pagos y reparto», desde el recuerdo");
     expect(itineraryGet).not.toHaveBeenCalled();
   });
   it("Accept stores the typed values, returns to the composer and asks to focus the expense button", async () => {

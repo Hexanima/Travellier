@@ -4,12 +4,13 @@ import { createRoot } from "react-dom/client";
 import { Link, MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExpenseForm } from "./ExpenseForm.js";
+import { ExpenseSplitForm } from "./ExpenseSplitForm.js";
 import { PostComposer } from "./PostComposer.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
 import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
-import type { PostResponse } from "./trip-post-api.js";
+import type { PostResponse, SavedExpenseView } from "./trip-post-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -19,15 +20,20 @@ const tripId = itineraryId(1), withExpenseId = itineraryId(10), withoutExpenseId
 const saved = (id: string, extra: Partial<PostResponse> = {}): PostResponse => ({ id, tripId, authorId: itineraryId(20), description: "Atardecer", mapsUrl: null,
   activityId: null, parentPostId: null, transportId: null, createdAt: "2026-09-25T13:00:00.123Z", ...extra });
 function Listing() { const location = useLocation(); return <p data-testid="listing">LISTADO {JSON.stringify(location.state)}</p>; }
-type Mocks = Partial<Record<"create" | "update" | "itineraryGet", ReturnType<typeof vi.fn>>>;
+type Mocks = Partial<Record<"create" | "update" | "itineraryGet" | "get", ReturnType<typeof vi.fn>>> & { storedExpense?: SavedExpenseView };
+const [me, beto, dani] = [itineraryId(30), itineraryId(31), itineraryId(33)];
+const membersList = vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [{ id: itineraryId(100), userId: me, name: "Ana", role: "admin", joinedAt: "2026-01-01T00:00:00.000Z" },
+  { id: itineraryId(101), userId: beto, name: "Beto", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } });
 async function render(path: string, mocks: Mocks = {}) {
   const itineraryGet = mocks.itineraryGet ?? vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() });
   const itinerary = { get: itineraryGet };
   const create = mocks.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved(itineraryId(60)) });
   const update = mocks.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved(withExpenseId) });
-  const get = vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null } }));
+  const get = mocks.get ?? vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null,
+    ...(mocks.storedExpense ? { expense: mocks.storedExpense } : {}) } }));
   const composer = <PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone={zone} />;
   const expenseForm = <ExpenseForm itinerary={itinerary} />;
+  const splitForm = <ExpenseSplitForm posts={{ get }} members={{ list: membersList }} />;
   const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={zone} spontaneousActivity />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
@@ -38,9 +44,10 @@ async function render(path: string, mocks: Mocks = {}) {
       <Route path="new" element={composer} /><Route path=":postId/edit" element={composer} />
       <Route path="new/link" element={picker} /><Route path=":postId/edit/link" element={picker} />
       <Route path="new/expense" element={expenseForm} /><Route path=":postId/edit/expense" element={expenseForm} />
+      <Route path="new/expense/split" element={splitForm} /><Route path=":postId/edit/expense/split" element={splitForm} />
       <Route path="new/activity" element={<SpontaneousActivityForm itinerary={itinerary} timeZone={zone} />} />
     </Route></Routes></MemoryRouter>));
-  return { container, create, update, itineraryGet };
+  return { container, create, update, itineraryGet, get };
 }
 async function type(container: HTMLElement, name: string, value: string) {
   const element = container.querySelector(`[name="${name}"]`) as HTMLInputElement | HTMLTextAreaElement;
@@ -275,12 +282,12 @@ describe("PostComposer expense (edit)", () => {
     await click(expenseButton(container));
     await type(container, "amount", "1"); await click(button(container, "Aceptar"));
     await submit(container);
-    expect(alerts(container)).toEqual(["El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en pagos y reparto (próximamente)."]);
+    expect(alerts(container)).toEqual(["El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en Pagos y reparto."]);
     expect(container.querySelector('section[aria-label="Gasto"]')?.textContent).toContain("ARS 1,00");
     expect(document.activeElement).toBe(expenseButton(container));
   });
   it("a shares conflict uses the same message", async () => {
-    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.shares[0].amount", code: "exceeds_total", message: "x" }] } });
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.shares", code: "exceeds_total", message: "x" }] } });
     const { container } = await render(editPath(withExpenseId), { update });
     await click(expenseButton(container));
     await type(container, "amount", "1"); await click(button(container, "Aceptar"));
@@ -331,5 +338,160 @@ describe("PostComposer expense (edit)", () => {
       const { container } = await render(editPath(withExpenseId));
       expect(container.querySelector('section[aria-label="Gasto"]')!.textContent).not.toContain("Gasto atribuido");
     });
+  });
+});
+
+describe("PostComposer payments and shares (T84)", () => {
+  const splitButton = (container: HTMLElement) => container.querySelector('button[name="split"]') as HTMLButtonElement;
+  const stored = (extra: Partial<SavedExpenseView> = {}): SavedExpenseView => ({ postId: withExpenseId, totalAmount: 25.5, currency: "ARS", breakdown: "Almuerzo",
+    payments: [{ userId: me, unit: "amount", value: 10 }], shares: [{ userId: me, unit: "remainder", value: null }],
+    completeness: { status: "incomplete", reasons: [] }, formerMemberIds: [], ...extra });
+  const rowsOf = (container: HTMLElement, section: string) => Array.from(container.querySelectorAll<HTMLElement>(`[data-section="${section}"] [data-row]`));
+  const valueIn = (row: HTMLElement) => row.querySelector<HTMLInputElement>('input[inputmode="decimal"]')!;
+  const setValue = async (element: HTMLInputElement, value: string) => {
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
+  };
+  const pick = async (container: HTMLElement, name: string, value: string) => {
+    const element = container.querySelector(`select[name="${name}"]`) as HTMLSelectElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+
+  it("opens the editor from the Gasto section, and with no expense yet it asks for amount and currency first", async () => {
+    const { container } = await render(newPath);
+    expect(splitButton(container).textContent).toBe("Pagos y reparto");
+    await click(splitButton(container));
+    expect(container.textContent).toContain("Cargá primero importe y moneda del gasto");
+    await click(button(container, "Cancelar"));
+    expect(splitButton(container)).not.toBeNull();
+    expect(document.activeElement).toBe(splitButton(container));
+  });
+
+  it("creating: the confirmed proposal travels with the expense in the POST", async () => {
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Cena");
+    await addExpense(container, "100", "ARS");
+    await click(splitButton(container));
+    expect(container.textContent).toContain("Propuesta sin confirmar");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Cena", expense: { totalAmount: 100, currency: "ARS",
+      shares: [{ userId: me, unit: "remainder", value: null }, { userId: beto, unit: "remainder", value: null }] } });
+  });
+
+  it("cancelling the editor sends nothing about the split (the proposal is not persisted)", async () => {
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Cena");
+    await addExpense(container, "100", "ARS");
+    await click(splitButton(container));
+    await click(button(container, "Cancelar"));
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Cena", expense: { totalAmount: 100, currency: "ARS" } });
+  });
+
+  it("removing a new expense also drops its payments and shares", async () => {
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Cena");
+    await addExpense(container, "100", "ARS");
+    await click(splitButton(container)); await click(button(container, "Aceptar"));
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Cena" });
+  });
+
+  it("editing: a save with no change in payments and shares does not send them, so they are kept when the mode changes", async () => {
+    const { container, update } = await render(editPath(withExpenseId), { storedExpense: stored() });
+    await type(container, "description", "Editado");
+    await click(splitButton(container)); await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado" });
+  });
+
+  it("editing: only the list that changed is sent", async () => {
+    const { container, update } = await render(editPath(withExpenseId), { storedExpense: stored() });
+    await click(splitButton(container));
+    await setValue(valueIn(rowsOf(container, "payments")[0]!), "12,50");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: { payments: [{ userId: me, unit: "amount", value: 12.5 }] } });
+  });
+
+  it("editing: a former member row is kept as it came when the other rows change", async () => {
+    const withFormer = stored({ payments: [{ userId: dani, unit: "amount", value: 10 }], shares: [{ userId: dani, unit: "amount", value: 5 }] });
+    const { container, update } = await render(editPath(withExpenseId), { storedExpense: withFormer });
+    await click(splitButton(container));
+    await pick(container, "payments-add", beto); await click(button(container, "Agregar pago"));
+    await setValue(valueIn(rowsOf(container, "payments")[1]!), "5");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: { payments: [{ userId: dani, unit: "amount", value: 10 }, { userId: beto, unit: "amount", value: 5 }] } });
+  });
+
+  it("a 422 on a row opens the editor with that row marked, keeps the draft and the person fixes it", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.payments[1].userId", code: "not_member", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored(), update });
+    await click(splitButton(container));
+    await pick(container, "payments-add", beto); await click(button(container, "Agregar pago"));
+    await setValue(valueIn(rowsOf(container, "payments")[1]!), "5");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)).toEqual(["Revisá pagos y reparto: no pudimos guardar algunas filas."]);
+    await click(button(container, "Ajustar pagos y reparto"));
+    expect(container.textContent).toContain("Esta persona ya no integra el viaje");
+    expect(rowsOf(container, "payments")).toHaveLength(2);
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(rowsOf(container, "payments")[1]!.contains(document.activeElement)).toBe(true);
+  });
+
+  it("a 422 on a list (total lowered below the fixed amounts) opens the editor with the new total showing the excess", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.payments", code: "exceeds_total", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored({ payments: [{ userId: me, unit: "amount", value: 20 }] }), update });
+    await click(expenseButton(container));
+    await type(container, "amount", "15"); await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)).toEqual(["El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en Pagos y reparto."]);
+    await click(button(container, "Ajustar pagos y reparto"));
+    expect(container.textContent).toContain("Sobran ARS 5,00");
+  });
+
+  it("a 422 about the split keeps the edited rows in the draft", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.shares[0].value", code: "invalid_value", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored(), update });
+    await click(splitButton(container));
+    await click(button(container, "Incluir a Beto"));
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)).toHaveLength(1);
+    await click(button(container, "Ajustar pagos y reparto"));
+    expect(rowsOf(container, "shares")).toHaveLength(2);
+  });
+
+  it("a 422 on an expense field that is not payments or shares keeps the general message and no adjust button", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.totalAmount", code: "invalid", message: "x" }] } });
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored(), update });
+    await click(expenseButton(container));
+    await type(container, "amount", "30"); await click(button(container, "Aceptar"));
+    await submit(container);
+    expect(alerts(container)).toEqual(["Revisá el importe del gasto."]);
+    expect(button(container, "Ajustar pagos y reparto")).toBeUndefined();
+  });
+
+  it("a failed save keeps the edited split in the draft", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored(), update });
+    await click(splitButton(container));
+    await setValue(valueIn(rowsOf(container, "payments")[0]!), "11");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    await click(splitButton(container));
+    expect(valueIn(rowsOf(container, "payments")[0]!).value).toBe("11");
+  });
+
+  it("the memory is dirty after editing the split: Cancelar asks before discarding", async () => {
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored() });
+    await click(splitButton(container));
+    await setValue(valueIn(rowsOf(container, "payments")[0]!), "11");
+    await click(button(container, "Aceptar"));
+    await click(button(container, "Cancelar"));
+    expect(document.body.textContent).toContain("Descartar cambios");
   });
 });
