@@ -36,16 +36,16 @@ describe("itinerary screen", () => {
       .toEqual([itineraryId(8), itineraryId(10), itineraryId(9)]);
     expect(container.querySelector(`time[datetime="2026-09-25T12:00:00.123Z"]`)?.textContent).toBe("09:00");
     expect(container.textContent).toContain("En camino");
-    expect(container.querySelector('[data-itinerary-expenses]')?.textContent).toContain("25,5");
+    expect(container.querySelector('[data-itinerary-expenses]')?.textContent).toContain("ARS 25,50 · 1 gasto");
     expect(container.querySelector('[data-itinerary-expenses]')?.textContent).not.toContain("999");
   });
   it.each([
-    ["register", 0.1, 0.2, "0,3", "0,1"],
-    ["balance", 0.1, 0.2, "0,3", "0,1"],
-    ["register", 10.005, 0, "10,01", "10,01"],
-    ["balance", 10.005, 0, "10,01", "10,01"],
-    ["register", 1234.56, 0.01, "1.234,57", "1.234,56"],
-    ["balance", 1234.56, 0.01, "1.234,57", "1.234,56"],
+    ["register", 0.1, 0.2, "ARS 0,30", "ARS 0,10"],
+    ["balance", 0.1, 0.2, "ARS 0,30", "ARS 0,10"],
+    ["register", 10.005, 0, "ARS 10,01", "ARS 10,01"],
+    ["balance", 10.005, 0, "ARS 10,01", "ARS 10,01"],
+    ["register", 1234.56, 0.01, "ARS 1.234,57", "ARS 1.234,56"],
+    ["balance", 1234.56, 0.01, "ARS 1.234,57", "ARS 1.234,56"],
   ] as const)("formats daily expenses without floating point artifacts in %s: %s + %s", async (expenseMode, first, second, expectedTotal, expectedPost) => {
     const value = fixture(); value.expenseMode = expenseMode;
     value.posts[0].expense!.totalAmount = first;
@@ -53,7 +53,7 @@ describe("itinerary screen", () => {
     const before = JSON.stringify(value);
     const { container } = await render(vi.fn().mockResolvedValue({ ok: true, value }));
     expect(container.querySelector('[data-itinerary-expenses] .itinerary-expense-total strong')?.textContent).toBe(expectedTotal);
-    expect(container.querySelector('[data-itinerary-expenses] .itinerary-expense-total span')?.textContent).toBe("2 gastos registrados");
+    expect(container.querySelector('[data-itinerary-expenses] .itinerary-expense-total span')?.textContent).toBe("2 gastos");
     expect(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] .itinerary-post-expense strong`)?.textContent).toBe(`Gasto: ${expectedPost}`);
     expect(JSON.stringify(value)).toBe(before);
   });
@@ -115,7 +115,7 @@ describe("itinerary screen", () => {
     expect(section?.querySelector("h2")?.textContent).toBe("Publicaciones fuera del itinerario");
     expect(Array.from(section!.querySelectorAll("[data-itinerary-post]")).map((n) => n.getAttribute("data-itinerary-post")))
       .toEqual([itineraryId(50), itineraryId(10)]);
-    expect(section?.textContent).toContain("Gasto: 99");
+    expect(section?.textContent).toContain("Gasto: ARS 99,00");
     expect(container.querySelector('[data-itinerary-date="2026-09-25"] [data-itinerary-expenses]')?.textContent).toContain("Sin gastos registrados.");
     expect(container.querySelectorAll(`[data-itinerary-post="${itineraryId(50)}"]`)).toHaveLength(1);
   });
@@ -143,7 +143,7 @@ describe("itinerary screen", () => {
     const post = container.querySelector(`[data-itinerary-post="${value.posts[0].id}"]`);
     expect(post?.closest("section")?.getAttribute("aria-labelledby")).toBe("itinerary-outside-posts");
     expect(container.querySelector('[data-itinerary-date] [data-itinerary-post]')).toBeNull();
-    expect(post?.textContent).toContain("Gasto: 25,5");
+    expect(post?.textContent).toContain("Gasto: ARS 25,50");
     for (const date of ["2026-09-24", "2026-09-25"])
       expect(container.querySelector(`[data-itinerary-date="${date}"] [data-itinerary-expenses]`)?.textContent).toContain("Sin gastos registrados.");
     expect(post?.querySelector("time")?.getAttribute("datetime")).toBe(value.posts[0].createdAt);

@@ -2,6 +2,7 @@ import type {
   ItineraryActivityResponse, ItineraryDayResponse, ItineraryPostResponse,
   ItineraryTransportResponse, TripItineraryResponse,
 } from "./trip-itinerary-api.js";
+import { totalsOf, type ExpenseTotals } from "./expense-format.js";
 
 export type ItineraryViewItem =
   | { kind: "transport"; id: string; at: string; transport: ItineraryTransportResponse; posts: ItineraryPostResponse[] }
@@ -11,9 +12,10 @@ export type ItinerarySegment = {
   key: string; destinationId: string; destinationName: string; type: ItineraryDayResponse["type"];
   startsAt: string; endsAt: string | null; sourceDayIds: string[]; items: ItineraryViewItem[];
 };
+/** `expenseSummary` is per local day and per currency (never summed across currencies), recomputed here: the server groups by UTC band. */
 export type LocalItineraryDay = {
   date: string; segments: ItinerarySegment[];
-  expenseSummary: { totalAmount: number; expenseCount: number };
+  expenseSummary: ExpenseTotals;
 };
 
 const rank = { transport: 0, activity: 1, post: 2 };
@@ -41,7 +43,12 @@ const chronologicalSegments = (segments: ItinerarySegment[]): ItinerarySegment[]
   return groups;
 };
 
-export type ItineraryView = { days: LocalItineraryDay[]; outsidePosts: ItineraryPostResponse[] };
+/**
+ * `outsideExpensePosts` are the posts with an expense that no local day claims (any placement), `outsideExpenses` their totals;
+ * `tripExpenses` is every expense of the Trip once (days plus outside): the days and the outside part never overlap.
+ */
+export type ItineraryView = { days: LocalItineraryDay[]; outsidePosts: ItineraryPostResponse[];
+  outsideExpensePosts: ItineraryPostResponse[]; outsideExpenses: ExpenseTotals; tripExpenses: ExpenseTotals };
 
 const byPublication = (a: ItineraryPostResponse, b: ItineraryPostResponse) =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id);
@@ -81,7 +88,7 @@ export const projectItineraryView = (itinerary: TripItineraryResponse,
         }
         sliceEnd = low;
       }
-      const localDay = days.get(date) ?? { date, segments: [], expenseSummary: { totalAmount: 0, expenseCount: 0 } };
+      const localDay = days.get(date) ?? { date, segments: [], expenseSummary: totalsOf([]) };
       days.set(date, localDay);
       const previous = [...localDay.segments].reverse().find((s) => s.destinationId === source.destinationId && s.type === source.type &&
         s.endsAt !== null && Date.parse(s.endsAt) === start);
@@ -109,7 +116,7 @@ export const projectItineraryView = (itinerary: TripItineraryResponse,
       const date = dateKey(Date.parse(activity.scheduledAt));
       if (date === dateKey(Date.parse(last.startsAt))) segment = last;
       else {
-        const localDay = days.get(date) ?? { date, segments: [], expenseSummary: { totalAmount: 0, expenseCount: 0 } };
+        const localDay = days.get(date) ?? { date, segments: [], expenseSummary: totalsOf([]) };
         days.set(date, localDay);
         segment = { ...last, key: `${activity.dayId}-${date}`, startsAt: activity.scheduledAt,
           endsAt: activity.scheduledAt, sourceDayIds: [activity.dayId], items: [] };
@@ -148,6 +155,7 @@ export const projectItineraryView = (itinerary: TripItineraryResponse,
   }
   const expenses = new Map(result.map((day) => [day, [] as ItineraryPostResponse[]] as const));
   const outsidePosts: ItineraryPostResponse[] = [];
+  const outsideExpensePosts: ItineraryPostResponse[] = [];
   for (const post of [...itinerary.posts, ...itinerary.unplacedPosts].sort(byPublication)) {
     const { rootActivityId, rootTransportId, placement } = post.context;
     const activity = placement === "activity" && rootActivityId !== null ? activityLocations.get(rootActivityId) : undefined;
@@ -161,16 +169,17 @@ export const projectItineraryView = (itinerary: TripItineraryResponse,
         [...publicationDay.segments].sort((a, b) => Date.parse(a.startsAt) - Date.parse(b.startsAt))[0];
       segment.items.push({ kind: "post", id: post.id, at: post.createdAt, post });
     } else outsidePosts.push(post);
-    // Expenses follow the root activity's day; otherwise the local day of publication. Without a day they are not summed.
+    // Expenses follow the root activity's day; otherwise the local day of publication. Without a day they are listed apart, never lost.
     if (post.expense !== null) {
       const day = activity ? activityDays.get(activity.id) : publicationDay;
-      if (day) expenses.get(day)!.push(post);
+      if (day) expenses.get(day)!.push(post); else outsideExpensePosts.push(post);
     }
   }
   for (const day of result) {
     const expensePosts = expenses.get(day)!;
     day.segments = chronologicalSegments(day.segments);
-    day.expenseSummary = { totalAmount: expensePosts.reduce((sum, p) => sum + p.expense!.totalAmount, 0), expenseCount: expensePosts.length };
+    day.expenseSummary = totalsOf(expensePosts);
   }
-  return { days: result, outsidePosts };
+  return { days: result, outsidePosts, outsideExpensePosts, outsideExpenses: totalsOf(outsideExpensePosts),
+    tripExpenses: totalsOf([...expenses.values(), outsideExpensePosts].flat()) };
 };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { itineraryFixture, itineraryId, linkPost } from "./itinerary-test-fixture.js";
+import type { ExpenseTotals } from "./expense-format.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import { projectItineraryView, projectTripItinerary } from "./trip-itinerary-view.js";
 
@@ -21,7 +22,9 @@ const activityPosts = (view: View, id: string) => {
   const found = itemsOf(view).find((item) => item.kind === "activity" && item.id === id);
   return found?.kind === "activity" ? found.posts.map((p) => p.id) : undefined;
 };
-const dayExpenses = (days: { date: string; expenseSummary: object }[]) => days.map((day) => ({ date: day.date, ...day.expenseSummary }));
+/** The fixture expenses are all ARS: a day total as decimals keeps these placement assertions readable (the currency rules have their own tests). */
+const flat = (summary: ExpenseTotals) => ({ totalAmount: (summary.byCurrency.find((entry) => entry.currency === "ARS")?.totalCents ?? 0) / 100, expenseCount: summary.expenseCount });
+const dayExpenses = (days: { date: string; expenseSummary: ExpenseTotals }[]) => days.map((day) => ({ date: day.date, ...flat(day.expenseSummary) }));
 
 describe("local itinerary projection", () => {
   it("shows outbound, activity and return bands under the same local date", async () => {
@@ -66,7 +69,7 @@ describe("local itinerary projection", () => {
       .toEqual([[itineraryId(6), [itineraryId(11)]], [itineraryId(7), [itineraryId(16)]]]);
     expectEachOnce(itinerary, view);
     expect(new Set(day.segments.map((segment) => segment.key)).size).toBe(day.segments.length);
-    expect(day.expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
+    expect(flat(day.expenseSummary)).toEqual({ totalAmount: 25.5, expenseCount: 1 });
     expect(view.outsidePosts).toEqual([]);
     expect(JSON.stringify(itinerary)).toBe(before);
   });
@@ -131,7 +134,7 @@ describe("local itinerary projection", () => {
     expect(activityPosts(view, itineraryId(8))).toEqual([itineraryId(10)]);
     expect(itemsOf(view).filter((item) => item.kind === "post" && item.id === itineraryId(10))).toHaveLength(0);
     expect(itemsOf(view).filter((item) => item.kind === "transport").flatMap((item) => item.posts.map((p) => p.id))).toEqual([itineraryId(11)]);
-    expect(day.expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
+    expect(flat(day.expenseSummary)).toEqual({ totalAmount: 25.5, expenseCount: 1 });
     expectEachOnce(itinerary, view);
   });
   it("retains transport context across local dates without repeating its posts or expenses", async () => {
@@ -144,7 +147,7 @@ describe("local itinerary projection", () => {
     const view = projectItineraryView(itinerary, BA);
     expect(view.days.map((day) => day.segments[0].items.filter((item) => item.kind === "transport").map((item) => [item.id, item.kind === "transport" ? item.posts.length : -1])))
       .toEqual([[[itineraryId(6), 1]], [[itineraryId(6), 0]]]);
-    expect(view.days.map((day) => day.expenseSummary.totalAmount)).toEqual([0, 25.5]);
+    expect(view.days.map((day) => flat(day.expenseSummary).totalAmount)).toEqual([0, 25.5]);
     expect(itemsOf(view).filter((item) => item.kind === "post")).toHaveLength(0);
     expectEachOnce(itinerary, view);
   });
@@ -156,7 +159,7 @@ describe("local itinerary projection", () => {
     const transport = itemsOf(view).find((item) => item.kind === "transport" && item.id === itineraryId(6));
     expect(transport?.kind === "transport" ? transport.posts.map((p) => p.id) : []).toEqual([itineraryId(11)]);
     expect(view.outsidePosts).toEqual([]);
-    expect(view.days[0].expenseSummary).toEqual({ totalAmount: 25.5, expenseCount: 1 });
+    expect(flat(view.days[0].expenseSummary)).toEqual({ totalAmount: 25.5, expenseCount: 1 });
     expectEachOnce(itinerary, view);
   });
   it("sends an independent post published outside the trip dates to outsidePosts, without summing its expense into any day", async () => {
@@ -166,7 +169,7 @@ describe("local itinerary projection", () => {
     expect(view.days.map((d) => d.date)).toEqual(["2026-09-25"]);
     expect(view.outsidePosts).toEqual([itinerary.posts[0]]);
     expect(itemsOf(view).filter((item) => item.kind === "post")).toEqual([]);
-    expect(view.days[0].expenseSummary).toEqual({ totalAmount: 0, expenseCount: 0 });
+    expect(flat(view.days[0].expenseSummary)).toEqual({ totalAmount: 0, expenseCount: 0 });
     expectEachOnce(itinerary, view);
     expect(JSON.stringify(itinerary)).toBe(before);
   });
@@ -185,7 +188,7 @@ describe("local itinerary projection", () => {
     expect(view.days.map((day) => day.segments.flatMap((s) => s.items.filter((i) => i.kind === "post")).length))
       .toEqual(anchoredDate === "2026-09-24" ? [1, 0] : [0, 0]);
     expect(view.outsidePosts).toEqual(anchoredDate ? [] : [itinerary.posts[0]]);
-    expect(view.days.map((day) => day.expenseSummary)).toEqual([
+    expect(view.days.map((day) => flat(day.expenseSummary))).toEqual([
       anchoredDate ? { totalAmount: 25.5, expenseCount: 1 } : { totalAmount: 0, expenseCount: 0 }, { totalAmount: 0, expenseCount: 0 },
     ]);
     expectEachOnce(itinerary, view);
@@ -319,5 +322,67 @@ describe("local itinerary projection", () => {
     expect(project(itinerary, "UTC")[0].segments[1].endsAt).toBeNull();
     project(itinerary, "Asia/Tokyo"); expect(JSON.stringify(itinerary)).toBe(snapshot);
     expect(project({ ...itinerary, days: [], activities: [], posts: [], transports: [] }, "UTC")).toEqual([]);
+  });
+});
+
+describe("expenses by currency and outside the itinerary", () => {
+  const priced = (post: ReturnType<typeof newPost>, totalAmount: number, currency: "ARS" | "EUR" | "USD" | null) =>
+    Object.assign(post, { expense: { ...itineraryFixture().posts[0].expense!, id: itineraryId(900 + parseInt(post.id, 16)), postId: post.id, totalAmount, currency } });
+  it("keeps two currencies of the same day apart instead of adding their decimals", () => {
+    const itinerary = fixture();
+    itinerary.posts[0].expense!.currency = "USD";
+    const other = priced(newPost(40, "2026-09-25T13:30:00.000Z"), 10, "ARS");
+    itinerary.posts.push(other as never);
+    const day = projectItineraryView(itinerary, "UTC").days[0];
+    expect(day.expenseSummary.byCurrency).toEqual([{ currency: "ARS", totalCents: 1000, expenseCount: 1 }, { currency: "USD", totalCents: 2550, expenseCount: 1 }]);
+    expect(day.expenseSummary.expenseCount).toBe(2);
+    expect(day.expenseSummary).not.toHaveProperty("totalAmount");
+  });
+  it("sums exactly in cents inside a currency", () => {
+    const itinerary = fixture();
+    itinerary.posts[0].expense!.totalAmount = 0.1;
+    itinerary.posts.push(priced(newPost(40, "2026-09-25T13:30:00.000Z"), 0.2, "ARS") as never);
+    expect(projectItineraryView(itinerary, "UTC").days[0].expenseSummary.byCurrency).toEqual([{ currency: "ARS", totalCents: 30, expenseCount: 2 }]);
+  });
+  it("counts an expense without currency apart, never summed and never assumed ARS", () => {
+    const itinerary = fixture();
+    itinerary.posts[0].expense!.currency = null;
+    const day = projectItineraryView(itinerary, "UTC").days[0];
+    expect(day.expenseSummary).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 1 }, expenseCount: 1 });
+  });
+  it("lists a transport post published outside the trip among the outside expenses without summing it into any day", () => {
+    const itinerary = fixture();
+    itinerary.posts[1].createdAt = "2027-01-01T12:00:00.000Z";
+    priced(itinerary.posts[1] as never, 7, "EUR");
+    const view = projectItineraryView(itinerary, "UTC");
+    expect(view.outsideExpensePosts.map((post) => post.id)).toEqual([itineraryId(11)]);
+    expect(view.outsideExpenses).toEqual({ byCurrency: [{ currency: "EUR", totalCents: 700, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 });
+    expect(view.days[0].expenseSummary.byCurrency).toEqual([{ currency: "ARS", totalCents: 2550, expenseCount: 1 }]);
+    // The post stays under its transport: it is both rendered there and listed outside for its expense.
+    expect(view.outsidePosts).toEqual([]);
+  });
+  it("lists an independent post without a day among outside posts and outside expenses", () => {
+    const itinerary = fixture();
+    itinerary.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    const view = projectItineraryView(itinerary, BA);
+    expect(view.outsidePosts.map((post) => post.id)).toEqual([itineraryId(10)]);
+    expect(view.outsideExpensePosts.map((post) => post.id)).toEqual([itineraryId(10)]);
+  });
+  it("tripExpenses is every expense once: the days plus the outside ones", () => {
+    const itinerary = fixture();
+    itinerary.posts.push(priced(newPost(40, "2026-10-03T12:00:00.000Z"), 100, "USD") as never);
+    itinerary.posts.push(priced(newPost(41, "2026-09-25T14:30:00.000Z"), 5, "ARS") as never);
+    const view = projectItineraryView(itinerary, BA);
+    expect(view.tripExpenses.byCurrency).toEqual([{ currency: "ARS", totalCents: 3050, expenseCount: 2 }, { currency: "USD", totalCents: 10000, expenseCount: 1 }]);
+    expect(view.tripExpenses.expenseCount).toBe(3);
+    const parts = [...view.days.map((day) => day.expenseSummary), view.outsideExpenses];
+    expect(parts.reduce((count, part) => count + part.expenseCount, 0)).toBe(view.tripExpenses.expenseCount);
+  });
+  it("without expenses everything is empty", () => {
+    const itinerary = fixture();
+    itinerary.posts.forEach((post) => { post.expense = null; });
+    const view = projectItineraryView(itinerary, "UTC");
+    expect(view.tripExpenses).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, expenseCount: 0 });
+    expect(view.outsideExpensePosts).toEqual([]);
   });
 });
