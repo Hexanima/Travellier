@@ -5,6 +5,12 @@ export const OUTBOX_MIGRATION_ID = "0005-notification-outbox-indexes";
 /** `pushDevices` is not defined by the PRD (T89): additive indexes only; the unique pair makes registration idempotent across accounts. */
 export const PUSH_DEVICE_MIGRATION_ID = "0007-push-device-indexes";
 
+/**
+ * `outboxEvents` doubles as the personal inbox (T91, not defined by the PRD): one document per (event, recipient). Additive indexes only:
+ * the inbox read (`userId`, newest first) and the Trip cascade/authorization (`tripId`). No TTL; it never touches existing documents.
+ */
+export const NOTIFICATION_INBOX_MIGRATION_ID = "0008-notification-inbox-indexes";
+
 const pendingMigrations: {
   id: string;
   collections: { name: string; indexes: IndexDescription[] }[];
@@ -28,6 +34,13 @@ const pendingMigrations: {
     collections: [{ name: "pushDevices", indexes: [
       { key: { provider: 1, token: 1 }, name: "provider_token_unique", unique: true },
       { key: { userId: 1 }, name: "userId" },
+    ] }],
+  },
+  {
+    id: NOTIFICATION_INBOX_MIGRATION_ID,
+    collections: [{ name: "outboxEvents", indexes: [
+      { key: { userId: 1, createdAt: -1, _id: -1 }, name: "userId_createdAt_id" },
+      { key: { tripId: 1 }, name: "tripId" },
     ] }],
   },
 ];

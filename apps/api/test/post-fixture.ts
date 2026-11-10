@@ -31,7 +31,7 @@ export class PostFixture {
   async stop() { await this.client?.close(); await this.server?.stop(); }
   async reset() {
     for (const name of ["trips", "tripMembers", "destinations", "itineraryDays", "activities", "transports", "posts",
-      "postPhotos", "postExpenses", "comments", "postLikes", "commentLikes", "activityVotes", "activityParticipations", "storageDeletionJobs"])
+      "postPhotos", "postExpenses", "comments", "postLikes", "commentLikes", "activityVotes", "activityParticipations", "storageDeletionJobs", "outboxEvents"])
       await this.db.collection(name).deleteMany({});
     this.trip = new ObjectId(); this.actor = new ObjectId(); this.destination = new ObjectId(); this.day = new ObjectId();
     await this.db.collection("trips").insertOne({ _id: this.trip, inviteCode: this.trip.toHexString(), visibility: "public", votingEnabled: false, expenseMode: "register" });

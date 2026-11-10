@@ -12,6 +12,7 @@ const publicationVersion = "0004-publication-and-personal-agenda-indexes";
 const eventVersion = "0005-notification-outbox-indexes";
 const expensePaymentsVersion = "0006-adapt-legacy-expense-paid-by";
 const pushDeviceVersion = "0007-push-device-indexes";
+const inboxVersion = "0008-notification-inbox-indexes";
 let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
@@ -53,6 +54,27 @@ describe("incremental pending contracts", () => {
     expect(indexes).toContainEqual(expect.objectContaining({ name: "userId", key: { userId: 1 } }));
     expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
     expect(await database.collection("_migrations").countDocuments({ id: pushDeviceVersion })).toBe(1);
+  });
+
+  it("versions the personal inbox and cascade indexes of outboxEvents without a TTL (T91)", async () => {
+    await migrateMongoSchema(database);
+    const indexes = await database.collection("outboxEvents").listIndexes().toArray();
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "userId_createdAt_id", key: { userId: 1, createdAt: -1, _id: -1 } }));
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "tripId", key: { tripId: 1 } }));
+    // The T44 indexes remain and nothing expires.
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "eventKey_unique", unique: true }));
+    expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
+    expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
+  });
+
+  it("applies 0008 twice and over existing events without touching or deleting them (T91)", async () => {
+    await migrateMongoSchema(database);
+    const event = { eventKey: "post.created:a:b", tripId: new ObjectId(), userId: new ObjectId(), type: "post.created", status: "pending", createdAt: new Date(), availableAt: new Date() };
+    await database.collection("outboxEvents").insertOne({ ...event });
+    await migrateMongoSchema(database);
+    await migrateMongoSchema(database);
+    expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
+    expect(await database.collection("outboxEvents").find({}, { projection: { _id: 0 } }).toArray()).toEqual([event]);
   });
 
   it("applies 0007 twice without touching existing push devices", async () => {
