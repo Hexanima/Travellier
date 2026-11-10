@@ -4,6 +4,7 @@ import { createObjectId, err, ok, PostNotFoundError, PostRequestConflictError, T
 import { toActivity, toActivityDocument, type ActivityDocument } from "./activity-document.js";
 import { createParticipationStore, type ParticipationDocument } from "./activity-participation-store.js";
 import { createPostExpenseStore, type PostExpenseDocument } from "./post-expense-store.js";
+import { createOutboxStore } from "./outbox-store.js";
 import { createPostPhotoStore, type PostPhotoDocument } from "./post-photo-store.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
@@ -35,12 +36,14 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
   const store = createParticipationStore(database.collection<ParticipationDocument>("activityParticipations"), tripId, session);
   const photos = createPostPhotoStore(database.collection<PostPhotoDocument>("postPhotos"), tripId, session);
   const expenses = createPostExpenseStore(database.collection<PostExpenseDocument>("postExpenses"), tripId, session);
+  const outbox = createOutboxStore(database, tripId, session);
   const reference = async (name: "activities" | "transports", referenceId: ObjectId) => {
     const value = await database.collection(name).findOne({ ...query, _id: new MongoObjectId(referenceId) },
       { ...options, projection: { _id: 1, tripId: 1 } });
     return ok(value === null ? undefined : { id: domainId(value._id), tripId: domainId(value.tripId) });
   };
   return {
+    ...outbox,
     findMemberRole: async (userId) => {
       const member = await database.collection<{ role: TripRole }>("tripMembers")
         .findOne({ ...query, userId: new MongoObjectId(userId) }, options);

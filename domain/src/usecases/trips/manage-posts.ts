@@ -19,6 +19,7 @@ import type { UseCase } from "../../types/usecase.js";
 import { createObjectId, type ObjectId } from "../../value-objects/object-id.js";
 import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
 import { planPostPhotos, registerPostPhotos, verifyOptionalPhotoUploads } from "./manage-post-photos.js";
+import { emitToMembers, type MemberNotification } from "./notification-emission.js";
 
 export interface TripPostPayload { tripId: ObjectId; authenticatedUserId: ObjectId }
 export interface PostDetailPayload extends TripPostPayload { postId: ObjectId }
@@ -282,6 +283,16 @@ const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewA
     ...(payload.expense !== undefined && expense ? { expense } : {}) });
 };
 
+/** `post.created` (and `activity.created` when the save created a spontaneous activity): ids and instants only, never the actor. */
+const savedNotifications = (input: { tripId: ObjectId; actorId: ObjectId; post?: Post; activity?: Activity }): MemberNotification[] => [
+  ...(input.post === undefined ? [] : [{ type: "post.created" as const, tripId: input.tripId, operationRef: input.post.id, actorId: input.actorId,
+    exclude: [input.actorId], createdAt: input.post.createdAt,
+    payload: { postId: input.post.id, actorId: input.actorId, activityId: input.post.activityId } }]),
+  ...(input.activity === undefined ? [] : [{ type: "activity.created" as const, tripId: input.tripId, operationRef: input.activity.id, actorId: input.actorId,
+    exclude: [input.actorId], createdAt: input.activity.createdAt, payload: { activityId: input.activity.id, actorId: input.actorId,
+      scheduledAt: input.activity.scheduledAt, durationMinutes: input.activity.durationMinutes } }]),
+];
+
 const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",
   message: "Choose an existing activity or create a new one." }]));
 
@@ -328,6 +339,8 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
       if (photos && !photos.ok) return photos;
       const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
       if (expense && !expense.ok) return expense;
+      const emitted = await emitToMembers(scope, savedNotifications({ tripId: payload.tripId, actorId: payload.authenticatedUserId, post: post.value }));
+      if (!emitted.ok) return emitted;
       return ok({ outcome: "created" as const, post: post.value, ...(photos ? { photos: photos.value } : {}),
         ...(expense ? { expense: expense.value } : {}) });
     }
@@ -350,8 +363,11 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     if (expense && !expense.ok) return expense;
     const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
       conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
-    return participation.ok ? ok({ outcome: "created" as const, post: post.value, activity, participation: participation.value,
-      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) }) : participation;
+    if (!participation.ok) return participation;
+    const emitted = await emitToMembers(scope, savedNotifications({ tripId: payload.tripId, actorId: payload.authenticatedUserId, post: post.value, activity }));
+    if (!emitted.ok) return emitted;
+    return ok({ outcome: "created" as const, post: post.value, activity, participation: participation.value,
+      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) });
     });
   },
 };
@@ -411,8 +427,12 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     if (expense && !expense.ok) return expense;
     const participation = await applyAuthorPlan(scope, { activity, userId: payload.authenticatedUserId, tripId: payload.tripId,
       conflicts: plan.conflicts, records, createId, updatedAt: createdAt });
-    return participation.ok ? ok({ outcome: "linked" as const, post: post.value, activity, participation: participation.value,
-      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) }) : participation;
+    if (!participation.ok) return participation;
+    // The post already existed (and was announced when it was published): only the new activity is an event.
+    const emitted = await emitToMembers(scope, savedNotifications({ tripId: payload.tripId, actorId: payload.authenticatedUserId, activity }));
+    if (!emitted.ok) return emitted;
+    return ok({ outcome: "linked" as const, post: post.value, activity, participation: participation.value,
+      ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) });
     });
   },
 };

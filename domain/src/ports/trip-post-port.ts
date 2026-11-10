@@ -9,6 +9,7 @@ import type { TripRole } from "../entities/trip-member.js";
 import type { Trip } from "../entities/trip.js";
 import type { AsyncResult } from "../types/result.js";
 import type { ObjectId } from "../value-objects/object-id.js";
+import type { NotificationScope } from "./trip-notification-port.js";
 
 /** Authorization and all references are resolved in the same Trip snapshot. */
 export interface TripPostReadScope {
@@ -43,7 +44,8 @@ export interface TripPostReadScope {
   listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
 }
 
-export interface TripPostScope extends TripPostReadScope {
+/** `appendNotifications` is the last write of a creation that saved something (T91). */
+export interface TripPostScope extends TripPostReadScope, NotificationScope {
   insert: (post: Post) => AsyncResult<void>;
   replace: (post: Post) => AsyncResult<void>;
   /** Registered photos with any of these S3 keys, in any Trip. */
