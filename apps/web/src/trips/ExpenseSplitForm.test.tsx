@@ -37,6 +37,7 @@ function Probe() {
     <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true } })}>ir</button>
     <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true,
       rowErrors: { [seed.extras.split.shares?.[0]?.key ?? "x"]: "Esta persona no es válida." }, listErrors: {} } })}>ir con errores</button>
+    <button type="button" onClick={() => navigate(`${location.pathname}/expense/split`, { state: { fromComposer: true, rowErrors: {}, listErrors: { payments: "x" } } })}>ir con error de lista</button>
   </div>;
 }
 type Probed = { draft: PostDraft | null; state: { focus?: string } | null; path: string; returned: { focus?: string } | null };
@@ -252,6 +253,52 @@ describe("ExpenseSplitForm", () => {
     await click(rows(container, "shares")[0]!.querySelector("button"));
     expect(rows(container, "shares")).toHaveLength(2);
     expect(container.textContent).toContain("Integrantes sin parte");
+  });
+
+  it("removing a share moves the focus to the next row, then the previous one, then the section heading", async () => {
+    const { container } = await open();
+    const removeAt = (index: number) => click(rows(container, "shares")[index]!.querySelector("button"));
+    await removeAt(0);
+    expect(rows(container, "shares")[0]!.contains(document.activeElement)).toBe(true);
+    await removeAt(1);
+    expect(rows(container, "shares")).toHaveLength(1);
+    expect(rows(container, "shares")[0]!.contains(document.activeElement)).toBe(true);
+    await removeAt(0);
+    expect(rows(container, "shares")).toHaveLength(0);
+    expect(document.activeElement).toBe(container.querySelector("#split-shares-title"));
+  });
+
+  it("removing the only payment moves the focus to its own «Agregar pago»", async () => {
+    const saved = view({ payments: [{ userId: me, unit: "percent", value: 100 }] });
+    const { container } = await open({ path: editPath, saved, draft: seeded(null) });
+    await click(rows(container, "payments")[0]!.querySelector("button"));
+    expect(rows(container, "payments")).toHaveLength(0);
+    expect(document.activeElement).toBe(button(container, "Agregar pago"));
+  });
+
+  it("including a member keeps the focus inside the list: next «Incluir…», then the section heading", async () => {
+    const saved = view({ shares: [{ userId: me, unit: "percent", value: 50 }] });
+    const { container } = await open({ path: editPath, saved, draft: seeded(null) });
+    await click(button(container, "Incluir a Beto"));
+    expect(document.activeElement).toBe(button(container, "Incluir a Caro"));
+    await click(button(container, "Incluir a Caro"));
+    expect(document.activeElement).toBe(container.querySelector("#split-shares-title"));
+  });
+
+  it("a server error only on a list moves the focus to the alert", async () => {
+    const { container } = await open({ action: "ir con error de lista" });
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(document.activeElement).toBe(container.querySelector('[role="alert"]'));
+  });
+
+  it("an expense detail that could not be read shows the retry state, and recovers", async () => {
+    const unreadable = { ok: true, value: { post: { id: postId }, parent: null, children: [], rootActivityId: null, expenseUnreadable: true } };
+    const get = vi.fn().mockResolvedValueOnce(unreadable).mockResolvedValue(detail(view()));
+    const { container } = await open({ path: editPath, get, draft: seeded(null) });
+    expect(container.querySelector("[data-section]")).toBeNull();
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    await click(button(container, "Reintentar"));
+    expect(container.querySelector("[data-section]")).not.toBeNull();
   });
 
   it("shows server row errors with the focus on the first one and a single alert", async () => {

@@ -52,7 +52,8 @@ function Shell({ posts, members, tripId, postId, draft, commit, setReturned, com
     void (async () => {
       try {
         const [post, people] = await Promise.all([postId ? posts.get(tripId, postId) : Promise.resolve(undefined), loadPeople(members, tripId)]);
-        if ((post && !post.ok) || !people.loaded) { settle({ kind: "error" }); return; }
+        // An unreadable stored expense is an error here (the lists would be edited blind), not an empty split.
+        if ((post && !post.ok) || (post?.ok && post.value.expenseUnreadable) || !people.loaded) { settle({ kind: "error" }); return; }
         settle({ kind: "ready", people, ...(post?.ok && post.value.expense ? { saved: post.value.expense } : {}) });
       } catch { settle({ kind: "error" }); }
     })();
@@ -106,7 +107,6 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
     return first ? { key: first.key, n: 0 } : null;
   });
   const formRef = useRef<HTMLFormElement>(null);
-  const addPaymentRef = useRef<HTMLButtonElement>(null);
   const check = useMemo(() => checkSplit(totals, { payments, shares }), [totals, payments, shares]);
   const former = formerLabels(people, payments, shares);
   const label = (userId: string) => former.get(userId) ?? authorLabel(people, userId);
@@ -118,6 +118,14 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
     const row = formRef.current?.querySelector<HTMLElement>(`[data-row-key="${focusRequest.key}"]`);
     (row?.querySelector<HTMLElement>('input[inputmode="decimal"]') ?? row?.querySelector<HTMLElement>("select"))?.focus();
   }, [focusRequest]);
+  // A target that is not a row (an include button, a heading, the alert): found by its `data-focus` once rendered.
+  const [focusTarget, setFocusTarget] = useState<{ id: string; n: number } | null>(null);
+  useEffect(() => {
+    if (focusTarget) formRef.current?.querySelector<HTMLElement>(`[data-focus="${focusTarget.id}"]`)?.focus();
+  }, [focusTarget]);
+  const focusOn = (id: string) => setFocusTarget((current) => ({ id, n: (current?.n ?? 0) + 1 }));
+  // A list-only 422 has no row to point at: the focus goes to the alert that explains it.
+  useEffect(() => { if (!focusRequest && Object.keys(serverLists).length > 0) focusOn("alert"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const focus = (key: string) => setFocusRequest((current) => ({ key, n: (current?.n ?? 0) + 1 }));
   const clearServer = (key: string) => setServerErrors((current) => { if (!(key in current)) return current; const next = { ...current }; delete next[key]; return next; });
   const errorOf = (key: string, section: SectionCheck<unknown>) => serverErrors[key] ?? (submitted ? section.rowErrors[key] : undefined);
@@ -131,9 +139,18 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
     setAdding(""); focus(key);
   };
   const removeRow = (section: "payments" | "shares", key: string) => {
+    const list: readonly (PaymentRow | ShareRow)[] = section === "payments" ? payments : shares;
+    const index = list.findIndex((row) => row.key === key), neighbour = list[index + 1] ?? list[index - 1];
     if (section === "payments") setPayments((rows) => rows.filter((row) => row.key !== key)); else setShares((rows) => rows.filter((row) => row.key !== key));
     clearServer(key);
-    addPaymentRef.current?.focus();
+    // Next row of the same section, else the previous one, else the section itself (its add control or heading).
+    if (neighbour) focus(neighbour.key); else focusOn(section === "payments" ? "add-payment" : "shares-title");
+  };
+  const include = (userId: string) => {
+    const index = withoutShare.indexOf(userId), remaining = withoutShare.filter((id) => id !== userId);
+    setShares((rows) => includeMember(rows, userId));
+    const next = remaining[index] ?? remaining[index - 1];
+    focusOn(next !== undefined ? `include-${next}` : "shares-title");
   };
   const accept = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -184,12 +201,12 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
         <option value="">Elegí quién pagó</option>
         {currentIds.map((id) => <option key={id} value={id}>{authorLabel(people, id)}</option>)}
       </select>
-      <button ref={addPaymentRef} type="button" className="ui-button" aria-disabled={adding === "" || undefined} onClick={addPayment}>Agregar pago</button>
+      <button data-focus="add-payment" type="button" className="ui-button" aria-disabled={adding === "" || undefined} onClick={addPayment}>Agregar pago</button>
       {summary(check.payments, serverLists.payments)}
       {check.incomplete.payments?.map((text) => <p key={text} className="itinerary-secondary">{text}</p>)}
     </section>
     <section data-section="shares" aria-labelledby="split-shares-title" className="post-expense-section">
-      <h2 id="split-shares-title">Reparto acordado</h2>
+      <h2 id="split-shares-title" data-focus="shares-title" tabIndex={-1}>Reparto acordado</h2>
       {initial.proposed ? <p className="itinerary-secondary">Propuesta sin confirmar: el resto se reparte en partes iguales entre los integrantes. Se guarda recién cuando aceptás y guardás el recuerdo.</p> : null}
       <ul className="split-rows">
         {shares.map((row) => {
@@ -215,14 +232,14 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
       {shares.some((row) => row.unit === "percent") ? <p className="itinerary-secondary">{percentNote}</p> : null}
       <h3>Integrantes sin parte</h3>
       {withoutShare.length === 0 ? <p className="itinerary-secondary">Todos los integrantes tienen una parte.</p> : <ul className="split-rows">
-        {withoutShare.map((id) => <li key={id}><Button onClick={() => setShares((rows) => includeMember(rows, id))}>{`Incluir a ${authorLabel(people, id)}`}</Button></li>)}
+        {withoutShare.map((id) => <li key={id}><Button data-focus={`include-${id}`} onClick={() => include(id)}>{`Incluir a ${authorLabel(people, id)}`}</Button></li>)}
       </ul>}
       <button type="button" className="ui-button" aria-disabled={withoutShare.length === 0 || undefined}
         onClick={() => { if (withoutShare.length > 0) setShares((rows) => includeAll(rows, currentIds)); }}>Incluir a todos</button>
       {summary(check.shares, serverLists.shares)}
       {check.incomplete.shares?.map((text) => <p key={text} className="itinerary-secondary">{text}</p>)}
     </section>
-    {showAlert ? <p className="ui-field__error" role="alert">{submitted && !check.valid ? alertMessage : serverAlertMessage}</p> : null}
+    {showAlert ? <p className="ui-field__error" role="alert" data-focus="alert" tabIndex={-1}>{submitted && !check.valid ? alertMessage : serverAlertMessage}</p> : null}
     <Button type="submit">Aceptar</Button>
     <Button onClick={back}>Cancelar</Button>
   </form>;
