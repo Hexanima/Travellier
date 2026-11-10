@@ -34,8 +34,9 @@ export interface TripPostReadScope {
   /** Expense of a post of this Trip (1:1 by `postId`); a legacy record has `currency` null. */
   findExpense: (postId: ObjectId) => AsyncResult<PostExpense | undefined>;
   /**
-   * Which of these users are CURRENT members of the Trip, read in the same snapshot (and under the same Trip lock) as `authorize`, so an
-   * expulsion and an expense save are serialized. A user not listed may be a former member or never have belonged: they cannot be told apart.
+   * Which of these users are CURRENT members of the Trip, read in the same scope as `authorize`. In a write scope that runs under the Trip lock,
+   * so an expulsion and an expense save are serialized; in a read scope it is a consistent snapshot and takes no lock. A user not listed may be a
+   * former member or never have belonged: they cannot be told apart.
    */
   listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
 }
