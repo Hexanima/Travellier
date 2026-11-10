@@ -3,10 +3,12 @@ import { Link } from "react-router-dom";
 
 import type { AuthApi, AuthenticatedProfile } from "../auth/auth-api.js";
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
+import { PushNotices } from "../push/PushNotices.js";
+import type { PushDeviceService } from "../push/push-device-service.js";
 
-type ProfileScreenProps = { auth?: Partial<AuthApi> };
+type ProfileScreenProps = { auth?: Partial<AuthApi>; push?: PushDeviceService };
 
-export function ProfileScreen({ auth }: ProfileScreenProps) {
+export function ProfileScreen({ auth, push }: ProfileScreenProps) {
   const [profile, setProfile] = useState<AuthenticatedProfile>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -147,6 +149,7 @@ export function ProfileScreen({ auth }: ProfileScreenProps) {
             <Button type="submit" loading={saving}>Guardar cambios</Button>
           </form>
         ) : null}
+        {push ? <PushNotices push={push} /> : null}
       </section>
     </main>
   );

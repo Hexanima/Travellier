@@ -48,7 +48,8 @@ export type HttpClientDependencies = {
   baseUrl: string;
   fetch: FetchApi;
   getAccessToken: () => Promise<string | null>;
-  onUnauthorized: () => void | Promise<void>;
+  /** Receives the bearer the failed request carried (null when none), so a late 401 can be told apart from the active session. */
+  onUnauthorized: (requestAccessToken: string | null) => void | Promise<void>;
 };
 
 type RequestOptions = {
@@ -213,7 +214,7 @@ export const createHttpClient = ({
 
     if (error.kind === "unauthorized") {
       try {
-        await onUnauthorized();
+        await onUnauthorized(headers.Authorization?.replace(/^Bearer /, "") ?? null);
       } catch {
         return err(error);
       }

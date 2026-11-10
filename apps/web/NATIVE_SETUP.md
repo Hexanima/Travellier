@@ -69,6 +69,29 @@ Para push real se necesita membresía/equipo Apple Developer con el identificado
 
 Usar Run en un dispositivo iOS registrado y con Developer Mode habilitado. El simulador permite verificar compilación/navegación y algunos permisos; la aceptación de cámara y recepción APNs se verifica en **iPhone físico**. Para distribución, crear Archive/Export con la firma del equipo; `corepack yarn workspace web cap:build:ios` también requiere macOS y opciones de firma correspondientes. No considerar `cap sync ios` una compilación iOS.
 
+## Registro push T90
+
+El cliente registra el token del dispositivo en la API (`PUT /push-devices`, T89) y lo revoca al cerrar sesión (`POST /push-devices/revoke`). El token viaja solo en el cuerpo de las solicitudes: nunca en la URL, en logs ni en el estado de la UI (solo se muestra un `tokenHint`), y vive únicamente en memoria. Código: `src/push/` (servicio, cliente API, panel); el adaptador del plugin es `src/native/push-registration.ts`.
+
+### Flujo y momento del permiso
+
+- Nunca se pide permiso al abrir la app ni al iniciar sesión. Con sesión (al iniciar o restaurar), el servicio solo actúa si el permiso ya está concedido: instala el listener, llama a `register()` y envía cada token con `PUT`. Con permiso sin decidir o denegado no hace nada.
+- El permiso se pide en contexto, solo desde el botón «Activar avisos»: sección «Avisos» de Mi perfil (siempre disponible) y tarjeta descartable tras unirse a un Trip («Ahora no» la oculta solo en esa sesión). En Android 13+ el diálogo es `POST_NOTIFICATIONS`.
+- Si el permiso está denegado la app explica cómo activarlo en Ajustes del sistema, pero no ofrece botón: ningún plugin instalado puede abrir los Ajustes. Viajes, actividades, «Voy / No voy» y «Modificado» no dependen del estado push.
+- Al cerrar sesión se revoca el token con el access token saliente, antes de borrar la sesión local, con un tope de 3 s; si falla o tarda, el cierre continúa igual. Si la app muere antes, la revocación explícita no ocurre y queda la reasignación del backend cuando otra cuenta registre el mismo token. Un 401 limpia el estado local sin revocar.
+- La renovación del token envía un nuevo `PUT` (idempotente) y revoca el anterior de forma best-effort. Solo en plataforma nativa; en web/jsdom el servicio no existe.
+
+### Credenciales sin versionarlas
+
+- **Android:** el `google-services.json` real del proyecto Firebase se inyecta en build/CI desde un secreto (por ejemplo, base64 en un secret de GitHub decodificado en `apps/web/android/app/google-services.json` justo antes de `cap sync` y del `assemble`). El archivo está ignorado por Git y no debe versionarse. El job `android-native` actual no se modifica y compila sin él (push no funciona en ese APK).
+- **iOS:** no hay credenciales de Firebase en el cliente. Se necesitan el entitlement `aps-environment`, el perfil y la firma del equipo Apple Developer, en macOS.
+- La clave `.p8` de APNs y las credenciales FCM de envío viven solo en el servidor (T45/T92), nunca en el cliente ni en el repositorio.
+- `src/push/credentials-contract.test.ts` verifica que esos archivos no estén rastreados, que Android ignore `google-services.json` y que `src/`, `android/` e `ios/` (incluidos `.xcconfig`, `.entitlements`, `.storyboard`, `.pbxproj` y `.plist`) no contengan `BEGIN PRIVATE KEY`, claves `AIza…`, referencias `AuthKey_*.p8` ni valores de configuración FCM; omite binarios y archivos de más de 1 MiB.
+
+### No verificado
+
+Registro real en Android (requiere `google-services.json` real y un dispositivo o emulador con Google Play) e iOS (macOS, Xcode, Apple Developer, firma, APNs, iPhone físico); recepción y renovación real del token; diálogo `POST_NOTIFICATIONS`. La entrega (T92) y la apertura desde el aviso (T93) no están implementadas.
+
 ## Verificación
 
 ```sh

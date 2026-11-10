@@ -10,6 +10,23 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
   const [items, setItems] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [closingSession, setClosingSession] = useState(false);
+  const closingRef = useRef(false);
+
+  // The logout can wait for the push revocation (up to 3 s): a second tap is ignored and the button stays focusable (aria-disabled, not disabled).
+  const logout = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosingSession(true);
+    try {
+      await onLocalLogout();
+    } catch {
+      /* the session handler never throws; keep the button usable if it does */
+    } finally {
+      closingRef.current = false;
+      setClosingSession(false);
+    }
+  };
 
   const loadTrips = useCallback(async () => {
     setLoading(true);
@@ -77,7 +94,9 @@ export function TripsListScreen({ trips, onLocalLogout }: TripsListScreenProps) 
 
         <nav className="trips-secondary" aria-label="Cuenta">
           <Link to="/profile">Mi perfil</Link>
-          <Button onClick={() => void onLocalLogout()}>Cerrar sesión</Button>
+          <Button onClick={() => void logout()} aria-disabled={closingSession || undefined}>
+            {closingSession ? "Cerrando sesión…" : "Cerrar sesión"}
+          </Button>
         </nav>
       </section>
     </main>

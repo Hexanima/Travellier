@@ -262,6 +262,18 @@ describe("createHttpClient", () => {
     });
   });
 
+  it("tells the unauthorized handler which bearer the failed request used", async () => {
+    const respond = () => vi.fn().mockImplementation(async () => new Response(JSON.stringify({ error: { code: "Unauthorized", message: "x" } }), { status: 401 }));
+    const onUnauthorized = vi.fn();
+    const client = createHttpClient({ baseUrl: "https://api.example.test", fetch: respond(), getAccessToken: vi.fn().mockResolvedValue("token-A"), onUnauthorized });
+    await client.get("/trips");
+    expect(onUnauthorized).toHaveBeenLastCalledWith("token-A");
+    await client.post("/x", {}, { authenticated: false, headers: { Authorization: "Bearer token-OUT" } });
+    expect(onUnauthorized).toHaveBeenLastCalledWith("token-OUT");
+    await client.post("/auth/login", {}, { authenticated: false });
+    expect(onUnauthorized).toHaveBeenLastCalledWith(null);
+  });
+
   it("returns the unauthorized result when its central handler fails", async () => {
     const onUnauthorized = vi.fn().mockRejectedValue(new Error("Session cleanup failed"));
     const client = createHttpClient({
