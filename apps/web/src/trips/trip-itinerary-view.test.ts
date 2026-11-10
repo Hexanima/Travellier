@@ -257,6 +257,35 @@ describe("local itinerary projection", () => {
       linkPost(itinerary.posts[0], {}); itinerary.activities[0].postIds = [];
       expect(projectItineraryView(itinerary, timeZone)).toEqual(independent);
     });
+    it("moves the expense of the linked post to the new day when the activity is rescheduled", () => {
+      const itinerary = setup();
+      linkPost(itinerary.posts[0], { activityId: itinerary.activities[0].id }); itinerary.activities[0].postIds = [itineraryId(10)];
+      const before = projectItineraryView(itinerary, timeZone);
+      expect(dayExpenses(before.days).map((d) => d.expenseCount)).toEqual([1, 0]);
+      // Rescheduled into the second source day (backend moves the dayId along with the instant).
+      itinerary.activities[0].dayId = itineraryId(30); itinerary.activities[0].scheduledAt = "2026-09-25T06:00:00.000Z";
+      const after = projectItineraryView(itinerary, timeZone);
+      expect(dayExpenses(after.days)).toEqual([
+        { date: "2026-09-24", totalAmount: 0, expenseCount: 0 }, { date: "2026-09-25", totalAmount: 25.5, expenseCount: 1 },
+      ]);
+      expect(activityPosts(after, itinerary.activities[0].id)).toEqual([itineraryId(10)]);
+      expect(after.outsideExpensePosts).toEqual([]);
+      expect(after.tripExpenses).toEqual(before.tripExpenses);
+      expectEachOnce(itinerary, after);
+    });
+    it("sends the expense outside the itinerary, without double counting, when the activity leaves the projected days", () => {
+      const itinerary = setup();
+      linkPost(itinerary.posts[0], { activityId: itinerary.activities[0].id }); itinerary.activities[0].postIds = [itineraryId(10)];
+      const before = projectItineraryView(itinerary, timeZone);
+      itinerary.activities[0].scheduledAt = "2030-01-01T12:00:00.000Z";
+      itinerary.posts[0].createdAt = "2031-01-01T12:00:00.000Z";
+      const after = projectItineraryView(itinerary, timeZone);
+      expect(after.outsideExpensePosts.map((p) => p.id)).toEqual([itineraryId(10)]);
+      expect(dayExpenses(after.days).map((d) => d.expenseCount)).toEqual([0, 0]);
+      expect(after.tripExpenses).toEqual(before.tripExpenses);
+      expect(after.tripExpenses.expenseCount).toBe(1);
+      expectEachOnce(itinerary, after);
+    });
     it("projects former descendants by publication, keeping the parent link, after the activity is removed", () => {
       const itinerary = setup();
       const [root, child, grandchild] = chain(itinerary, itinerary.activities[0].id);

@@ -119,6 +119,19 @@ describe("itinerary contract with the real read model", () => {
     expect(itinerary.expenseSummary.outsideItinerary.expenseCount).toBe(1);
     expect(unplaced.map((post) => post.expense!.totalAmount)).toEqual([100]);
   });
+  it.each(["UTC", "America/Argentina/Buenos_Aires"])("places each activity-attributed expense under the local day of its expenses[].occurredAt in %s", async (timeZone) => {
+    const { result } = await read();
+    if (!result.ok) throw new Error("rejected");
+    const itinerary = result.value, view = projectItineraryView(itinerary, timeZone);
+    const localDate = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+    const dayOf = (postId: string) => view.days.find((day) => day.segments.some((segment) => segment.items.some((item) =>
+      item.kind === "post" ? item.id === postId : item.posts.some((post) => post.id === postId))))?.date;
+    const fromActivity = itinerary.expenses.filter((entry) => entry.source === "activity");
+    expect(fromActivity.length).toBeGreaterThan(0);
+    for (const entry of fromActivity) expect(dayOf(entry.postId), `expense ${entry.expenseId}`).toBe(localDate(entry.occurredAt));
+    // The attributed expenses are never counted twice: days plus outside equal the expenses listed.
+    expect(view.tripExpenses.expenseCount).toBe(itinerary.expenses.length);
+  });
 });
 
 describe("itinerary contract after removing an activity (T55 persistence contract)", () => {
