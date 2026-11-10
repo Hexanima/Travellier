@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -78,13 +78,13 @@ const launch = (hang = false) => {
   return nativeApp;
 };
 function CurrentPath() { return <output data-testid="path">{useLocation().pathname}</output>; }
-const render = async (storage: NativeSessionStorage, path = "/trips", nativeApp = launch()) => {
+const render = async (storage: NativeSessionStorage, path = "/trips", nativeApp = launch(), noticePort?: ComponentProps<typeof App>["noticePort"]) => {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   roots.push(root);
   await act(async () => root.render(
-    <MemoryRouter initialEntries={[path]}><App apiBaseUrl="https://api.test" sessionStorage={storage} nativeApp={nativeApp} /><CurrentPath /></MemoryRouter>,
+    <MemoryRouter initialEntries={[path]}><App apiBaseUrl="https://api.test" sessionStorage={storage} nativeApp={nativeApp} noticePort={noticePort} /><CurrentPath /></MemoryRouter>,
   ));
   return container;
 };
@@ -120,13 +120,14 @@ afterEach(async () => {
 
 describe("App push registration wiring (Capacitor native, mocked plugin)", () => {
   it("never asks for the permission when mounting, restoring or signing in with an undecided permission", async () => {
-    await render(createStorage(null), "/login");
-    await render(createStorage("r-A"));
+    // T93: the notice opener gets a fake port, so the real push plugin is touched only by the registration service: it must not listen on mount.
+    const noticePort = { listen: vi.fn(async () => ({ ok: true as const, value: async () => ({ ok: true as const, value: undefined }) })) };
+    await render(createStorage(null), "/login", launch(), noticePort);
+    await render(createStorage("r-A"), "/trips", launch(), noticePort);
+    expect(noticePort.listen).toHaveBeenCalled();
     expect(native.push.requestPermissions).not.toHaveBeenCalled();
     expect(native.push.register).not.toHaveBeenCalled();
-    // T93: the notice opener listens early (its own listeners, no permission, no registration); the registration service adds none of its own here.
-    expect(native.push.addListener.mock.calls.length).toBeGreaterThan(0);
-    expect(native.push.addListener.mock.calls.map(([name]) => name).every((name) => ["registration", "registrationError", "pushNotificationReceived", "pushNotificationActionPerformed"].includes(name))).toBe(true);
+    expect(native.push.addListener).not.toHaveBeenCalled();
     expect(put()).toHaveLength(0);
   });
 
