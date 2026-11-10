@@ -1,6 +1,10 @@
 import { NativeCapabilityError, err, ok, type AsyncResult } from "app-domain";
 import type { NativePlatform } from "./capabilities.js";
 
+/**
+ * `OS-PLUG-CLDR-0001` is a generic INVALID_ARGUMENT of the plugin (no match, but also an empty title in createEvent or an invalid calendarId), not only «no match».
+ * It is translated to `missing` here, but callers interpret `missing` only in update/remove (forget the reference and re-create); in find/create it is just a failure.
+ */
 export function nativeError(error: unknown): NativeCapabilityError {
   if (error instanceof NativeCapabilityError) return error;
   const code = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
