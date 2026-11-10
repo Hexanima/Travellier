@@ -136,6 +136,15 @@ describe("TripBalanceScreen: balance mode", () => {
     expect(usd.textContent).toContain("Vos"); expect(usd.textContent).toContain("Debe USD 5,00");
     expect(usd.textContent).toContain("Beto"); expect(usd.textContent).toContain("Tiene a favor USD 5,00");
   });
+  it("a member named «Vos» is not the viewer: no voseo for them and the label is told apart", async () => {
+    const named = vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [
+      { id: itineraryId(100), userId: me, name: "Ana", role: "admin", joinedAt: "2026-01-01T00:00:00.000Z" }, { id: itineraryId(101), userId: beto, name: "Vos", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } });
+    const { container } = await render({ members: named });
+    const ars = section(container, "Pesos (ARS)").textContent ?? "", usd = section(container, "Dólares (USD)").textContent ?? "";
+    expect(ars).toContain("Vos (integrante) te debe ARS 10,00");
+    expect(usd).toContain("Vos le debés USD 5,00 a Vos (integrante)");
+    expect(ars).not.toMatch(/(^|[^(])Vos te debe/);
+  });
   it("shows what each person paid and was owed besides the net", async () => {
     const { container } = await render();
     expect(section(container, "Pesos (ARS)").textContent).toContain("Pagó ARS 30,00");

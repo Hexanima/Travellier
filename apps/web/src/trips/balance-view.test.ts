@@ -50,8 +50,17 @@ describe("balance texts", () => {
   });
   it("writes suggestions, not facts", () => {
     expect(settlementText("Ana", "Beto", 1000, "ARS")).toBe("Ana le debe ARS 10,00 a Beto");
-    expect(settlementText("Vos", "Beto", 1000, "ARS")).toBe("Vos le debés ARS 10,00 a Beto");
-    expect(settlementText("Ana", "Vos", 1000, "ARS")).toBe("Ana te debe ARS 10,00");
+    expect(settlementText("Vos", "Beto", 1000, "ARS", true, false)).toBe("Vos le debés ARS 10,00 a Beto");
+    expect(settlementText("Ana", "Vos", 1000, "ARS", false, true)).toBe("Ana te debe ARS 10,00");
+  });
+  it("decides the voseo by identity, not by the text: a member named «Vos» is not the viewer", () => {
+    const named = people([[me, "Ana"], [beto, "Vos"]]);
+    const label = balanceLabels(balance(), named);
+    expect(label(me)).toBe("Vos");
+    expect(label(beto)).not.toBe("Vos");
+    expect(label(beto)).toContain("Vos");
+    expect(settlementText(label(beto), "Ana", 1000, "ARS")).toBe(`${label(beto)} le debe ARS 10,00 a Ana`);
+    expect(settlementText("Ana", label(beto), 1000, "ARS")).toBe(`Ana le debe ARS 10,00 a ${label(beto)}`);
   });
   it("has a readable text for each of the seven reasons", () => {
     expect(Object.keys(reasonText).sort()).toEqual([...balanceReasons].sort());

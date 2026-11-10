@@ -31,15 +31,18 @@ export const balanceLabels = (balance: TripBalance, people: PhotoPeople): ((user
     if (number !== undefined) return `Ex integrante ${number}`;
     if (!people.loaded) return "Integrante";
     if (userId === people.currentUserId) return "Vos";
-    return people.names.get(userId) || "Integrante";
+    const name = people.names.get(userId);
+    return name && name.trim().toLowerCase() === "vos" ? "Vos (integrante)" : name || "Integrante";
   };
 };
 
 export const memberStatus = (netCents: number, currency: ExpenseCurrency): string =>
   netCents > 0 ? `Tiene a favor ${formatCents(netCents, currency)}` : netCents < 0 ? `Debe ${formatCents(-netCents, currency)}` : "Sin saldo pendiente";
 /** A suggestion: the app does not register what is later done outside it. */
-export const settlementText = (from: string, to: string, cents: number, currency: ExpenseCurrency): string =>
-  to === "Vos" ? `${from} te debe ${formatCents(cents, currency)}` : `${from} le ${from === "Vos" ? "debés" : "debe"} ${formatCents(cents, currency)} a ${to}`;
+export const isCurrentUser = (people: PhotoPeople, userId: string): boolean => people.loaded && userId === people.currentUserId;
+/** The voseo depends on who the people are (`fromIsMe`/`toIsMe`, decided by id), never on their label. */
+export const settlementText = (from: string, to: string, cents: number, currency: ExpenseCurrency, fromIsMe = false, toIsMe = false): string =>
+  toIsMe ? `${from} te debe ${formatCents(cents, currency)}` : `${from} le ${fromIsMe ? "debés" : "debe"} ${formatCents(cents, currency)} a ${to}`;
 
 export const excludedAmount = ({ currency, totalCents }: Pick<ExcludedExpense, "currency" | "totalCents">): string =>
   totalCents === null ? "Importe no disponible" : currency === null ? `${formatPlainCents(totalCents)} (moneda sin indicar)` : formatCents(totalCents, currency);

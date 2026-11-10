@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
-import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText, memberStatus, reasonText, settlementText, type ExcludedAction } from "./balance-view.js";
+import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText, memberStatus, reasonText, settlementText, isCurrentUser, type ExcludedAction } from "./balance-view.js";
 import type { ExpenseCurrency } from "./expense-draft.js";
 import { formatCents } from "./expense-format.js";
 import { openEditFrom } from "./open-post.js";
@@ -139,7 +139,7 @@ function BalanceSections({ tripId, ready, create, location, navigate }: { tripId
       <h3>Compensaciones sugeridas</h3>
       {settlements.length === 0 ? <p>No hay compensaciones sugeridas en esta moneda.</p>
         : <List aria-label={`Compensaciones sugeridas en ${currencyTitle[currency]}`}>
-          {settlements.map(({ fromUserId, toUserId, cents }) => <ListItem key={`${fromUserId}-${toUserId}`}>{settlementText(label(fromUserId), label(toUserId), cents, currency)}</ListItem>)}
+          {settlements.map(({ fromUserId, toUserId, cents }) => <ListItem key={`${fromUserId}-${toUserId}`}>{settlementText(label(fromUserId), label(toUserId), cents, currency, isCurrentUser(people, fromUserId), isCurrentUser(people, toUserId))}</ListItem>)}
         </List>}
     </section>)}
     {balance.excludedExpenses.length > 0 ? <section className="activity-detail" aria-labelledby="balance-pending">
