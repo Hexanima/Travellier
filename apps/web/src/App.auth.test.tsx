@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const httpClient = vi.hoisted(() => ({
   getAccessToken: undefined as undefined | (() => Promise<string | null>),
-  onUnauthorized: undefined as undefined | (() => void),
+  onUnauthorized: undefined as undefined | ((requestAccessToken: string | null) => void),
   get: vi.fn(),
   post: vi.fn(),
 }));
@@ -111,7 +111,8 @@ describe("App authentication", () => {
     vi.mocked(storage.read).mockResolvedValue({ accessToken: "access", refreshToken: "refresh" });
     httpClient.post.mockResolvedValue({ ok: true, value: { accessToken: "renewed", refreshToken: "renewed-refresh" } });
     httpClient.get.mockImplementation(async () => {
-      httpClient.onUnauthorized?.();
+      // The real client reports the bearer the failed request carried: the session just restored.
+      httpClient.onUnauthorized?.("renewed");
       return { ok: false, error: { kind: "unauthorized" } };
     });
 
