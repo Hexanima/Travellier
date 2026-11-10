@@ -52,7 +52,7 @@ describe("local HTTP request logging", () => {
   });
 
   it("does not log the query string, token or cursor of routes that read it", async () => {
-    const baseUrl = await start(createApp({}, async () => ({ authenticatedUserId: "507f1f77bcf86cd799439011" }), logger));
+    const baseUrl = await start(createApp({}, async () => ({ authenticatedUserId: "507f1f77bcf86cd799439011" as never }), logger));
     const response = await fetch(`${baseUrl}/notifications?cursor=cursor-secret&token=query-secret`, { headers: { authorization: "Bearer access-secret" } });
     await response.text();
 
