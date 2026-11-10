@@ -160,7 +160,7 @@ describe("notification opener: session", () => {
     t.action(data("post.created", { postId: itineraryId(10) }, 2));
     t.opener.setSession("active");
     expect(t.navigate).toHaveBeenLastCalledWith(`/trips/${trip}/memories/${itineraryId(10)}`, { state: origin });
-    expect(t.navigate).toHaveBeenCalledTimes(3);
+    expect(t.navigate).toHaveBeenCalledTimes(2); // one login redirect and the resume
   });
 
   it("an account change or logout discards the pending action", async () => {
