@@ -36,6 +36,8 @@ function ExpenseLines({ totals, empty }: { totals: ExpenseTotals; empty?: string
       <strong>{formatCents(entry.totalCents, entry.currency)}</strong> · <span>{plural(entry.expenseCount, "gasto", "gastos")}</span></p>)}
     {totals.withoutCurrency.expenseCount > 0 ? <p className="itinerary-expense-total itinerary-expense-total--no-currency">
       {plural(totals.withoutCurrency.expenseCount, "gasto sin moneda indicada", "gastos sin moneda indicada")} (no se suman)</p> : null}
+    {totals.invalidAmount.expenseCount > 0 ? <p className="itinerary-expense-total itinerary-expense-total--no-currency">
+      {plural(totals.invalidAmount.expenseCount, "gasto con importe no válido", "gastos con importe no válido")} (no se suman)</p> : null}
     {totals.expenseCount === 0 && empty ? <p>{empty}</p> : null}
   </>;
 }

@@ -66,6 +66,16 @@ describe("itinerary screen expenses", () => {
     expect(dayExpenses(container).textContent).toContain("1 gasto sin moneda indicada (no se suman)");
     expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] .itinerary-post-expense strong`)?.textContent).toBe("Gasto: 25,50 (moneda sin indicar)");
   });
+  it("labels an amount that cannot be represented as invalid, not as a missing currency, and never sums it", async () => {
+    const value = fixture();
+    value.posts[0].expense!.totalAmount = -5;
+    const container = await render(value);
+    expect(tripSection(container)?.textContent).toContain("1 gasto con importe no válido (no se suman)");
+    expect(tripSection(container)?.textContent).not.toContain("sin moneda");
+    expect(tripSection(container)?.querySelector("[data-expense-currency]")).toBeNull();
+    expect(dayExpenses(container).textContent).toContain("1 gasto con importe no válido (no se suman)");
+    expect(container.querySelector(`[data-itinerary-post="${itineraryId(10)}"] .itinerary-post-expense strong`)?.textContent).toBe("Gasto: importe no válido (ARS)");
+  });
   it("lists the expenses outside the itinerary with a link to the post and moves the focus there from the Trip summary", async () => {
     const value = fixture();
     value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";

@@ -19,6 +19,11 @@ describe("formatExpenseAmount", () => {
     expect(formatExpenseAmount({ totalAmount: 25.5, currency: "ARS" })).toBe("ARS 25,50");
     expect(formatExpenseAmount({ totalAmount: 25.5, currency: null })).toBe("25,50 (moneda sin indicar)");
   });
+  it("says the amount is not valid (not that the currency is missing) when there is a currency but the amount cannot be represented", () => {
+    expect(formatExpenseAmount({ totalAmount: -5, currency: "ARS" })).toBe("importe no válido (ARS)");
+    expect(formatExpenseAmount({ totalAmount: Number.MAX_SAFE_INTEGER, currency: "EUR" })).toBe("importe no válido (EUR)");
+    expect(formatExpenseAmount({ totalAmount: -5, currency: null })).toBe("-5 (moneda sin indicar)");
+  });
 });
 describe("totalsOf", () => {
   it("sums exactly in cents (0.1 + 0.2) and keeps currencies apart in ARS, EUR, USD order", () => {
@@ -34,14 +39,21 @@ describe("totalsOf", () => {
     expect(totals.withoutCurrency).toEqual({ expenseCount: 1 });
     expect(totals.expenseCount).toBe(2);
   });
-  it("sends a non-representable amount to the currency-less group", () => {
-    const totals = totalsOf([post(Number.MAX_SAFE_INTEGER, "ARS"), post(-1, "ARS")]);
-    expect(totals.byCurrency).toEqual([]);
-    expect(totals.withoutCurrency).toEqual({ expenseCount: 2 });
+  it("counts a non-representable amount with a currency as an invalid amount, apart from the currency-less group, never summed", () => {
+    const totals = totalsOf([post(Number.MAX_SAFE_INTEGER, "ARS"), post(-1, "ARS"), post(3, "ARS")]);
+    expect(totals.byCurrency).toEqual([{ currency: "ARS", totalCents: 300, expenseCount: 1 }]);
+    expect(totals.withoutCurrency).toEqual({ expenseCount: 0 });
+    expect(totals.invalidAmount).toEqual({ expenseCount: 2 });
+    expect(totals.expenseCount).toBe(3);
+  });
+  it("a missing currency wins over an invalid amount (the currency is what is missing)", () => {
+    const totals = totalsOf([post(-1, null)]);
+    expect(totals.withoutCurrency).toEqual({ expenseCount: 1 });
+    expect(totals.invalidAmount).toEqual({ expenseCount: 0 });
   });
   it("ignores posts without an expense", () => {
     expect(totalsOf([{ expense: null }, post(1, "ARS")]).expenseCount).toBe(1);
-    expect(totalsOf([])).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, expenseCount: 0 });
+    expect(totalsOf([])).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, invalidAmount: { expenseCount: 0 }, expenseCount: 0 });
   });
 });
 

@@ -348,7 +348,7 @@ describe("expenses by currency and outside the itinerary", () => {
     const itinerary = fixture();
     itinerary.posts[0].expense!.currency = null;
     const day = projectItineraryView(itinerary, "UTC").days[0];
-    expect(day.expenseSummary).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 1 }, expenseCount: 1 });
+    expect(day.expenseSummary).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 1 }, invalidAmount: { expenseCount: 0 }, expenseCount: 1 });
   });
   it("lists a transport post published outside the trip among the outside expenses without summing it into any day", () => {
     const itinerary = fixture();
@@ -356,7 +356,7 @@ describe("expenses by currency and outside the itinerary", () => {
     priced(itinerary.posts[1] as never, 7, "EUR");
     const view = projectItineraryView(itinerary, "UTC");
     expect(view.outsideExpensePosts.map((post) => post.id)).toEqual([itineraryId(11)]);
-    expect(view.outsideExpenses).toEqual({ byCurrency: [{ currency: "EUR", totalCents: 700, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, expenseCount: 1 });
+    expect(view.outsideExpenses).toEqual({ byCurrency: [{ currency: "EUR", totalCents: 700, expenseCount: 1 }], withoutCurrency: { expenseCount: 0 }, invalidAmount: { expenseCount: 0 }, expenseCount: 1 });
     expect(view.days[0].expenseSummary.byCurrency).toEqual([{ currency: "ARS", totalCents: 2550, expenseCount: 1 }]);
     // The post stays under its transport: it is both rendered there and listed outside for its expense.
     expect(view.outsidePosts).toEqual([]);
@@ -382,7 +382,7 @@ describe("expenses by currency and outside the itinerary", () => {
     const itinerary = fixture();
     itinerary.posts.forEach((post) => { post.expense = null; });
     const view = projectItineraryView(itinerary, "UTC");
-    expect(view.tripExpenses).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, expenseCount: 0 });
+    expect(view.tripExpenses).toEqual({ byCurrency: [], withoutCurrency: { expenseCount: 0 }, invalidAmount: { expenseCount: 0 }, expenseCount: 0 });
     expect(view.outsideExpensePosts).toEqual([]);
   });
 });
