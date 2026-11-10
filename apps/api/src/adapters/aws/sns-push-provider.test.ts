@@ -23,8 +23,8 @@ const awsError = (name: string, status?: number, extra: Record<string, unknown> 
 
 const setup = (over: Partial<SnsPushClient> = {}) => {
   const client = {
-    createPlatformEndpoint: vi.fn(over.createPlatformEndpoint ?? (async (_input: { PlatformApplicationArn: string; Token: string }) => ({ EndpointArn: ENDPOINT } as { EndpointArn?: string }))),
-    publish: vi.fn(over.publish ?? (async (_input: { TargetArn: string; Message: string; MessageStructure: "json" }) => ({ MessageId: "fake" } as unknown))),
+    createPlatformEndpoint: vi.fn(over.createPlatformEndpoint ?? (async () => ({ EndpointArn: ENDPOINT }))),
+    publish: vi.fn(over.publish ?? (async () => ({ MessageId: "fake" }))),
   };
   return { client, provider: createSnsPushProvider({ client, applications: { android: ANDROID_APP, ios: IOS_APP } }) };
 };
