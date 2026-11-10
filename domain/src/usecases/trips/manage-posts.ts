@@ -200,12 +200,15 @@ const requestConflict = () => err(new PostRequestConflictError());
 /** The requester's own post of this Trip exists with other content than the retry: safe to say it was already saved. */
 const alreadySaved = (postId: ObjectId) => err(new PostRequestConflictError({ reason: "already_saved", postId }));
 const rowsKey = (rows: readonly { userId: unknown; unit: unknown; value: unknown }[]) => JSON.stringify(rows.map((row) => [row.userId, row.unit, row.value ?? null]));
-/** Whether the `expense` of a retry, normalized as a creation would store it, equals the stored one (no member check: they may have left since). */
-const expenseMatchesStored = (raw: unknown, stored: PostExpense | undefined): boolean => {
+/**
+ * Whether the `expense` of a retry equals the stored one (no member check: they may have left since). A POST is normalized as a creation;
+ * a PATCH is applied as the partial edit it is over the stored expense, and matches when no field would change.
+ */
+const expenseMatchesStored = (raw: unknown, stored: PostExpense | undefined, mode: "create" | "patch" = "create"): boolean => {
   if (raw === undefined || stored === undefined) return false;
   const parsed = parsePostExpenseInput(raw);
   if (!parsed.ok) return false;
-  const plan = applyPostExpense({ existing: undefined, input: parsed.value, tripId: stored.tripId, postId: stored.postId, id: stored.id,
+  const plan = applyPostExpense({ existing: mode === "patch" ? stored : undefined, input: parsed.value, tripId: stored.tripId, postId: stored.postId, id: stored.id,
     createdAt: stored.createdAt, memberIds: [...stored.payments, ...stored.shares].map((row) => row.userId) });
   if (!plan.ok) return false;
   const { expense } = plan.value;
@@ -267,7 +270,7 @@ const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewA
   const fields = ["description", "mapsUrl", "parentPostId", "transportId"] as const;
   const postSame = fields.every((field) => !Object.hasOwn(payload, field) || payload[field] === undefined || payload[field] === post[field]);
   const photosSame = keys === undefined || keys.every((key) => photos.some((photo) => photo.s3Key === key));
-  const expenseSame = payload.expense === undefined || expenseMatchesStored(payload.expense, expenseRecord);
+  const expenseSame = payload.expense === undefined || expenseMatchesStored(payload.expense, expenseRecord, "patch");
   const activitySame = activity !== undefined && wanted.title === activity.title && wanted.scheduledAt.getTime() === activity.scheduledAt.getTime()
     && (wanted.durationMinutes ?? null) === activity.durationMinutes && (wanted.description ?? null) === activity.description
     && (wanted.mapsUrl ?? null) === activity.mapsUrl;
@@ -370,7 +373,10 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
       if (current.value.activityId === wantedActivityId) return answerLinkRetry(scope, payload, current.value, keys);
       const taken = await scope.listActivities();
       if (!taken.ok) return taken;
-      if (taken.value.some((candidate) => candidate.id === wantedActivityId)) return requestConflict();
+      const occupant = taken.value.find((candidate) => candidate.id === wantedActivityId);
+      // Own activity of this Trip that the post no longer points to (relinked by someone else): the save already happened.
+      if (occupant !== undefined) return occupant.tripId === payload.tripId && occupant.createdBy === payload.authenticatedUserId
+        ? alreadySaved(payload.postId) : requestConflict();
     }
     const createdAt = now();
     const built = await buildNewActivity(scope, trip.value, payload, wantedActivityId ?? createId(), createdAt);

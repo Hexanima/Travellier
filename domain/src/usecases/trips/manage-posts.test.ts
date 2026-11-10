@@ -1285,6 +1285,51 @@ describe("Trip post use cases", () => {
             expect(everything()).toEqual(before);
           });
 
+          it("an exact PATCH retry with a partial expense ({ breakdown }) or without payments/shares answers 200 with what is stored", async () => {
+            const first = await linkWithId({ expense: { ...agreed, breakdown: "agua" } });
+            expect(first).toMatchObject({ ok: true, value: { outcome: "linked", expense: { breakdown: "agua" } } });
+            const before = everything(), spies = writers();
+            for (const partial of [{ breakdown: "agua" }, { totalAmount: 100, currency: "ARS", breakdown: "agua" }, { currency: "ARS" }]) {
+              const retry = await linkWithId({ expense: partial });
+              expect(retry, JSON.stringify(partial)).toMatchObject({ ok: true, value: { outcome: "linked", expense: { breakdown: "agua", payments: expect.any(Array) } } });
+            }
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it.each<[string, Record<string, unknown>]>([
+            ["breakdown", { breakdown: "otro" }], ["totalAmount", { totalAmount: 7 }], ["currency", { currency: "USD" }],
+            ["payments", { payments: [{ userId: id(42), unit: "percent", value: 100 }] }],
+          ])("a PATCH retry whose partial expense changes %s is already_saved, without writes", async (_, partial) => {
+            expect(await linkWithId({ expense: { ...agreed, breakdown: "agua" } })).toMatchObject({ ok: true });
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ expense: partial })).toMatchObject({ ok: false, error: { reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it("an exact retry without expense still answers 200", async () => {
+            const first = await linkWithId({ expense: agreed });
+            expect(await linkWithId({ expense: undefined })).toMatchObject({ ok: true, value: { outcome: "linked", activity: first.ok ? first.value.activity : undefined } });
+          });
+
+          it("the same activity id after another member relinked the post elsewhere is already_saved with the route post id when it is the requester's own in this Trip", async () => {
+            expect(await linkWithId()).toMatchObject({ ok: true });
+            records = [{ ...records[0]!, activityId: links.activityId }];
+            const before = everything(), spies = writers();
+            expect(await linkWithId()).toMatchObject({ ok: false, error: { tag: "PostRequestConflictError", reason: "already_saved", postId } });
+            expect(calls(spies)).toBe(0);
+            expect(everything()).toEqual(before);
+          });
+
+          it.each<[string, Partial<Activity>]>([["another creator", { createdBy: id(77) }], ["another Trip", { tripId: otherTripId }]])(
+            "an occupied activity id of %s stays the generic conflict (no reason)", async (_, fields) => {
+              activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: actor, ...fields }];
+              const result = await linkWithId();
+              expect(result).toMatchObject(conflict);
+              expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+            });
+
           it("without an id on a post that already has an activity it still creates another and repoints (documented, user decision pending)", async () => {
             expect(await linkWith()).toMatchObject({ ok: true, value: { activity: { id: id(20) } } });
             expect(await linkWith({ newActivity: { ...withDuration, scheduledAt: new Date("2026-09-25T15:00:00Z") } })).toMatchObject({ ok: true, value: { outcome: "linked" } });
