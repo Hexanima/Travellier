@@ -52,6 +52,12 @@
 .activity-date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--ui-space-3); }
 .activity-description { white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-maps-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--ui-color-accent); text-underline-offset: .2em; }
+.location-preview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-space-3); }
+.location-preview__icon { display: inline-flex; color: var(--ui-color-accent); }
+.location-preview__text { display: grid; flex: 1 1 8rem; min-width: 0; }
+.location-preview__place { overflow-wrap: anywhere; font-weight: 700; }
+.location-preview__error { flex-basis: 100%; margin: 0; }
+.location-preview__open[aria-disabled="true"] { opacity: .6; cursor: progress; }
 .activity-dialog .ui-modal-backdrop { z-index: 10; }
 .participation-conflict-layer .ui-modal-backdrop { z-index: 20; }
 .activity-confirm-layer .ui-modal-backdrop { z-index: 20; }
