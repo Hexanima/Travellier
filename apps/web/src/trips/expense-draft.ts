@@ -14,9 +14,9 @@ export type ValidExpense = { totalAmount: number; currency: ExpenseCurrency; bre
 
 /**
  * Parses a typed amount without floating point: up to two decimals with `,` or `.`; thousand separators are not accepted.
- * More than two decimals is a `precision` error (nothing is rounded for the person); zero, negatives and non-numbers are `invalid`.
+ * More than two decimals is a `precision` error (nothing is rounded for the person); zero (unless `allowZero`), negatives and non-numbers are `invalid`.
  */
-export const parseAmount = (raw: string): ParsedAmount => {
+export const parseAmount = (raw: string, options: { allowZero?: boolean } = {}): ParsedAmount => {
   const text = raw.trim();
   if (text === "") return { ok: false, code: "required" };
   const match = /^(\d+)(?:[.,](\d*))?$/.exec(text);
@@ -25,6 +25,7 @@ export const parseAmount = (raw: string): ParsedAmount => {
   if (fraction.length > 2) return { ok: false, code: "precision" };
   // Exact cents from the text (never from a float), and the number that travels must give them back: otherwise it would silently be another amount.
   const exact = BigInt(match[1]!) * 100n + BigInt(fraction.padEnd(2, "0") || "0");
+  if (exact === 0n && options.allowZero === true) return { ok: true, cents: 0, amount: 0 };
   if (exact <= 0n || exact > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, code: "invalid" };
   const cents = Number(exact);
   const amount = Number(`${match[1]}.${fraction.padEnd(2, "0")}`);
