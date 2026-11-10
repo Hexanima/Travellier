@@ -39,7 +39,8 @@ export const auditMongoContracts = async (database: Db): Promise<ContractAuditRe
   for await (const expense of expenses) {
     const base = { collection: "postExpenses" as const, documentId: expense._id, tripId: reference(expense.tripId) };
     const paidBy = reference(expense.paidBy);
-    if (paidBy !== null && (!Array.isArray(expense.payments) || expense.payments.length === 0)) {
+    // Same single gap rule as the read path and migration 0006: payments absent or null; a present list (even []) is never legacy.
+    if (paidBy !== null && (expense.payments === undefined || expense.payments === null)) {
       findings.push({ ...base, code: "expense_legacy_paid_by", fields: ["paidBy"], relatedIds: [paidBy] });
     }
     const complete = checkExpenseCompleteness({ totalAmount: expense.totalAmount, currency: expense.currency,

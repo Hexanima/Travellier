@@ -148,6 +148,51 @@ describe("incremental pending contracts", () => {
       expect(after.find(({ _id }) => _id.equals(missing._id))).not.toHaveProperty("payments");
     });
 
+    it("one gap rule: payments null or absent is adapted once (reruns identical); [] , own payments and a null paidBy with null payments are untouched", async () => {
+      await seedVersion3Fixture(database);
+      const payer = new ObjectId();
+      const nullPayments = await insertExpense({ paidBy: payer, payments: null, currency: "ARS" });
+      const absent = await insertExpense({ paidBy: payer, currency: "ARS" });
+      const empty = await insertExpense({ paidBy: payer, payments: [], currency: "ARS" });
+      const own = await insertExpense({ paidBy: payer, payments: [{ userId: legacyIds.user, unit: "amount", value: 10 }] });
+      const noPayer = await insertExpense({ paidBy: null, payments: null });
+      const before = await expenses();
+      await migrateMongoSchema(database);
+      const first = await expenses();
+      const find = (documents: typeof first, expense: { _id: ObjectId }) => documents.find(({ _id }) => _id.equals(expense._id));
+      const adaptedPayments = [{ userId: payer, unit: "percent", value: 100 }];
+      expect(find(first, nullPayments)).toEqual({ ...nullPayments, payments: adaptedPayments });
+      expect(find(first, absent)).toEqual({ ...absent, payments: adaptedPayments });
+      for (const untouched of [empty, own, noPayer]) expect(find(first, untouched)).toEqual(find(before, untouched));
+      expect(find(first, noPayer)!.payments).toBeNull();
+      for (const adapted of [nullPayments, absent]) {
+        expect(find(first, adapted)).not.toHaveProperty("shares");
+        expect(find(first, adapted)!.paidBy).toEqual(payer);
+      }
+      await database.collection("_migrations").deleteOne({ id: expensePaymentsVersion });
+      await migrateMongoSchema(database);
+      await database.collection("_migrations").deleteOne({ id: expensePaymentsVersion });
+      await migrateMongoSchema(database);
+      expect(await expenses()).toEqual(first);
+    });
+
+    it("reads the same expense before and after the migration for payments null, absent and []", async () => {
+      await seedVersion3Fixture(database);
+      const payer = new ObjectId();
+      const ids = [(await insertExpense({ paidBy: payer, payments: null, currency: "ARS" }))._id,
+        (await insertExpense({ paidBy: payer, currency: "ARS" }))._id,
+        (await insertExpense({ paidBy: payer, payments: [], currency: "ARS" }))._id];
+      const readable = async () => (await expenses()).map((document) => toPostExpense(document as unknown as PostExpenseDocument));
+      const before = await readable();
+      await migrateMongoSchema(database);
+      const after = await readable();
+      expect(after).toEqual(before);
+      const payment = [{ userId: payer.toHexString(), unit: "percent", value: 100 }];
+      expect(after.find(({ id }) => id === ids[0].toHexString())!.payments).toEqual(payment);
+      expect(after.find(({ id }) => id === ids[1].toHexString())!.payments).toEqual(payment);
+      expect(after.find(({ id }) => id === ids[2].toHexString())!.payments).toEqual([]);
+    });
+
     it("keeps the payer who is a former member, expelled or who left the Trip, as historic identity with currency and shares untouched", async () => {
       await seedVersion3Fixture(database);
       const left = new ObjectId();

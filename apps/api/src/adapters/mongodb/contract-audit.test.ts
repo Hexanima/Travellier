@@ -102,7 +102,21 @@ describe("read-only approved contract audit", () => {
     payments: [payment("percent", 100)], shares: [share("percent", 100)] });
 
   it.each([
-    ["empty payments", { payments: [] }, ["payments"]],
+    ["null", { payments: null }, true],
+    ["absent", {}, true],
+    ["an explicit empty list (cleared on purpose, never re-adapted)", { payments: [] }, false],
+    ["own payments", { payments: [payment("amount", 50)] }, false],
+  ])("legacy paidBy is reported only when payments is absent or null: %s", async (_name, overrides, legacy) => {
+    const base: Record<string, unknown> = { ...completeExpense(), paidBy: legacyIds.formerUser };
+    delete base.payments;
+    const { insertedId } = await database.collection("postExpenses").insertOne({ ...base, ...overrides });
+    const report = await auditMongoContracts(database);
+    expect(report.findings.some(({ code, documentId }) => code === "expense_legacy_paid_by" && documentId.equals(insertedId))).toBe(legacy);
+    expect(report.findings.some(({ code, documentId }) => code === "expense_incomplete" && documentId.equals(insertedId))).toBe(true);
+  });
+
+  it.each([
+    ["empty payments",{ payments: [] }, ["payments"]],
     ["empty shares", { shares: [] }, ["shares"]],
     ["partial payments", { payments: [payment("amount", 50)] }, ["payments"]],
     ["partial shares", { shares: [share("percent", 50)] }, ["shares"]],
