@@ -31,6 +31,7 @@ import {
   createTripPhotoUploads,
   getTripPostPhotos,
   getTripPhoto,
+  listTripPhotos,
   err,
   UnknownError,
   type ObjectStoragePort,
@@ -110,6 +111,8 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
       ? getTripPostPhotos.execute({ ...photoDependencies, now: () => new Date() }, payload) : missingStorage(),
     getPhoto: (payload) => photoDependencies
       ? getTripPhoto.execute({ ...photoDependencies, now: () => new Date() }, payload) : missingStorage(),
+    listPhotos: (payload) => photoDependencies
+      ? listTripPhotos.execute({ ...photoDependencies, now: () => new Date() }, payload) : missingStorage(),
     linkPostToNewActivity: (payload) => linkTripPostToNewActivity.execute(postDependencies, payload),
     listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
     createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),
