@@ -67,6 +67,15 @@ describe("Trip screens", () => {
     expect(container.querySelector(`a[href="/trips/${trip.id}/memories"]`)?.textContent).toBe("Recuerdos");
   });
 
+  it("links the notices center next to the profile, also when there are no Trips", async () => {
+    for (const value of [[trip], []]) {
+      const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: true, value }), create: vi.fn() });
+      const link = container.querySelector("a[href=\"/notifications\"]");
+      expect(link?.textContent).toBe("Avisos");
+      expect(link?.closest("nav")?.getAttribute("aria-label")).toBe("Cuenta");
+    }
+  });
+
   it("shows an empty state with a creation action", async () => {
     const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), create: vi.fn() });
 
