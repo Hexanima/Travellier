@@ -22,6 +22,8 @@ export interface TripPostReadScope {
   listChildren: (postId: ObjectId) => AsyncResult<Post[]>;
   /** Photos of a post of this Trip, `order` ascending. */
   listPhotos: (postId: ObjectId) => AsyncResult<PostPhoto[]>;
+  /** Photos of any of these posts within this Trip (`tripId` and `postId`), `order` ascending inside each post; the order across posts is the caller's. */
+  listPhotosByPosts: (postIds: readonly ObjectId[]) => AsyncResult<PostPhoto[]>;
   /** Photo by id whatever its Trip: the caller compares `tripId` with the Trip it authorized. */
   findPhoto: (photoId: ObjectId) => AsyncResult<PostPhoto | undefined>;
 }

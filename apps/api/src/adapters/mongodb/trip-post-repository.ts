@@ -64,6 +64,7 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       return ok((await posts.find(filter, options).sort(sort).toArray()).map(toPost));
     },
     listPhotos: photos.listPhotos,
+    listPhotosByPosts: photos.listPhotosByPosts,
     findPhoto: photos.findPhoto,
     findPhotosByKeys: photos.findPhotosByKeys,
     insertPhotos: photos.insertPhotos,

@@ -13,6 +13,7 @@ export * from "./manage-activities.js";
 export * from "./manage-activity-participations.js";
 export * from "./manage-posts.js";
 export * from "./manage-post-photos.js";
+export * from "./list-trip-photos.js";
 export * from "./manage-comments.js";
 export * from "./manage-likes.js";
 export * from "./process-storage-deletion-jobs.js";

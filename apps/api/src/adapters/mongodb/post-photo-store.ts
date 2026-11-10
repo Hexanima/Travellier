@@ -18,12 +18,21 @@ const toDocument = (photo: PostPhoto): PostPhotoDocument => ({ _id: new MongoObj
   tripId: new MongoObjectId(photo.tripId), uploaderId: new MongoObjectId(photo.uploaderId), s3Key: photo.s3Key, order: photo.order,
   uploadedAt: photo.uploadedAt });
 
+/** Photos of several posts of one Trip, grouped by post and by `order` inside it (served by the `postId` / `postId_order_unique` index). */
+export const postPhotosByPostsQuery = (tripId: MongoObjectId, postIds: readonly ObjectId[]) =>
+  ({ filter: { tripId, postId: { $in: postIds.map((postId) => new MongoObjectId(postId)) } }, sort: { postId: 1, order: 1 } }) as const;
+
 /** Photo reads/writes of a Trip scope; always pass the transaction session. */
 export const createPostPhotoStore = (records: Collection<PostPhotoDocument>, tripId: ObjectId, session: ClientSession) => {
   const mongoTripId = new MongoObjectId(tripId), options = { session };
   return {
     listPhotos: async (postId: ObjectId): AsyncResult<PostPhoto[]> =>
       ok((await records.find({ postId: new MongoObjectId(postId), tripId: mongoTripId }, options).sort({ order: 1 }).toArray()).map(toPostPhoto)),
+    /** Exact filter and sort of the gallery read; shared with the index test so the plan checked is the real one. */
+    listPhotosByPosts: async (postIds: readonly ObjectId[]): AsyncResult<PostPhoto[]> => {
+      const { filter, sort } = postPhotosByPostsQuery(mongoTripId, postIds);
+      return ok((await records.find(filter, options).sort(sort).toArray()).map(toPostPhoto));
+    },
     /** By id only: the use case compares `tripId` with the Trip it authorized. */
     findPhoto: async (photoId: ObjectId): AsyncResult<PostPhoto | undefined> => {
       const photo = await records.findOne({ _id: new MongoObjectId(photoId) }, options);

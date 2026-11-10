@@ -36,6 +36,7 @@ describe("Trip post use cases", () => {
       listChildren: async (id) => domain.ok(records.filter((p) => p.tripId === tripId && p.parentPostId === id)
         .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.id.localeCompare(a.id))),
       listPhotos: async (id) => domain.ok(photoRecords.filter((p) => p.postId === id && p.tripId === tripId).sort((a, b) => a.order - b.order)),
+      listPhotosByPosts: async (postIds) => domain.ok(photoRecords.filter((p) => postIds.includes(p.postId) && p.tripId === tripId).sort((a, b) => a.order - b.order)),
       findPhoto: async (id) => domain.ok(photoRecords.find((p) => p.id === id)),
       findPhotosByKeys: async (keys) => domain.ok(photoRecords.filter((p) => keys.includes(p.s3Key))),
       insertPhotos: async (photos) => { photoRecords.push(...photos); return domain.ok(undefined); },
