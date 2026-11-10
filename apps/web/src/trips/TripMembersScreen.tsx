@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
 import { displayName } from "../profile/display-name.js";
+import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 
@@ -37,6 +38,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
 }) {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [trip, setTrip] = useState<MemberTripDetail>();
   const [memberList, setMemberList] = useState<MemberList>();
   const [loading, setLoading] = useState(true);
@@ -186,7 +188,10 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   return (
     <main className="app-shell trips-shell">
       <section className="trips-panel" aria-labelledby="trip-members-title">
-        <Link className="trips-back" to="/trips">Volver a mis viajes</Link>
+        {/* Opened from the notices center (member.joined): the way back is that center. */}
+        {readOrigin(location.state, tripId ?? "").label === "avisos"
+          ? <Link className="trips-back" to={noticesOrigin.path}>{originLabel("avisos")}</Link>
+          : <Link className="trips-back" to="/trips">Volver a mis viajes</Link>}
         <h1 id="trip-members-title">Miembros e invitación</h1>
         {loading ? <LoadingState label="Cargando miembros…" /> : null}
         {!loading && loadError ? (

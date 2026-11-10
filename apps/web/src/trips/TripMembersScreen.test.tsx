@@ -35,6 +35,7 @@ async function render(options: {
   copyText?: ReturnType<typeof vi.fn>;
   share?: ReturnType<typeof vi.fn>;
   deleteTrip?: ReturnType<typeof vi.fn>;
+  state?: unknown;
 } = {}) {
   const get = options.get ?? vi.fn().mockResolvedValue({ ok: true, value: trip });
   const list = options.list ?? vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, participant], currentUserId: options.viewerId ?? adminId } });
@@ -46,11 +47,12 @@ async function render(options: {
   const root = createRoot(container);
   roots.push(root);
   await act(async () => root.render(
-    <MemoryRouter initialEntries={[`/trips/${tripId}/members`]}>
+    <MemoryRouter initialEntries={[{ pathname: `/trips/${tripId}/members`, state: options.state }]}>
       <Routes>
         <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={{ get, deleteTrip } as never}
           members={{ list, expel }} apiBaseUrl="https://api.example.test" sharing={{ copyText, share: options.share }} />} />
         <Route path="/trips" element={<h1>Mis viajes</h1>} />
+        <Route path="/notifications" element={<h1>Avisos</h1>} />
       </Routes>
     </MemoryRouter>,
   ));
@@ -58,6 +60,33 @@ async function render(options: {
 }
 
 describe("TripMembersScreen", () => {
+  const backLink = (container: HTMLElement) => container.querySelector<HTMLAnchorElement>("a.trips-back");
+
+  it("goes back to the notices center when opened from there", async () => {
+    const { container } = await render({ state: { origin: { path: "/notifications", label: "avisos" } } });
+    expect(backLink(container)?.textContent).toBe("Volver a avisos");
+    await act(async () => backLink(container)?.click());
+    expect(container.textContent).toBe("Avisos");
+  });
+
+  it.each([undefined, { origin: { path: "/notifications", label: "avisos", search: "?x=1" } }, { origin: { path: "/elsewhere", label: "avisos" } }, "avisos"])(
+    "keeps the way back to My Trips without a valid notices origin (%j)", async (state) => {
+      const { container } = await render({ state });
+      expect(backLink(container)?.textContent).toBe("Volver a mis viajes");
+      await act(async () => backLink(container)?.click());
+      expect(container.textContent).toBe("Mis viajes");
+    });
+
+  it.each([
+    ["not-found", "No encontramos este viaje o ya no sos integrante."],
+    ["forbidden", "No pudimos cargar los miembros."],
+  ])("keeps the generic %s message and offers the safe way back to notices", async (kind, message) => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind } });
+    const { container } = await render({ get, state: { origin: { path: "/notifications", label: "avisos" } } });
+    expect(container.textContent).toContain(message);
+    expect(backLink(container)?.textContent).toBe("Volver a avisos");
+  });
+
   it("hides group deletion from participants", async () => {
     const { container } = await render({ viewerId: participantId });
     expect(findButton(container, "Eliminar viaje")).toBeUndefined();
