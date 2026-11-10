@@ -8,7 +8,7 @@ export interface RegisterPushDeviceInput {
   platform: PushPlatform;
   token: string;
   now: Date;
-  /** Maximum of devices of the user; it applies only when the token was not already theirs. */
+  /** Maximum of devices of the user; it applies only to a new document: at the limit the oldest own devices are evicted. */
   limit: number;
 }
 
@@ -17,7 +17,7 @@ export interface RegisterPushDeviceInput {
  * Revocations are idempotent: a missing or foreign device is also a success.
  */
 export interface PushDeviceRepository {
-  /** Atomic upsert by (provider, token). A token of another user is reassigned to the caller, who bears the limit. */
+  /** Atomic upsert by (provider, token). A token of another user is reassigned to the caller without counting against the limit. */
   register: (input: RegisterPushDeviceInput) => AsyncResult<{ device: PushDevice; created: boolean }>;
   revokeById: (userId: ObjectId, id: ObjectId) => AsyncResult<void>;
   revokeByToken: (userId: ObjectId, provider: PushProvider, token: string) => AsyncResult<void>;

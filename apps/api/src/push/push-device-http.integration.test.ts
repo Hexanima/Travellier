@@ -107,12 +107,15 @@ describe("push device HTTP API", () => {
     expect(await count()).toBe(0);
   });
 
-  it("answers 409 at the limit without the token and still accepts an existing token", async () => {
+  it("evicts the oldest own device at the limit and answers 200 without the token", async () => {
     for (let index = 0; index < 10; index += 1) expect((await put(valid(`own-token-${index}`))).statusCode).toBe(200);
-    const limited = await put(valid(SENTINEL));
-    expect(limited.statusCode).toBe(409);
-    expect(json(limited).error.code).toBe("PushDeviceLimitError");
-    expect(limited.body).not.toContain(SENTINEL);
+    const accepted = await put(valid(SENTINEL));
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.body).not.toContain(SENTINEL);
+    expect(await count()).toBe(10);
+    const tokens = (await db.collection("pushDevices").find().toArray()).map((doc) => doc.token);
+    expect(tokens).toContain(SENTINEL);
+    expect(tokens).not.toContain("own-token-0");
     expect((await put(valid("own-token-4"))).statusCode).toBe(200);
     expect(await count()).toBe(10);
   });
@@ -170,7 +173,7 @@ describe("push device HTTP API", () => {
     const send = (base: string, method: string, path: string, body: unknown) =>
       fetch(`${base}${path}`, { method, headers: { authorization: "Bearer t", "content-type": "application/json" }, body: JSON.stringify(body) });
 
-    it("never writes the token to a log entry, also on 422, 409 and an unexpected 500", async () => {
+    it("never writes the token to a log entry, also on 422, an evicting registration and an unexpected 500", async () => {
       const logs: ApiLogEntry[] = [];
       const exploding: PushDeviceApi = { ...api, register: async (payload) => {
         if ((payload.input as { token?: string }).token === OTHER_SENTINEL) throw new Error(`driver failure with ${OTHER_SENTINEL}`);
@@ -187,7 +190,7 @@ describe("push device HTTP API", () => {
         const failed = await send(base, "PUT", "/push-devices", valid(OTHER_SENTINEL));
         statuses.push(failed.status);
         expect(await failed.text()).not.toContain(OTHER_SENTINEL);
-        expect(statuses).toEqual([200, 422, 204, 409, 500]);
+        expect(statuses).toEqual([200, 422, 204, 200, 500]);
       } finally { await close(); }
       expect(logs.length).toBeGreaterThan(0);
       expect(logs.some((entry) => entry.event === "error")).toBe(true);

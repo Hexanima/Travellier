@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { PushDeviceLimitError } from "../../errors/push-device-limit-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import type { PushDevice } from "../../entities/push-device.js";
 import type { PushDeviceRepository } from "../../ports/push-device-port.js";
@@ -47,10 +46,7 @@ describe("registerPushDevice", () => {
     expect(pushDevices.register).not.toHaveBeenCalled();
   });
 
-  it("propagates the device limit and repository failures", async () => {
-    const limited = makeRepo({ register: vi.fn(async () => err(new PushDeviceLimitError(10))) });
-    expect(await registerPushDevice.execute({ pushDevices: limited }, { userId, input: { provider: "fcm", platform: "android", token }, now }))
-      .toMatchObject({ ok: false, error: { tag: "PushDeviceLimitError" } });
+  it("propagates repository failures", async () => {
     const broken = makeRepo({ register: vi.fn(async () => err(new UnknownError("Database operation failed."))) });
     expect(await registerPushDevice.execute({ pushDevices: broken }, { userId, input: { provider: "fcm", platform: "android", token }, now }))
       .toMatchObject({ ok: false, error: { tag: "UnknownError" } });

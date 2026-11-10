@@ -1,5 +1,5 @@
 import { ObjectId as MongoObjectId, type Db } from "mongodb";
-import { createObjectId, err, ok, PushDeviceLimitError, TaggedError, UnknownError, type AsyncResult, type ObjectId, type PushDevice,
+import { createObjectId, err, ok, TaggedError, UnknownError, type AsyncResult, type ObjectId, type PushDevice,
   type PushDeviceRepository, type PushPlatform, type PushProvider } from "app-domain";
 
 /** `pushDevices` document. `token` is the raw provider token: it is never logged nor placed in an error. */
@@ -32,9 +32,11 @@ const guard = async <T>(work: () => Promise<T>): AsyncResult<T> => {
 };
 
 /**
- * Registration runs in a short transaction: it counts the receiver's devices (only when the token is not already theirs) and upserts by
- * (provider, token), so a token never belongs to two accounts. The limit is soft: two NEW tokens of the same user registered at the same
- * instant can both pass the count and exceed it by a few (known window, documented). A duplicate-key race between two upserts is retried.
+ * Registration runs in a short transaction and upserts by (provider, token), so a token never belongs to two accounts. The limit only applies
+ * to a NEW document: when the user already has `limit` devices, the oldest own ones (lowest lastRegisteredAt, ties by _id) are evicted in the
+ * same transaction. A reassignment (the token exists under another user) or a re-registration never counts nor evicts. The limit is soft:
+ * simultaneous registrations of distinct new tokens do not conflict and can exceed it; the next registration converges by evicting the excess.
+ * A duplicate-key race between two upserts is retried.
  */
 export const createMongoPushDeviceRepository = (database: Db): PushDeviceRepository => {
   const registerOnce = async ({ userId, provider, platform, token, now, limit }: Parameters<PushDeviceRepository["register"]>[0]) => {
@@ -44,8 +46,13 @@ export const createMongoPushDeviceRepository = (database: Db): PushDeviceReposit
     try {
       return await session.withTransaction(async () => {
         const existing = await devices.findOne({ provider, token }, { session, projection: { userId: 1 } });
-        if (existing === null || !existing.userId.equals(owner)) {
-          if (await devices.countDocuments({ userId: owner }, { session }) >= limit) throw new PushDeviceLimitError(limit);
+        if (existing === null) {
+          const count = await devices.countDocuments({ userId: owner }, { session });
+          if (count >= limit) {
+            const oldest = await devices.find({ userId: owner }, { session, projection: { _id: 1 } })
+              .sort({ lastRegisteredAt: 1, _id: 1 }).limit(count - limit + 1).toArray();
+            await devices.deleteMany({ _id: { $in: oldest.map((doc) => doc._id) } }, { session });
+          }
         }
         const result = await devices.findOneAndUpdate({ provider, token },
           { $set: { userId: owner, platform, updatedAt: now, lastRegisteredAt: now }, $setOnInsert: { createdAt: now } },

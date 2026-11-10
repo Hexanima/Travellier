@@ -25,4 +25,3 @@ export * from "./expense-conflict-error.js";
 export * from "./native-capability-error.js";
 export * from "./comment-not-found-error.js";
 export * from "./post-request-conflict-error.js";
-export * from "./push-device-limit-error.js";

@@ -83,31 +83,88 @@ describe("MongoDB push device repository", () => {
   });
 
   describe("limit", () => {
-    it("rejects an eleventh new device, re-registers an existing one at the limit and counts a reassignment against the receiver", async () => {
+    const fill = async (user: ObjectId, count: number) => {
+      for (let index = 0; index < count; index += 1) expect((await repo().register(input(user, `own-${index}`, { now: at(index) }))).ok).toBe(true);
+    };
+    const tokensOf = async (user: ObjectId) => (await devices().find({ userId: user }).toArray()).map((doc) => doc.token).sort();
+
+    it("evicts the oldest own device when registering an eleventh new one", async () => {
+      const user = new ObjectId();
+      await fill(user, 10);
+      const result = await repo().register(input(user, "own-new", { now: at(100) }));
+      expect(result).toMatchObject({ ok: true, value: { created: true } });
+      const tokens = await tokensOf(user);
+      expect(tokens).toHaveLength(10);
+      expect(tokens).toContain("own-new");
+      expect(tokens).not.toContain("own-0");
+      expect(tokens).toContain("own-1");
+    });
+
+    it("breaks lastRegisteredAt ties by _id when evicting", async () => {
+      const user = new ObjectId();
+      for (let index = 0; index < 10; index += 1) await repo().register(input(user, `tie-${index}`));
+      await repo().register(input(user, "tie-new"));
+      const tokens = await tokensOf(user);
+      expect(tokens).toHaveLength(10);
+      expect(tokens).not.toContain("tie-0");
+      expect(tokens).toContain("tie-1");
+    });
+
+    it("evicts by lastRegisteredAt: a recently re-registered device survives", async () => {
+      const user = new ObjectId();
+      await fill(user, 10);
+      await repo().register(input(user, "own-0", { now: at(50) }));
+      await repo().register(input(user, "own-new", { now: at(100) }));
+      const tokens = await tokensOf(user);
+      expect(tokens).toContain("own-0");
+      expect(tokens).not.toContain("own-1");
+      expect(tokens).toHaveLength(10);
+    });
+
+    it("re-registering an existing own token at the limit does not evict anything", async () => {
+      const user = new ObjectId();
+      await fill(user, 10);
+      const result = await repo().register(input(user, "own-3", { now: at(99) }));
+      expect(result).toMatchObject({ ok: true, value: { created: false } });
+      expect(await tokensOf(user)).toHaveLength(10);
+      expect(await tokensOf(user)).toContain("own-0");
+    });
+
+    it("a reassignment to a receiver at the limit is performed and neither evicts nor fails", async () => {
       const user = new ObjectId(), other = new ObjectId();
-      for (let index = 0; index < 10; index += 1) expect((await repo().register(input(user, `own-${index}`))).ok).toBe(true);
-
-      expect(await repo().register(input(user, "own-new"))).toMatchObject({ ok: false, error: { tag: "PushDeviceLimitError" } });
-      expect(await devices().countDocuments({ userId: user })).toBe(10);
-      expect((await repo().register(input(user, "own-3", { now: at(9) }))).ok).toBe(true);
-
+      await fill(user, 10);
       await repo().register(input(other, "foreign"));
-      expect(await repo().register(input(user, "foreign"))).toMatchObject({ ok: false, error: { tag: "PushDeviceLimitError" } });
-      expect((await devices().findOne({ token: "foreign" }))?.userId.equals(other)).toBe(true);
+      const result = await repo().register(input(user, "foreign", { now: at(100) }));
+      expect(result).toMatchObject({ ok: true, value: { created: false } });
+      expect((await devices().findOne({ token: "foreign" }))?.userId.equals(user)).toBe(true);
+      expect(await devices().countDocuments({ userId: user })).toBe(11);
+      expect(await tokensOf(user)).toContain("own-0");
+      expect(await devices().countDocuments({ userId: other })).toBe(0);
     });
 
     it("honors the limit passed by the caller", async () => {
       const user = new ObjectId();
-      await repo().register(input(user, "a", { limit: 1 }));
-      expect(await repo().register(input(user, "b", { limit: 1 }))).toMatchObject({ ok: false, error: { tag: "PushDeviceLimitError", limit: 1 } });
+      await repo().register(input(user, "a", { limit: 1, now: at(1) }));
+      expect((await repo().register(input(user, "b", { limit: 1, now: at(2) }))).ok).toBe(true);
+      expect(await tokensOf(user)).toEqual(["b"]);
     });
 
-    it("never carries the token in the limit error", async () => {
+    it("never carries the token in an error nor leaves it out of the evicting registration", async () => {
       const user = new ObjectId();
       await repo().register(input(user, "a", { limit: 1 }));
-      const result = await repo().register(input(user, SENTINEL, { limit: 1 }));
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(`${result.error.message} ${JSON.stringify(result.error)}`).not.toContain(SENTINEL);
+      const result = await repo().register(input(user, SENTINEL, { limit: 1, now: at(1) }));
+      expect(result.ok).toBe(true);
+      expect(await tokensOf(user)).toEqual([SENTINEL]);
+    });
+
+    it("is a soft limit under a burst, and a later sequential registration converges back to at most the limit", async () => {
+      const user = new ObjectId();
+      await fill(user, 10);
+      await Promise.all(Array.from({ length: 5 }, (_, index) => repo().register(input(user, `burst-${index}`, { now: at(200 + index) }))));
+      expect(await devices().countDocuments({ userId: user })).toBeGreaterThanOrEqual(10);
+      expect((await repo().register(input(user, "after-burst", { now: at(300) }))).ok).toBe(true);
+      expect(await devices().countDocuments({ userId: user })).toBeLessThanOrEqual(10);
+      expect(await tokensOf(user)).toContain("after-burst");
     });
   });
 

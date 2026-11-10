@@ -334,11 +334,6 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
     return jsonResponse(409, { error: { code: error.tag, message: "Transport changes would invalidate activities or remove days with linked data." } });
   }
 
-  if (error.tag === "PushDeviceLimitError") {
-    // Generic on purpose: no token data.
-    return jsonResponse(409, { error: { code: error.tag, message: "The maximum number of push devices was reached; revoke one first." } });
-  }
-
   if (error.tag === "UnauthorizedError") {
     return jsonResponse(403, {
       error: { code: "Forbidden", message: "This action is not allowed." },
