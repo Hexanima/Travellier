@@ -29,6 +29,15 @@ describe("parsePostExpenseInput", () => {
   it.each([0, -1, Number.NaN, Infinity, 10.005, "10", null, Number.MAX_SAFE_INTEGER + 1])("rejects totalAmount %j", (totalAmount) => {
     expect(issuesOf(parsePostExpenseInput({ totalAmount }))).toEqual(["expense.totalAmount:invalid"]);
   });
+  it.each([0.1 + 0.2, 1e-7, 1e21, 1.5e-3, Number.MIN_VALUE])("rejects the edge totalAmount %j", (totalAmount) => {
+    expect(parsePostExpenseInput({ totalAmount })).toMatchObject({ ok: false, error: { issues: [{ field: "expense.totalAmount", code: "invalid" }] } });
+  });
+  it.each([[1e2, 100], [0.01, 0.01], [123456789012.34, 123456789012.34], [90071992547409.91, 90071992547409.91]])(
+    "accepts the edge totalAmount %j without rounding it", (totalAmount, expected) => {
+      const parsed = parsePostExpenseInput({ totalAmount });
+      expect(parsed).toEqual({ ok: true, value: { totalAmount: expected } });
+      expect(Object.is((parsed as { value: { totalAmount: number } }).value.totalAmount, expected)).toBe(true);
+    });
   it.each(["BRL", "ars", 1, null])("rejects currency %j", (currency) => {
     expect(issuesOf(parsePostExpenseInput({ currency }))).toEqual(["expense.currency:invalid"]);
   });
