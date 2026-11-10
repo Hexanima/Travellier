@@ -15,6 +15,7 @@ import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { createPhotoFileReader } from './native/photo-file.js'
 import { ProfileScreen } from './profile/ProfileScreen.js'
+import { PushNotices } from './push/PushNotices.js'
 import { createPushDeviceApi, type PushDeviceApi } from './push/push-device-api.js'
 import { createPushDeviceService, type PushDeviceService } from './push/push-device-service.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
@@ -356,7 +357,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
-        <Route path="/invite/:code" element={<InviteRoute sessionReady={sessionReady} hasSession={hasSession} trips={activeTrips} />} />
+        <Route path="/invite/:code" element={<InviteRoute sessionReady={sessionReady} hasSession={hasSession} trips={activeTrips} push={activePush} />} />
         <Route path="/trips" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
             <TripsListScreen trips={tripManagement} onLocalLogout={onLocalLogout} />
@@ -426,7 +427,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
           !sessionReady
             ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
             : hasSession
-              ? <ProfileScreen auth={activeAuth} />
+              ? <ProfileScreen auth={activeAuth} push={activePush} />
               : <Navigate to="/login" replace />
         } />
         <Route path="*" element={<NotFound />} />
@@ -435,14 +436,14 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   )
 }
 
-type InviteEntryProps = { sessionReady: boolean; hasSession: boolean; trips?: Partial<TripInvitationApi> }
+type InviteEntryProps = { sessionReady: boolean; hasSession: boolean; trips?: Partial<TripInvitationApi>; push?: PushDeviceService }
 
 function InviteRoute(props: InviteEntryProps) {
   const { code } = useParams()
   return <InviteEntry key={code} code={code} {...props} />
 }
 
-function InviteEntry({ sessionReady, hasSession, trips, code }: InviteEntryProps & { code?: string }) {
+function InviteEntry({ sessionReady, hasSession, trips, push, code }: InviteEntryProps & { code?: string }) {
   const location = useLocation()
   const destination = `${location.pathname}${location.search}`
   const [joining, setJoining] = useState(false)
@@ -471,7 +472,7 @@ function InviteEntry({ sessionReady, hasSession, trips, code }: InviteEntryProps
           : !hasSession
             ? <p>Iniciá sesión para continuar. <Link to="/login" state={{ from: destination }}>Iniciar sesión</Link></p>
             : result?.ok
-              ? <><p>{result.value.joined ? 'Te uniste al viaje.' : 'Ya sos parte de este viaje.'}</p><Link to={`/trips/${result.value.tripId}/members`}>Ver miembros</Link></>
+              ? <><p>{result.value.joined ? 'Te uniste al viaje.' : 'Ya sos parte de este viaje.'}</p><Link to={`/trips/${result.value.tripId}/members`}>Ver miembros</Link>{result.value.joined && push ? <PushNotices push={push} dismissible /> : null}</>
               : <>
                   <Button onClick={() => void confirmJoin()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
                   {result && !result.ok
