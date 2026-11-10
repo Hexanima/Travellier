@@ -57,7 +57,7 @@ describe("App balance route", () => {
     await click(link(container, "Volver al itinerario"));
     expect(container.querySelector("h1")?.textContent).toBe("Itinerario");
   });
-  it("completes a pending expense from the balance and comes back to the updated balance without losing the origin", async () => {
+  it("leaving the editor with Cancelar comes back to the balance, which is asked for again", async () => {
     const get = vi.fn().mockResolvedValueOnce({ ok: true, value: pendingBalance }).mockResolvedValue({ ok: true, value: completeBalance });
     const postGet = vi.fn().mockResolvedValue({ ok: true, value: { post, parent: null, children: [], rootActivityId: null } });
     const container = await render(`/trips/${tripId}/balance`, { auth, sessionStorage: storage(true), balance: { get },
@@ -72,6 +72,43 @@ describe("App balance route", () => {
     expect(container.querySelector("h1")?.textContent).toBe("Balance");
     expect(get).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Pesos (ARS)");
+    expect(container.textContent).not.toContain("Gastos por completar");
+  });
+  it("completes payments and shares from the balance, saves, and comes back to the balance with the expense complete in its currency", async () => {
+    // The itinerary fixture carries an expense of ARS 25.50 in this memory: the composer reads the stored expense from there.
+    const expensePostId = itineraryId(10);
+    const expensePost = { ...post, id: expensePostId };
+    const incomplete: TripBalance = { ...pendingBalance, excludedExpenses: [{ ...pendingBalance.excludedExpenses[0]!, postId: expensePostId, totalCents: 2550, reasons: ["payments_not_covering_total"] }] };
+    const stored = { postId: expensePostId, totalAmount: 25.5, currency: "ARS" as const, breakdown: null, payments: [{ userId: me, unit: "amount" as const, value: 10 }],
+      shares: [{ userId: me, unit: "remainder" as const, value: null }], completeness: { status: "incomplete" as const, reasons: ["payments_not_covering_total"] }, formerMemberIds: [] };
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, value: incomplete }).mockResolvedValue({ ok: true, value: completeBalance });
+    const postGet = vi.fn().mockResolvedValue({ ok: true, value: { post: expensePost, parent: null, children: [], rootActivityId: null, expense: stored } });
+    const update = vi.fn().mockResolvedValue({ ok: true, value: expensePost });
+    const membersList = vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [
+      { id: itineraryId(100), userId: me, name: "Ana", role: "admin", joinedAt: "2026-01-01T00:00:00.000Z" },
+      { id: itineraryId(101), userId: beto, name: "Beto", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } });
+    const container = await render(`/trips/${tripId}/balance`, { auth, sessionStorage: storage(true), balance: { get },
+      posts: { list: vi.fn().mockResolvedValue({ ok: true, value: [expensePost] }), get: postGet, update }, members: { list: membersList },
+      itinerary: { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) } });
+    expect(container.textContent).toContain("Gastos por completar");
+    expect(container.textContent).not.toContain("1 gasto incluido");
+    await click(link(container, "Completar pagos y reparto"));
+    expect(container.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+    await click(container.querySelector('button[name="split"]'));
+    expect(container.querySelector("h1")?.textContent).toBe("Pagos y reparto");
+    const input = container.querySelector<HTMLInputElement>('[data-section="payments"] [data-row] input[inputmode="decimal"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "25,50"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    await click(button(container, "Aceptar"));
+    expect(container.querySelector("h1")?.textContent).toBe("Editar recuerdo");
+    await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(update).toHaveBeenCalledOnce();
+    expect(update.mock.calls[0]![0]).toBe(tripId);
+    expect(update.mock.calls[0]![1]).toBe(expensePostId);
+    expect(update.mock.calls[0]![2]).toEqual({ expense: { payments: [{ userId: me, unit: "amount", value: 25.5 }] } });
+    expect(container.querySelector("h1")?.textContent).toBe("Balance");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Pesos (ARS)");
+    expect(container.textContent).toContain("1 gasto incluido");
     expect(container.textContent).not.toContain("Gastos por completar");
   });
 });
