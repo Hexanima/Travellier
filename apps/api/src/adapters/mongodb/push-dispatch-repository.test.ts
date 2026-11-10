@@ -79,9 +79,18 @@ describe("MongoDB push dispatch repository", () => {
     expect(await claim("w1")).toMatchObject({ ok: true, value: { attempts: 3 } });
     expect(await claim("w2", at(121))).toMatchObject({ ok: true, value: { attempts: 4 } });
     expect(await events().findOne({ _id: insertedId })).toMatchObject({ attempts: 4, leaseOwner: "w2", lastAttemptAt: at(121) });
-    const second = await insert();
-    await Promise.all([claim("w3", at(500)), claim("w4", at(500)), claim("w5", at(500))]);
-    expect((await events().findOne({ _id: second.insertedId }))?.attempts).toBe(1);
+  });
+
+  it("gives a single eligible event to exactly one of three concurrent claims, with one attempt and one owner", async () => {
+    const { insertedId } = await insert();
+    const results = await Promise.all([claim("w3"), claim("w4"), claim("w5")]);
+    const values = results.map((result) => { if (!result.ok) throw result.error; return result.value; });
+    expect(values.filter((value) => value !== undefined)).toHaveLength(1);
+    expect(values.filter((value) => value === undefined)).toHaveLength(2);
+    expect(values.find((value) => value !== undefined)?.attempts).toBe(1);
+    const stored = await events().findOne({ _id: insertedId });
+    expect(stored?.attempts).toBe(1);
+    expect(["w3", "w4", "w5"]).toContain(stored?.leaseOwner);
   });
 
   it("reports the progress of a previous attempt", async () => {
