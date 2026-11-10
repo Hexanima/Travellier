@@ -33,6 +33,9 @@ import {
   getTripPostChain,
   updateTripPost,
   linkTripPostToNewActivity,
+  createTripPostComment,
+  listTripPostComments,
+  updateTripPostComment,
 } from "app-domain";
 
 import type { TripApi } from "../app.js";
@@ -46,6 +49,7 @@ import { createTripInvitationApi } from "./trip-invitation-api.js";
 import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-activity-repository.js";
 import { createMongoTripParticipationRepository } from "../adapters/mongodb/trip-participation-repository.js";
 import { createMongoTripPostRepository } from "../adapters/mongodb/trip-post-repository.js";
+import { createMongoTripCommentRepository } from "../adapters/mongodb/trip-comment-repository.js";
 
 const inviteAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -72,6 +76,7 @@ export const createTripApi = (database: Db): TripApi => {
   const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
   const participationDependencies = { participations: createMongoTripParticipationRepository(database), createId, now: () => new Date() };
   const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date() };
+  const commentDependencies = { comments: createMongoTripCommentRepository(database), createId, now: () => new Date() };
   return {
     ...createTripInvitationApi(database),
     createPost: (payload) => createTripPost.execute(postDependencies, payload),
@@ -80,6 +85,9 @@ export const createTripApi = (database: Db): TripApi => {
     getPostChain: (payload) => getTripPostChain.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
     linkPostToNewActivity: (payload) => linkTripPostToNewActivity.execute(postDependencies, payload),
+    listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
+    createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),
+    updateComment: (payload) => updateTripPostComment.execute(commentDependencies, payload),
     getActivityParticipation: (payload) => getTripActivityParticipation.execute(participationDependencies, payload),
     setActivityParticipation: (payload) => setTripActivityParticipation.execute(participationDependencies, payload),
     createActivity: (payload) => createTripActivity.execute(activityDependencies, payload),

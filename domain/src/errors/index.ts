@@ -20,3 +20,4 @@ export * from "./deletion-conflict-error.js";
 export * from "./activity-not-found-error.js";
 export * from "./post-not-found-error.js";
 export * from "./native-capability-error.js";
+export * from "./comment-not-found-error.js";
