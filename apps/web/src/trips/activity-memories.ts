@@ -37,16 +37,22 @@ export type MemoryThumbnails = { thumbnails: ReadonlyMap<string, GalleryPhoto>; 
 
 /**
  * Thumbnail of each memory (first photo of its post, lowest `order`) from the loaded gallery pages. A memory with no loaded photo is
- * text-only for certain only when nothing else can be loaded or the gallery already moved on to a strictly older post (the server orders
- * `(post.createdAt desc, postId desc)`); otherwise it is pending and nothing is claimed about it.
+ * text-only for certain only when the gallery already loaded its first page successfully (`loaded`) and either nothing else can be
+ * loaded or it already moved on to a strictly older post (the server orders `(post.createdAt desc, postId desc)`); otherwise it is
+ * pending and nothing is claimed about it. Without loaded pages (initial loading or initial error) `hasMore` is false but says nothing:
+ * `loaded` tells «loaded and empty» apart from «not loaded yet / failed».
  */
-export const memoryThumbnails = (memories: readonly ItineraryPostResponse[], photos: readonly GalleryPhoto[], hasMore: boolean): MemoryThumbnails => {
+export const memoryThumbnails = (memories: readonly ItineraryPostResponse[], photos: readonly GalleryPhoto[], hasMore: boolean, loaded: boolean): MemoryThumbnails => {
   const thumbnails = new Map<string, GalleryPhoto>();
   for (const item of photos) {
     const current = thumbnails.get(item.postId);
     if (!current || item.order < current.order) thumbnails.set(item.postId, item);
   }
   const pending = new Set<string>();
+  if (!loaded) {
+    for (const item of memories) if (!thumbnails.has(item.id)) pending.add(item.id);
+    return { thumbnails, pending };
+  }
   if (!hasMore) return { thumbnails, pending };
   const last = photos[photos.length - 1];
   const frontier = last ? { id: last.postId, createdAt: last.post.createdAt } : undefined;

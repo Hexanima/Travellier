@@ -170,6 +170,25 @@ describe("ActivityMemories (Recuerdos)", () => {
     expect(container.querySelector("[data-memory-pending]")).toBeNull();
   });
 
+  it("a loaded gallery without photos and without next cursor claims every memory text only", async () => {
+    const container = await mount(vi.fn().mockResolvedValue(page([], null)));
+    expect(memoryRows(container.querySelector("#activity-panel-memories")!)).toEqual([p1.id, p2.id, p3.id]);
+    expect(container.querySelector("[data-memory-pending]")).toBeNull();
+    expect(container.textContent).not.toContain("Cargar más fotos");
+  });
+  it("while the gallery is loading every memory is pending, none is claimed text only, and nothing can be loaded yet", async () => {
+    const container = await mount(vi.fn().mockReturnValue(deferred<unknown>().promise));
+    expect(memoryRows(container.querySelector("#activity-panel-memories")!)).toEqual([p1.id, p2.id, p3.id]);
+    expect(Array.from(container.querySelectorAll("[data-memory-pending]")).map((item) => item.getAttribute("data-memory-pending"))).toEqual([p1.id, p2.id, p3.id]);
+    expect(container.textContent).not.toContain("Cargar más fotos");
+  });
+  it("when the first page failed every memory is pending, none is claimed text only, and the memories stay listed", async () => {
+    const container = await mount(vi.fn().mockResolvedValue(fail("network")));
+    expect(memoryRows(container.querySelector("#activity-panel-memories")!)).toEqual([p1.id, p2.id, p3.id]);
+    expect(Array.from(container.querySelectorAll("[data-memory-pending]")).map((item) => item.getAttribute("data-memory-pending"))).toEqual([p1.id, p2.id, p3.id]);
+    expect(container.textContent).not.toContain("Cargar más fotos");
+  });
+
   describe("thumbnails that are not loaded yet", () => {
     // Page 1 only reaches p1: p2 and p3 may still have photos in later pages.
     const firstPage = () => page([photo(21, p1, 0)], "c1");

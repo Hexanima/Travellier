@@ -43,7 +43,9 @@ export function ActivityMemories({ tripId, activityId, activityTitle, itinerary,
   }, [members, tripId]);
 
   const memories = useMemo(() => activityMemories(itinerary.posts, itinerary.unplacedPosts, activityId), [itinerary.posts, itinerary.unplacedPosts, activityId]);
-  const { thumbnails, pending } = useMemo(() => memoryThumbnails(memories, gallery.photos, gallery.hasMore), [memories, gallery.photos, gallery.hasMore]);
+  // Loaded = the first page arrived; during initial loading/error there are no pages, so nothing may be claimed text only.
+  const loaded = gallery.phase !== "initial-loading" && gallery.phase !== "initial-error";
+  const { thumbnails, pending } = useMemo(() => memoryThumbnails(memories, gallery.photos, gallery.hasMore, loaded), [memories, gallery.photos, gallery.hasMore, loaded]);
 
   // A 404/403 on any page or refresh means the activity is gone for this account: the owner clears the dialog and refreshes the itinerary (once).
   const gone = (gallery.phase === "initial-error" || gallery.phase === "more-error" ? unavailable(gallery.error) : false) || unavailable(gallery.refreshError);

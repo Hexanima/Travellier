@@ -44,40 +44,46 @@ describe("memoryThumbnails", () => {
   const of = (n: number, source: ItineraryPostResponse, order: number) => photo(n, source.id, order, source.createdAt);
   it("uses the first photo of each post (lowest order) as its thumbnail", () => {
     const first = of(1, newer, 0), second = of(2, newer, 1);
-    const result = memoryThumbnails(memories, [first, second, of(3, middle, 0)], false);
+    const result = memoryThumbnails(memories, [first, second, of(3, middle, 0)], false, true);
     expect(result.thumbnails.get(newer.id)).toBe(first);
     expect(result.thumbnails.get(middle.id)?.id).toBe(id(903));
     expect(result.thumbnails.has(older.id)).toBe(false);
   });
   it("a post without photos is text only for certain when nothing more can be loaded", () => {
-    const result = memoryThumbnails(memories, [of(1, newer, 0)], false);
+    const result = memoryThumbnails(memories, [of(1, newer, 0)], false, true);
     expect([...result.pending]).toEqual([]);
   });
   it("a post without photos is pending while more pages exist and the last loaded photo is not of an older post", () => {
-    const result = memoryThumbnails(memories, [of(1, newer, 0)], true);
+    const result = memoryThumbnails(memories, [of(1, newer, 0)], true, true);
     expect([...result.pending].sort()).toEqual([middle.id, older.id].sort());
   });
   it("is text only for certain when the last loaded photo belongs to a strictly older post", () => {
     // Loaded up to `older`: `middle` has no photo for sure (its photos would have come first); nothing after `older` is known.
-    const result = memoryThumbnails([newer, middle, older, post(4, { createdAt: "2026-03-10T07:00:00.000Z" })], [of(1, newer, 0), of(3, older, 0)], true);
+    const result = memoryThumbnails([newer, middle, older, post(4, { createdAt: "2026-03-10T07:00:00.000Z" })], [of(1, newer, 0), of(3, older, 0)], true, true);
     expect([...result.pending]).toEqual([id(4)]);
     expect(result.thumbnails.has(middle.id)).toBe(false);
   });
   it("breaks a tie of publication by id: the same instant with a smaller id is older", () => {
     const at = "2026-03-10T12:00:00.000Z";
     const high = post(6, { createdAt: at }), low = post(5, { createdAt: at });
-    const certain = memoryThumbnails([high, low], [of(1, low, 0)], true);
+    const certain = memoryThumbnails([high, low], [of(1, low, 0)], true, true);
     expect([...certain.pending]).toEqual([]); // loaded up to `low` (older than `high`): `high` has no photos
-    const unknown = memoryThumbnails([high, low], [of(1, high, 0)], true);
+    const unknown = memoryThumbnails([high, low], [of(1, high, 0)], true, true);
     expect([...unknown.pending]).toEqual([low.id]); // loaded up to `high`: `low` may still have photos
   });
   it("without photos and with more pages every post is pending", () => {
-    expect([...memoryThumbnails(memories, [], true).pending].sort()).toEqual(memories.map((item) => item.id).sort());
-    expect([...memoryThumbnails(memories, [], false).pending]).toEqual([]);
+    expect([...memoryThumbnails(memories, [], true, true).pending].sort()).toEqual(memories.map((item) => item.id).sort());
+    expect([...memoryThumbnails(memories, [], false, true).pending]).toEqual([]);
+  });
+  it("while the gallery is not loaded (loading or failed first page) every post is pending, none is claimed text only", () => {
+    expect([...memoryThumbnails(memories, [], false, false).pending].sort()).toEqual(memories.map((item) => item.id).sort());
+  });
+  it("a loaded and empty gallery (first page without photos and no next cursor) claims every post text only", () => {
+    expect([...memoryThumbnails(memories, [], false, true).pending]).toEqual([]);
   });
   it("compares against the post carried by the last photo even when that post is not among the memories", () => {
-    expect([...memoryThumbnails([newer], [photo(1, id(777), 0, "2026-03-10T01:00:00.000Z")], true).pending]).toEqual([]);
-    expect([...memoryThumbnails([newer], [photo(1, id(777), 0, "2026-03-10T20:00:00.000Z")], true).pending]).toEqual([newer.id]);
+    expect([...memoryThumbnails([newer], [photo(1, id(777), 0, "2026-03-10T01:00:00.000Z")], true, true).pending]).toEqual([]);
+    expect([...memoryThumbnails([newer], [photo(1, id(777), 0, "2026-03-10T20:00:00.000Z")], true, true).pending]).toEqual([newer.id]);
   });
 });
 
