@@ -21,7 +21,7 @@ const trackedFiles = (): string[] | undefined => {
 };
 const tracked = trackedFiles();
 
-const textExtensions = /\.(ts|tsx|js|mjs|json|xml|gradle|kts|java|kt|properties|swift|plist|pbxproj|md|txt|yml|yaml|html|css|pro|cfg)$/i;
+const textExtensions = /\.(ts|tsx|js|mjs|json|xml|gradle|kts|java|kt|properties|swift|plist|pbxproj|xcconfig|entitlements|storyboard|md|txt|yml|yaml|html|css|pro|cfg)$/i;
 const skipDirectories = new Set(["node_modules", "build", ".gradle", ".git", "dist", "Pods", ".swiftpm", "DerivedData"]);
 const walk = (directory: string): string[] => {
   if (!existsSync(directory)) return [];
@@ -100,6 +100,11 @@ describe("push credentials stay out of the repository", () => {
       writeFileSync(text, "{}");
       expect(readText(binary)).toBeUndefined();
       expect(readText(text)).toBe("{}");
+      for (const extension of ["xcconfig", "entitlements", "storyboard"]) expect(textExtensions.test(`Config.${extension}`)).toBe(true);
+      const xcconfig = join(directory, "Debug.xcconfig");
+      writeFileSync(xcconfig, `KEY = AuthKey_ABC123DEF4.p8`);
+      expect(textExtensions.test(xcconfig)).toBe(true);
+      expect(apnsKeyReference.test(readText(xcconfig) ?? "")).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
