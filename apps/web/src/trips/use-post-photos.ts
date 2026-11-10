@@ -60,6 +60,8 @@ export function usePostPhotos({ deps, tripId, getDraft, applyDraft, blobs, isSav
           settled += 1;
           setActive((current) => current.filter((id) => id !== localId)); setSummary(`Subiendo fotos: ${settled} de ${todo.length}`);
         } });
+    } catch {
+      return { items: [...items], reserveError: { kind: "network" }, aborted: false };
     } finally {
       uploadingRef.current = false; abortRef.current = undefined;
       setUploading(false); setActive([]); setProgress({}); setSummary("");

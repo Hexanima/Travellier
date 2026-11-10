@@ -92,7 +92,7 @@ describe("SpontaneousActivityForm", () => {
     await click(button(container, "Aceptar"));
     const result = probe(container);
     expect(result.path).toBe(newPath);
-    expect(result.draft).toEqual({ values: seeded().values, extras: { link: null, transportId: null, newActivity: created } });
+    expect(result.draft).toEqual({ values: seeded().values, extras: { link: null, transportId: null, newActivity: created, photos: [] } });
     // Back through history: the focus and the notice travel in the drafts context.
     expect(result.returned).toEqual({ focus: "link", notice: "Actividad nueva: Cena, 25/09/2026 12:30. Se creará al publicar." });
     expect(itineraryGet).toHaveBeenCalledExactlyOnceWith(tripId);
@@ -109,7 +109,7 @@ describe("SpontaneousActivityForm", () => {
     const { container } = await open(newPath, seeded({ link, transportId: itineraryId(6) }));
     await type(field(container, "title"), "Cena"); await click(button(container, "Aceptar"));
     const result = probe(container);
-    expect(result.draft?.extras).toEqual({ link: null, transportId: itineraryId(6), newActivity: created });
+    expect(result.draft?.extras).toEqual({ link: null, transportId: itineraryId(6), newActivity: created, photos: [] });
     expect(result.returned?.notice).toBe("Actividad nueva: Cena, 25/09/2026 12:30. Se creará al publicar. Se quitó el vínculo anterior.");
   });
   it("opened directly (no composer in the history) Accept replaces this entry with the composer and passes the notice in the location state", async () => {
