@@ -39,7 +39,7 @@ export const memberStatus = (netCents: number, currency: ExpenseCurrency): strin
   netCents > 0 ? `Tiene a favor ${formatCents(netCents, currency)}` : netCents < 0 ? `Debe ${formatCents(-netCents, currency)}` : "Sin saldo pendiente";
 /** A suggestion: the app does not register what is later done outside it. */
 export const settlementText = (from: string, to: string, cents: number, currency: ExpenseCurrency): string =>
-  `${from} le ${from === "Vos" ? "deberías" : "debería"} ${formatCents(cents, currency)} a ${to === "Vos" ? "vos" : to}`;
+  to === "Vos" ? `${from} te debe ${formatCents(cents, currency)}` : `${from} le ${from === "Vos" ? "debés" : "debe"} ${formatCents(cents, currency)} a ${to}`;
 
 export const excludedAmount = ({ currency, totalCents }: Pick<ExcludedExpense, "currency" | "totalCents">): string =>
   totalCents === null ? "Importe no disponible" : currency === null ? `${formatPlainCents(totalCents)} (moneda sin indicar)` : formatCents(totalCents, currency);

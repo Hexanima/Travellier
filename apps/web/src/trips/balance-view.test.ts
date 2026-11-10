@@ -49,9 +49,9 @@ describe("balance texts", () => {
     expect(memberStatus(0, "EUR")).toBe("Sin saldo pendiente");
   });
   it("writes suggestions, not facts", () => {
-    expect(settlementText("Ana", "Beto", 1000, "ARS")).toBe("Ana le debería ARS 10,00 a Beto");
-    expect(settlementText("Vos", "Beto", 1000, "ARS")).toBe("Vos le deberías ARS 10,00 a Beto");
-    expect(settlementText("Ana", "Vos", 1000, "ARS")).toBe("Ana le debería ARS 10,00 a vos");
+    expect(settlementText("Ana", "Beto", 1000, "ARS")).toBe("Ana le debe ARS 10,00 a Beto");
+    expect(settlementText("Vos", "Beto", 1000, "ARS")).toBe("Vos le debés ARS 10,00 a Beto");
+    expect(settlementText("Ana", "Vos", 1000, "ARS")).toBe("Ana te debe ARS 10,00");
   });
   it("has a readable text for each of the seven reasons", () => {
     expect(Object.keys(reasonText).sort()).toEqual([...balanceReasons].sort());

@@ -106,7 +106,7 @@ describe("TripBalanceScreen: register mode", () => {
   it("renders no balance even if the data carried some", async () => {
     const odd = { ...register, currencies: [ars()], excludedExpenses: [pending(1, ["missing_shares"])], includedExpenseCount: 2 };
     const { container, list } = await render({ get: vi.fn().mockResolvedValue(ok(odd)) });
-    expect(container.textContent).not.toMatch(/Pesos|Tiene a favor|Debe |le debería|Gastos por completar|ARS/);
+    expect(container.textContent).not.toMatch(/Pesos|Tiene a favor|Debe |le debe |Gastos por completar|ARS/);
     expect(pendingItems(container)).toHaveLength(0);
     expect(list).not.toHaveBeenCalled();
   });
@@ -152,9 +152,9 @@ describe("TripBalanceScreen: balance mode", () => {
     expect(container.textContent).toContain("Las compensaciones son sugerencias: la app no registra transferencias ni cobros.");
     const ars = section(container, "Pesos (ARS)");
     expect(ars.textContent).toContain("Compensaciones sugeridas");
-    expect(ars.textContent).toContain("Beto le debería ARS 10,00 a vos");
-    expect(ars.textContent).toContain("Ex integrante 1 le debería ARS 10,00 a vos");
-    expect(section(container, "Dólares (USD)").textContent).toContain("Vos le deberías USD 5,00 a Beto");
+    expect(ars.textContent).toContain("Beto te debe ARS 10,00");
+    expect(ars.textContent).toContain("Ex integrante 1 te debe ARS 10,00");
+    expect(section(container, "Dólares (USD)").textContent).toContain("Vos le debés USD 5,00 a Beto");
     expect(button(container, "Marcar como hecho")).toBeUndefined();
   });
   it("never says a debt was paid, collected or settled, in any state or accessible name", async () => {
