@@ -120,3 +120,8 @@
 .photo-viewer { display: grid; gap: 8px; }
 .photo-viewer img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
 .photo-viewer__nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.activity-memories { display: grid; gap: 8px; }
+.activity-memories [role="tablist"] { display: flex; gap: 8px; }
+.activity-memories__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.activity-memories__list li { display: grid; gap: 4px; min-width: 0; }
+.activity-memories__list img { display: block; width: 4rem; aspect-ratio: 1 / 1; object-fit: cover; }

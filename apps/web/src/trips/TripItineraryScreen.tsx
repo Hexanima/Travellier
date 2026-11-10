@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
@@ -15,23 +15,50 @@ import { useActivityParticipations } from "./use-activity-participations.js";
 import { PostLink } from "./post-navigation.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { itineraryAnchor } from "./post-origin.js";
+import { ActivityMemories } from "./ActivityMemories.js";
+import { readActivityParams, type ActivityTab } from "./activity-memories.js";
+import type { TripMembersApi } from "./trip-members-api.js";
 import "./itinerary.css";
 
-type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; timeZone?: string };
+/** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
+type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; members?: Pick<TripMembersApi, "list">; timeZone?: string };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
 const transportLabels = { bus_local: "Colectivo", bus_long: "Ómnibus", flight: "Avión", car: "Auto", other: "Otro transporte" };
 const amount = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 
-export function TripItineraryScreen({ itinerary, activities, participations, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
+export function TripItineraryScreen({ itinerary, activities, participations, members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
-  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} timeZone={timeZone} />;
+  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} timeZone={timeZone} />;
 }
 
-function ItineraryContent({ tripId, itinerary, activities, participations, timeZone }: Props & { tripId?: string; timeZone: string }) {
+function ItineraryContent({ tripId, itinerary, activities, participations, members, timeZone }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
-  const [dialog, setDialog] = useState<ActivityDialogRequest>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const locationRef = useRef(location);
+  locationRef.current = location;
+  // The detail of an activity lives in the URL (`?activity=<id>&tab=memories|photos`) so a return from a memory restores it; creating stays local.
+  // Changes replace the entry and keep its state (a restore or an open viewer), so «Atrás» leaves the itinerary exactly as before.
+  const { activityId: urlActivity, tab } = readActivityParams(location.search);
+  const [creating, setCreating] = useState<Extract<ActivityDialogRequest, { kind: "create" }>>();
+  const detail = useMemo<ActivityDialogRequest | undefined>(() => urlActivity ? { kind: "detail", activityId: urlActivity } : undefined, [urlActivity]);
+  const dialog = creating ?? detail;
+  const updateParams = (change: (params: URLSearchParams) => void) => {
+    const current = locationRef.current;
+    const params = new URLSearchParams(current.search);
+    change(params);
+    const search = params.toString();
+    navigate({ pathname: current.pathname, search: search ? `?${search}` : "" }, { replace: true, state: current.state });
+  };
+  const openDetail = (activityId: string) => updateParams((params) => { params.set("activity", activityId); params.delete("tab"); });
+  const closeDialog = () => {
+    setCreating(undefined);
+    const params = new URLSearchParams(locationRef.current.search);
+    if (params.has("activity") || params.has("tab")) updateParams((next) => { next.delete("activity"); next.delete("tab"); });
+  };
+  const [panelSettled, setPanelSettled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -70,7 +97,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
           else if (["network", "server"].includes(result.error.kind)) {
             setRefreshError(attempt > 0);
             setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
-          } else { setState({ kind: "error", error: result.error }); setDialog(undefined); }
+          } else { setState({ kind: "error", error: result.error }); closeDialog(); }
         }
       } catch {
         if (!cancelled) {
@@ -83,7 +110,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     };
     void load();
     return () => { cancelled = true; };
-  }, [tripId, itinerary, attempt]);
+  }, [tripId, itinerary, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const onSaved = (activity: ActivityResponse, created: ParticipationResponse | null = null) => {
     if (created) participation.apply(activity.id, created);
     // Reflect only a successful server write; retain posts and expenses until the aggregate refreshes.
@@ -99,9 +126,12 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
         ].sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.id.localeCompare(b.id)) })),
       } };
     });
-    setSaved(true); setNotice(undefined); setDialog(undefined); setAttempt((value) => value + 1);
+    setSaved(true); setNotice(undefined); closeDialog(); setAttempt((value) => value + 1);
   };
+  // Ids already handled as removed: the URL update of the router may land after the local state update, and that render must not handle the same id twice.
+  const removedIds = useRef(new Set<string>());
   const onRemoved = (activityId: string, outcome: "removed" | "gone") => {
+    removedIds.current.add(activityId);
     participation.remove(activityId);
     const control = trigger.current;
     if (control && (control.closest(".activity-dialog") || control.closest(`[data-itinerary-item="${activityId}"]`))) trigger.current = null;
@@ -112,10 +142,16 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
     } });
     setSaved(false);
     setNotice(outcome === "removed" ? { text: "Actividad eliminada.", variant: "success" } : { text: "La actividad ya no existe.", variant: "info" });
-    setDialog(undefined); setAttempt((value) => value + 1);
+    closeDialog(); setAttempt((value) => value + 1);
   };
   const dialogParticipation = dialog?.kind === "detail" ? participation.states[dialog.activityId] : undefined;
-  useRestorePosition(state.kind === "ready");
+  // With the dialog open in the URL the position is restored once its panel is on screen (the focus target is inside it).
+  const awaitsPanel = members !== undefined && activities !== undefined && urlActivity !== undefined && creating === undefined;
+  useRestorePosition(state.kind === "ready" && (!awaitsPanel || panelSettled));
+  // An id in the URL that the itinerary does not have: the dialog cannot open. The URL is cleaned first (onRemoved), then the itinerary is refreshed once.
+  const missingActivity = state.kind === "ready" && activities !== undefined && creating === undefined && urlActivity !== undefined && !removedIds.current.has(urlActivity) && !state.value.activities.some((a) => a.id === urlActivity) ? urlActivity : undefined;
+  useEffect(() => { if (missingActivity) onRemoved(missingActivity, "gone"); }, [missingActivity]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setTab = (next: ActivityTab) => updateParams((params) => { params.set("tab", next); });
   const { days, outsidePosts } = state.kind === "ready" ? projectItineraryView(state.value, timeZone) : { days: [], outsidePosts: [] };
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const calendar = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -164,11 +200,11 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
               </header>
               {activities && segment.type === "activity" && segment.endsAt !== null && Date.parse(segment.endsAt) > Date.parse(segment.startsAt) &&
                 day.segments.findIndex((candidate) => candidate.type === "activity" && candidate.startsAt === segment.startsAt && candidate.endsAt === segment.endsAt && candidate.destinationId === segment.destinationId) === index
-                ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setDialog({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
+                ? <Button className="activity-create" disabled={refreshing} onClick={() => { setSaved(false); setNotice(undefined); setCreating({ kind: "create", selection: { ...segment, date: day.date } }); }}>Crear actividad</Button> : null}
               {segment.items.length > 0 ? <List className="itinerary-items" aria-label={`${bandLabels[segment.type]} en ${segment.destinationName}`}>
                 {segment.items.map((item) => <AgendaItem tripId={tripId ?? ""} key={`${item.kind}-${item.id}`} item={item} publication={publication} timeZone={timeZone}
                   participation={item.kind === "activity" ? participationControls(item.id, item.activity.title) : null}
-                  disabled={refreshing} onActivity={activities ? (activityId) => setDialog({ kind: "detail", activityId }) : undefined} />)}
+                  disabled={refreshing} onActivity={activities ? openDetail : undefined} />)}
               </List> : <p className="itinerary-band-empty">{segment.type === "activity" ? "Sin actividades ni posts en esta franja." : "Sin registros en esta franja."}</p>}
             </section>)}
           </div>
@@ -191,10 +227,14 @@ function ItineraryContent({ tripId, itinerary, activities, participations, timeZ
         stale={confirming.confirming.stale} saving={!!confirming.saving}
         onCancel={() => participation.cancelConfirmation(confirmingId)} onConfirm={() => { void participation.confirmChange(confirmingId); }} /></div> : null}
       {state.kind === "ready" && activities && dialog ? <ActivityDialog key={dialog.kind === "detail" ? dialog.activityId : "new"}
-        request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={() => setDialog(undefined)} onSaved={onSaved} onRemoved={onRemoved}
+        request={dialog} itinerary={state.value} activities={activities} timeZone={timeZone} onClose={closeDialog} onSaved={onSaved} onRemoved={onRemoved}
         busy={dialogParticipation?.kind === "ready" && !!(dialogParticipation.saving || dialogParticipation.confirming)}
         participation={dialog.kind === "detail" ? participationControls(dialog.activityId,
-          state.value.activities.find((activity) => activity.id === dialog.activityId)?.title ?? "esta actividad") : null} /> : null}
+          state.value.activities.find((activity) => activity.id === dialog.activityId)?.title ?? "esta actividad") : null}
+        memories={dialog.kind === "detail" && members ? <ActivityMemories tripId={tripId ?? ""} activityId={dialog.activityId}
+          activityTitle={state.value.activities.find((activity) => activity.id === dialog.activityId)?.title ?? "esta actividad"}
+          itinerary={state.value} members={members} timeZone={timeZone} tab={tab} onTab={setTab}
+          onGone={() => onRemoved(dialog.activityId, "gone")} onSettled={() => setPanelSettled(true)} /> : undefined} /> : null}
     </div>
   </main>;
 }
