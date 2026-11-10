@@ -152,4 +152,33 @@ describe("local API entrypoint", () => {
       await client.close();
     }
   });
+  it("registers and revokes a push device through the authenticated local API (T89)", async () => {
+    const databaseName = "travellier_push_local_test";
+    const client = new MongoClient(mongo.getUri());
+    await client.connect();
+    const localApi = await createLocalApi({ MONGODB_URI: mongo.getUri(), MONGODB_DATABASE_NAME: databaseName, JWT_SECRET: "local-jwt-signing-secret" });
+    await new Promise<void>((resolve) => localApi.app.listen(0, resolve));
+    const { port } = localApi.app.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const json = { "content-type": "application/json" };
+    try {
+      await fetch(`${baseUrl}/auth/register`, { method: "POST", headers: json, body: JSON.stringify({ email: "push@example.test", name: "Push", password: "secret-pass" }) });
+      const login = await fetch(`${baseUrl}/auth/login`, { method: "POST", headers: json, body: JSON.stringify({ email: "push@example.test", password: "secret-pass" }) });
+      const { accessToken } = await login.json() as { accessToken: string };
+      const headers = { ...json, authorization: `Bearer ${accessToken}` };
+      const body = JSON.stringify({ provider: "fcm", platform: "android", token: "local-token-0123456789-wxyz" });
+      expect((await fetch(`${baseUrl}/push-devices`, { method: "PUT", headers: json, body })).status).toBe(401);
+      const registered = await fetch(`${baseUrl}/push-devices`, { method: "PUT", headers, body });
+      expect(registered.status).toBe(200);
+      expect(await registered.json()).toMatchObject({ device: { provider: "fcm", platform: "android", tokenHint: "****wxyz" } });
+      expect(await client.db(databaseName).collection("pushDevices").countDocuments()).toBe(1);
+      const revoked = await fetch(`${baseUrl}/push-devices/revoke`, { method: "POST", headers, body: JSON.stringify({ provider: "fcm", token: "local-token-0123456789-wxyz" }) });
+      expect(revoked.status).toBe(204);
+      expect(await client.db(databaseName).collection("pushDevices").countDocuments()).toBe(0);
+    } finally {
+      await new Promise<void>((resolve, reject) => localApi.app.close((error) => error === undefined ? resolve() : reject(error)));
+      await localApi.close();
+      await client.close();
+    }
+  });
 });
