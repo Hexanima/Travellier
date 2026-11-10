@@ -8,8 +8,10 @@ const maxLength = 2048;
 const maxPlaceLength = 120;
 const invalid: MapsLink = { kind: "invalid" };
 /** Whitespace and C0/C1 control characters; also catches spaces inside the value. */
-const forbidden = /[\u0000- \u007f-\u009f\\]/;
-const control = /[\u0000-\u001f\u007f-\u009f]/;
+const isControl = (text: string, withSpacesAndBackslash: boolean) => Array.from(text).some((char) => {
+  const code = char.charCodeAt(0);
+  return code <= 0x1f || (code >= 0x7f && code <= 0x9f) || (withSpacesAndBackslash && (code === 0x20 || char === "\\"));
+});
 const number = "-?\\d{1,3}(?:\\.\\d{1,15})?";
 const pair = new RegExp(`^(${number}),\\s*(${number})$`);
 const atPair = new RegExp(`@(${number}),(${number})(?:[,/]|$)`);
@@ -32,7 +34,7 @@ function coordinatesFrom(lat: string | undefined, lng: string | undefined): Maps
 }
 function placeFrom(text: string): string | undefined {
   const value = text.trim();
-  return value === "" || value.length > maxPlaceLength || control.test(value) ? undefined : value;
+  return value === "" || value.length > maxPlaceLength || isControl(value, false) ? undefined : value;
 }
 function decodePathText(segment: string): string | undefined {
   try { return placeFrom(decodeURIComponent(segment.replace(/\+/g, " "))); } catch { return undefined; }
@@ -45,7 +47,7 @@ function decodePathText(segment: string): string | undefined {
 export function parseMapsLink(raw: string | null | undefined): MapsLink {
   const value = raw?.trim() ?? "";
   if (value === "") return { kind: "none" };
-  if (value.length > maxLength || forbidden.test(value) || !/^https:\/\/[^/]/i.test(value)) return invalid;
+  if (value.length > maxLength || isControl(value, true) || !/^https:\/\/[^/]/i.test(value)) return invalid;
   let url: URL;
   try { url = new URL(value); } catch { return invalid; }
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.port !== "") return invalid;
