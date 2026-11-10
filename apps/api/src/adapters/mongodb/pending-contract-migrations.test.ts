@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { describePostExpense, hasLegacyPaymentsGap, resolveExpense } from "app-domain";
+import { describePostExpense, resolveExpense } from "app-domain";
 import { auditMongoContracts } from "./contract-audit.js";
 import { migrateMongoSchema } from "./migrations.js";
 import { expenseGapCases, gapOwnPayer, gapPayer } from "../../../test/expense-gap-cases.js";
@@ -152,14 +152,14 @@ describe("incremental pending contracts", () => {
 
     it.each(expenseGapCases)("read, migration 0006 and audit classify the same document alike: $name", async ({ fields, legacy }) => {
       const stored = await insertExpense(fields);
-      const read = toPostExpense(stored as unknown as PostExpenseDocument);
+      const persisted = (await database.collection("postExpenses").findOne({ _id: stored._id }))!;
+      const read = toPostExpense(persisted as unknown as PostExpenseDocument);
       const audited = (await auditMongoContracts(database)).findings
         .some(({ code, documentId }) => code === "expense_legacy_paid_by" && documentId.equals(stored._id));
       await migrateMongoSchema(database);
       const [after] = await expenses();
-      // (a) read
-      expect(hasLegacyPaymentsGap(fields.payments) && fields.paidBy instanceof ObjectId).toBe(legacy);
-      const ownRows = Array.isArray(fields.payments) && fields.payments.some((row) => row?.userId instanceof ObjectId);
+      // (a) read: the document persisted in Mongo goes through the store's real read path
+      const ownRows = Array.isArray(persisted.payments) && persisted.payments.some((row) => row?.userId instanceof ObjectId);
       expect(read.payments).toEqual(legacy ? [{ userId: gapPayer.toHexString(), unit: "percent", value: 100 }]
         : ownRows ? [{ userId: gapOwnPayer.toHexString(), unit: "amount", value: 10 }] : []);
       // (b) migration: adapted exactly, or the document stays byte-identical
