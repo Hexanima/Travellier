@@ -124,7 +124,9 @@ describe("App push registration wiring (Capacitor native, mocked plugin)", () =>
     await render(createStorage("r-A"));
     expect(native.push.requestPermissions).not.toHaveBeenCalled();
     expect(native.push.register).not.toHaveBeenCalled();
-    expect(native.push.addListener).not.toHaveBeenCalled();
+    // T93: the notice opener listens early (its own listeners, no permission, no registration); the registration service adds none of its own here.
+    expect(native.push.addListener.mock.calls.length).toBeGreaterThan(0);
+    expect(native.push.addListener.mock.calls.map(([name]) => name).every((name) => ["registration", "registrationError", "pushNotificationReceived", "pushNotificationActionPerformed"].includes(name))).toBe(true);
     expect(put()).toHaveLength(0);
   });
 
