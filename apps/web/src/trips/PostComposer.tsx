@@ -319,6 +319,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
         const { activity, participation, ...post } = result.value;
         setPending(undefined);
         handle.clear();
+        if (backToBalance()) return;
         navigate(listing, { state: { post, going: participation?.status === "going",
           notice: activity ? (existing ? "linked-activity" : "created-activity") : existing ? "updated" : "created" } });
       } else if (result.error.kind === "participation-conflict" && result.error.confirmation) {
@@ -355,9 +356,22 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone }: Omit<P
   // Cancelar/Descartar while the first is pending is ignored (the mark is cleared if the location changes without leaving).
   const leaving = useRef(false);
   useEffect(() => { leaving.current = false; }, [location.key]);
+  /**
+   * An edit opened from the balance (T85) returns to it, saving or leaving: `-1` when there is app history (its entry keeps the restore state),
+   * otherwise the entry is replaced by the balance carrying the place to find again. Returns whether it navigated.
+   */
+  const backToBalance = () => {
+    const origin = readOrigin(location.state, tripId ?? "");
+    if (!postId || origin.label !== "balance") return false;
+    if (leaving.current) return true;
+    if (canGoBack(location)) { leaving.current = true; navigate(-1); }
+    else navigate(originHref(origin), { replace: true, state: withNoBack(origin.anchor !== undefined && origin.scrollY !== undefined ? { restore: { anchor: origin.anchor, scrollY: origin.scrollY } } : undefined) });
+    return true;
+  };
   const leave = () => {
     if (leaving.current) return;
     handle.clear();
+    if (backToBalance()) return;
     const origin = readOrigin(location.state, tripId ?? "");
     if (postId && origin.label !== "recuerdo") { navigate(listing); return; }
     if ((origin.label === "recuerdo" || origin.label === "actividad") && canGoBack(location)) { leaving.current = true; navigate(-1); }

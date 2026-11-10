@@ -14,3 +14,15 @@ export const openPostFrom = (navigate: NavigateFunction, location: HereLocation,
   navigate(`${location.pathname}${location.search}`, { replace: true, state: { ...previous, restore: { anchor, scrollY, ...(panel ? { panel } : {}) } } });
   navigate(`/trips/${tripId}/memories/${postId}`, { state: { origin: buildOrigin(location, label, anchor, scrollY, viewer) } });
 };
+
+export type EditOpening = { tripId: string; postId: string; anchor: string; label: OriginLabel; focus?: "link" | "expense" | "split" };
+/**
+ * Opens the editor of a memory from a list that must be found again (the balance): the current entry stores the anchor and scroll, and the editor
+ * receives the origin and, optionally, which control takes the focus.
+ */
+export const openEditFrom = (navigate: NavigateFunction, location: HereLocation, { tripId, postId, anchor, label, focus }: EditOpening) => {
+  const scrollY = Math.max(0, Math.round(window.scrollY || 0));
+  const previous = typeof location.state === "object" && location.state !== null && !Array.isArray(location.state) ? location.state : {};
+  navigate(`${location.pathname}${location.search}`, { replace: true, state: { ...previous, restore: { anchor, scrollY } } });
+  navigate(`/trips/${tripId}/memories/${postId}/edit`, { state: { origin: buildOrigin(location, label, anchor, scrollY), ...(focus ? { focus } : {}) } });
+};
