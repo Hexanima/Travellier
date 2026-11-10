@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useNavigate } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, TextField } from "../components/index.js";
-import { classifyTrips, type TripFilter } from "./trip-list-filter.js";
+import { classifyTrips, nextBoundaryMs, type TripFilter } from "./trip-list-filter.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
+import { useTripRefresh } from "./use-trip-refresh.js";
 
 type TripsListScreenProps = {
   trips: Pick<TripManagementApi, "list">;
@@ -12,6 +13,7 @@ type TripsListScreenProps = {
   now?: () => number;
 };
 
+const maxTimerMs = 2 ** 31 - 1;
 const filterTabs = [{ id: "active", label: "Activos" }, { id: "finished", label: "Finalizados" }] as const;
 
 export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsListScreenProps) {
@@ -40,22 +42,41 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
     }
   };
 
-  const loadTrips = useCallback(async () => {
+  // Only the latest request applies its result; unmounting invalidates the pending ones.
+  const requestRef = useRef(0);
+  const loadedRef = useRef(false);
+
+  // A silent refresh keeps what is shown: it never shows the loading state and, once the list loaded, never an error.
+  const loadTrips = useCallback(async (silent = false) => {
+    const request = ++requestRef.current;
+    // The clock is read before the request so the Trips are reclassified even if the network fails.
     setNowMs(nowRef.current());
-    setLoading(true);
-    setLoadError(false);
+    if (!silent) { setLoading(true); setLoadError(false); }
+    let failed = false;
     try {
       const result = await trips.list();
-      if (result.ok) setItems(result.value);
-      else setLoadError(true);
+      if (request !== requestRef.current) return;
+      if (result.ok) { loadedRef.current = true; setItems(result.value); setLoadError(false); }
+      else failed = true;
     } catch {
-      setLoadError(true);
-    } finally {
-      setLoading(false);
+      if (request !== requestRef.current) return;
+      failed = true;
     }
+    if (failed && (!silent || !loadedRef.current)) setLoadError(true);
+    setLoading(false);
   }, [trips]);
 
-  useEffect(() => { void loadTrips(); }, [loadTrips]);
+  useEffect(() => { void loadTrips(); return () => { requestRef.current += 1; }; }, [loadTrips]);
+  useTripRefresh(() => loadTrips(true));
+
+  // The next Trip to finish: wait for its limit (the instant itself is still active), never more than the timers allow, and re-evaluate on firing.
+  useEffect(() => {
+    const next = nextBoundaryMs(items, nowMs);
+    if (next === null) return;
+    const delay = Math.min(Math.max(next - nowRef.current() + 1, 1), maxTimerMs);
+    const timer = window.setTimeout(() => setNowMs(nowRef.current()), delay);
+    return () => window.clearTimeout(timer);
+  }, [items, nowMs]);
 
   const classified = useMemo(() => classifyTrips(items, nowMs), [items, nowMs]);
   const shown = filter === "active" ? classified.active : classified.finished;
