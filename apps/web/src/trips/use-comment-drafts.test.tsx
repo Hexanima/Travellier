@@ -65,8 +65,21 @@ describe("comment drafts context", () => {
   it("fails clearly without a provider", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const container = document.createElement("div"); document.body.append(container);
-    const root = createRoot(container); roots.push(root);
-    await expect(act(async () => root.render(<Probe name="x" />))).rejects.toThrow("useCommentDraft requires a CommentDraftsProvider");
-    error.mockRestore();
+    const uncaught: unknown[] = [];
+    const root = createRoot(container, { onUncaughtError: (thrown) => { uncaught.push(thrown); } });
+    roots.push(root);
+    try {
+      // Según el entorno, act puede rechazar o React reporta por onUncaughtError: se acepta ambos y se afirma sobre el error capturado.
+      await act(async () => root.render(<Probe name="x" />));
+    } catch (thrown) {
+      uncaught.push(thrown);
+    } finally {
+      error.mockRestore();
+    }
+    expect(uncaught.length).toBeGreaterThan(0);
+    for (const thrown of uncaught) {
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe("useCommentDraft requires a CommentDraftsProvider");
+    }
   });
 });
