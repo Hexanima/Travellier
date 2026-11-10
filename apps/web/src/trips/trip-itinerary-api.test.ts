@@ -49,6 +49,23 @@ describe("itinerary client", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
     expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
   });
+  it.each([
+    ["without the paidBy key", (e: Record<string, unknown>) => { delete e.paidBy; }],
+    ["with paidBy null", (e: Record<string, unknown>) => { e.paidBy = null; }],
+    ["with a paidBy id", (e: Record<string, unknown>) => { e.paidBy = itineraryId(77); }],
+    ["legacy without currency and without paidBy", (e: Record<string, unknown>) => { delete e.paidBy; e.currency = null; }],
+  ])("accepts an expense %s", async (_name, mutate) => {
+    const itinerary = itineraryFixture();
+    mutate(itinerary.posts[0]!.expense as unknown as Record<string, unknown>);
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: true, value: itinerary });
+  });
+  it.each([[5], ["not-an-object-id"]])("rejects an invalid paidBy %j", async (paidBy) => {
+    const itinerary = itineraryFixture();
+    (itinerary.posts[0]!.expense as unknown as Record<string, unknown>).paidBy = paidBy;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it("reads canonical UTC and legacy urban steps without mutating their fields", async () => {
     const itinerary = itineraryFixture();
     const canonical = { ...itinerary.transports[0], type: "bus_local", details: { steps: [

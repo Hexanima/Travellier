@@ -62,7 +62,7 @@ const activity = (v: unknown) => entity(v) && id(v.dayId) && text(v.title) && nu
   timestamp(v.scheduledAt) && nullableText(v.mapsUrl) &&
   id(v.createdBy) && timestamp(v.createdAt) && ids(v.postIds);
 const expense = (v: unknown) => entity(v) && id(v.postId) && finite(v.totalAmount) && (v.currency === null || currencies.includes(v.currency as string)) && nullableText(v.breakdown) &&
-  nullableId(v.paidBy) && timestamp(v.createdAt);
+  (v.paidBy === undefined || nullableId(v.paidBy)) && timestamp(v.createdAt);
 const placements = ["activity", "transport", "independent"];
 // A legacy dayId (absent, null or an ObjectId) is accepted and never used.
 const context = (v: unknown) => record(v) && nullableId(v.parentPostId) && id(v.rootPostId) && nullableId(v.rootActivityId) &&
