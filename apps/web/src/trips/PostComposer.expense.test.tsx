@@ -426,6 +426,39 @@ describe("PostComposer payments and shares (T84)", () => {
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: { payments: [{ userId: dani, unit: "amount", value: 10 }, { userId: beto, unit: "amount", value: 5 }] } });
   });
 
+  describe("with an unreadable stored expense", () => {
+    const unreadable = () => vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: saved(id), parent: null, children: [], rootActivityId: null, expenseUnreadable: true } }));
+
+    it("the composer loads and saves a text change without payments or shares", async () => {
+      const { container, update } = await render(editPath(withExpenseId), { get: unreadable() });
+      await type(container, "description", "Editado");
+      await submit(container);
+      expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado" });
+    });
+
+    it("saving an amount sends no payments or shares", async () => {
+      const { container, update } = await render(editPath(withExpenseId), { get: unreadable() });
+      await click(expenseButton(container));
+      await type(container, "amount", "30"); await choose(container, "ARS");
+      await click(button(container, "Aceptar"));
+      await submit(container);
+      expect(update).toHaveBeenCalledTimes(1);
+      const body = update.mock.calls[0]![2] as { expense?: Record<string, unknown> };
+      expect(body.expense).toBeDefined();
+      expect(body.expense).not.toHaveProperty("payments");
+      expect(body.expense).not.toHaveProperty("shares");
+    });
+
+    it("Pagos y reparto shows the error state with a retry and no editor", async () => {
+      const { container } = await render(editPath(withExpenseId), { get: unreadable() });
+      await type(container, "description", "Editado");
+      await click(splitButton(container));
+      expect(container.querySelector("[data-section]")).toBeNull();
+      expect(alerts(container)).toHaveLength(1);
+      expect(button(container, "Reintentar")).toBeDefined();
+    });
+  });
+
   it("a 422 on a row opens the editor with that row marked, keeps the draft and the person fixes it", async () => {
     const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "expense.payments[1].userId", code: "not_member", message: "x" }] } });
     const { container } = await render(editPath(withExpenseId), { storedExpense: stored(), update });
