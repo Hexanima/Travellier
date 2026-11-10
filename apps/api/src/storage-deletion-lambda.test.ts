@@ -78,13 +78,22 @@ describe("storage deletion Lambda handler", () => {
 });
 
 describe("abandoned photo sweep runner", () => {
-  const sweepSummary = { pages: 1, scanned: 3, deleted: 1, keptRecent: 1, keptLinked: 0, ignored: 1, listFailed: false, deleteFailed: 0, truncated: false };
+  const sweepSummary = { pages: 1, scanned: 3, deleted: 1, keptRecent: 1, keptLinked: 0, ignored: 1, listFailed: false, deleteFailed: 0, linkCheckFailed: 0, truncated: false };
 
   it("runs the sweep for a valid manual input with the internal deadline and reports counters only", async () => {
     const sweep = vi.fn().mockResolvedValue(ok(sweepSummary));
     const runner = createPhotoSweepRunner({ expectedStage: "dev", sweep, now: () => NOW, deadlineMs: 45_000 });
     expect(await runner({ kind: "photoSweep", stage: "dev" })).toEqual({ ok: true, summary: sweepSummary });
     expect(sweep).toHaveBeenCalledWith({ deadline: new Date(NOW.getTime() + 45_000) });
+  });
+
+  it("propagates truncated and the failure counters without keys or secrets", async () => {
+    const partial = { ...sweepSummary, deleteFailed: 2, linkCheckFailed: 3, truncated: true };
+    const runner = createPhotoSweepRunner({ expectedStage: "dev", sweep: vi.fn().mockResolvedValue(ok(partial)), now: () => NOW, deadlineMs: 45_000 });
+    const outcome = await runner({ kind: "photoSweep", stage: "dev" });
+    expect(outcome).toEqual({ ok: true, summary: partial });
+    expect(outcome).toMatchObject({ summary: { truncated: true, linkCheckFailed: 3, deleteFailed: 2 } });
+    expect(JSON.stringify(outcome)).not.toMatch(/trips\/|secret/);
   });
 
   it.each([{ kind: "storageDeletionJobs", stage: "dev" }, { kind: "photoSweep", stage: "prod" }, { kind: "photoSweep" }, null, "photoSweep", { kind: "photoSweep", stage: "dev", minAgeSeconds: 1 }])(
