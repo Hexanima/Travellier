@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UploadOutcome } from "../api/direct-upload.js";
 import { PhotoReadError } from "../native/photo-file.js";
 import { PostComposer } from "./PostComposer.js";
+import { ignoreRetryIds } from "./post-composer-test-api.js";
 import { PostLinkPicker } from "./PostLinkPicker.js";
 import { SpontaneousActivityForm } from "./SpontaneousActivityForm.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
@@ -48,7 +49,7 @@ async function render(path: string, mocks: Mocks | undefined, overrides: Partial
   const get = overrides.get ?? vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
   const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={timeZone} spontaneousActivity />;
   const subform = <SpontaneousActivityForm itinerary={itinerary} timeZone={timeZone} />;
-  const composer = <PostComposer posts={{ create, update, get }} itinerary={itinerary} timeZone={timeZone} {...(mocks ? { photos: mocks.deps } : {})} />;
+  const composer = <PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone={timeZone} {...(mocks ? { photos: mocks.deps } : {})} />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
@@ -301,7 +302,7 @@ describe("PostComposer photos: publishing", () => {
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[1]![1]).toEqual(create.mock.calls[0]![1]);
     expect(mocks.api.reserve).toHaveBeenCalledTimes(1);
-    expect(alerts(container)[0]!.textContent).toContain("por si ya se publicó");
+    expect(alerts(container)[0]!.textContent).toContain("Podés reintentar: el recuerdo no se va a publicar dos veces.");
   });
   it.each([["not-found"], ["forbidden"]])("after a %s on create shows the text read-only and copyable and keeps the draft", async (kind) => {
     const mocks = makeDeps();
@@ -416,7 +417,7 @@ describe("PostComposer photos: publishing", () => {
     const { container } = await render(newPath, mocks, { create });
     await field(container, "description", "Hola"); await choose(container, mocks, 1);
     await submit(container);
-    expect(container.textContent).toContain("Revisá tus recuerdos antes de reintentar por si ya se publicó.");
+    expect(container.textContent).toContain("Podés reintentar: el recuerdo no se va a publicar dos veces.");
     await submit(container);
     expect(create.mock.calls[1]![1]).toEqual(create.mock.calls[0]![1]);
     expect(mocks.api.reserve).toHaveBeenCalledTimes(1); expect(mocks.transfer.put).toHaveBeenCalledTimes(1);

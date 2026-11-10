@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PostComposer } from "./PostComposer.js";
+import { ignoreRetryIds } from "./post-composer-test-api.js";
 import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
 import type { PostResponse } from "./trip-post-api.js";
@@ -39,7 +40,7 @@ async function render(entries: Entry[], mocks: { update?: ReturnType<typeof vi.f
   const itinerary = { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) };
   const update = mocks.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved({ description: "Editado" }) });
   const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
-  const composer = <PostComposer posts={{ create: vi.fn(), update, get }} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />;
+  const composer = <PostComposer posts={ignoreRetryIds({ create: vi.fn(), update, get })} itinerary={itinerary} timeZone="America/Argentina/Buenos_Aires" />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={entries}><Back /><Forward /><Routes>
