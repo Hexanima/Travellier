@@ -20,7 +20,7 @@ Los puertos y errores están en `domain`, sin imports de Capacitor. Las fábrica
 - Fotos: `photos.select('camera' | 'gallery')` devuelve referencias locales y URLs de previsualización. No crea posts ni sube a S3. Solicita solo cámara al capturar en iOS. Los selectores del sistema entregan acceso a archivos seleccionados sin pedir acceso general a la biblioteca. La captura usa `saveToGallery: false`.
 - Push: consultar/solicitar permiso explícitamente; luego instalar `push.listen(handlers)` y llamar `push.register()`. `register()` solo confirma que se solicitó el registro: el token llega por `onToken`, o el fallo por `onError`. Conservar y ejecutar el cierre de listeners al abandonar el flujo; no usar `removeAllListeners()`. `unregister()` no revoca por sí solo el registro en la API de T89/T90. El token iOS es **APNs** y el Android es **FCM**.
 - Calendario: `checkAccess()` consulta sin diálogo. `requestAccess('write')` pide escritura; `requestAccess('manage')` pide lectura/escritura, necesarias para gestionar eventos vinculados. Un resultado exitoso puede contener permisos denegados: siempre inspeccionar `read`/`write`. No representa una exportación o sincronización.
-- Errores: `unsupported`, `denied`, `cancelled` y `native`. La cancelación de fotos no equivale a denegación. En navegador se devuelve `unsupported`; no se incorpora una plataforma web pública.
+- Errores: `unsupported`, `denied`, `cancelled`, `missing` (solo eventos del calendario: el evento buscado no existe) y `native`. La cancelación de fotos no equivale a denegación. En navegador se devuelve `unsupported`; no se incorpora una plataforma web pública.
 
 T74 debe manejar `App.appRestoredResult` al recuperar una captura si Android termina el proceso. Este setup no introduce listeners permanentes ni publica archivos recuperados automáticamente.
 
@@ -28,7 +28,15 @@ T74 debe manejar `App.appRestoredResult` al recuperar una captura si Android ter
 
 La versión instalada exige `startDate` y `endDate` al crear un evento; `modifyEvent` elige la primera coincidencia por filtros y no admite ID. `deleteEvent` sí admite ID. iOS EventKit reduce la precisión a segundos.
 
-T46 configura plugins y permisos, sin exponer CRUD de eventos. Antes de T96 se debe resolver cómo preservar la identidad al editar y cómo representar planes sin duración. No asignar duración/fin por defecto, recrear eventos indiscriminadamente ni modificar por título. No se modificó el PRD ni se acredita T96. Un ICS sigue siendo una copia estática gestionada por T95.
+T46 configuró plugins y permisos. T96 agrega la sincronización de eventos sobre ese plugin, sin tocar la configuración nativa. Un ICS sigue siendo una copia estática gestionada por T95.
+
+**Identidad por marcador.** Como `modifyEvent` no admite ID, cada evento gestionado lleva como última línea de sus `notes` el marcador `travellier:<tipo>-<id>@<tripId>` (tipo: `activity`, `transport` o `day`). El adaptador (`apps/web/src/native/calendar-events.ts`, puerto `CalendarEventsPort`) busca con `findEvents` filtrando por ese texto y descarta lo que no lo tenga como línea completa; actualiza con `modifyEvent` por marcador más la ventana anterior (±60 s); borra con `deleteEvent({ id })`. El plugin responde `OS-PLUG-CLDR-0001` («sin coincidencia») cuando no hay evento; el adaptador lo traduce a `NativeCapabilityError` de tipo `missing`. `notes` reemplaza la descripción entera en el plugin, por eso el marcador viaja siempre en el texto que se escribe.
+
+**Qué hace el servicio** (`apps/web/src/calendar/calendar-sync-service.ts`): solo corre si la persona lo activó; antes de operar consulta el permiso sin diálogo y exige lectura y escritura (los dos hacen falta para buscar, actualizar y borrar). Crea guardando la referencia (id, huella, ventana) en Preferences por cuenta, viaje y dispositivo; antes de crear busca por marcador y adopta el evento existente (si se perdió la referencia o la app murió antes de guardarla), borrando copias repetidas. Un plan sin duración se escribe con fin igual al inicio. No se escriben gastos, participantes, tokens, costos ni números de vuelo. Android no tiene campo URL: el plugin lo ignora, así que el enlace del lugar solo llega en iOS.
+
+**Requiere permiso de lectura:** buscar por marcador, actualizar, borrar y adoptar. **Solo escritura** (iOS 17+ «Add Events Only»): se pueden crear eventos pero no buscarlos ni mantenerlos, así que la app no sincroniza y ofrece el `.ics`. El permiso se pide solo al pulsar «Mantener sincronizado con el calendario», nunca al abrir la pantalla.
+
+**No verificado (T96):** todo se probó con el plugin simulado en memoria. Falta comprobar en Android e iOS reales: alta, edición y baja; el comportamiento real de `modifyEvent` por filtro (coincidencia por subcadena de `notes` y por rango); la estabilidad de los ids; el truncado a segundos; los permisos reales, incluido «Add Events Only»; cuentas de calendario reales (Google/iCloud); duplicados tras reinstalar; y varios dispositivos. Los ids y las referencias son por dispositivo.
 
 ## Android
 
