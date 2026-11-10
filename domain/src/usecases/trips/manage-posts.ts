@@ -66,6 +66,8 @@ export interface TripPostChainResult {
   children: PostSummary[];
   /** Activity of the highest ancestor; null when the root has none or stored data is inconsistent. */
   rootActivityId: ObjectId | null;
+  /** Saved expense of the post (with derived completeness and former members); the key is absent when the post has none. */
+  expense?: PostExpenseView;
 }
 /** An expense plan with the current members among the users it names (to derive `formerMemberIds` after the write). */
 type PlannedExpense = PostExpensePlan & { memberIds: ObjectId[] };
@@ -337,10 +339,16 @@ export const getTripPostChain: UseCase<Dependencies, PostDetailPayload, TripPost
     const ancestors = { ok: true as const, value: loaded.value.posts };
     const byId = new Map(ancestors.value.map((ancestor) => [ancestor.id, ancestor]));
     const chain = resolvePostChain(post.value, (id) => byId.get(id));
+    const expense = await scope.findExpense(post.value.id);
+    if (!expense.ok) return expense;
+    const named = expense.value === undefined ? [] : [...new Set([...expense.value.payments, ...expense.value.shares].map((row) => row.userId))];
+    const members = named.length === 0 ? ok([] as ObjectId[]) : await scope.listMemberUserIds(named);
+    if (!members.ok) return members;
     return ok({ post: post.value, parent: ancestors.value[0] !== undefined && ancestors.value[0].id === post.value.parentPostId
       ? summarize(ancestors.value[0]) : null,
     children: children.value.filter((child) => child.tripId === payload.tripId && child.parentPostId === post.value.id)
-      .map(summarize), rootActivityId: chain.ok ? chain.value.rootActivityId : null });
+      .map(summarize), rootActivityId: chain.ok ? chain.value.rootActivityId : null,
+    ...(expense.value === undefined ? {} : { expense: describePostExpense(expense.value, members.value) }) });
   }),
 };
 
