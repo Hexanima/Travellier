@@ -42,9 +42,14 @@ export interface TripPostScope extends TripPostReadScope {
   insertPhotos: (photos: readonly PostPhoto[]) => AsyncResult<void>;
   /** Expense of a post of this Trip (1:1 by `postId`); a legacy record has `currency` null. */
   findExpense: (postId: ObjectId) => AsyncResult<PostExpense | undefined>;
-  /** Writes a new expense; a second one for the same post fails with `ExpenseConflictError`. */
+  /**
+   * Which of these users are CURRENT members of the Trip, read in the same snapshot (and under the same Trip lock) as `authorize`, so an
+   * expulsion and an expense save are serialized. A user not listed may be a former member or never have belonged: they cannot be told apart.
+   */
+  listMemberUserIds: (userIds: ObjectId[]) => AsyncResult<ObjectId[]>;
+  /** Writes a new expense (`payments` and `shares` are stored as given, empty by default); a second one for the same post fails with `ExpenseConflictError`. */
   insertExpense: (expense: PostExpense) => AsyncResult<void>;
-  /** `$set` of only these fields of an existing expense; never replaces the record (payers, payments and shares are kept). */
+  /** `$set` of only these fields of an existing expense; never replaces the record (the legacy `paidBy`, `createdAt` and the lists not listed are kept). */
   updateExpenseFields: (expense: PostExpense, fields: readonly PostExpenseField[]) => AsyncResult<void>;
   insertActivity: (activity: Activity) => AsyncResult<void>;
   /** Complete activities of the Trip, to review the author's agenda in the same snapshot. */
