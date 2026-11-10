@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
 import { createPhotoUploadKey } from "app-domain";
+import { postPhotosByPostsQuery } from "../adapters/mongodb/post-photo-store.js";
 import { createMongoTripPostRepository } from "../adapters/mongodb/trip-post-repository.js";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
 import { FakeObjectStorage } from "../../test/fake-object-storage.js";
@@ -243,7 +244,7 @@ describe("photo persistence and transactions", () => {
 
   // Deterministic ordering: the first call of `method` on `name` runs for real and then stays paused (its transaction
   // open, Trip lock already taken) until `release()`. The rival operation is started while the pause holds.
-  const pauseAfterFirst = (name: string, method: "insertOne" | "updateOne") => {
+  const pauseAfterFirst = (name: string, method: "insertOne" | "updateOne" | "findOne") => {
     const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
     const real = (collection[method] as (...args: unknown[]) => Promise<unknown>).bind(collection);
     let reached!: () => void, release!: () => void, first = true;
@@ -364,6 +365,226 @@ describe("photo persistence and transactions", () => {
     expect(saved).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
     expect(await f.db.collection("postPhotos").countDocuments({})).toBe(0);
     expect(await f.db.collection("storageDeletionJobs").countDocuments({})).toBe(0);
+  });
+
+  describe("gallery listing", () => {
+    const at = (minutes: number) => new Date(Date.parse("2026-10-01T10:00:00.000Z") + minutes * 60_000);
+    const seedPost = async (fields: { createdAt: Date; activityId?: ObjectId | null; parentPostId?: ObjectId | null; authorId?: ObjectId; tripId?: ObjectId }) => {
+      const _id = new ObjectId();
+      await f.db.collection("posts").insertOne({ _id, tripId: fields.tripId ?? f.trip, authorId: fields.authorId ?? f.actor, description: null, mapsUrl: null,
+        activityId: fields.activityId ?? null, parentPostId: fields.parentPostId ?? null, transportId: null, createdAt: fields.createdAt });
+      return _id;
+    };
+    const seedPhotos = async (postId: ObjectId, count: number, extra: { tripId?: ObjectId; uploaderId?: ObjectId } = {}) => {
+      const tripId = extra.tripId ?? f.trip, uploaderId = extra.uploaderId ?? f.actor;
+      const docs = Array.from({ length: count }, (_, index) => ({ _id: new ObjectId(), postId, tripId, uploaderId, order: index + 1,
+        s3Key: `trips/${tripId.toHexString()}/photos/${uploaderId.toHexString()}/${randomUUID()}.jpg`, uploadedAt: at(0) }));
+      if (docs.length > 0) await f.db.collection("postPhotos").insertMany(docs);
+      return docs;
+    };
+    const list = (extra: Record<string, unknown> = {}, user: ObjectId = f.actor, trip: ObjectId = f.trip) =>
+      f.api.listPhotos!({ tripId: domainId(trip), authenticatedUserId: domainId(user), ...extra });
+    const page = async (extra: Record<string, unknown> = {}, user?: ObjectId) => {
+      const result = await list(extra, user);
+      if (!result.ok) throw new Error(`unexpected ${result.error.tag}`);
+      return result.value;
+    };
+    const walk = async (limit: number, extra: Record<string, unknown> = {}) => {
+      const pages = [];
+      let cursor: string | undefined;
+      for (let guard = 0; guard < 100; guard++) {
+        const current = await page({ limit, cursor, ...extra });
+        pages.push(current);
+        if (current.nextCursor === null) return pages;
+        cursor = current.nextCursor;
+      }
+      throw new Error("pagination does not end");
+    };
+    /** Independent oracle: reads the collections and sorts with plain comparisons. */
+    const expectedIds = async (tripId: ObjectId = f.trip) => {
+      const posts = await f.db.collection("posts").find({ tripId }).toArray();
+      const photos = await f.db.collection("postPhotos").find({ tripId }).toArray();
+      const rank = new Map(posts.map((post) => [post._id.toHexString(), post]));
+      return photos.filter((photo) => rank.has(photo.postId.toHexString()))
+        .sort((a, b) => {
+          const pa = rank.get(a.postId.toHexString())!, pb = rank.get(b.postId.toHexString())!;
+          const ha = a.postId.toHexString(), hb = b.postId.toHexString();
+          return pb.createdAt.getTime() - pa.createdAt.getTime() || (ha < hb ? 1 : ha > hb ? -1 : 0) || a.order - b.order;
+        }).map((photo) => photo._id.toHexString());
+    };
+    const idsOf = (pages: Array<{ photos: Array<{ id: string }> }>) => pages.flatMap((p) => p.photos.map((photo) => photo.id));
+    const createActivity = async () => {
+      const created = await f.api.createPost!({ ...f.input(), dayId: domainId(f.day), newActivity: { title: "Cena", scheduledAt: f.occurrence, durationMinutes: 60 } });
+      if (!created.ok || created.value.outcome !== "created" || !created.value.activity) throw new Error("Activity not created.");
+      return created.value.activity.id;
+    };
+
+    it("pages real data with tied publication instants without duplicates or gaps, ending with a null cursor", async () => {
+      const posts = [at(0), at(0), at(0), at(0), at(1), at(1), at(1), at(-1), at(5)];
+      for (const [index, createdAt] of posts.entries()) await seedPhotos(await seedPost({ createdAt }), index % 4);
+      const expected = await expectedIds();
+      expect(expected.length).toBeGreaterThan(10);
+      for (const limit of [1, 3, 4, expected.length, expected.length + 5]) {
+        const pages = await walk(limit);
+        expect(idsOf(pages), `limit ${limit}`).toEqual(expected);
+        expect(pages.at(-1)!.nextCursor).toBeNull();
+        expect(pages.slice(0, -1).every((p) => p.photos.length === limit && p.nextCursor !== null)).toBe(true);
+      }
+    });
+
+    it("signs only the photos of the page, with 300 s URLs, and never takes the Trip lock", async () => {
+      for (let i = 0; i < 4; i++) await seedPhotos(await seedPost({ createdAt: at(i) }), 2);
+      const start = await revision();
+      const first = await page({ limit: 3 });
+      expect(fake.downloads).toHaveLength(3);
+      expect(fake.downloads.every((d) => d.expiresInSeconds === 300)).toBe(true);
+      const keysOfPage = (await f.db.collection("postPhotos").find({ _id: { $in: first.photos.map((p) => new ObjectId(p.id)) } }).toArray()).map((d) => d.s3Key).sort();
+      expect(fake.downloads.map((d) => d.objectKey).sort()).toEqual(keysOfPage);
+      expect(await revision()).toBe(start);
+      expect(JSON.stringify(first)).not.toContain("s3Key");
+      expect(Object.keys(first.photos[0]!).sort()).toEqual(["expiresAt", "id", "order", "post", "postId", "uploadedAt", "uploaderId", "url"]);
+      expect(Object.keys(first.photos[0]!.post).sort()).toEqual(["authorId", "createdAt", "rootActivityId", "rootTransportId"]);
+    });
+
+    it("runs the exact photo query by posts as an index scan on postId without COLLSCAN", async () => {
+      const ids = [await seedPost({ createdAt: at(0) }), await seedPost({ createdAt: at(1) })];
+      for (const id of ids) await seedPhotos(id, 2);
+      const { filter, sort } = postPhotosByPostsQuery(f.trip, ids.map(domainId));
+      const plan = await f.db.collection("postPhotos").find(filter).sort(sort).explain("queryPlanner");
+      const winning = JSON.stringify(plan.queryPlanner.winningPlan);
+      expect(winning).toContain("IXSCAN");
+      expect(winning).not.toContain("COLLSCAN");
+      expect(winning).toMatch(/"indexName":"postId(_order_unique)?"/);
+    });
+
+    it("includes independent posts and posts far outside the itinerary dates", async () => {
+      const ids = [await seedPost({ createdAt: new Date("2001-01-01T00:00:00.000Z") }), await seedPost({ createdAt: new Date("2090-01-01T00:00:00.000Z") })];
+      for (const id of ids) await seedPhotos(id, 1);
+      expect((await page()).photos.map((p) => p.postId)).toEqual([ids[1]!.toHexString(), ids[0]!.toHexString()]);
+    });
+
+    it("keeps the other pages consistent when a post is published between them, and sees it from a new first page", async () => {
+      for (let i = 0; i < 4; i++) await seedPhotos(await seedPost({ createdAt: at(i) }), 2);
+      const first = await page({ limit: 3 });
+      const created = await createPost(keys(1));
+      if (!created.ok || created.value.outcome !== "created") throw new Error("Post not created.");
+      const rest = await walk(3);
+      const continued = [];
+      let cursor = first.nextCursor;
+      while (cursor !== null) { const next = await page({ limit: 3, cursor }); continued.push(next); cursor = next.nextCursor; }
+      const seen = [...idsOf([first]), ...idsOf(continued)];
+      expect(new Set(seen).size).toBe(seen.length);
+      expect(seen).toHaveLength(8);
+      expect(idsOf(rest)).toHaveLength(9);
+      expect(rest[0]!.photos[0]!.postId).toBe(created.value.post.id);
+    });
+
+    it("lets a page read finish while a publication is open, without waiting and without seeing it", async () => {
+      for (let i = 0; i < 4; i++) await seedPhotos(await seedPost({ createdAt: at(i) }), 2);
+      const first = await page({ limit: 3 }), expected = await expectedIds();
+      const paused = pauseAfterFirst("posts", "insertOne");
+      const publishing = launch(createPost(keys(1)));
+      let second!: Awaited<ReturnType<typeof page>>;
+      try {
+        await paused.reached;
+        second = await page({ limit: 3, cursor: first.nextCursor });
+      } finally { paused.release(); }
+      expect((await publishing).ok).toBe(true);
+      expect(idsOf([first, second])).toEqual(expected.slice(0, 6));
+      const third = await page({ limit: 3, cursor: second.nextCursor });
+      expect(idsOf([first, second, third])).toEqual(expected);
+      expect(third.nextCursor).toBeNull();
+    }, 15_000);
+
+    it("keeps the group listing complete when an activity is deleted or a post is relinked between pages, leaving postPhotos intact", async () => {
+      const activity = await createActivity(), mongoActivity = new ObjectId(activity);
+      const root = await seedPost({ createdAt: at(1), activityId: mongoActivity });
+      const child = await seedPost({ createdAt: at(2), parentPostId: root }), grandchild = await seedPost({ createdAt: at(3), parentPostId: child });
+      const other = await seedPost({ createdAt: at(4) });
+      for (const id of [root, child, grandchild, other]) await seedPhotos(id, 2);
+      const inActivity = await walk(3, { activityId: activity });
+      expect(idsOf(inActivity)).toHaveLength(6);
+      expect(inActivity.flatMap((p) => p.photos).every((photo) => photo.post.rootActivityId === activity)).toBe(true);
+      const expected = await expectedIds(), before = await f.db.collection("postPhotos").find().sort({ _id: 1 }).toArray();
+      const first = await page({ limit: 3 });
+      // Relink the root away from the activity: its descendants leave the filter, nothing is deleted.
+      expect((await f.api.updatePost!({ ...f.context(), postId: domainId(root), activityId: null })).ok).toBe(true);
+      expect(idsOf(await walk(3, { activityId: activity }))).toHaveLength(0);
+      expect((await f.api.updatePost!({ ...f.context(), postId: domainId(root), activityId: domainId(mongoActivity) })).ok).toBe(true);
+      expect(idsOf(await walk(3, { activityId: activity }))).toHaveLength(6);
+      // Delete the activity between two pages of the general listing.
+      expect((await f.api.deleteActivity!({ ...f.context(), activityId: domainId(mongoActivity) })).ok).toBe(true);
+      const rest = [];
+      let cursor = first.nextCursor;
+      while (cursor !== null) { const next = await page({ limit: 3, cursor }); rest.push(next); cursor = next.nextCursor; }
+      expect(idsOf([first, ...rest])).toEqual(expected);
+      expect(await f.db.collection("postPhotos").find().sort({ _id: 1 }).toArray()).toEqual(before);
+      expect(await list({ activityId: activity })).toMatchObject({ ok: false, error: { tag: "ActivityNotFoundError" } });
+      expect((await page({ limit: 60 })).photos.every((photo) => photo.post.rootActivityId === null)).toBe(true);
+    });
+
+    it("lets a read that started before an expulsion finish on its snapshot and answers 404 to the next page", async () => {
+      const admin = await addMember("admin");
+      for (let i = 0; i < 4; i++) await seedPhotos(await seedPost({ createdAt: at(i) }), 2);
+      const first = await page({ limit: 3 }), expected = await expectedIds();
+      const paused = pauseAfterFirst("tripMembers", "findOne");
+      const reading = launch(list({ limit: 3, cursor: first.nextCursor }));
+      let expelled!: Awaited<ReturnType<typeof expel>>;
+      try {
+        await paused.reached;
+        expelled = await expel(admin);
+      } finally { paused.release(); }
+      const second = await reading;
+      expect(expelled.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      expect(second.ok && second.value.photos.map((p) => p.id)).toEqual(expected.slice(3, 6));
+      expect(await list({ limit: 3, cursor: second.ok ? second.value.nextCursor : undefined })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(await list({})).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    }, 15_000);
+
+    it("keeps serving the photos of a former member to the remaining members, with their ids", async () => {
+      const admin = await addMember("admin");
+      await seedPhotos(await seedPost({ createdAt: at(1) }), 2);
+      expect((await expel(admin)).ok).toBe(true);
+      const result = await page({}, admin);
+      expect(result.photos).toHaveLength(2);
+      expect(result.photos.every((photo) => photo.uploaderId === f.actor.toHexString() && photo.post.authorId === f.actor.toHexString())).toBe(true);
+    });
+
+    it("isolates two Trips: foreign photos, foreign posts and corrupt records never show up", async () => {
+      const tripB = new ObjectId(), memberB = new ObjectId(), activityB = new ObjectId();
+      await f.db.collection("trips").insertOne({ _id: tripB, inviteCode: tripB.toHexString(), visibility: "public", votingEnabled: false, expenseMode: "register" });
+      await f.db.collection("tripMembers").insertOne({ tripId: tripB, userId: memberB, role: "participant", joinedAt: new Date() });
+      await f.db.collection("activities").insertOne({ _id: activityB, tripId: tripB, dayId: new ObjectId(), title: "B", scheduledAt: at(0) });
+      const own = await seedPost({ createdAt: at(1) }), foreignPost = await seedPost({ createdAt: at(9), tripId: tripB, authorId: memberB });
+      const ownPhotos = await seedPhotos(own, 2);
+      await seedPhotos(foreignPost, 3, { tripId: tripB, uploaderId: memberB });
+      await seedPhotos(own, 0);
+      // Corrupt records: a photo of the Trip's post stamped with another Trip, and a photo of this Trip pointing at a foreign post.
+      await f.db.collection("postPhotos").insertOne({ _id: new ObjectId(), postId: own, tripId: tripB, uploaderId: memberB, order: 7, s3Key: "corrupt-1", uploadedAt: at(0) });
+      await f.db.collection("postPhotos").insertOne({ _id: new ObjectId(), postId: foreignPost, tripId: f.trip, uploaderId: f.actor, order: 8, s3Key: "corrupt-2", uploadedAt: at(0) });
+      expect((await page({ limit: 60 })).photos.map((p) => p.id)).toEqual(ownPhotos.map((d) => d._id.toHexString()));
+      // The adapter itself already scopes by Trip (the use case checks again, so this is the only place that proves the query).
+      const scoped = await createMongoTripPostRepository(f.db).withReadSnapshot(domainId(f.trip), (scope) =>
+        scope.listPhotosByPosts([domainId(own), domainId(foreignPost)]));
+      expect(scoped.ok && scoped.value.map((photo) => [photo.postId, photo.tripId, photo.order]).sort()).toEqual([
+        ...ownPhotos.map((d) => [domainId(own), domainId(f.trip), d.order]), [domainId(foreignPost), domainId(f.trip), 8]].sort());
+      // The existing-id reads that validate post links are scoped by Trip too.
+      const ownActivity = new ObjectId(), ownTransport = new ObjectId(), transportB = new ObjectId();
+      await f.db.collection("activities").insertOne({ _id: ownActivity, tripId: f.trip, dayId: new ObjectId(), title: "A", scheduledAt: at(0) });
+      await f.db.collection("transports").insertMany([{ _id: ownTransport, tripId: f.trip, destinationId: new ObjectId(), direction: "outbound" },
+        { _id: transportB, tripId: tripB, destinationId: new ObjectId(), direction: "outbound" }]);
+      const repository = createMongoTripPostRepository(f.db);
+      const activityIds = await repository.withReadSnapshot(domainId(f.trip), (scope) => scope.listActivityIds());
+      const transportIds = await repository.withReadSnapshot(domainId(f.trip), (scope) => scope.listTransportIds());
+      expect(activityIds.ok && activityIds.value).toContain(domainId(ownActivity));
+      expect(activityIds.ok && activityIds.value).not.toContain(domainId(activityB));
+      expect(transportIds.ok && transportIds.value).toEqual([domainId(ownTransport)]);
+      expect(await list({}, memberB)).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      const ofB =await list({ limit: 60 }, memberB, tripB);
+      expect(ofB.ok && ofB.value.photos.map((p) => [p.postId, p.order])).toEqual([1, 2, 3].map((order) => [foreignPost.toHexString(), order]));
+      expect(await list({ activityId: domainId(activityB) })).toMatchObject({ ok: false, error: { tag: "ActivityNotFoundError" } });
+    });
   });
 
   it("serves the photos of a former member to the remaining members after the expulsion", async () => {

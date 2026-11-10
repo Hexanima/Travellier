@@ -30,7 +30,8 @@ export interface PostPhotoPlan { toInsert: PostPhoto[]; photos: PostPhotoRef[] }
 interface UploadDependencies { posts: TripPostPort; storage: ObjectStoragePort; createUploadId: () => string }
 interface ReadDependencies { posts: TripPostPort; storage: ObjectStoragePort; now: () => Date }
 
-const authorizeMember = async (scope: TripPostReadScope, payload: { tripId: ObjectId; authenticatedUserId: ObjectId }) => {
+/** Current role of the actor in this Trip snapshot; a non-member or former member is a `TripNotFoundError`. */
+export const authorizeMember = async (scope: TripPostReadScope, payload: { tripId: ObjectId; authenticatedUserId: ObjectId }) => {
   const member = await scope.findMemberRole(payload.authenticatedUserId);
   if (!member.ok) return member;
   if (member.value !== "admin" && member.value !== "participant") return err(new TripNotFoundError());
@@ -106,7 +107,8 @@ export const registerPostPhotos = async (scope: TripPostScope, plan: PostPhotoPl
   return ok(plan.photos);
 };
 
-const signPhotos = async (storage: ObjectStoragePort, now: () => Date, photos: readonly PostPhoto[]): AsyncResult<PostPhotoView[]> => {
+/** Signs one short-lived GET per photo (same expiry for all); nothing is persisted and the S3 key is not exposed. */
+export const signPhotos = async (storage: ObjectStoragePort, now: () => Date, photos: readonly PostPhoto[]): AsyncResult<PostPhotoView[]> => {
   const expiresAt = new Date(now().getTime() + PHOTO_DOWNLOAD_EXPIRES_SECONDS * 1000);
   const views: PostPhotoView[] = [];
   for (const photo of photos) {

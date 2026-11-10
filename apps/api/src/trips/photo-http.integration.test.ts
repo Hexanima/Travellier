@@ -429,11 +429,150 @@ describe("photo protocol HTTP API", () => {
     });
   });
 
+  describe("group gallery (GET /trips/:tripId/photos)", () => {
+    const url = (query = "", trip: ObjectId = f.trip) => `/trips/${trip}/photos${query}`;
+    const get = (query = "", user = f.actor, trip: ObjectId = f.trip) => f.request("GET", url(query, trip), undefined, user);
+    const entry = ["expiresAt", "id", "order", "post", "postId", "uploadedAt", "uploaderId", "url"];
+    const withActivity = { newActivity: { title: "Cena", scheduledAt: "2026-09-25T12:00:00.456Z", durationMinutes: 60 } };
+
+    it("answers 200 with the exact body: photos with their post data, the signed URL and an explicit null cursor", async () => {
+      const keys = await uploaded(2), post = await saved(keys);
+      const response = await get();
+      expect(response.statusCode, response.body).toBe(200);
+      const result = body(response);
+      expect(Object.keys(result).sort()).toEqual(["nextCursor", "photos"]);
+      expect(result.nextCursor).toBeNull();
+      expect(result.photos).toHaveLength(2);
+      for (const [index, photo] of result.photos.entries()) {
+        expect(Object.keys(photo).sort()).toEqual(entry);
+        expect(Object.keys(photo.post).sort()).toEqual(["authorId", "createdAt", "rootActivityId", "rootTransportId"]);
+        expect(photo).toMatchObject({ id: post.photos[index]!.id, postId: post.post.id, order: index + 1, uploaderId: f.actor.toHexString(),
+          url: `https://s3.test/get/${keys[index]}?expires=300`,
+          post: { authorId: f.actor.toHexString(), rootActivityId: null, rootTransportId: null } });
+      }
+      expect(new Set(result.photos.map((photo: { expiresAt: string }) => photo.expiresAt)).size).toBe(1);
+      expect(JSON.stringify(result)).not.toContain("s3Key");
+      expect(await f.db.collection("postPhotos").countDocuments({})).toBe(2);
+    });
+
+    it("pages with limit and cursor over several posts, newest first, without duplicates", async () => {
+      const first = await saved(await uploaded(2)), second = await saved(await uploaded(1)), third = await saved(await uploaded(2));
+      const seen: Array<{ postId: string; order: number }> = [];
+      let cursor: string | null = null, pages = 0;
+      do {
+        const response = await get(`?limit=2${cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
+        expect(response.statusCode, response.body).toBe(200);
+        const result = body(response);
+        expect(result.photos.length).toBeLessThanOrEqual(2);
+        seen.push(...result.photos);
+        cursor = result.nextCursor;
+        pages++;
+      } while (cursor !== null && pages < 10);
+      expect(pages).toBe(3);
+      expect(seen.map((p) => [p.postId, p.order])).toEqual([[third.post.id, 1], [third.post.id, 2], [second.post.id, 1], [first.post.id, 1], [first.post.id, 2]]);
+      expect(fake.downloads).toHaveLength(5);
+    });
+
+    it("filters by the activity of a post and leaves out photos of other posts", async () => {
+      const linked = body(await publish(await uploaded(1), withActivity));
+      await saved(await uploaded(2));
+      const response = await get(`?activityId=${linked.activity.id}`);
+      expect(response.statusCode, response.body).toBe(200);
+      expect(body(response).photos.map((p: { postId: string; post: { rootActivityId: string } }) => [p.postId, p.post.rootActivityId]))
+        .toEqual([[linked.post.id, linked.activity.id]]);
+      expect(fake.downloads).toHaveLength(1);
+      expect(body(await get("?limit=60")).photos).toHaveLength(3);
+    });
+
+    it("answers 401 without a session", async () => {
+      const response = await handleApiRequest({ method: "GET", url: url() }, { trips: f.api });
+      expect(outcome(response)[0]).toBe(401);
+    });
+
+    it("answers 400 for a malformed Trip, activity or transport id", async () => {
+      for (const target of ["/trips/nope/photos", url("?activityId=zzz"), url("?transportId=zzz"), url(`?activityId=${new ObjectId()}&transportId=1`)]) {
+        const response = await f.request("GET", target);
+        expect(outcome(response), target).toEqual([400, "InvalidRequest"]);
+      }
+      expect(fake.downloads).toEqual([]);
+    });
+
+    it("answers 404 to non-members and former members, whatever the query, without signing anything", async () => {
+      const admin = await addMember("admin"), { member: stranger } = await addTrip();
+      await saved(await uploaded(1));
+      for (const query of ["", "?limit=0", "?cursor=x", `?activityId=${new ObjectId()}`]) {
+        expect(outcome(await get(query, stranger)), query).toEqual([404, "TripNotFoundError"]);
+      }
+      expect((await expel(admin)).ok).toBe(true);
+      expect(outcome(await get())).toEqual([404, "TripNotFoundError"]);
+      expect(outcome(await get("?limit=0"))).toEqual([404, "TripNotFoundError"]);
+      expect(fake.downloads).toEqual([]);
+      const current = await get("", admin);
+      expect(current.statusCode).toBe(200);
+      expect(body(current).photos[0]).toMatchObject({ uploaderId: f.actor.toHexString() });
+    });
+
+    it("answers 404 when the activity or transport does not exist in this Trip, also when it belongs to another one", async () => {
+      const { tripId: tripB, member: memberB } = await addTrip();
+      const foreignActivity = new ObjectId(), foreignTransport = new ObjectId();
+      await f.db.collection("activities").insertOne({ _id: foreignActivity, tripId: tripB, dayId: new ObjectId(), title: "B", scheduledAt: new Date() });
+      await f.db.collection("transports").insertOne({ _id: foreignTransport, tripId: tripB, destinationId: new ObjectId() });
+      await saved(await uploaded(1));
+      expect(outcome(await get(`?activityId=${new ObjectId()}`))).toEqual([404, "ActivityNotFoundError"]);
+      expect(outcome(await get(`?activityId=${foreignActivity}`))).toEqual([404, "ActivityNotFoundError"]);
+      expect(outcome(await get(`?transportId=${new ObjectId()}`))).toEqual([404, "TransportNotFoundError"]);
+      expect(outcome(await get(`?transportId=${foreignTransport}`))).toEqual([404, "TransportNotFoundError"]);
+      expect((await get(`?activityId=${foreignActivity}`, memberB, tripB)).statusCode).toBe(200);
+      expect(fake.downloads).toEqual([]);
+    });
+
+    it("answers 422 with the offending fields", async () => {
+      await saved(await uploaded(2));
+      const check = async (query: string, expected: string[]) => {
+        const response = await get(query);
+        expect(response.statusCode, `${query} -> ${response.body}`).toBe(422);
+        expect(fields(response), query).toEqual(expected);
+      };
+      for (const query of ["?limit=0", "?limit=61", "?limit=abc", "?limit=1.5", "?limit=-1", "?limit="]) await check(query, ["limit/invalid"]);
+      for (const query of ["?cursor=garbage", "?cursor=", `?cursor=${btoa("{}")}`]) await check(query, ["cursor/invalid"]);
+      await check(`?activityId=${new ObjectId()}&transportId=${new ObjectId()}`, ["filter/conflict"]);
+      await check("?limit=0&cursor=x", ["limit/invalid", "cursor/invalid"]);
+      await check("?other=1", ["query/unknown_parameter"]);
+      await check("?limit=1&limit=2", ["query/duplicate_parameter"]);
+      expect(fake.downloads).toEqual([]);
+    });
+
+    it("rejects a cursor taken from another Trip or from another filter", async () => {
+      await saved(await uploaded(3));
+      const { tripId: tripB, member: memberB } = await addTrip();
+      await saved(await uploaded(3, memberB, tripB), {}, memberB, tripB);
+      const linked = body(await publish(await uploaded(2), withActivity));
+      const mine = body(await get("?limit=1")).nextCursor as string;
+      const theirs = body(await get("?limit=1", memberB, tripB)).nextCursor as string;
+      const filtered = body(await get(`?limit=1&activityId=${linked.activity.id}`)).nextCursor as string;
+      expect([mine, theirs, filtered].every((cursor) => typeof cursor === "string")).toBe(true);
+      expect(outcome(await get(`?cursor=${encodeURIComponent(theirs)}`))).toEqual([422, "ValidationError"]);
+      expect(fields(await get(`?cursor=${encodeURIComponent(theirs)}`))).toEqual(["cursor/invalid"]);
+      expect(fields(await get(`?cursor=${encodeURIComponent(filtered)}`))).toEqual(["cursor/invalid"]);
+      expect(fields(await get(`?cursor=${encodeURIComponent(mine)}&activityId=${linked.activity.id}`))).toEqual(["cursor/invalid"]);
+      expect((await get(`?cursor=${encodeURIComponent(mine)}`)).statusCode).toBe(200);
+      expect((await get(`?cursor=${encodeURIComponent(filtered)}&activityId=${linked.activity.id}`)).statusCode).toBe(200);
+    });
+
+    it("leaves the single photo and post photo reads working", async () => {
+      const keys = await uploaded(1), post = await saved(keys);
+      expect((await f.request("GET", `/trips/${f.trip}/photos/${post.photos[0]!.id}`)).statusCode).toBe(200);
+      expect((await f.request("GET", `${f.path()}/${post.post.id}/photos`)).statusCode).toBe(200);
+      expect((await get()).statusCode).toBe(200);
+    });
+  });
+
   describe("service wiring", () => {
     it("answers 503 when the endpoints are not wired and 500 when the Trip API has no storage", async () => {
       const unwired = { trips: { joinByCode: vi.fn() } };
       for (const [method, url, payload] of [["POST", `/trips/${f.trip}/photo-uploads`, { files: [jpeg] }],
-        ["GET", `/trips/${f.trip}/posts/${new ObjectId()}/photos`, undefined], ["GET", `/trips/${f.trip}/photos/${new ObjectId()}`, undefined]] as const) {
+        ["GET", `/trips/${f.trip}/posts/${new ObjectId()}/photos`, undefined], ["GET", `/trips/${f.trip}/photos/${new ObjectId()}`, undefined],
+        ["GET", `/trips/${f.trip}/photos`, undefined], ["GET", `/trips/${f.trip}/photos?limit=5`, undefined]] as const) {
         const response = await handleApiRequest({ method, url, body: payload, authenticatedUserId: domainId(f.actor) }, unwired);
         expect(outcome(response), url).toEqual([503, "ServiceUnavailable"]);
       }
@@ -442,6 +581,7 @@ describe("photo protocol HTTP API", () => {
       for (const response of [
         await f.request("POST", `/trips/${f.trip}/photo-uploads`, { files: [jpeg] }),
         await f.request("GET", `/trips/${f.trip}/photos/${new ObjectId()}`),
+        await f.request("GET", `/trips/${f.trip}/photos`),
         await f.request("POST", f.path(), { description: "x", photos: [{ key: keyless }] }),
       ]) expect(outcome(response)).toEqual([500, "InternalError"]);
       expect(await f.db.collection("posts").countDocuments({})).toBe(0);

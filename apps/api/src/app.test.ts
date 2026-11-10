@@ -537,6 +537,99 @@ describe("api app", () => {
     expect(JSON.parse(response.body)).toMatchObject({ avatar: "avatars/507f1f77bcf86cd799439011/id.jpg" });
   });
 
+  describe("GET /trips/:tripId/photos", () => {
+    const user = "507f1f77bcf86cd799439011", trip = "507f191e810c19729de860ea", activity = "507f191e810c19729de860eb", transport = "507f191e810c19729de860ec";
+    const page = { photos: [{ id: "p1", postId: "post1", order: 1, url: "https://get.test/1", expiresAt: "2026-11-10T10:05:00.000Z" }], nextCursor: "abc" };
+    const call = (url: string, trips: Record<string, unknown>, extra: Record<string, unknown> = { authenticatedUserId: user }, method = "GET") =>
+      handleApiRequest({ method, url, ...extra } as never, { trips } as never);
+    const lister = () => vi.fn().mockResolvedValue({ ok: true, value: page });
+
+    it("answers 401 without a session and does not read anything", async () => {
+      const listPhotos = lister();
+      const response = await call(`/trips/${trip}/photos`, { listPhotos }, {});
+      expect(response.statusCode).toBe(401);
+      expect(listPhotos).not.toHaveBeenCalled();
+    });
+
+    it("passes the Trip, the user and the raw query values and answers the exact body", async () => {
+      const listPhotos = lister();
+      const response = await call(`/trips/${trip}/photos?limit=5&cursor=a%2Bb_c-d&activityId=${activity}`, { listPhotos });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers).toMatchObject({ "content-type": "application/json" });
+      expect(JSON.parse(response.body)).toEqual(page);
+      expect(Object.keys(JSON.parse(response.body)).sort()).toEqual(["nextCursor", "photos"]);
+      expect(listPhotos).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, limit: "5", cursor: "a+b_c-d", activityId: activity });
+    });
+
+    it("sends only what the request carried", async () => {
+      const listPhotos = lister();
+      expect((await call(`/trips/${trip}/photos`, { listPhotos })).statusCode).toBe(200);
+      expect((await call(`/trips/${trip}/photos?`, { listPhotos })).statusCode).toBe(200);
+      expect((await call(`/trips/${trip}/photos?transportId=${transport.toUpperCase()}`, { listPhotos })).statusCode).toBe(200);
+      expect((await call(`/trips/${trip}/photos?limit=&cursor=`, { listPhotos })).statusCode).toBe(200);
+      expect(listPhotos.mock.calls.map(([payload]) => payload)).toEqual([
+        { tripId: trip, authenticatedUserId: user }, { tripId: trip, authenticatedUserId: user },
+        { tripId: trip, authenticatedUserId: user, transportId: transport }, { tripId: trip, authenticatedUserId: user, limit: "", cursor: "" }]);
+    });
+
+    it("answers 400 for a malformed Trip, activity or transport id before reading", async () => {
+      const listPhotos = lister();
+      for (const url of ["/trips/not-an-id/photos", `/trips/${trip}/photos?activityId=zzz`, `/trips/${trip}/photos?transportId=`,
+        `/trips/${trip}/photos?activityId=${activity}&transportId=12`, `/trips/${trip}/photos?activityId=zzz&unknown=1`]) {
+        const response = await call(url, { listPhotos });
+        expect(response.statusCode, url).toBe(400);
+        expect(JSON.parse(response.body).error.code).toBe("InvalidRequest");
+      }
+      expect(listPhotos).not.toHaveBeenCalled();
+    });
+
+    it("answers 422 with fields for an unknown or repeated parameter without echoing it", async () => {
+      const listPhotos = lister();
+      const unknown = await call(`/trips/${trip}/photos?secretName=1`, { listPhotos });
+      expect(unknown.statusCode).toBe(422);
+      expect(JSON.parse(unknown.body).error).toMatchObject({ code: "ValidationError", fields: [{ field: "query", code: "unknown_parameter" }] });
+      expect(unknown.body).not.toContain("secretName");
+      for (const query of [`limit=1&limit=2`, `activityId=${activity}&activityId=${activity}`, `cursor=a&cursor=b`]) {
+        const response = await call(`/trips/${trip}/photos?${query}`, { listPhotos });
+        expect(response.statusCode, query).toBe(422);
+        expect(JSON.parse(response.body).error.fields).toMatchObject([{ field: "query", code: "duplicate_parameter" }]);
+      }
+      expect(listPhotos).not.toHaveBeenCalled();
+    });
+
+    it("maps the use case failures to their status", async () => {
+      const failing = (error: unknown) => ({ listPhotos: vi.fn().mockResolvedValue({ ok: false, error }) });
+      const cases: Array<[unknown, number, string]> = [
+        [{ tag: "TripNotFoundError" }, 404, "TripNotFoundError"], [{ tag: "ActivityNotFoundError" }, 404, "ActivityNotFoundError"],
+        [{ tag: "TransportNotFoundError" }, 404, "TransportNotFoundError"], [{ tag: "UnknownError" }, 500, "InternalServerError"]];
+      for (const [error, status] of cases) {
+        const response = await call(`/trips/${trip}/photos`, failing(error));
+        expect(response.statusCode, JSON.stringify(error)).toBe(status);
+      }
+      const { ValidationError } = await import("app-domain");
+      const invalid = await call(`/trips/${trip}/photos`, failing(new ValidationError([{ field: "limit", code: "invalid", message: "Limit is not valid." }])));
+      expect(invalid.statusCode).toBe(422);
+      expect(JSON.parse(invalid.body).error.fields).toEqual([{ field: "limit", code: "invalid", message: "Limit is not valid." }]);
+    });
+
+    it("answers 503 when the listing is not wired", async () => {
+      expect((await call(`/trips/${trip}/photos`, {})).statusCode).toBe(503);
+    });
+
+    it("does not capture the other photo routes nor other methods", async () => {
+      const listPhotos = lister(), getPhoto = vi.fn().mockResolvedValue({ ok: true, value: { id: "x" } });
+      const getPostPhotos = vi.fn().mockResolvedValue({ ok: true, value: [] });
+      const trips = { listPhotos, getPhoto, getPostPhotos };
+      expect((await call(`/trips/${trip}/photos/${activity}`, trips)).statusCode).toBe(200);
+      expect(getPhoto).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, photoId: activity });
+      expect((await call(`/trips/${trip}/posts/${activity}/photos`, trips)).statusCode).toBe(200);
+      expect(getPostPhotos).toHaveBeenCalledTimes(1);
+      expect((await call(`/trips/${trip}/photos`, trips, { authenticatedUserId: user, body: "{}" }, "POST")).statusCode).not.toBe(200);
+      expect((await call(`/trips/${trip}/photos/`, trips)).statusCode).not.toBe(200);
+      expect(listPhotos).not.toHaveBeenCalled();
+    });
+  });
+
   it("returns only the authenticated user's avatar URL", async () => {
     const getAvatarUrl = vi.fn().mockResolvedValue({ ok: true, value: { url: "https://s3.example.test/view" } });
     const response = await handleApiRequest({

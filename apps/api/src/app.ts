@@ -68,6 +68,8 @@ import {
   type PhotoUploadView,
   type PostPhotoPayload,
   type PostPhotoView,
+  type ListTripPhotosPayload,
+  type TripPhotoPage,
   type PostEditableFields,
   type CommentView,
   type TripCommentPayload,
@@ -78,6 +80,7 @@ import {
   type LikeState,
   type TripPostLikesView,
   type Result,
+  type ValidationIssue,
   createObjectId,
   ValidationError,
   err,
@@ -144,6 +147,7 @@ export interface TripApi extends TripInvitationApi {
   createPhotoUploads?: (payload: PhotoUploadPayload) => AsyncResult<{ uploads: PhotoUploadView[] }>;
   getPostPhotos?: (payload: PostPhotoPayload) => AsyncResult<PostPhotoView[]>;
   getPhoto?: (payload: PhotoPayload) => AsyncResult<PostPhotoView>;
+  listPhotos?: (payload: ListTripPhotosPayload) => AsyncResult<TripPhotoPage>;
   listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
   createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
   updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
@@ -486,6 +490,33 @@ const participationConflictResponse = ({ conflicts, activity }: Pick<PostConfirm
       durationMinutes: c.durationMinutes })),
     activity: { scheduledAt: activity.scheduledAt.toISOString(), durationMinutes: activity.durationMinutes } } });
 
+const photoListParameters = ["limit", "cursor", "activityId", "transportId"] as const;
+
+/**
+ * Query of `GET /trips/:tripId/photos`. A malformed filter id is a 400 (like any path id); an unknown or repeated parameter
+ * is a 422 that does not echo what was sent. `limit` and `cursor` travel raw: the use case validates them after the membership.
+ */
+const parsePhotoListQuery = (search: string):
+  { invalidId: true } | { invalidId: false; error: ValidationError } | { invalidId: false; payload: Pick<ListTripPhotosPayload, "limit" | "cursor" | "activityId" | "transportId"> } => {
+  const params = new URLSearchParams(search), payload: Pick<ListTripPhotosPayload, "limit" | "cursor" | "activityId" | "transportId"> = {};
+  const issues: ValidationIssue[] = [];
+  for (const key of new Set(params.keys())) {
+    if (!(photoListParameters as readonly string[]).includes(key)) issues.push({ field: "query", code: "unknown_parameter", message: "The query has an unsupported parameter." });
+    else if (params.getAll(key).length > 1) issues.push({ field: "query", code: "duplicate_parameter", message: "A query parameter was sent more than once." });
+  }
+  for (const key of ["activityId", "transportId"] as const) {
+    const value = params.get(key);
+    if (value === null) continue;
+    const id = createObjectId(value);
+    if (!id.ok) return { invalidId: true };
+    payload[key] = id.value;
+  }
+  if (issues.length > 0) return { invalidId: false, error: new ValidationError(issues) };
+  if (params.has("limit")) payload.limit = params.get("limit");
+  if (params.has("cursor")) payload.cursor = params.get("cursor");
+  return { invalidId: false, payload };
+};
+
 const activityPayload = (payload: Record<string, unknown>, creating: boolean): Result<Partial<ActivityEditableFields>, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Activity ${field} is ${code === "required" ? "required" : "invalid"}.` },
@@ -714,6 +745,20 @@ export const handleApiRequest = async (
       const result = await trips.updateComment({ ...context, commentId: commentId.value, text: payload.text });
       return result.ok ? jsonResponse(200, { comment: result.value }) : errorResponse(result.error);
     }
+  }
+
+  const photoListMatch = request.method === "GET" ? request.url?.match(/^\/trips\/([^/?]+)\/photos(?:\?(.*))?$/) : null;
+  if (photoListMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(photoListMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    const query = parsePhotoListQuery(photoListMatch[2] ?? "");
+    if (query.invalidId) return invalidRequestResponse();
+    if ("error" in query) return errorResponse(query.error);
+    const trips = dependencies.trips;
+    if (!trips?.listPhotos) return unavailableResponse();
+    const result = await trips.listPhotos({ tripId: tripId.value, authenticatedUserId: request.authenticatedUserId, ...query.payload });
+    return result.ok ? jsonResponse(200, { photos: result.value.photos, nextCursor: result.value.nextCursor }) : errorResponse(result.error);
   }
 
   const photoUploadsMatch = request.url?.match(/^\/trips\/([^/?]+)\/photo-uploads$/);

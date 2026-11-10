@@ -34,6 +34,8 @@ describe("trip photo use cases", () => {
       find: async (postIdValue: ObjectId) => ok(posts.find((p) => p.id === postIdValue)),
       listPhotos: async (postIdValue: ObjectId) => ok(photos.filter((p) => p.postId === postIdValue && p.tripId === tripId)
         .sort((a, b) => a.order - b.order)),
+      listPhotosByPosts: async (postIds: readonly ObjectId[]) => ok(photos.filter((p) => postIds.includes(p.postId) && p.tripId === tripId)
+        .sort((a, b) => a.order - b.order)),
       findPhoto: async (photoId: ObjectId) => ok(photos.find((p) => p.id === photoId)),
     } as unknown as TripPostReadScope;
     port = {
