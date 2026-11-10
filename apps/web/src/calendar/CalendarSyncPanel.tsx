@@ -30,6 +30,9 @@ export function CalendarSyncPanel({ status, busy, onEnable, onRetry, onStop, onR
   const canEnable = state === "off" || state === "needs-permission";
   const enabled = state === "pending" || state === "synced" || state === "partial" || state === "error";
   const canRetry = state === "partial" || state === "error";
+  const removingLeft = status.state === "removing-partial";
+  /** Turning sync off needs no permission: it only stops and keeps the references. */
+  const canStop = enabled || removingLeft || (status.state === "denied" && status.enabled === true);
 
   useLayoutEffect(() => {
     if (pressed.current && (document.activeElement === document.body || document.activeElement === null)) panel.current?.focus();
@@ -52,7 +55,8 @@ export function CalendarSyncPanel({ status, busy, onEnable, onRetry, onStop, onR
           : state === "needs-permission" ? "Falta conceder el acceso al calendario. Podés intentarlo de nuevo cuando quieras."
             : status.state === "denied" && status.limited ? `Travellier tiene solo permiso para agregar eventos, no para actualizarlos ni borrarlos, así que no puede mantenerlos al día. Para sincronizar, dale acceso completo al calendario en Ajustes del sistema > Travellier > Calendarios. ${exportHint}`
               : state === "denied" ? `El acceso al calendario está desactivado para Travellier. Para activarlo, abrí Ajustes del sistema > Travellier > Calendarios. ${exportHint}`
-                : "";
+                : status.state === "removing-partial" ? `No se pudieron quitar ${status.remaining === 1 ? "1 evento" : `${status.remaining} eventos`} del calendario. Mientras tanto no se sincroniza nada. Podés reintentar quitarlos o dejar de sincronizar (los eventos que quedan se conservan).`
+                  : "";
   return (
     <div className="calendar-sync" ref={panel} tabIndex={-1}>
       {state === "off" || state === "needs-permission" ? <p>Mantené este itinerario al día en el calendario de tu dispositivo. Es opcional: podés usar Travellier sin esto.</p> : null}
@@ -62,7 +66,8 @@ export function CalendarSyncPanel({ status, busy, onEnable, onRetry, onStop, onR
       {canEnable ? action("Mantener sincronizado con el calendario", onEnable) : null}
       {canRetry ? action("Reintentar", onRetry) : null}
       {state === "synced" || state === "partial" ? action("Volver a agregar eventos borrados", onRestore) : null}
-      {enabled ? action("Dejar de sincronizar", onStop) : null}
+      {removingLeft ? action("Reintentar quitar", onRemove) : null}
+      {canStop ? action("Dejar de sincronizar", onStop) : null}
       {enabled ? action("Quitar del calendario", () => setConfirming(true)) : null}
       {enabled && confirming ? (
         <div role="group" aria-label="Confirmar quitar del calendario">

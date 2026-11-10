@@ -22,7 +22,8 @@ async function render(status: CalendarSyncStatus, props: Partial<Props> = {}) {
 const button = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === label);
 const click = (element: Element) => act(async () => { element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
 const every: CalendarSyncStatus[] = [{ state: "checking" }, { state: "off" }, { state: "needs-account" }, { state: "needs-permission" }, { state: "denied", limited: false },
-  { state: "denied", limited: true }, { state: "syncing" }, { state: "pending" }, { state: "synced", at: "2026-11-10T15:30:00.000Z" }, { state: "partial", failed: 2, at: null }, { state: "error" }];
+  { state: "denied", limited: true }, { state: "syncing" }, { state: "pending" }, { state: "synced", at: "2026-11-10T15:30:00.000Z" }, { state: "partial", failed: 2, at: null }, { state: "error" },
+  { state: "removing-partial", remaining: 1 }, { state: "denied", limited: false, enabled: true }];
 
 describe("CalendarSyncPanel", () => {
   it("offers the opt-in as an optional action and says nothing else when off", async () => {
@@ -112,5 +113,26 @@ describe("CalendarSyncPanel", () => {
     await click(enable);
     await rerender({ state: "denied", limited: false });
     expect(document.activeElement).toBe(container.querySelector(".calendar-sync"));
+  });
+  it("after a partial removal it offers «Reintentar quitar» and «Dejar de sincronizar», says how many are left and offers nothing else", async () => {
+    const { container, spies } = await render({ state: "removing-partial", remaining: 2 });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("2 eventos");
+    expect(button(container, "Quitar del calendario")).toBeUndefined();
+    expect(button(container, "Reintentar")).toBeUndefined();
+    expect(button(container, "Mantener sincronizado con el calendario")).toBeUndefined();
+    await click(button(container, "Reintentar quitar")!);
+    expect(spies.onRemove).toHaveBeenCalledTimes(1);
+    await click(button(container, "Dejar de sincronizar")!);
+    expect(spies.onStop).toHaveBeenCalledTimes(1);
+  });
+  it("with the permission denied it offers «Dejar de sincronizar» only when sync was enabled, and never «Quitar del calendario»", async () => {
+    const enabled = await render({ state: "denied", limited: false, enabled: true });
+    await click(button(enabled.container, "Dejar de sincronizar")!);
+    expect(enabled.spies.onStop).toHaveBeenCalledTimes(1);
+    expect(button(enabled.container, "Quitar del calendario")).toBeUndefined();
+    const never = await render({ state: "denied", limited: false, enabled: false });
+    expect(button(never.container, "Dejar de sincronizar")).toBeUndefined();
+    const unknown = await render({ state: "denied", limited: true });
+    expect(button(unknown.container, "Dejar de sincronizar")).toBeUndefined();
   });
 });
