@@ -32,7 +32,9 @@ export type SavedPost = PostResponse & { activity?: ActivityResponse; participat
 /** Summary of a chained post: the server sends only these fields for the immediate parent and the direct children. */
 export type PostSummary = { id: string; authorId: string; createdAt: string; description: string | null };
 /** `parent` is the immediate parent (null when absent or not visible); `children` are only the direct children, newest first. */
-export type PostDetail = { post: PostResponse; parent: PostSummary | null; children: PostSummary[]; rootActivityId: string | null; expense?: SavedExpenseView };
+export type PostDetail = { post: PostResponse; parent: PostSummary | null; children: PostSummary[]; rootActivityId: string | null; expense?: SavedExpenseView;
+  /** The detail carried an expense that could not be read: the rest of the detail is still valid, but the stored lists are unknown. */
+  expenseUnreadable?: true };
 export type TripPostApi = {
   list: (tripId: string) => Promise<TripResult<PostResponse[]>>;
   get: (tripId: string, postId: string) => Promise<TripResult<PostDetail>>;
@@ -170,9 +172,8 @@ export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "pat
     if (!children.every((child) => child !== undefined)) return server;
     const rawExpense = result.value.expense;
     const expense = rawExpense === undefined ? undefined : parseExpenseView(rawExpense, tripId, postId);
-    if (rawExpense !== undefined && !expense) return server;
     return { ok: true, value: { post, parent, children: children.sort(newestFirst), rootActivityId: id(rootActivityId) ? rootActivityId : null,
-      ...(expense ? { expense } : {}) } };
+      ...(expense ? { expense } : {}), ...(rawExpense !== undefined && !expense ? { expenseUnreadable: true as const } : {}) } };
   },
   create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation)), tripId, undefined, input.newActivity !== undefined, carriesExpense(input)),
   update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation)),

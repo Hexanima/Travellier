@@ -274,7 +274,11 @@ describe("post HTTP adapter with payments and shares (T84)", () => {
     ["with a remainder carrying a value", stored({ shares: [{ userId: ana, unit: "remainder", value: 3 }] })],
     ["with a bad completeness", stored({ completeness: { status: "x", reasons: [] } })],
     ["with bad former members", stored({ formerMemberIds: ["z"] })],
-    ["with an invalid currency", stored({ currency: "BRL" })]])("rejects a detail whose expense is %s", async (_name, value) => {
-    expect(await setup(detail(value)).api.get(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "server" } });
+    ["with an invalid currency", stored({ currency: "BRL" })]])("keeps the detail but drops an expense that is %s, flagging it unreadable", async (_name, value) => {
+    const result = await setup(detail(value)).api.get(tripId, itineraryId(5));
+    expect(result.ok).toBe(true);
+    expect(result.ok && "expense" in result.value).toBe(false);
+    expect(result.ok && result.value.expenseUnreadable).toBe(true);
+    expect(result.ok && result.value.post.id).toBe(itineraryId(5));
   });
 });
