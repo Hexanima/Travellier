@@ -1334,13 +1334,27 @@ describe("Trip post use cases", () => {
               expect(everything()).toEqual(before);
             });
 
-          it.each<[string, Partial<Activity>]>([["another creator", { createdBy: id(77) }], ["another Trip", { tripId: otherTripId }]])(
-            "an occupied activity id of %s stays the generic conflict (no reason)", async (_, fields) => {
-              activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: actor, ...fields }];
-              const result = await linkWithId();
-              expect(result).toMatchObject(conflict);
-              expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
-            });
+          it("an occupied activity id of ANOTHER creator in this Trip stays the generic conflict (no reason)", async () => {
+            activities = [{ ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: id(77) }];
+            const result = await linkWithId();
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+          });
+
+          it("an activity id owned by ANOTHER Trip is not visible to the per-Trip listActivities: the flow goes on to the insert, where the simulated 11000 is the generic conflict without writes", async () => {
+            const foreign: Activity = { ...seedActivity(600, "2026-09-25T15:00:00Z"), id: clientActivity, createdBy: actor, tripId: otherTripId };
+            activities = [foreign];
+            // Port contract: listActivities only returns this Trip's activities (the foreign one is outside the list).
+            scope.listActivities = async () => domain.ok(activities.filter((activity) => activity.tripId === tripId));
+            const insert = vi.spyOn(scope, "insertActivity").mockResolvedValue(domain.err(new domain.PostRequestConflictError()));
+            const before = everything();
+            const result = await linkWithId();
+            expect(foreign.tripId).not.toBe(tripId);
+            expect(insert).toHaveBeenCalledTimes(1);
+            expect(result).toMatchObject(conflict);
+            expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
+            expect(everything()).toEqual(before);
+          });
 
           it("without an id on a post that already has an activity it still creates another and repoints (documented, user decision pending)", async () => {
             expect(await linkWith()).toMatchObject({ ok: true, value: { activity: { id: id(20) } } });
