@@ -1,5 +1,5 @@
 import type { DirectUpload } from "../api/direct-upload.js";
-import type { PhotoDraftItem } from "./post-draft.js";
+import { applyPhotoChange, type PhotoChange, type PhotoDraftItem } from "./post-draft.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { TripPhotoApi, UploadTarget } from "./trip-photo-api.js";
 
@@ -8,7 +8,6 @@ export const RESERVE_MARGIN_MS = 30_000;
 /** Uploaded photos older than this are uploaded again: far from the 24 h after which the server may sweep unused keys. */
 export const MAX_RESERVED_AGE_MS = 12 * 3_600_000;
 export const UPLOAD_CONCURRENCY = 2;
-export type PhotoChange = Pick<PhotoDraftItem, "status"> & Partial<Pick<PhotoDraftItem, "key" | "uploadedAt" | "failure">>;
 /** `items` is the final state; `reserveError` stops the whole publication (revoked access, session, network); `aborted` means the signal fired. */
 export type UploadReport = { items: PhotoDraftItem[]; reserveError?: TripFailure; aborted: boolean };
 export type UploadPendingParams = { tripId: string; items: readonly PhotoDraftItem[]; blobs: { get: (localId: string) => Blob | undefined };
@@ -17,11 +16,6 @@ export type UploadPendingParams = { tripId: string; items: readonly PhotoDraftIt
 
 const needsUpload = (item: PhotoDraftItem, now: number) =>
   item.status !== "uploaded" || item.key === undefined || item.uploadedAt === undefined || now - item.uploadedAt > MAX_RESERVED_AGE_MS;
-const applyChange = (item: PhotoDraftItem, change: PhotoChange): PhotoDraftItem => {
-  const { key: _key, uploadedAt: _uploadedAt, failure: _failure, status: _status, ...rest } = item;
-  return { ...rest, status: change.status, ...(change.key !== undefined ? { key: change.key } : {}),
-    ...(change.uploadedAt !== undefined ? { uploadedAt: change.uploadedAt } : {}), ...(change.failure !== undefined ? { failure: change.failure } : {}) };
-};
 const descriptor = (item: PhotoDraftItem) => ({ contentType: item.contentType, sizeBytes: item.sizeBytes });
 const fatal = (error: TripFailure) => error.kind === "not-found" || error.kind === "forbidden" || error.kind === "unauthorized";
 
@@ -35,7 +29,7 @@ export const uploadPending = async ({ tripId, items, blobs, api, transfer, now, 
   let reserveError: TripFailure | undefined, sawAbort = false;
   const apply = (localId: string, change: PhotoChange) => {
     const index = result.findIndex((item) => item.localId === localId);
-    if (index >= 0) result[index] = applyChange(result[index]!, change);
+    if (index >= 0) result[index] = applyPhotoChange(result[index]!, change);
     onUpdate?.(localId, change);
   };
   const report = (): UploadReport => ({ items: result, ...(reserveError ? { reserveError } : {}), aborted: sawAbort || signal?.aborted === true });

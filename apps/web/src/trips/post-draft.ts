@@ -49,13 +49,13 @@ export const movePhoto = (draft: PostDraft, localId: string, delta: -1 | 1): Pos
   return withPhotos(draft, next);
 };
 /** Replaces the status data of one photo (no stale `key`, `uploadedAt` or `failure` survives); the selection data stays. */
-export const markPhoto = (draft: PostDraft, localId: string, change: Pick<PhotoDraftItem, "status"> & Partial<Pick<PhotoDraftItem, "key" | "uploadedAt" | "failure">>): PostDraft =>
-  withPhotos(draft, draft.extras.photos.map((item) => {
-    if (item.localId !== localId) return item;
-    const { key: _key, uploadedAt: _uploadedAt, failure: _failure, status: _status, ...rest } = item;
-    return { ...rest, status: change.status, ...(change.key !== undefined ? { key: change.key } : {}),
-      ...(change.uploadedAt !== undefined ? { uploadedAt: change.uploadedAt } : {}), ...(change.failure !== undefined ? { failure: change.failure } : {}) };
-  }));
+export type PhotoChange = Pick<PhotoDraftItem, "status"> & Partial<Pick<PhotoDraftItem, "key" | "uploadedAt" | "failure">>;
+export const applyPhotoChange = (item: PhotoDraftItem, change: PhotoChange): PhotoDraftItem => ({ localId: item.localId, reference: item.reference,
+  ...(item.previewUrl !== undefined ? { previewUrl: item.previewUrl } : {}), contentType: item.contentType, sizeBytes: item.sizeBytes, status: change.status,
+  ...(change.key !== undefined ? { key: change.key } : {}), ...(change.uploadedAt !== undefined ? { uploadedAt: change.uploadedAt } : {}),
+  ...(change.failure !== undefined ? { failure: change.failure } : {}) });
+export const markPhoto = (draft: PostDraft, localId: string, change: PhotoChange): PostDraft =>
+  withPhotos(draft, draft.extras.photos.map((item) => item.localId === localId ? applyPhotoChange(item, change) : item));
 const samePhotos = (a: PhotoDraftItem[], b: PhotoDraftItem[]) => a.length === b.length && a.every((item, index) => item.localId === b[index]!.localId);
 export const isDraftDirty = (draft: PostDraft, base: PostDraft): boolean =>
   draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl ||

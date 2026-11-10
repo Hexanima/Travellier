@@ -18,6 +18,8 @@ function Probe({ name }: { name: string }) {
     <span data-returned>{handle.returned ? `${handle.returned.focus}|${handle.returned.notice}` : "none"}</span>
     <button type="button" data-action="return" onClick={() => handle.setReturned({ focus: "link", notice: `aviso ${name}` })}>return</button>
     <button type="button" data-action="clear-return" onClick={handle.clearReturned}>clear-return</button>
+    <button type="button" data-action="blob" onClick={() => handle.blobs.set(`foto-${name}`, new Blob([name]))}>blob</button>
+    <span data-blobs>{handle.blobs.ids().join(",") || "none"}</span>
   </div>;
 }
 function Host({ names }: { names: string[] }) {
@@ -71,5 +73,17 @@ describe("post drafts context", () => {
     await click(container, '[data-probe="new"] [data-action="set"]');
     await click(container, '[data-probe="new"] [data-action="clear"]');
     expect(shown(container, "edit:a")).toBe("texto edit:a");
+  });
+  it("keeps the binaries per key across unmount and remount and empties them with clear, without touching other keys", async () => {
+    const container = await render(["new", "edit:a"]);
+    const blobs = (name: string) => container.querySelector(`[data-probe="${name}"] [data-blobs]`)?.textContent;
+    await click(container, "[data-probe=\"new\"] [data-action=\"blob\"]");
+    await click(container, "[data-probe=\"edit:a\"] [data-action=\"blob\"]");
+    await click(container, "[data-action=\"toggle\"]"); await click(container, "[data-action=\"toggle\"]");
+    expect(blobs("new")).toBe("foto-new"); expect(blobs("edit:a")).toBe("foto-edit:a");
+    await click(container, "[data-probe=\"new\"] [data-action=\"clear\"]");
+    await click(container, "[data-action=\"toggle\"]"); await click(container, "[data-action=\"toggle\"]");
+    expect(blobs("new")).toBe("none");
+    expect(blobs("edit:a")).toBe("foto-edit:a");
   });
 });
