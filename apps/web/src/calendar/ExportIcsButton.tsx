@@ -49,7 +49,7 @@ export function ExportIcsButton({ tripName = "", resolveTripName, itinerary, dow
     {/* aria-disabled instead of disabled: the button keeps focus while exporting. */}
     <Button onClick={() => void exportNow()} aria-disabled={busy || undefined}>Exportar a calendario (.ics)</Button>
     <p className="ics-export-notice">{icsStaticCopyNotice}</p>
-    {outcome.kind === "done" ? <Feedback variant="success">Exportado el {stamp}</Feedback> : null}
+    {outcome.kind === "done" ? <Feedback variant="success">Se generó la exportación el {stamp}. Si no aparece el archivo, probá de nuevo.</Feedback> : null}
     {outcome.kind === "error" ? <Feedback variant="error">No pudimos generar la descarga del archivo. Probá nuevamente.</Feedback> : null}
   </section>;
 }

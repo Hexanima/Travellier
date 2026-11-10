@@ -45,7 +45,9 @@ describe("ExportIcsButton", () => {
     expect(text).toContain("DTSTAMP:20261110T123456Z");
     const status = container.querySelectorAll('[role="status"]');
     expect(status).toHaveLength(1);
-    expect(status[0].textContent).toMatch(/^Exportado el .*2026.*09:34/);
+    expect(status[0].textContent).toMatch(/^Se generó la exportación el .*2026.*09:34.*Si no aparece el archivo, probá de nuevo\.$/);
+    // The download is only started: success never claims the file was saved.
+    expect(status[0].textContent).not.toMatch(/guard|Exportado/i);
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
   it("generates from the latest itinerary each time, never from a cached export", async () => {

@@ -49,7 +49,7 @@ describe("itinerary screen .ics export", () => {
     expect(text).toContain("X-WR-CALNAME:Viaje a Córdoba");
     expect(text).toContain("SUMMARY:Paseo por el centro");
     expect(get).not.toHaveBeenCalled();
-    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Exportado el /);
+    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Se generó la exportación el .*Si no aparece el archivo, probá de nuevo\.$/);
   });
   it("asks the Trip name only when exporting, and falls back to a fixed name if that fails", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { id: itineraryId(1), name: "Nombre del viaje" } });
