@@ -167,7 +167,8 @@ describe("App notices: reading never changes the participation", () => {
     expect(calls(fetch).some((call) => call.includes("/participation"))).toBe(false);
     await click(find("a", "Abrir actividad"));
     await click(find("a", "Volver a avisos"));
-    expect(calls(fetch).filter((call) => call.startsWith("PUT") || call.startsWith("POST") || call.startsWith("PATCH") || call.startsWith("DELETE"))).toEqual([]);
+    // The only write is the session restore: no participation, no notice mark.
+    expect(calls(fetch).filter((call) => call.startsWith("PUT") || call.startsWith("PATCH") || call.startsWith("DELETE") || (call.startsWith("POST") && call !== "POST /auth/refresh"))).toEqual([]);
   });
 
   const mark = { reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: "2026-11-09T10:00:00.000Z" };
