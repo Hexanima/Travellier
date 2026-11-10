@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
 import { commentsQuery, createMongoTripCommentRepository } from "../adapters/mongodb/trip-comment-repository.js";
 import { ok } from "app-domain";
@@ -8,6 +8,10 @@ describe("comment persistence and transactions", () => {
   const f = new PostFixture();
   beforeAll(() => f.start("comment_persistence"), 120_000);
   afterAll(() => f.stop());
+  // Releases of every pause created by a test. afterEach always frees them (idempotent), so a failed assertion never leaves
+  // a transaction open that would block the next reset until the server aborts it.
+  let pendingReleases: Array<() => void> = [];
+  afterEach(() => { for (const release of pendingReleases) release(); pendingReleases = []; });
   beforeEach(async () => { vi.restoreAllMocks(); await f.reset(); });
 
   const createPost = async (tripId = domainId(f.trip), user = domainId(f.actor)) => {
@@ -100,13 +104,18 @@ describe("comment persistence and transactions", () => {
     let reached!: () => void, release!: () => void, first = true;
     const reachedPromise = new Promise<void>((resolve) => { reached = resolve; });
     const gate = new Promise<void>((resolve) => { release = resolve; });
+    pendingReleases.push(() => release());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`The first ${name}.${method} never ran.`)), 5_000); });
+    const reachedOrTimeout = Promise.race([reachedPromise, timeout]).finally(() => clearTimeout(timer));
+    reachedOrTimeout.catch(() => undefined);
     vi.spyOn(collection, method).mockImplementation((async (...args: unknown[]) => {
       const result = await real(...args);
       if (first) { first = false; reached(); await gate; }
       return result;
     }) as never);
     vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
-    return { reached: reachedPromise, release };
+    return { reached: reachedOrTimeout, release: () => release() };
   };
   const track = <T>(promise: Promise<T>) => { const state = { settled: false }; void promise.finally(() => { state.settled = true; }); return state; };
   const pause = () => new Promise((resolve) => setTimeout(resolve, 500));
@@ -117,11 +126,13 @@ describe("comment persistence and transactions", () => {
     const post = await createPost(); const admin = await addMember("admin");
     const paused = pauseAfterFirst("comments", "insertOne");
     const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
-    await paused.reached;
-    const expelling = expel(admin); const expulsion = track(expelling);
-    await pause();
-    expect(expulsion.settled, "expulsion finished while the comment transaction was open").toBe(false);
-    paused.release();
+    let expelling!: ReturnType<typeof expel>;
+    try {
+      await paused.reached;
+      expelling = expel(admin); const expulsion = track(expelling);
+      await pause();
+      expect(expulsion.settled, "expulsion finished while the comment transaction was open").toBe(false);
+    } finally { paused.release(); }
     const [created, expelled] = await Promise.all([creating, expelling]);
     expect(created.ok).toBe(true);
     expect(expelled.ok).toBe(true);
@@ -133,11 +144,13 @@ describe("comment persistence and transactions", () => {
     const post = await createPost(); const admin = await addMember("admin");
     const paused = pauseAfterFirst("trips", "updateOne");
     const expelling = expel(admin);
-    await paused.reached;
-    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
-    await pause();
-    expect(creation.settled, "comment finished while the expulsion transaction was open").toBe(false);
-    paused.release();
+    let creating!: ReturnType<NonNullable<typeof f.api.createComment>>;
+    try {
+      await paused.reached;
+      creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+      await pause();
+      expect(creation.settled, "comment finished while the expulsion transaction was open").toBe(false);
+    } finally { paused.release(); }
     const [created, expelled] = await Promise.all([creating, expelling]);
     expect(expelled.ok).toBe(true);
     expect(created).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
@@ -149,11 +162,13 @@ describe("comment persistence and transactions", () => {
     const post = await createPost();
     const paused = pauseAfterFirst("comments", "insertOne");
     const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" });
-    await paused.reached;
-    const deleting = deleteTrip(); const deletion = track(deleting);
-    await pause();
-    expect(deletion.settled, "deletion finished while the comment transaction was open").toBe(false);
-    paused.release();
+    let deleting!: ReturnType<typeof deleteTrip>;
+    try {
+      await paused.reached;
+      deleting = deleteTrip(); const deletion = track(deleting);
+      await pause();
+      expect(deletion.settled, "deletion finished while the comment transaction was open").toBe(false);
+    } finally { paused.release(); }
     const [created, deleted] = await Promise.all([creating, deleting]);
     expect(created.ok).toBe(true);
     expect(deleted.ok).toBe(true);
@@ -165,11 +180,13 @@ describe("comment persistence and transactions", () => {
     const post = await createPost();
     const paused = pauseAfterFirst("trips", "updateOne");
     const deleting = deleteTrip();
-    await paused.reached;
-    const creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
-    await pause();
-    expect(creation.settled, "comment finished while the deletion transaction was open").toBe(false);
-    paused.release();
+    let creating!: ReturnType<NonNullable<typeof f.api.createComment>>;
+    try {
+      await paused.reached;
+      creating = f.api.createComment!({ ...payload(post.id), text: "Hola" }); const creation = track(creating);
+      await pause();
+      expect(creation.settled, "comment finished while the deletion transaction was open").toBe(false);
+    } finally { paused.release(); }
     const [created, deleted] = await Promise.all([creating, deleting]);
     expect(deleted.ok).toBe(true);
     expect(created).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
