@@ -23,7 +23,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-async function renderTrips(trips: Pick<TripManagementApi, "list" | "create">, path = "/trips") {
+async function renderTrips(trips: Pick<TripManagementApi, "list" | "create">, path = "/trips", onLocalLogout: () => Promise<void> = async () => undefined) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
@@ -31,7 +31,7 @@ async function renderTrips(trips: Pick<TripManagementApi, "list" | "create">, pa
   await act(async () => root.render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/trips" element={<TripsListScreen trips={trips} onLocalLogout={async () => undefined} />} />
+        <Route path="/trips" element={<TripsListScreen trips={trips} onLocalLogout={onLocalLogout} />} />
         <Route path="/trips/new" element={<CreateTripScreen trips={trips} />} />
       </Routes>
     </MemoryRouter>,
@@ -155,5 +155,39 @@ describe("Trip screens", () => {
     await act(async () => { container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
     expect(create).toHaveBeenCalledOnce();
     await act(async () => resolveCreate({ ok: true, value: trip }));
+  });
+});
+
+describe("Trip screens: logout guard", () => {
+  const list = { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), create: vi.fn() };
+  const logoutButton = (container: HTMLElement) => Array.from(container.querySelectorAll("button")).find((item) => /^Cerrar sesión|^Cerrando sesión/.test(item.textContent ?? ""))!;
+  const tap = async (element: Element) => { await act(async () => { element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); }); };
+
+  it("ignores a second tap, shows the closing state without losing focus, and recovers when it finishes", async () => {
+    let finish: () => void = () => undefined;
+    const onLocalLogout = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const container = await renderTrips(list, "/trips", onLocalLogout);
+    const button = logoutButton(container);
+    button.focus();
+    await tap(button);
+    await tap(logoutButton(container));
+    expect(onLocalLogout).toHaveBeenCalledTimes(1);
+    const closing = logoutButton(container);
+    expect(closing).toBe(button);
+    expect(closing.textContent).toBe("Cerrando sesión…");
+    expect(closing.getAttribute("aria-disabled")).toBe("true");
+    expect(closing.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(closing);
+    await act(async () => { finish(); });
+    expect(logoutButton(container).textContent).toBe("Cerrar sesión");
+    expect(logoutButton(container).hasAttribute("aria-disabled")).toBe(false);
+    await tap(logoutButton(container));
+    expect(onLocalLogout).toHaveBeenCalledTimes(2);
+  });
+  it("recovers when the logout rejects", async () => {
+    const onLocalLogout = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValue(undefined);
+    const container = await renderTrips(list, "/trips", onLocalLogout);
+    await tap(logoutButton(container));
+    expect(logoutButton(container).textContent).toBe("Cerrar sesión");
   });
 });
