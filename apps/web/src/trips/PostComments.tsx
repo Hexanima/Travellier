@@ -71,7 +71,8 @@ export function CommentComposer({ name, label, text, onText, onSubmit, submitLab
       {/* Busy uses `aria-disabled` (not `disabled`) so the pressed button keeps the focus; `onSubmit` of the owner ignores a second send. */}
       <button type="submit" className="ui-button" disabled={problem !== undefined} aria-disabled={busy || undefined} aria-busy={busy || undefined}
         onClick={(event) => { if (busy) event.preventDefault(); }}>{busy ? busyLabel : submitLabel}</button>
-      {onCancel ? <Button onClick={onCancel}>Cancelar</Button> : null}
+      {/* Cancelar cannot abort the request: while busy it stays focusable but inert (`aria-disabled`, not `disabled`). */}
+      {onCancel ? <button type="button" className="ui-button" aria-disabled={busy || undefined} onClick={() => { if (!busy) onCancel(); }}>Cancelar</button> : null}
     </div>
   </form>;
 }
@@ -103,7 +104,7 @@ export function CommentItem({ comment, author, format, likes, update, onSaved }:
   const value = draft.text ?? comment.text;
   const latestValue = useRef(value);
   latestValue.current = value;
-  const close = () => { draft.clear(); setMessage(undefined); focus.current = "button"; setEditing(false); };
+  const close = () => { if (savingRef.current) return; draft.clear(); setMessage(undefined); focus.current = "button"; setEditing(false); };
   const save = async () => {
     if (savingRef.current || commentProblem(value)) return;
     if (value.trim() === comment.text) { close(); return; }
@@ -116,7 +117,8 @@ export function CommentItem({ comment, author, format, likes, update, onSaved }:
         // Text typed during the request is kept: the draft is cleared and the edit closed only if the field still holds what was sent.
         if (latestValue.current !== sent) { if (alive.current) setMessage(undefined); return; }
         draft.clear();
-        if (alive.current) { setMessage(undefined); focus.current = "button"; setEditing(false); }
+        // The focus returns to «Editar» only if it was still inside the edit form: it is never taken from where the user moved it meanwhile.
+        if (alive.current) { setMessage(undefined); focus.current = form.current?.contains(document.activeElement) ? "button" : undefined; setEditing(false); }
         return;
       }
       if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.") ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
@@ -223,7 +225,8 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
         setList((current) => ({ kind: "ready", items: sorted([...(current.kind === "ready" ? current.items : []), result.value]) }));
         latest.current.likes.seed(result.value.id); void latest.current.likes.refresh();
         setMessage({ variant: "success", text: "Comentario publicado" });
-        if (untouched) focusField(form.current);
+        // Only if the focus was still inside the form: never taken from a control the user moved to during the request.
+        if (untouched && form.current?.contains(document.activeElement)) focusField(form.current);
         return;
       }
       if (!alive.current) return;

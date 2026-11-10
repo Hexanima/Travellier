@@ -161,6 +161,7 @@ describe("comments panel: create", () => {
     const api = apis([comment(5)], { comments: { create: vi.fn().mockResolvedValue(ok(created)) } });
     const container = await render(api);
     await type(container, NEW, "  hola  ");
+    button(container, "Comentar")!.focus();
     await click(button(container, "Comentar"));
     expect(api.comments.create).toHaveBeenCalledExactlyOnceWith(tripId, postId, "hola");
     expect(order(container)).toEqual(["Comentario 5", "hola"]);
@@ -343,6 +344,7 @@ describe("comments panel: edit", () => {
     expect(edit?.value).toBe("Comentario 6");
     expect(document.activeElement).toBe(edit);
     await type(container, `comment-edit-${itineraryId(6)}`, "  Corregido ");
+    button(item(container, 6), "Guardar")!.focus();
     await click(button(item(container, 6), "Guardar"));
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, itineraryId(6), "Corregido");
     expect(order(container)).toEqual(["Comentario 5", "Corregido", "Comentario 7"]);
@@ -605,6 +607,94 @@ describe("focus stays on the pressed button while busy and afterwards", () => {
     await act(async () => pending.resolve(fail("network")));
     expect(document.activeElement).toBe(button(item(container, 5), "Guardar"));
     expect(button(item(container, 5), "Guardar")?.getAttribute("aria-disabled")).toBeNull();
+  });
+});
+
+describe("the focus is only moved after a success when it was still inside the form", () => {
+  const withLike = (over: Record<string, unknown>) => apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false } }))) }, ...over });
+  it("publishing from Comentar leaves the focus in the field", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(withLike({ comments: { create: vi.fn().mockReturnValue(pending.promise) } }));
+    await type(container, NEW, "hola");
+    button(container, "Comentar")!.focus();
+    await click(button(container, "Comentar"));
+    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
+    expect(document.activeElement).toBe(field(container, NEW));
+  });
+  it("publishing does not steal the focus from a like the user moved to meanwhile", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(withLike({ comments: { create: vi.fn().mockReturnValue(pending.promise) } }));
+    await type(container, NEW, "hola");
+    button(container, "Comentar")!.focus();
+    await click(button(container, "Comentar"));
+    likeOf(container, "post").focus();
+    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
+    expect(document.activeElement).toBe(likeOf(container, "post"));
+  });
+  it("saving an edit returns the focus to Editar when it was inside the edit", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(withLike({ comments: { update: vi.fn().mockReturnValue(pending.promise) } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    button(item(container, 5), "Guardar")!.focus();
+    await click(button(item(container, 5), "Guardar"));
+    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    expect(document.activeElement).toBe(button(item(container, 5), "Editar"));
+  });
+  it("saving an edit does not steal the focus from a like the user moved to meanwhile", async () => {
+    const pending = deferred<unknown>();
+    const container = await render(withLike({ comments: { update: vi.fn().mockReturnValue(pending.promise) } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    button(item(container, 5), "Guardar")!.focus();
+    await click(button(item(container, 5), "Guardar"));
+    likeOf(container, "post").focus();
+    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    expect(order(container)).toEqual(["nuevo"]);
+    expect(document.activeElement).toBe(likeOf(container, "post"));
+  });
+});
+
+describe("Cancelar is ignored while saving", () => {
+  const name = `comment-edit-${itineraryId(5)}`;
+  async function saving(result: unknown) {
+    const pending = deferred<unknown>();
+    const container = await render(apis([comment(5)], { comments: { update: vi.fn().mockReturnValue(pending.promise) } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, name, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    return { container, resolve: () => act(async () => pending.resolve(result)) };
+  }
+  it("is aria-disabled without a real disabled and pressing it keeps the edit and the draft", async () => {
+    const { container, resolve } = await saving(ok(comment(5, { text: "nuevo" })));
+    const cancel = button(item(container, 5), "Cancelar")!;
+    cancel.focus();
+    expect(cancel.getAttribute("aria-disabled")).toBe("true");
+    expect(cancel.hasAttribute("disabled")).toBe(false);
+    await click(cancel);
+    expect(field(container, name)?.value).toBe("nuevo");
+    expect(document.activeElement).toBe(cancel);
+    await resolve();
+    expect(field(container, name)).toBeNull();
+    expect(order(container)).toEqual(["nuevo"]);
+  });
+  it("keeps the text and shows the error when the save fails after pressing it", async () => {
+    const { container, resolve } = await saving(fail("network"));
+    await click(button(item(container, 5), "Cancelar"));
+    await resolve();
+    expect(field(container, name)?.value).toBe("nuevo");
+    expect(item(container, 5).querySelector('[role="alert"]')).not.toBeNull();
+    expect(button(item(container, 5), "Cancelar")?.getAttribute("aria-disabled")).toBeNull();
+  });
+  it("still cancels and clears when it is not busy", async () => {
+    const container = await render(apis([comment(5)]));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, name, "otra cosa");
+    expect(button(item(container, 5), "Cancelar")?.getAttribute("aria-disabled")).toBeNull();
+    await click(button(item(container, 5), "Cancelar"));
+    expect(field(container, name)).toBeNull();
+    await click(button(item(container, 5), "Editar"));
+    expect(field(container, name)?.value).toBe("Comentario 5");
   });
 });
 
