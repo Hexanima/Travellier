@@ -83,11 +83,12 @@ Las nuevas migraciones son aditivas y se ejecutan después de `0001–0003`, cuy
 | --- | --- |
 | `0004-publication-and-personal-agenda-indexes` | `posts.tripId_createdAt_desc`: `{ tripId: 1, createdAt: -1 }`; `activityParticipations.tripId_userId_status`: `{ tripId: 1, userId: 1, status: 1 }`. |
 | `0005-notification-outbox-indexes` | `outboxEvents.eventKey_unique`: `{ eventKey: 1 }` único; `outboxEvents.status_availableAt`: `{ status: 1, availableAt: 1 }`. |
+| `0008-notification-inbox-indexes` | `outboxEvents.userId_createdAt_id`: `{ userId: 1, createdAt: -1, _id: -1 }` (bandeja personal); `outboxEvents.tripId`: `{ tripId: 1 }` (cascada y autorización). Aditiva, idempotente, sin TTL y sin tocar documentos (T91; fuera del PRD, ver «API de avisos (T91)»). |
 | `0007-push-device-indexes` | `pushDevices.provider_token_unique`: `{ provider: 1, token: 1 }` único; `pushDevices.userId`: `{ userId: 1 }`. Colección nueva de T89, sin TTL (no está en el PRD; ver «API de dispositivos push (T89)»). |
 
 Se mantienen todos los índices anteriores, incluidos los únicos de membresías, participaciones, likes, gastos, posiciones de destinos, direcciones de transporte e identidad de itinerario, además del TTL de refresh tokens. No se quitan índices heredados de `dayId` ni se borra `activityVotes`.
 
-`outboxEvents` prepara el almacenamiento técnico para avisos/push de T91–T92; no almacena vínculos al calendario nativo de T96. Su contrato base reserva `_id: ObjectId`, `tripId: ObjectId`, `eventKey: string` (clave estable de deduplicación de la operación), `type: string`, `status: string`, `availableAt: Date` y `createdAt: Date` en UTC. Los IDs de recursos/destinatarios que incorpore T91 deben ser ObjectId. La máquina de estados, el payload y la emisión transaccional se implementarán en T91–T92; T44 solo versiona sus índices y no impone un validador de documentos. No hay TTL ni eliminación de eventos en estas migraciones.
+`outboxEvents` prepara el almacenamiento técnico para avisos/push de T91–T92; no almacena vínculos al calendario nativo de T96. Su contrato base reserva `_id: ObjectId`, `tripId: ObjectId`, `eventKey: string` (clave estable de deduplicación; desde T91, `{type}:{operación}:{userId}`, un documento por evento y destinatario), `type: string`, `status: string`, `availableAt: Date` y `createdAt: Date` en UTC. T91 escribe en esta colección (ver «API de avisos (T91)») con los campos adicionales `userId`, `actorId`, `operationKey` y `payload`; los IDs son ObjectId. La entrega (la máquina de estados de `status`) es de T92; T44 solo versiona sus índices y no impone un validador de documentos. No hay TTL ni eliminación de eventos en estas migraciones.
 
 Cada versión se registra en `_migrations` solo después de crear todos sus índices. Si un índice existente tiene una definición incompatible o hay claves de evento duplicadas, la operación falla y conserva los datos y el índice conflictivo. Los índices ya creados pueden permanecer: después de una resolución explícita se puede repetir `migrate:mongodb` sin duplicar versiones ni modificar sus fechas. Los hallazgos del auditor no bloquean por sí solos estos índices aditivos; la evolución funcional posterior debe revisar el reporte y resolver incompatibilidades explícitamente.
 
@@ -198,6 +199,35 @@ Registro de los tokens de push del dispositivo, ligados al usuario autenticado (
 - `pushDevices` guarda `{ _id, userId: ObjectId, provider, platform, token, createdAt, updatedAt, lastRegisteredAt }`. El token se guarda crudo (hace falta para enviar) y **nunca** se devuelve (solo `tokenHint`: los últimos 4 caracteres; si es corto, oculto), ni se registra en logs ni aparece en errores; el cifrado en reposo del dato es de la infraestructura (Atlas). `/auth/logout` no revoca dispositivos: el cliente de T90 debe revocar antes de cerrar sesión.
 - El caso de uso `removeInvalidPushDevices` (dominio) borra tokens por proveedor sin filtrar por usuario; lo consumirá T92 y **no** se expone por HTTP.
 - Verificado con MongoDB efímero (`mongodb-memory-server`); no se probó con FCM/APNs/SNS, dispositivos ni Atlas reales.
+
+## API de avisos (T91)
+
+Los eventos de la app se guardan **con la operación que los origina**, como última escritura de su misma transacción MongoDB (con el bloqueo del Trip): si la operación no se guarda, o falla después, no queda evento; un evento nunca anuncia un cambio revertido ni depende del dispositivo. T91 no envía push (T92) y no cambia `serverless.yml` ni infraestructura.
+
+**Persistencia.** `outboxEvents` es a la vez outbox (para T92) y bandeja personal (T91): **un documento por evento y destinatario**, `{ _id, tripId, eventKey, type, status: "pending", availableAt, createdAt, userId (destinatario), actorId (ObjectId o null), operationKey, payload }`. `eventKey = "{type}:{id de la operación}:{userId}"` y se escribe con `updateOne({ eventKey }, { $setOnInsert }, { upsert: true })` (nunca `insertOne`): repetir una clave no duplica ni aborta la transacción. Un aviso no se consume ni cambia por entregarse ni por leerse; la bandeja ignora `status`. Los reintentos de T87 de un post ya guardado y las ediciones sin cambios reales no emiten.
+
+| `type` | Se emite cuando | Destinatarios | `payload` (solo IDs y fechas UTC, sin textos) |
+|---|---|---|---|
+| `post.created` | se guarda un post | integrantes actuales menos el autor | `postId`, `actorId`, `activityId` (o null) |
+| `activity.created` | se crea una actividad (también la espontánea creada con o a partir de un post) | integrantes menos el autor | `activityId`, `actorId`, `scheduledAt`, `durationMinutes` |
+| `activity.updated` | una edición cambia título, descripción, ubicación, inicio o duración | integrantes menos el editor y menos los desvinculados por esa edición | `activityId`, `actorId`, `changedFields` |
+| `activity.participant_unlinked` | una edición de inicio/duración pasa a «Sin responder» a un participante «Voy» con conflicto | solo cada afectado (el editor si está afectado); los compatibles no lo reciben | `activityId`, `reason: "schedule_conflict"`, `changedFields`, `changedAt`, `newInterval { startsAt, durationMinutes, endsAt \| null }`, `incompatibleActivities [{ activityId, reason, scheduledAt, durationMinutes }]` (todas) |
+| `member.joined` | ingresa un integrante nuevo (no si ya lo era) | integrantes menos quien ingresó | `memberId` (membresía), `userId` |
+| `member.expelled` | se expulsa a un participante | solo el expulsado; sin actor ni datos del Trip | `tripId` |
+| `comment.created` | se crea un comentario | integrantes menos el autor | `commentId`, `postId`, `actorId` |
+
+No emiten: editar un post o un comentario, «Voy / No voy», likes, votos (retirados), eliminar una actividad, ni quien ya estaba «Sin responder» (con o sin marca) vuelve a recibir un aviso de desvinculación. Los destinatarios «integrantes menos el actor» se leen dentro de la transacción del Trip: una expulsión concurrente se serializa con la operación. `activity.updated` y los `activity.participant_unlinked` de una misma edición comparten un `operationId` y un único `changedAt`. `activityParticipations.decisionRequired` **no** se consume ni se modifica al emitir ni al leer: solo lo borra una respuesta explícita.
+
+| Método | Ruta | Respuesta |
+|---|---|---|
+| GET | `/notifications?limit&cursor` | 200 `{ notifications: [{ id, type, tripId, actorId, payload, createdAt }], nextCursor }` |
+
+- Autenticada (JWT) y **solo lectura**: el usuario sale únicamente del JWT (un `userId` en query o body se rechaza/ignora; parámetro desconocido o repetido → 422 `ValidationError` con `fields`). Sin token → 401. No marca avisos como leídos (no existe «leído»).
+- Orden: `createdAt` descendente y `_id` descendente. `limit` entero de 1 a 60 (30 por defecto); `cursor` opaco como el de fotos (posición `createdAt`+`_id`); `limit` o `cursor` inválidos → 422 con el campo. `nextCursor` es `null` en la última página; un aviso nuevo no desplaza las páginas siguientes.
+- Autorización en cada lectura: solo avisos propios de los Trips de los que el usuario es integrante **hoy**, más el aviso `member.expelled` de su propia expulsión (mientras exista el Trip). Quien sale o es expulsado deja de ver los demás avisos de ese Trip. La respuesta lleva IDs exactos y fechas; sin títulos, descripciones, textos de comentarios ni tokens.
+- Al eliminar un Trip se borran sus documentos de `outboxEvents` (cascada). No hay TTL ni retención definida.
+- `lambda.ts` ahora entrega a la ruta el `rawQueryString` de API Gateway (antes se descartaba: `limit` y `cursor` no llegaban a ninguna ruta con parámetros, incluida la lista de fotos).
+- Verificado con MongoDB efímero (`mongodb-memory-server`); no se probó con Atlas, push real (T92), volumen del fan-out ni textos finales del cliente.
 
 ## API de participación (T38)
 
