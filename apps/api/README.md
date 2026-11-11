@@ -124,9 +124,20 @@ Matriz de permisos y errores:
 - Cambiar rol y transferir: solo el titular (`trips.ownerId`). Actor no integrante, 404; integrante que no es titular, 403 `Forbidden`; destino no integrante, 404 `TripMemberNotFoundError`. Nadie rebaja al titular a `participant`: 409 `TripOwnerProtectedError`. Transferir al propio titular: 422 (`userId`, `same_owner`).
 - Repetir un cambio de rol ya aplicado (incluido `admin` sobre el titular) es idempotente: 204; confirma la transacción y solo incrementa `destinationOrderRevision` (candado interno). Una transferencia repetida no lo es: el anterior titular ya no lo es y recibe 403.
 - Transferir: `trips.ownerId` pasa al destino, que queda `admin`, y el anterior titular conserva `admin`; todo en una transacción.
-- Expulsar: los admins expulsan participantes; solo el titular expulsa admins; nadie expulsa al titular (ni él mismo). Rechazos con 403 `Forbidden` (también para un actor sin membresía); destino inexistente, 404. El expulsado, admin o participante, recibe el aviso `member.expelled` en la misma transacción. Aún no se limpian sus participaciones futuras en actividades (MEM-04, T116).
+- Expulsar: los admins expulsan participantes; solo el titular expulsa admins; nadie expulsa al titular (ni él mismo). Rechazos con 403 `Forbidden` (también para un actor sin membresía); destino inexistente, 404. El expulsado, admin o participante, recibe el aviso `member.expelled` en la misma transacción. Sus participaciones futuras se limpian igual que en la salida (ver «Salir del viaje (T116)»).
 - Un viaje sin `ownerId` rechaza toda operación del titular (403) hasta migrarlo; no se usa `createdBy` como respaldo.
 - Cada operación corre en una transacción que toma el mismo candado del Trip que la eliminación, el itinerario y las actividades (`$inc` de `destinationOrderRevision`), y lee actor, destino y titular dentro de ella. Un rechazo de negocio aborta la transacción (candado incluido) sin escribir nada. No se emiten eventos por cambio de rol ni por transferencia. Sin migraciones ni índices nuevos.
+
+## Salir del viaje (T116)
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| POST | `/trips/:tripId/leave` | — (sin cuerpo; el usuario sale solo del JWT) | 204 |
+
+- Cualquier integrante sale; la confirmación es del cliente (T118). Actor sin membresía, segundo intento o Trip inexistente: 404. El titular recibe 409 `TripOwnerProtectedError` sin escribir nada hasta transferir la titularidad o eliminar el Trip. Id inválido, 400; sin token, 401.
+- Un Trip sin `ownerId` o con titular no integrante bloquea la salida solo a admins (409); los participantes salen.
+- Salida y expulsión usan la misma baja (`removeMember`): borra la membresía y, en la misma transacción y bajo el candado del Trip, las participaciones del usuario en actividades del Trip cuyo inicio (`scheduledAt`) es posterior al instante de la baja, sea cual sea su estado (`going`, `not_going`, `pending`) y con su `decisionRequired`. El instante se lee dentro de la transacción. Una actividad que empieza exactamente en ese instante ya inició: su participación se conserva. Las participaciones de actividades ya iniciadas se conservan como registro. No se reasigna a nadie ni se tocan otros usuarios, actividades, posts, fotos, comentarios, likes, pagos ni partes.
+- La salida voluntaria no emite avisos; la expulsión mantiene `member.expelled` solo para el expulsado. El aviso va después de la limpieza (última escritura) y un fallo revierte todo. Sin migraciones: los usuarios expulsados antes de T116 conservan sus participaciones futuras.
 
 ## API de actividades (T36)
 
