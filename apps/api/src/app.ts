@@ -93,6 +93,7 @@ import {
   ok,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
+import { redactPath, sanitizeErrorForLog } from "./security/redact.js";
 import { tripInvitationBridgePage, tripInvitationErrorPage } from "./trips/trip-invitation-page.js";
 
 export interface HealthResponse {
@@ -1338,9 +1339,7 @@ export const createRequestHandler = (
     const metadata = {
       requestId: randomUUID(),
       method: request.method ?? "UNKNOWN",
-      path: (request.url ?? "/").split("?")[0]
-        .replace(/(\/auth\/verify\/)[^/]+/g, "$1[REDACTED]")
-        .replace(/(\/invite\/)[^/]+/g, "$1[REDACTED]"),
+      path: redactPath(request.url),
     };
     let errorCode: string | undefined;
 
@@ -1389,8 +1388,7 @@ export const createRequestHandler = (
       logger?.({
         event: "error",
         ...metadata,
-        errorName: error instanceof Error ? error.name : "UnknownError",
-        ...(error instanceof Error ? { stack: error.stack?.split("\n").filter((line) => /^\s+at /.test(line)) } : {}),
+        ...sanitizeErrorForLog(error),
       });
       const apiResponse = jsonResponse(500, {
         error: { code: errorCode, message: "Unable to complete the request." },
