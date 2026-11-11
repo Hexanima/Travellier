@@ -259,6 +259,13 @@ Mis viajes conserva Viajes/Descubrir/Perfil con iconos originales, etiquetas cap
 
 Voto y participación son individuales. El estado local se reinicia al recargar, no hay confirmación automática y la respuesta personal no altera Confirmada. Acciones fuera de la muestra anuncian que la pantalla no está incluida. Galería agrega fotos de posts, selecciona hasta cuatro y muestra un collage local como Idea futura. No hay autenticación, backend, cargas reales, publicación, exportación ni integración nativa en esta muestra.
 
+### Role badge y bloque de costos · T117 (pendiente de aprobación)
+
+- **Insignia de rol** (`.role-badge`): píldora de 12px/18px, radio 12px, fondo `--soft` y texto `--brand`; el **Titular** invierte a fondo `--brand` y texto `--surface`. Acompaña el nombre en la lista de integrantes y en «Gestionar integrante»; el rol nunca depende solo del color porque lleva texto.
+- **Bloque de costos de transporte** (`.transport-costs`): reutiliza la nota informativa (`.inline-note`); cifras con `font-variant-numeric: tabular-nums`, un renglón por moneda y un apartado «Moneda sin indicar» para costos previos, sin sumar. Siempre incluye «No es un gasto ni entra en el balance».
+- **Ex integrante:** sufijo textual «· ex integrante» en el nombre, solo en gastos y balance. Sin componente nuevo.
+- El resto de las pantallas de T117 reutiliza botones (primario, secundario, peligro), notas, selects, casilla de confirmación y filas ya definidos. Aprobación del usuario pendiente.
+
 ## Do's and Don'ts
 
 ### Do:

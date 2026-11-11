@@ -1,6 +1,6 @@
 # Evaluación del diseño contra el PRD v1
 
-Fecha: 2026-10-11. Fuente: [PRD en curso](../../docs/versiones/v1/PRD.md), incluidos sus criterios de aceptación. Referencia visual: `public/`, diseño azul aprobado por el usuario. No es una auditoría de PR, de las tareas ni del código productivo.
+Fecha: 2026-10-11 (actualización T117 del 2026-11-11 al final, pendiente de aprobación). Fuente: [PRD en curso](../../docs/versiones/v1/PRD.md), incluidos sus criterios de aceptación. Referencia visual: `public/`, diseño azul aprobado por el usuario. No es una auditoría de PR, de las tareas ni del código productivo.
 
 ## Resultado
 
@@ -194,3 +194,47 @@ Limitación técnica a validar al implementar: paginación/lazy loading del diar
 - Original y tareas conservan sus hashes previos. La evaluación no editó la UI/modelo; la corrección posterior solo modificó el prototipo y sus pruebas/documentación. Autenticación, push, S3, mapa geográfico, integración nativa, transacciones, concurrencia y sincronización entre usuarios no se acreditan aquí.
 
 El PRD no registra nuevas dudas de negocio pendientes. **Las integraciones pendientes son trabajo de implementación/validación, no decisiones abiertas resueltas por esta auditoría.** El usuario podrá comparar después las tareas con el PRD sin que este informe las marque realizadas.
+
+## Actualización del PRD del 2026-11-08 · T117
+
+**Estado: pendiente de aprobación del usuario.** Lo diseñado abajo es una propuesta para revisar; no está aprobado, no acredita implementación ni servicios reales y no modifica el PRD, las tareas ni el código productivo (`apps/*`, `domain`). La validación visual con Impeccable la realiza la sesión principal después de esta entrega; no se ejecutó aquí.
+
+### Qué se diseñó (solo en `design/prototype`)
+
+- **Grupo con titularidad.** Cada integrante muestra una insignia de rol: **Titular**, **Admin** o **Participante**. El titular ve «Gestionar» en todos los demás; un admin que no es titular solo lo ve en participantes; un participante no lo ve. Todos tienen «Salir del viaje».
+- **Gestionar integrante** (`member-manage`): el titular puede hacer o quitar admin, transferir la titularidad y expulsar (también admins); un admin expulsa participantes y no administra admins ni al titular. Nadie ve acciones sobre el titular.
+- **Confirmaciones.** Hacer/quitar admin (`role-change`, confirmación breve nombrando a la persona); expulsar (`remove-member`, ahora aclara qué registros se conservan); transferir (`transfer-owner`, selección de la persona y casilla obligatoria que explica que el titular anterior queda como admin); salir (`leave-trip`, qué se conserva como «ex integrante» y qué participaciones se eliminan).
+- **Titular que intenta salir** (`leave-owner`): elige entre «Transferir la titularidad» y «Eliminar el viaje». Si es el único integrante solo se ofrece eliminar. Transferir y salir son dos pasos separados: después de transferir se pasa a la confirmación de salida.
+- **Eliminar viaje** solo para el titular (antes bastaba un admin); los textos «Solo los admins pueden eliminar…» se corrigieron también en las variantes de estudio.
+- **Moneda del costo de transporte.** Selector «Moneda del costo» (ARS/EUR/USD) junto al costo por persona, sin moneda preseleccionada y obligatorio si hay costo. Los registros previos con costo y sin moneda muestran «Moneda sin indicar» (formulario, detalle y resumen) y exigen elegirla al guardar si se conserva el costo.
+- **Resumen «Costo de transporte por persona»** en la pantalla de transportes: un total por moneda, sin conversiones; los costos sin moneda aparecen aparte, sin sumar; nota «No es un gasto ni entra en el balance». Un tramo compartido por dos destinos se cuenta una vez.
+- **Ex integrantes en gastos y balance.** Detalle del gasto (pagos y partes), editor de reparto, lista de gastos («Incluye a un ex integrante») y transferencias del balance muestran «· ex integrante». Los montos se conservan; el reparto sigue editable para redistribuir.
+- **Datos de ejemplo** (Italia): avión en EUR, ómnibus en EUR, ómnibus en ARS y un vuelo previo con costo sin moneda. Nico es titular; Ana, admin. Los viajes públicos tienen a Ana como titular, por lo que al unirse se ve la vista de participante.
+
+Componentes reutilizados: lista de integrantes, botones primario/secundario/peligro, nota informativa, campos y selects, casilla de confirmación y filas existentes. Único patrón nuevo: la **insignia de rol** (`.role-badge`, tokens `--soft`, `--brand`, `--surface`) y el bloque de costos, que reutiliza la nota informativa. Se documentan en `DESIGN.md`.
+
+### Decisiones provisorias (a confirmar por el usuario)
+
+1. **Vista de rol del estudio** (control «Vista del rol»: «Admin o titular» / «Participante»): solo baja los permisos efectivos, nunca los sube; no muta la membresía. Para ver el rol Admin sin titularidad, transferir la titularidad desde el propio prototipo.
+2. **Moneda en todos los tipos de transporte con costo**, no solo avión y ómnibus: el PRD (`costCurrency`, obligatoria si hay `costPerPerson`) la define por transporte y el formulario ofrece el costo en todos los tipos. Alternativa a decidir: limitar el costo a avión/ómnibus.
+3. **Ubicación del resumen de costos**: no existe una pantalla «resumen del Trip»; se colocó en «Ida y vuelta» (transportes). Queda por definir si pertenece también a otra pantalla.
+4. **«Ex integrante» solo en gastos y balance.** No se etiquetan autores de posts, comentarios, likes ni fotos, aunque el PRD (§3.2) los conserva «identificados como de un ex integrante». **Pendiente de definición**: dónde y cómo mostrarlo en el resto.
+5. **Sin avisos** por cambio de rol, transferencia o salida (el PRD no los define). La expulsión conserva el aviso personal existente.
+6. **Salir** vuelve a Mis viajes, retira el viaje de la lista y descarta sus avisos. Reingresar no se rediseñó (un ex integrante que vuelve a unirse queda sin tocar).
+7. **Participaciones al salir o ser expulsado:** «iniciada» se mide contra la fecha del recorrido (16 oct 2026); las futuras se eliminan junto con su marca «Modificado» y las iniciadas se conservan como registro.
+8. **Titular único integrante:** solo puede eliminar el viaje.
+9. **Serialización** de cambios de rol, transferencia, salida y expulsión con otras mutaciones (PRD §3.2): no hay estado de carga ni conflicto concurrente diseñado para estas acciones.
+
+### Qué no se revisó
+
+- No se auditaron las demás pantallas contra el PRD del 2026-11-08: fotos privadas con URL firmada, actualización periódica de datos y retiro del tipo `arrival` de `itineraryDays` no se tocaron aquí.
+- No se verificó con lector de pantalla, teclado virtual ni dispositivos reales. No se ejecutó Impeccable (lo hace la sesión principal).
+- No se rehicieron las capturas de `review/` ni se volvieron a ejecutar los demás `verify-*.mjs`; `verify-participation.mjs` y la auditoría inicial conservan sus cifras anteriores (56 entradas, 165 combinaciones).
+- Los estados guardados en el navegador antes de T117 no traen costos ni moneda de ejemplo: usar «Reiniciar recorrido».
+
+### Evidencia de esta entrega
+
+- `node --test --test-concurrency=1 *.test.mjs`: **227 pruebas aprobadas** (191 anteriores y 36 nuevas: 19 de titularidad, roles y salida en `membership-ownership.test.mjs`, 10 de moneda en `transport-currency.test.mjs` y 7 de ex integrantes en `former-members.test.mjs`). Las tres suites fallaban antes de implementar. Dos pruebas anteriores (`prd-edge-fixes`) leen ahora también el selector de moneda del formulario; sin ese ajuste de la prueba fallaban por el nuevo costo de ejemplo.
+- Catálogo: **61 entradas** (fundamentos + 60 vistas de teléfono); cinco nuevas: `member-manage`, `role-change`, `transfer-owner`, `leave-trip`, `leave-owner`.
+- `verify-membership.mjs` (Edge headless): titular → quitar admin con confirmación → salir como titular → transferir (casilla obligatoria) → salida; expulsión y «ex integrante» en gastos; resumen y selector de moneda; vista de participante. Sin errores JS ni overflow horizontal a 320 y 390 px. No guarda capturas.
+- Ninguna de las pantallas nuevas menciona votación; la votación sigue retirada.

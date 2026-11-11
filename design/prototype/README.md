@@ -56,12 +56,29 @@ Las versiones descartadas y las capturas de verificaciones anteriores permanecen
 
 Se conservan el azul, las pestañas compartidas, las cadenas de recuerdos, las fotos por actividad y los gastos configurables. Estos cambios corresponden al prototipo; no modifican la implementación, el PRD ni las tareas.
 
+## Salida, titularidad y moneda de transportes · T117 (pendiente de aprobación)
+
+Propuesta de diseño para los cambios del PRD del 2026-11-08, **pendiente de aprobación del usuario**. Detalle, decisiones provisorias y límites en [PRD-AUDIT.md](PRD-AUDIT.md). Solo cambia el prototipo.
+
+Cómo explorarlo (servidor Node o Live Server, `?mode=app` para ver solo la app; sin ese parámetro se muestra el estudio):
+
+- **Grupo con titular y roles:** `?mode=app&screen=group`. Nico es titular (insignia «Titular»), Ana es admin, Martín y Juli son participantes. «Gestionar» abre `member-manage` con las acciones según el rol de quien mira; «Hacer admin»/«Quitar admin» abre `role-change`; «Transferir titularidad» abre `transfer-owner`.
+- **Titular que intenta salir:** en Grupo, «Salir del viaje» (`screen=leave-owner`): elegir transferir o eliminar. Transferir lleva después a la confirmación de salida (`screen=leave-trip`); al confirmar se vuelve a Mis viajes.
+- **Salir como admin o participante:** transferir la titularidad a otra persona y volver a «Salir del viaje», o unirse desde Descubrir a «Roma en buena compañía» (allí Ana es titular y vos participante). El control del estudio «Vista del rol: Participante» muestra la vista de un participante sin cambiar la membresía.
+- **Expulsar:** Grupo → «Gestionar» → «Expulsar» (`screen=remove-member`). Un admin solo expulsa participantes; el titular también admins; nadie expulsa al titular. «Eliminar viaje» (Opciones del viaje, `screen=delete-trip`) solo aparece para el titular.
+- **Moneda de transportes:** `?mode=app&screen=transports` muestra «Costo de transporte por persona» por moneda y el costo previo en «Moneda sin indicar». `screen=transport-edit` tiene el selector «Moneda del costo»; el detalle del traslado (`screen=transport-detail`) muestra el costo con su moneda. Para ver el vuelo Venecia → Buenos Aires con la moneda sin indicar, elegir el destino Venecia en «Ida y vuelta» y abrir su salida.
+- **Ex integrantes en gastos y balance:** expulsar a Juli y abrir Gastos (`screen=expenses`), el detalle de un gasto en un post (`screen=post`) y Balance (`screen=balance`, con el control «Gastos: Balance»). Juli aparece como «Juli · ex integrante», con sus pagos y partes conservados.
+
+«Reiniciar recorrido» restaura los datos iniciales, incluidos los costos y monedas de ejemplo (los estados guardados antes de esta entrega no los tienen).
+
+Pruebas: `membership-ownership.test.mjs`, `transport-currency.test.mjs` y `former-members.test.mjs`; recorrido en navegador: `node verify-membership.mjs` (320/390 px). Pantallas nuevas en el catálogo: `member-manage`, `role-change`, `transfer-owner`, `leave-trip` y `leave-owner` (61 entradas en total). La validación con Impeccable la hace la sesión principal después de esta entrega.
+
 ## Pruebas
 
 ```sh
 node --test --test-concurrency=1 *.test.mjs
 ```
 
-La comprobación vigente es `node verify-participation.mjs`: recorre las 56 vistas del catálogo a 320/390/1280 px, cambios de plan, cancelación, actividad espontánea, persistencia y registro. Las capturas están en `review/participation/`.
+La comprobación vigente es `node verify-participation.mjs`: recorre las vistas del catálogo (56 cuando se ejecutó; hoy son 61 y no se volvió a correr en T117) a 320/390/1280 px, cambios de plan, cancelación, actividad espontánea, persistencia y registro. Las capturas están en `review/participation/`.
 
 Los scripts históricos `verify-*.mjs` y de capturas pueden conservar supuestos de entregas anteriores y usan Playwright del runtime local de Codex; no son necesarios para abrir el prototipo y no se agregan a los comandos de la aplicación.

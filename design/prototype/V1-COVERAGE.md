@@ -10,7 +10,7 @@ Evidencia del 2026-10-11: 191 pruebas unitarias aprobadas; regresiones F1–F12 
 
 ## Adaptación vigente al PRD · 11 de octubre de 2026
 
-El catálogo activo contiene 56 vistas (fundamentos y 55 vistas de teléfono), sin votación, aprobación colectiva ni confirmación obligatoria de email. Conserva el sistema azul y las pestañas compartidas.
+El catálogo activo contiene 61 vistas (fundamentos y 60 vistas de teléfono; las cinco últimas son de T117 y están pendientes de aprobación), sin votación, aprobación colectiva ni confirmación obligatoria de email. Conserva el sistema azul y las pestañas compartidas.
 
 - Actividad nueva: autor en «Voy»; otros integrantes sin responder. Duración opcional con fin derivado; validación del intervalo completo contra la ventana del destino.
 - Participación: confirmación explícita ante todos los planes personales incompatibles. Cancelar conserva estado y borrador; confirmar cambia únicamente las participaciones propias.
@@ -77,6 +77,10 @@ Crear/editar recuerdo ahora guarda directamente desde el botón al final del for
 Es diseño HTML navegable, no implementación funcional. React/Capacitor, AWS, MongoDB, S3, JWT y transacciones siguen en la app en desarrollo. Las formas y confirmaciones no mutan datos reales. Borradores, votos, participación, selección de fotos, comentarios y likes son demostraciones en memoria que se reinician al recargar. La validación nativa del navegador y el chequeo de llegada anterior a salida no acreditan conversión UTC ni todas las restricciones de ventanas de transporte. No se crea historial real, no se prueba concurrencia o integridad de MongoDB y no se solicita ningún permiso nativo. Los datos de ejemplo no acreditan viajes/fotos del usuario.
 
 Collage conserva la marca «Idea futura» de la exploración anterior. Offline, chat, templates y PDF están fuera de v1. No se revisó ni modificó el listado de tareas ni el código productivo. Figma permanece sin cambios.
+
+## Salida, titularidad y moneda de transportes · T117 (2026-11-11)
+
+Propuesta para el PRD del 2026-11-08, **pendiente de aprobación del usuario**: Grupo con titular y roles, gestionar integrante, cambio de rol, transferencia, salida (con la opción de transferir o eliminar para el titular), moneda en el costo de transporte con «Moneda sin indicar» y resumen por moneda, y «ex integrante» en gastos y balance. Cinco vistas nuevas (`member-manage`, `role-change`, `transfer-owner`, `leave-trip`, `leave-owner`): 61 entradas en el catálogo. Evidencia: 227 pruebas unitarias aprobadas (36 nuevas) y `verify-membership.mjs` a 320/390 px. Decisiones provisorias y límites en [PRD-AUDIT.md](PRD-AUDIT.md); no se rehicieron las capturas de `review/` ni la validación con Impeccable (la hace la sesión principal).
 
 ## Evidencia
 
