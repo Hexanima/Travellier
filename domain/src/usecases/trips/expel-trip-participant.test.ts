@@ -33,7 +33,7 @@ const expulsionNotice = (userId: ObjectId) => {
 const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; ownerRole?: TripRole } = {}) => {
   const roles = new Map<ObjectId, TripRole>([[owner, options.ownerRole ?? "admin"], [admin, "admin"], [participant, "participant"], [otherParticipant, "participant"]]);
   const calls = { findOwnerId: 0 };
-  const removeMember = vi.fn(async (...args: [membershipId: ObjectId, userId: ObjectId, notifications: unknown]): Promise<Result<boolean>> =>
+  const removeMember = vi.fn(async (...args: [membershipId: ObjectId, userId: ObjectId, notifications: unknown, at: Date]): Promise<Result<boolean>> =>
     ok(options.removed === false ? false : roles.delete(args[1])));
   const scope: TripMemberAdministrationScope = {
     findMember: async (userId) => {
@@ -55,7 +55,7 @@ describe("expelTripParticipant", () => {
   it.each([["an admin", admin], ["the owner", owner]])("lets %s expel a participant with a notice for the expelled user only", async (_label, actor) => {
     const { port, removeMember, calls, roles } = createFake();
     expect(await expel(port, actor, participant)).toEqual({ ok: true, value: undefined });
-    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, expulsionNotice(participant));
+    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, expulsionNotice(participant), now());
     expect(JSON.stringify(removeMember.mock.calls[0]?.[2])).not.toContain(actor);
     expect(roles.has(participant)).toBe(false);
     expect(calls.findOwnerId).toBe(1);
@@ -64,7 +64,7 @@ describe("expelTripParticipant", () => {
   it("lets the owner expel an admin with the same notice", async () => {
     const { port, removeMember, roles } = createFake();
     expect(await expel(port, owner, admin)).toEqual({ ok: true, value: undefined });
-    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(admin), admin, expulsionNotice(admin));
+    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(admin), admin, expulsionNotice(admin), now());
     expect(roles.has(admin)).toBe(false);
   });
 
