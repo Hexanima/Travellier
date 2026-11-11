@@ -8,12 +8,9 @@ import {
   type ObjectId,
   type TripMember,
   type TripMemberListingPort,
-  type TripMemberManagementPort,
   type TripMemberSummary,
   type TripRole,
 } from "app-domain";
-
-import { createOutboxStore } from "./outbox-store.js";
 
 type MembershipDocument = {
   _id: MongoObjectId;
@@ -41,7 +38,7 @@ const toMember = (document: MembershipDocument): TripMember => ({
 
 const unknownError = () => new UnknownError("Trip member database operation failed.");
 
-export const createMongoTripMemberRepository = (database: Db): TripMemberManagementPort & TripMemberListingPort => {
+export const createMongoTripMemberRepository = (database: Db): TripMemberListingPort => {
   const members = database.collection<MembershipDocument>("tripMembers");
   const users = database.collection<UserNameDocument>("users");
 
@@ -86,33 +83,6 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
         return ok(summaries);
       } catch {
         return err(unknownError());
-      }
-    },
-    removeParticipant: async (membershipId, tripId, userId, notifications) => {
-      const session = database.client.startSession();
-      try {
-        const removed = await session.withTransaction(async () => {
-          const mongoTripId = new MongoObjectId(tripId);
-          // Share activity/itinerary/Trip-deletion coordination before revoking access.
-          const lock = await database.collection("trips").updateOne({ _id: mongoTripId },
-            { $inc: { destinationOrderRevision: 1 } }, { session });
-          if (lock.matchedCount === 0) return false;
-          const result = await members.deleteOne({
-            _id: new MongoObjectId(membershipId),
-            tripId: mongoTripId,
-            userId: new MongoObjectId(userId),
-            role: "participant",
-          }, { session });
-          if (result.deletedCount !== 1) return false;
-          // Last write, same transaction: the notice exists only if the membership was really deleted.
-          await createOutboxStore(database, tripId, session).appendNotifications(notifications);
-          return true;
-        }, { readConcern: { level: "snapshot" }, readPreference: "primary" });
-        return removed === undefined ? err(unknownError()) : ok(removed);
-      } catch {
-        return err(unknownError());
-      } finally {
-        await session.endSession();
       }
     },
   };
