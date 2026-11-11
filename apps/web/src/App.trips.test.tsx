@@ -2,10 +2,11 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useNavigate } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.js";
+import type { NativeAppUrlApi } from "./navigation/app-url-listener.js";
 import type { NativeSessionStorage } from "./auth/native-session-storage.js";
 import { getRememberedFilter, resetRememberedFilter } from "./trips/trips-filter-memory.js";
 
@@ -403,6 +404,64 @@ describe("App Trip routes", () => {
       expect(getRememberedFilter()).toBe("finished");
       await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Cerrar sesión")?.click());
       expect(getRememberedFilter()).toBe("active");
+    });
+
+    describe("with the default HTTP client", () => {
+      let unauthorizedProfile = false;
+      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+      const fakeFetch = vi.fn(async (url: string, init: RequestInit) => {
+        const path = new URL(url).pathname;
+        const body = typeof init.body === "string" ? JSON.parse(init.body) as Record<string, string> : undefined;
+        if (path === "/auth/refresh") return json({ accessToken: "access-A", refreshToken: "r-A" });
+        if (path === "/auth/login") return json({ accessToken: "access-B", refreshToken: `r-${body?.email}` });
+        if (path === "/trips") return json({ trips: [finishedTrip, activeTrip] });
+        if (path === "/profile") return unauthorizedProfile ? json({ error: { code: "Unauthorized", message: "x" } }, 401) : json({ profile: { name: "Nico", email: "a@example.test", avatar: null } });
+        return json({}, 404);
+      });
+      let navigateTo: (path: string) => void = () => undefined;
+      function Navigator() { const navigate = useNavigate(); navigateTo = (path) => navigate(path); return null; }
+      beforeEach(() => { unauthorizedProfile = false; vi.stubGlobal("fetch", fakeFetch); });
+      afterEach(() => { vi.unstubAllGlobals(); });
+      // The launch URL never resolves, so an authenticated session is not redirected away from /login.
+      const nativeApp: NativeAppUrlApi = {
+        addListener: vi.fn(async () => ({ remove: vi.fn().mockResolvedValue(undefined) })),
+        getLaunchUrl: vi.fn(() => new Promise<undefined>(() => undefined)),
+      };
+      const renderApi = async () => {
+        const container = document.createElement("div");
+        document.body.append(container);
+        const root = createRoot(container);
+        roots.push(root);
+        await act(async () => root.render(
+          <MemoryRouter initialEntries={["/trips"]}><App apiBaseUrl="https://api.test" sessionStorage={storage(true)} nativeApp={nativeApp} /><Navigator /></MemoryRouter>,
+        ));
+        return container;
+      };
+
+      it("forgets the selected tab when a 401 ends the session", async () => {
+        const container = await renderApi();
+        await act(async () => tabButton(container, "Finalizados")?.click());
+        expect(getRememberedFilter()).toBe("finished");
+        unauthorizedProfile = true;
+        await act(async () => container.querySelector<HTMLElement>('a[href="/profile"]')?.click());
+        expect(container.textContent).toContain("Iniciar sesión");
+        expect(getRememberedFilter()).toBe("active");
+      });
+
+      it("opens the list in Activos after another account signs in", async () => {
+        const container = await renderApi();
+        await act(async () => tabButton(container, "Finalizados")?.click());
+        expect(getRememberedFilter()).toBe("finished");
+        await act(async () => navigateTo("/login"));
+        await act(async () => {
+          (container.querySelector("[name=email]") as HTMLInputElement).value = "b@example.test";
+          (container.querySelector("[name=password]") as HTMLInputElement).value = "secret-pass";
+          container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        });
+        expect(getRememberedFilter()).toBe("active");
+        expect(tabButton(container, "Activos")?.getAttribute("aria-selected")).toBe("true");
+        expect(names(container)).toEqual(["Futuro"]);
+      });
     });
 
     it("moves a Trip between tabs after changing its transports and coming back", async () => {

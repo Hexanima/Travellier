@@ -39,17 +39,13 @@ describe("classifyTrips", () => {
     expect(result.active[0]?.name).toBe("future");
     expect(result.finished).toHaveLength(1);
   });
-  it("is the same whatever the device time zone (sanity of the TZ in use is logged by the test below)", () => {
-    // Around midnight UTC: a local-day comparison would differ between Buenos Aires and UTC.
+  it("compares UTC instants around midnight, not local days", () => {
+    // Around midnight UTC: a local-day comparison would differ between Buenos Aires and UTC. The real time-zone change is covered in TripScreens.clock.test.tsx.
     const edge = item("edge", null, "2026-10-10T00:30:00.000Z");
     expect(classifyTrips([edge], Date.parse("2026-10-10T00:29:59.999Z")).active).toHaveLength(1);
     expect(classifyTrips([edge], Date.parse("2026-10-10T00:30:00.000Z")).active).toHaveLength(1);
     expect(classifyTrips([edge], Date.parse("2026-10-10T00:30:00.001Z")).finished).toHaveLength(1);
     expect(classifyTrips([edge], Date.parse("2026-10-09T23:59:59.999Z")).active).toHaveLength(1);
-  });
-  it("runs with the time zone requested by the environment", () => {
-    if (process.env.TZ === "UTC") expect(new Date().getTimezoneOffset()).toBe(0);
-    if (process.env.TZ === "America/Argentina/Buenos_Aires") expect(new Date().getTimezoneOffset()).toBe(180);
   });
 });
 
