@@ -93,7 +93,17 @@ import {
   ok,
 } from "app-domain";
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
+import type { AuthRateLimitRoute, AuthRateLimiter } from "./security/auth-rate-limit.js";
 import { redactPath, sanitizeErrorForLog } from "./security/redact.js";
+import {
+  bodyLimitFor,
+  contentTypeProblem,
+  payloadTooLargeResponse,
+  readSecurityConfig,
+  tooManyRequestsResponse,
+  unsupportedMediaTypeResponse,
+  type SecurityConfig,
+} from "./security/request-limits.js";
 import { tripInvitationBridgePage, tripInvitationErrorPage } from "./trips/trip-invitation-page.js";
 
 export interface HealthResponse {
@@ -112,6 +122,10 @@ export interface ApiRequest {
   url?: string;
   body?: unknown;
   authenticatedUserId?: ObjectId;
+  /** Client IP as seen by the transport (API Gateway `sourceIp` or the socket); never read from X-Forwarded-For. */
+  clientIp?: string;
+  /** Raw `Content-Type` header, when the request carried one. */
+  contentType?: string;
 }
 
 export interface AuthenticationApi {
@@ -138,6 +152,8 @@ export interface ApiDependencies {
   auth?: AuthenticationApi;
   trips?: TripApi;
   pushDevices?: PushDeviceApi;
+  /** Auth throttle (T102). Without it no rate limiting applies. */
+  rateLimiter?: AuthRateLimiter;
 }
 
 /** Push device registration (T89). `input` is the untrusted body; the user always comes from the authenticated request. */
@@ -684,8 +700,18 @@ export const handleApiRequest = async (
     return jsonResponse(200, await createHealthResponse());
   }
 
+  if (request.body !== undefined && request.body !== "" && contentTypeProblem(request.contentType)) {
+    return unsupportedMediaTypeResponse();
+  }
+
   const payload = parsePayload(request.body);
   const auth = dependencies.auth;
+  // Counts the attempt before any password hashing or user lookup; undefined means "go on".
+  const limitAuth = async (route: AuthRateLimitRoute, email?: string): Promise<ApiResponse | undefined> => {
+    if (dependencies.rateLimiter === undefined) return undefined;
+    const decision = await dependencies.rateLimiter.check(route, { ip: request.clientIp, ...(email === undefined ? {} : { email }) });
+    return decision.allowed ? undefined : tooManyRequestsResponse(decision.retryAfterSeconds);
+  };
 
   if (request.method === "POST" && request.url === "/trips/join") {
     if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
@@ -1218,6 +1244,9 @@ export const handleApiRequest = async (
       return unavailableResponse();
     }
 
+    const limited = await limitAuth("register");
+    if (limited !== undefined) return limited;
+
     const result = await auth.register(input);
 
     return result.ok
@@ -1236,9 +1265,16 @@ export const handleApiRequest = async (
       return unavailableResponse();
     }
 
+    const limited = await limitAuth("login", input.email);
+    if (limited !== undefined) return limited;
+
     const result = await auth.login(input);
 
-    return result.ok ? jsonResponse(200, result.value) : errorResponse(result.error);
+    if (result.ok) {
+      await dependencies.rateLimiter?.succeeded("login", { ip: request.clientIp, email: input.email });
+      return jsonResponse(200, result.value);
+    }
+    return errorResponse(result.error);
   }
 
   if (request.method === "POST" && request.url === "/auth/refresh") {
@@ -1251,6 +1287,9 @@ export const handleApiRequest = async (
     if (auth === undefined) {
       return unavailableResponse();
     }
+
+    const limited = await limitAuth("refresh");
+    if (limited !== undefined) return limited;
 
     const result = await auth.refresh(input);
 
@@ -1267,6 +1306,9 @@ export const handleApiRequest = async (
     if (auth === undefined) {
       return unavailableResponse();
     }
+
+    const limited = await limitAuth("logout");
+    if (limited !== undefined) return limited;
 
     const result = await auth.logout(input);
 
@@ -1302,11 +1344,20 @@ export const handleApiRequest = async (
   return jsonResponse(404, { error: "NotFound" });
 };
 
-const readRequestBody = async (request: IncomingMessage): Promise<string> => {
+class PayloadTooLargeError extends Error {}
+
+/** Reads at most `limit` bytes: a larger Content-Length or a larger stream raises `PayloadTooLargeError` (leaving the loop destroys the stream). */
+const readRequestBody = async (request: IncomingMessage, limit: number): Promise<string> => {
+  const declared = Number(request.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > limit) throw new PayloadTooLargeError();
   const chunks: Buffer[] = [];
+  let size = 0;
 
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > limit) throw new PayloadTooLargeError();
+    chunks.push(buffer);
   }
 
   return Buffer.concat(chunks).toString("utf8");
@@ -1325,6 +1376,7 @@ export const createRequestHandler = (
   authenticate?: RequestAuthenticator,
   logger?: ApiLogger,
   allowedOrigins: readonly string[] = defaultCorsOrigins,
+  security: SecurityConfig = readSecurityConfig({}),
 ) => {
   const applyCors = cors<IncomingMessage>({
     origin: [...allowedOrigins],
@@ -1363,16 +1415,27 @@ export const createRequestHandler = (
         response.end();
         return;
       }
-      const authenticated = await authenticate?.(request.headers.authorization);
-      const apiResponse = await handleApiRequest(
-        {
-          method: request.method,
-          url: request.url,
-          body: await readRequestBody(request),
-          authenticatedUserId: authenticated?.authenticatedUserId,
-        },
-        dependencies,
-      );
+      let apiResponse: ApiResponse;
+      try {
+        const body = await readRequestBody(request, bodyLimitFor(request.url ?? "/", security));
+        const authenticated = await authenticate?.(request.headers.authorization);
+        apiResponse = await handleApiRequest(
+          {
+            method: request.method,
+            url: request.url,
+            body,
+            authenticatedUserId: authenticated?.authenticatedUserId,
+            ...(request.socket.remoteAddress === undefined ? {} : { clientIp: request.socket.remoteAddress }),
+            ...(request.headers["content-type"] === undefined ? {} : { contentType: request.headers["content-type"] }),
+          },
+          dependencies,
+        );
+      } catch (error: unknown) {
+        if (!(error instanceof PayloadTooLargeError)) throw error;
+        // The unread body is not worth keeping the connection for.
+        apiResponse = { ...payloadTooLargeResponse(), headers: { ...payloadTooLargeResponse().headers, connection: "close" } };
+      }
+      apiResponse = { ...apiResponse, headers: { ...apiResponse.headers, "x-request-id": metadata.requestId } };
       if (apiResponse.statusCode >= 400) {
         try {
           const payload = JSON.parse(apiResponse.body) as { error?: string | { code?: string } };
@@ -1396,7 +1459,7 @@ export const createRequestHandler = (
       if (response.headersSent) {
         response.destroy();
       } else {
-        response.writeHead(apiResponse.statusCode, apiResponse.headers);
+        response.writeHead(apiResponse.statusCode, { ...apiResponse.headers, "x-request-id": metadata.requestId });
         response.end(apiResponse.body);
       }
     }
@@ -1410,7 +1473,8 @@ export const createApp = (
   authenticate?: RequestAuthenticator,
   logger?: ApiLogger,
   allowedOrigins: readonly string[] = defaultCorsOrigins,
-) => createServer(createRequestHandler(dependencies, authenticate, logger, allowedOrigins));
+  security?: SecurityConfig,
+) => createServer(createRequestHandler(dependencies, authenticate, logger, allowedOrigins, security));
 
 const isEntrypoint =
   process.argv[1] !== undefined &&
