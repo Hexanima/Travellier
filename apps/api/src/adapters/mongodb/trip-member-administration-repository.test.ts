@@ -149,9 +149,9 @@ describe("Mongo trip member administration repository", () => {
       const base = await seed();
       const other = await seed();
       const bystander = new ObjectId();
-      const activityAt = async (tripId: ObjectId, scheduledAt: Date) => {
+      const activityAt = async (tripId: ObjectId, scheduledAt: Date, durationMinutes: number | null = null) => {
         const _id = new ObjectId();
-        await database.collection("activities").insertOne({ _id, tripId, scheduledAt, title: "Plan", durationMinutes: null });
+        await database.collection("activities").insertOne({ _id, tripId, scheduledAt, title: "Plan", durationMinutes });
         return _id;
       };
       const participation = async (tripId: ObjectId, activityId: ObjectId, userId: ObjectId, status: string, decisionRequired?: object) => {
@@ -172,6 +172,15 @@ describe("Mongo trip member administration repository", () => {
       expect(await f.remove()).toEqual(ok(true));
       expect(await database.collection("activityParticipations").find({ _id: { $in: [before, equal, after] } }).sort({ _id: 1 }).toArray())
         .toMatchObject([{ _id: before }, { _id: equal }]);
+    });
+
+    it("ignores the duration: a started activity whose end is after the instant is kept and a short future one is deleted", async () => {
+      const f = await seedCleanup();
+      const startedLong = await f.participation(f.tripId, await f.activityAt(f.tripId, new Date(at.getTime() - 60_000), 600), f.participant, "going");
+      const futureShort = await f.participation(f.tripId, await f.activityAt(f.tripId, new Date(at.getTime() + 60_000), 1), f.participant, "going");
+      expect(await f.remove()).toEqual(ok(true));
+      expect(await database.collection("activityParticipations").findOne({ _id: startedLong })).not.toBeNull();
+      expect(await database.collection("activityParticipations").findOne({ _id: futureShort })).toBeNull();
     });
 
     it("deletes going, not_going and pending futures with their decisionRequired and keeps the started ones as they are", async () => {

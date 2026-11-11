@@ -48,10 +48,10 @@ describe("leaving a Trip and the cleanup of future participations (T116)", () =>
   const expel = (actor: ObjectId, target: ObjectId) => call(actor, "DELETE", `/members/${target}`);
   const transfer = (actor: ObjectId, target: ObjectId) => call(actor, "POST", "/transfer-ownership", { userId: target.toHexString() });
 
-  const addActivity = async (day: ObjectId, scheduledAt: Date) => {
+  const addActivity = async (day: ObjectId, scheduledAt: Date, durationMinutes: number | null = null) => {
     const _id = new ObjectId();
     await f.db.collection("activities").insertOne({ _id, tripId: f.trip, dayId: day, title: "Plan", description: null, mapsUrl: null,
-      durationMinutes: null, scheduledAt, status: "confirmed", createdBy: O, createdAt: new Date() });
+      durationMinutes, scheduledAt, status: "confirmed", createdBy: O, createdAt: new Date() });
     return _id;
   };
   const marker = { reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: new Date("2026-10-01T00:00:00.000Z") };
@@ -163,6 +163,27 @@ describe("leaving a Trip and the cleanup of future participations (T116)", () =>
     vi.useRealTimers();
     expect(response.statusCode).toBe(204);
     expect(await held(C)).toEqual(sorted(before, equal));
+  }, 30_000);
+
+  it("ignores the duration: a started activity ending after the instant is kept, a short future one is deleted (controlled clock)", async () => {
+    const instant = new Date("2099-06-10T12:00:00.000Z");
+    const startedLong = await addActivity(futureDay, new Date(instant.getTime() - 60_000), 600);
+    const futureShort = await addActivity(futureDay, new Date(instant.getTime() + 60_000), 1);
+    for (const activity of [startedLong, futureShort]) await participate(activity, C, "going");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(instant);
+    const response = await leave(C);
+    vi.useRealTimers();
+    expect(response.statusCode).toBe(204);
+    expect(await held(C)).toEqual(sorted(startedLong));
+  }, 30_000);
+
+  it("in a Trip whose owner has the participant role (inconsistent data) an admin cannot leave but a participant can", async () => {
+    await f.db.collection("tripMembers").updateOne({ tripId: f.trip, userId: O }, { $set: { role: "participant" } });
+    const before = await fullSnapshot();
+    expect((await leave(B)).statusCode).toBe(409);
+    expect(await fullSnapshot()).toEqual(before);
+    expect((await leave(C)).statusCode).toBe(204);
   }, 30_000);
 
   it("lets an expelled participant keep started participations and drops the future ones with the same cleanup", async () => {
