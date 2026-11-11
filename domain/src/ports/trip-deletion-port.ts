@@ -6,6 +6,8 @@ import type { ObjectId } from "../value-objects/object-id.js";
 /** All operations are scoped to the Trip locked by withTransaction. */
 export interface TripDeletionScope {
   findMemberRole: (userId: ObjectId) => AsyncResult<TripRole | undefined>;
+  /** Titular actual (`trips.ownerId`); `undefined` si el viaje todavía no lo tiene. */
+  findOwnerId: () => AsyncResult<ObjectId | undefined>;
   listDestinations: () => AsyncResult<TripDestination[]>;
   hasDestinationRecords: (destinationId: ObjectId) => AsyncResult<boolean>;
   removeDestination: (destinationId: ObjectId) => AsyncResult<void>;

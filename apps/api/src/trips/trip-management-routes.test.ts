@@ -5,11 +5,11 @@ import { handleApiRequest } from "../app.js";
 
 const actorId = "507f1f77bcf86cd799439011";
 const tripId = "507f191e810c19729de860ea";
-const trip = { id: tripId, name: "Patagonia", primaryDestination: { name: "Bariloche" } };
+const trip = { id: tripId, name: "Patagonia", ownerId: actorId, createdBy: actorId, primaryDestination: { name: "Bariloche" } };
 
 describe("Trip management routes", () => {
   it("lists members only for the authenticated trip member", async () => {
-    const member = { id: "507f1f77bcf86cd799439013", userId: actorId, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
+    const member = { id: "507f1f77bcf86cd799439013", userId: actorId, name: "Nico", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" };
     const listMembers = vi.fn().mockResolvedValue(ok([member]));
     const dependencies = { trips: { listMembers } } as never;
     const request = { method: "GET", url: `/trips/${tripId}/members`, body: { currentUserId: "spoofed" } };
@@ -17,8 +17,18 @@ describe("Trip management routes", () => {
     expect((await handleApiRequest(request, dependencies)).statusCode).toBe(401);
     const response = await handleApiRequest({ ...request, authenticatedUserId: actorId as never }, dependencies);
     expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body)).toEqual({ members: [member], currentUserId: actorId });
+    expect(JSON.parse(response.body)).toEqual({ members: [member], currentUserId: actorId, ownerId: actorId });
     expect(listMembers).toHaveBeenCalledWith({ authenticatedUserId: actorId, tripId });
+  });
+
+  it("derives the top-level ownerId from the member flagged as owner, or null when none is", async () => {
+    const other = { id: "507f1f77bcf86cd799439014", userId: "507f1f77bcf86cd799439012", name: "Ana", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:01:00.000Z" };
+    const plain = { ...other, userId: actorId, isOwner: false, role: "participant" };
+    const request = { method: "GET", url: `/trips/${tripId}/members`, authenticatedUserId: actorId as never };
+    const withOwner = await handleApiRequest(request, { trips: { listMembers: vi.fn().mockResolvedValue(ok([plain, other])) } } as never);
+    expect(JSON.parse(withOwner.body)).toMatchObject({ ownerId: other.userId, currentUserId: actorId });
+    const withoutOwner = await handleApiRequest(request, { trips: { listMembers: vi.fn().mockResolvedValue(ok([plain])) } } as never);
+    expect(JSON.parse(withoutOwner.body)).toMatchObject({ ownerId: null });
   });
 
   it("expels a participant using only the JWT actor and path IDs", async () => {

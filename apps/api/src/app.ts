@@ -1110,7 +1110,12 @@ export const handleApiRequest = async (
         tripId: tripId.value,
       });
       return result.ok
-        ? jsonResponse(200, { members: result.value, currentUserId: request.authenticatedUserId })
+        ? jsonResponse(200, {
+          members: result.value,
+          currentUserId: request.authenticatedUserId,
+          // Titular actual: el integrante marcado isOwner; null si el viaje aún no tiene titular válido entre sus integrantes.
+          ownerId: result.value.find((member) => member.isOwner)?.userId ?? null,
+        })
         : errorResponse(result.error);
     }
     const targetUserId = createObjectId(expelMemberMatch?.[2] ?? "");

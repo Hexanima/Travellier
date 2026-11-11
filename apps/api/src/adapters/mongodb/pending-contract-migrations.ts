@@ -74,7 +74,22 @@ const adaptLegacyExpensePayers = (database: Db) => database.collection("postExpe
   [{ $set: { payments: [{ userId: "$paidBy", unit: "percent", value: 100 }] } }],
 );
 
-// Index DDL is additive (no data removal or replacement of historical indexes); 0006 is the only data change.
+/**
+ * Titularidad (T114): `ownerId` nace de `createdBy` en los viajes que todavía no lo tienen. El filtro compara el tipo BSON de los campos
+ * completos con `$expr` (`ownerId` ausente o null; `createdBy` ObjectId): nunca pisa un `ownerId` existente (ni uno ya transferido), no toca
+ * otros campos ni colecciones y corre idempotente aunque se repita o compita. No corrige viajes cuyo creador ya no es miembro: los
+ * diagnostica `auditMongoContracts` (`trip_owner_not_member`). Sin índice nuevo.
+ */
+export const TRIP_OWNER_MIGRATION_ID = "0010-trip-owner-from-created-by";
+const deriveTripOwners = (database: Db) => database.collection("trips").updateMany(
+  { $expr: { $and: [
+    { $in: [{ $type: "$ownerId" }, ["missing", "null"]] },
+    { $eq: [{ $type: "$createdBy" }, "objectId"] },
+  ] } },
+  [{ $set: { ownerId: "$createdBy" } }],
+);
+
+// Index DDL is additive (no data removal or replacement of historical indexes); 0006 and 0010 are the only data changes.
 export const migratePendingContracts = async (database: Db): Promise<void> => {
   const versions = database.collection<{ id: string; appliedAt: Date }>("_migrations");
   for (const migration of pendingMigrations) {
@@ -87,5 +102,9 @@ export const migratePendingContracts = async (database: Db): Promise<void> => {
   if (!(await versions.findOne({ id: EXPENSE_PAYMENTS_MIGRATION_ID }))) {
     await adaptLegacyExpensePayers(database);
     await versions.updateOne({ id: EXPENSE_PAYMENTS_MIGRATION_ID }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
+  }
+  if (!(await versions.findOne({ id: TRIP_OWNER_MIGRATION_ID }))) {
+    await deriveTripOwners(database);
+    await versions.updateOne({ id: TRIP_OWNER_MIGRATION_ID }, { $setOnInsert: { appliedAt: new Date() } }, { upsert: true });
   }
 };

@@ -35,7 +35,7 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
   beforeEach(async () => {
     for (const collection of await database.collections()) await collection.deleteMany({});
     tripId = new ObjectId(); userId = new ObjectId(); firstId = new ObjectId(); secondId = new ObjectId();
-    await database.collection("trips").insertOne({ _id: tripId, inviteCode: "VIAJE-TEST" });
+    await database.collection("trips").insertOne({ _id: tripId, inviteCode: "VIAJE-TEST", ownerId: userId });
     await database.collection("tripMembers").insertOne({ tripId, userId, role: "participant", joinedAt: new Date() });
     await database.collection("destinations").insertMany([
       { _id: firstId, tripId, name: "Primero", order: 1, createdAt: new Date() },
@@ -64,7 +64,7 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     ]);
   });
 
-  it("allows an admin to delete the group with members and all associated records, without affecting another group or users", async () => {
+  it("allows the owner to delete the group with members and all associated records, without affecting another group or users", async () => {
     await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
     await database.collection("tripMembers").insertOne({ tripId, userId: new ObjectId(), role: "participant" });
     const otherTripId = new ObjectId();
@@ -153,7 +153,36 @@ describe("Trip deletion HTTP and MongoDB integration", () => {
     }
   });
 
+  const snapshot = async () => {
+    const names = ["trips", ...tripCollections, "storageDeletionJobs"];
+    return Object.fromEntries(await Promise.all(names.map(async (name) =>
+      [name, await database.collection(name).find({}).sort({ _id: 1 }).toArray()] as const)));
+  };
+
+  it("rejects a non-owner admin with 403 and leaves the trip, its records, the S3 jobs and the lock untouched", async () => {
+    const admin = new ObjectId();
+    await database.collection("tripMembers").insertOne({ tripId, userId: admin, role: "admin", joinedAt: new Date() });
+    await database.collection("postPhotos").insertOne({ tripId, postId: new ObjectId(), order: 1, s3Key: "trips/test/photo.jpg" });
+    await database.collection("transports").insertOne({ tripId, destinationId: firstId });
+    const before = await snapshot();
+    const response = await deleteTripRequest(admin);
+    expect(response.statusCode).toBe(403);
+    expect(JSON.parse(response.body)).toMatchObject({ error: { code: "Forbidden" } });
+    expect(await snapshot()).toEqual(before);
+    expect(await database.collection("trips").findOne({ _id: tripId })).not.toHaveProperty("destinationOrderRevision");
+    expect(await database.collection("storageDeletionJobs").countDocuments({})).toBe(0);
+  });
+
+  it("rejects every deletion while the trip has no owner, even from an admin", async () => {
+    await database.collection("trips").updateOne({ _id: tripId }, { $unset: { ownerId: "" } });
+    await database.collection("tripMembers").updateOne({ tripId, userId }, { $set: { role: "admin" } });
+    const before = await snapshot();
+    expect((await deleteTripRequest()).statusCode).toBe(403);
+    expect(await snapshot()).toEqual(before);
+  });
+
   it("does not allow a participant or an outsider to delete the group", async () => {
+    await database.collection("trips").updateOne({ _id: tripId }, { $set: { ownerId: new ObjectId() } });
     expect((await deleteTripRequest()).statusCode).toBe(403);
     expect((await deleteTripRequest(new ObjectId())).statusCode).toBe(404);
     await database.collection("trips").updateOne({ _id: tripId }, { $set: { visibility: "public" } });

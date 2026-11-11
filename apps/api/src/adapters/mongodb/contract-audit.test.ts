@@ -83,6 +83,46 @@ describe("read-only approved contract audit", () => {
     } finally { client.off("commandStarted", observer); }
   });
 
+  describe("trip ownership (T114)", () => {
+    const seedTrip = async (fields: Record<string, unknown>, members: { userId: ObjectId; role: string }[]) => {
+      const _id = new ObjectId();
+      await database.collection("trips").insertOne({ _id, inviteCode: _id.toHexString(), ...fields });
+      if (members.length > 0) await database.collection("tripMembers").insertMany(members.map((member) => ({ _id: new ObjectId(), tripId: _id, joinedAt: new Date(), ...member })));
+      return _id;
+    };
+    const tripFindings = async () => (await auditMongoContracts(database)).findings.filter(({ collection }) => collection === "trips");
+
+    it("does not report healthy trips whose owner is an admin member", async () => {
+      const owner = new ObjectId();
+      await seedTrip({ ownerId: owner, createdBy: owner }, [{ userId: owner, role: "admin" }]);
+      await seedTrip({ ownerId: owner, createdBy: new ObjectId() }, [{ userId: owner, role: "admin" }]);
+      expect(await tripFindings()).toEqual([]);
+    });
+
+    it("reports an owner without membership, falling back to createdBy when ownerId is missing, without correcting anything", async () => {
+      const creator = new ObjectId(), owner = new ObjectId();
+      const left = await seedTrip({ ownerId: owner, createdBy: creator }, [{ userId: creator, role: "admin" }]);
+      const legacyLeft = await seedTrip({ createdBy: creator }, [{ userId: new ObjectId(), role: "admin" }]);
+      const before = await snapshotDocuments(database);
+      const findings = await tripFindings();
+      expect(findings).toContainEqual(expect.objectContaining({ code: "trip_owner_not_member", documentId: left, tripId: left, fields: ["ownerId"], relatedIds: [owner] }));
+      expect(findings).toContainEqual(expect.objectContaining({ code: "trip_owner_not_member", documentId: legacyLeft, fields: ["createdBy"], relatedIds: [creator] }));
+      expect(findings).toContainEqual(expect.objectContaining({ code: "trip_owner_missing", documentId: legacyLeft, fields: ["ownerId"], relatedIds: [creator] }));
+      expect(findings.some(({ code, documentId }) => code === "trip_owner_missing" && documentId.equals(left))).toBe(false);
+      expect(await snapshotDocuments(database)).toEqual(before);
+    });
+
+    it("reports a trip with neither a valid owner nor a valid creator, and an owner that is not an admin", async () => {
+      const noOwner = await seedTrip({ createdBy: "not-an-id" }, []);
+      const owner = new ObjectId();
+      const demoted = await seedTrip({ ownerId: owner, createdBy: owner }, [{ userId: owner, role: "participant" }]);
+      const findings = await tripFindings();
+      expect(findings).toContainEqual(expect.objectContaining({ code: "trip_owner_missing", documentId: noOwner, relatedIds: [] }));
+      expect(findings.some(({ code, documentId }) => code === "trip_owner_not_member" && documentId.equals(noOwner))).toBe(false);
+      expect(findings).toContainEqual(expect.objectContaining({ code: "trip_owner_not_admin", documentId: demoted, relatedIds: [owner] }));
+    });
+  });
+
   it("does not create collections when auditing an empty database", async () => {
     expect(await auditMongoContracts(database)).toEqual({ findings: [] });
     expect(await database.listCollections().toArray()).toEqual([]);

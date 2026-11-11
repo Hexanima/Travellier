@@ -35,6 +35,12 @@ export const createMongoTripDeletionRepository = (database: Db): TripDeletionPor
               .findOne({ tripId: mongoTripId, userId: new MongoObjectId(userId) }, options);
             return ok(member?.role);
           },
+          findOwnerId: async () => {
+            const trip = await database.collection<{ ownerId?: unknown }>("trips").findOne({ _id: mongoTripId }, { ...options, projection: { ownerId: 1 } });
+            if (!(trip?.ownerId instanceof MongoObjectId)) return ok(undefined);
+            const ownerId = createObjectId(trip.ownerId.toHexString());
+            return ownerId.ok ? ok(ownerId.value) : ok(undefined);
+          },
           listDestinations: () => createMongoTripJourneyRepository(database, session).listDestinations(tripId),
           hasDestinationRecords: async (destinationId) => {
             const filter = { tripId: mongoTripId, destinationId: new MongoObjectId(destinationId) };

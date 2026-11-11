@@ -22,6 +22,7 @@ const trip: Trip = {
   visibility: "private",
   inviteCode: "VIAJE-X7K2",
   expenseMode: "register",
+  ownerId: userId,
   createdBy: userId,
   createdAt,
 };

@@ -13,6 +13,9 @@ export interface Trip {
   visibility: TripVisibility;
   inviteCode: string;
   expenseMode: TripExpenseMode;
+  /** Titular actual del viaje; siempre es admin. */
+  ownerId: ObjectId;
+  /** Creador original; dato histórico que no cambia al transferir la titularidad. */
   createdBy: ObjectId;
   createdAt: Date;
 }
@@ -65,6 +68,7 @@ export const createTripWithAdmin = (
     visibility: input.visibility ?? "private",
     inviteCode: input.inviteCode,
     expenseMode: input.expenseMode ?? "register",
+    ownerId: input.creatorId,
     createdBy: input.creatorId,
     createdAt: input.createdAt,
   };

@@ -22,7 +22,9 @@ export const deleteTrip: UseCase<{ deletion: TripDeletionPort }, DeleteTripPaylo
     const member = await scope.findMemberRole(payload.authenticatedUserId);
     if (!member.ok) return member;
     if (member.value === undefined) return err(new TripNotFoundError());
-    if (member.value !== "admin") return err(new UnauthorizedError());
+    const ownerId = await scope.findOwnerId();
+    if (!ownerId.ok) return ownerId;
+    if (ownerId.value === undefined || ownerId.value !== payload.authenticatedUserId) return err(new UnauthorizedError());
     return scope.removeTrip();
   }),
 };

@@ -36,7 +36,7 @@ describe("activity persistence and transactions", () => {
     for (const name of ["trips", "tripMembers", "destinations", "itineraryDays", "activities", "activityVotes", "activityParticipations",
       "posts", "postExpenses", "postPhotos", "comments", "postLikes", "commentLikes", "transports"]) await db.collection(name).deleteMany({});
     trip = new ObjectId(); actor = new ObjectId(); destination = new ObjectId(); day = new ObjectId();
-    await db.collection("trips").insertOne({ _id: trip, inviteCode: trip.toHexString(), votingEnabled: false, expenseMode: "register", visibility: "public" });
+    await db.collection("trips").insertOne({ _id: trip, inviteCode: trip.toHexString(), votingEnabled: false, expenseMode: "register", visibility: "public", ownerId: actor });
     await db.collection("tripMembers").insertOne({ tripId: trip, userId: actor, role: "participant", joinedAt: new Date() });
     await db.collection("destinations").insertOne({ _id: destination, tripId: trip, name: "Córdoba", order: 1, createdAt: new Date() });
     await db.collection("itineraryDays").insertOne({ _id: day, tripId: trip, destinationId: destination, type: "activity", order: 1,

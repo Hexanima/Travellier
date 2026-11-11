@@ -59,6 +59,9 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
         const documents = await members.find({ tripId: new MongoObjectId(tripId) })
           .sort({ joinedAt: 1, _id: 1 }).toArray();
         if (documents.length === 0) return ok([]);
+        const trip = await database.collection<{ ownerId?: unknown }>("trips")
+          .findOne({ _id: new MongoObjectId(tripId) }, { projection: { ownerId: 1 } });
+        const ownerHex = trip?.ownerId instanceof MongoObjectId ? trip.ownerId.toHexString() : undefined;
         const userDocuments = await users.find(
           { _id: { $in: documents.map((member) => member.userId) } },
           { projection: { name: 1 } },
@@ -76,6 +79,7 @@ export const createMongoTripMemberRepository = (database: Db): TripMemberManagem
             userId: domainId(document.userId),
             name,
             role: document.role,
+            isOwner: userId === ownerHex,
             joinedAt: document.joinedAt,
           };
         });

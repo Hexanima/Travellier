@@ -18,8 +18,10 @@ import {
   type TripView,
 } from "app-domain";
 
-type TripDocument = Omit<Trip, "id" | "createdBy"> & {
+type TripDocument = Omit<Trip, "id" | "createdBy" | "ownerId"> & {
   _id: MongoObjectId;
+  /** Ausente solo en viajes anteriores a la migración 0010. */
+  ownerId?: MongoObjectId;
   createdBy: MongoObjectId;
 };
 type DestinationDocument = Omit<TripDestination, "id" | "tripId"> & {
@@ -47,6 +49,7 @@ const tripDocument = (trip: Trip): TripDocument => ({
   visibility: trip.visibility,
   inviteCode: trip.inviteCode,
   expenseMode: trip.expenseMode,
+  ownerId: new MongoObjectId(trip.ownerId),
   createdBy: new MongoObjectId(trip.createdBy),
   createdAt: trip.createdAt,
 });
@@ -66,6 +69,8 @@ const toView = (trip: TripDocument, destination: DestinationDocument): TripView 
   visibility: trip.visibility,
   inviteCode: trip.inviteCode,
   expenseMode: trip.expenseMode,
+  // Solo lectura: un viaje sin migrar muestra createdBy; la autorización de baja no usa este respaldo.
+  ownerId: domainId(trip.ownerId ?? trip.createdBy),
   createdBy: domainId(trip.createdBy),
   createdAt: trip.createdAt,
   primaryDestination: {

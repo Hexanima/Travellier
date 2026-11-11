@@ -46,7 +46,7 @@ describe("Mongo Trip management repository", () => {
     return {
       trip: {
         id: tripId, name: "Patagonia", description: null, visibility: "private", inviteCode: code,
-        expenseMode: "register", createdBy: creatorId, createdAt,
+        expenseMode: "register", ownerId: creatorId, createdBy: creatorId, createdAt,
       },
       creatorMembership: {
         id: domainId(new ObjectId()), tripId, userId: creatorId, role: "admin", joinedAt: createdAt,
@@ -61,7 +61,11 @@ describe("Mongo Trip management repository", () => {
     const repository = createMongoTripManagementRepository(database);
     const input = record();
     expect(await repository.createWithAdminAndDestination(input)).toMatchObject({ ok: true });
-    expect(await database.collection("trips").findOne({ _id: new ObjectId(input.trip.id) })).toMatchObject({ inviteCode: input.trip.inviteCode });
+    expect(await database.collection("trips").findOne({ _id: new ObjectId(input.trip.id) })).toMatchObject({
+      inviteCode: input.trip.inviteCode,
+      ownerId: new ObjectId(input.trip.ownerId),
+      createdBy: new ObjectId(input.trip.createdBy),
+    });
     expect(await database.collection("tripMembers").findOne({ tripId: new ObjectId(input.trip.id) })).toMatchObject({ role: "admin", userId: new ObjectId(input.trip.createdBy) });
     expect(await database.collection("destinations").findOne({ tripId: new ObjectId(input.trip.id) })).toMatchObject({ name: "Bariloche", order: 1 });
   });
@@ -118,8 +122,37 @@ describe("Mongo Trip management repository", () => {
     expect(await repository.listForMember(outsider)).toEqual({ ok: true, value: [] });
     expect(await repository.findByIdForViewer(input.trip.id, input.trip.createdBy)).toMatchObject({
       ok: true,
-      value: { inviteCode: input.trip.inviteCode, createdBy: input.trip.createdBy },
+      value: { inviteCode: input.trip.inviteCode, ownerId: input.trip.ownerId, createdBy: input.trip.createdBy },
     });
+  });
+
+  it("exposes the owner to members in the detail and in the listing, but never in the public preview", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    const creator = new ObjectId();
+    const input = record("VIAJE-OWN1", creator);
+    input.trip.visibility = "public";
+    await repository.createWithAdminAndDestination(input);
+    await database.collection("trips").updateOne({ _id: new ObjectId(input.trip.id) }, { $set: { ownerId: new ObjectId() } });
+    const stored = await database.collection("trips").findOne({ _id: new ObjectId(input.trip.id) });
+    const ownerHex = (stored!.ownerId as ObjectId).toHexString();
+
+    expect(await repository.findByIdForViewer(input.trip.id, domainId(creator))).toMatchObject({ ok: true, value: { ownerId: ownerHex, createdBy: input.trip.createdBy } });
+    expect(await repository.listForMember(domainId(creator))).toMatchObject({ ok: true, value: [{ ownerId: ownerHex }] });
+    const preview = await repository.findByIdForViewer(input.trip.id, domainId(new ObjectId()));
+    expect(preview).toMatchObject({ ok: true });
+    expect(preview.ok && preview.value).not.toHaveProperty("ownerId");
+    const publicList = await repository.listPublic();
+    expect(publicList.ok && publicList.value[0]).not.toHaveProperty("ownerId");
+  });
+
+  it("reads a not yet migrated trip with createdBy as the displayed owner without writing", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    const creator = new ObjectId();
+    const input = record("VIAJE-OWN2", creator);
+    await repository.createWithAdminAndDestination(input);
+    await database.collection("trips").updateOne({ _id: new ObjectId(input.trip.id) }, { $unset: { ownerId: "" } });
+    expect(await repository.findByIdForViewer(input.trip.id, domainId(creator))).toMatchObject({ ok: true, value: { ownerId: input.trip.createdBy } });
+    expect(await database.collection("trips").findOne({ _id: new ObjectId(input.trip.id) })).not.toHaveProperty("ownerId");
   });
 
   it("lists only public trips with decision fields", async () => {
