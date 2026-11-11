@@ -11,8 +11,12 @@ export interface TripMemberAdministrationScope {
   setRole: (userId: ObjectId, role: TripRole) => AsyncResult<void>;
   /** `trips.ownerId = toUserId`, el destino queda admin y el anterior titular conserva admin. */
   transferOwnership: (fromUserId: ObjectId, toUserId: ObjectId) => AsyncResult<void>;
-  /** Deletes the membership (any role) and writes `notifications` in the same transaction only if it was deleted. */
-  removeMember: (membershipId: ObjectId, userId: ObjectId, notifications: readonly TripNotificationDraft[]) => AsyncResult<boolean>;
+  /**
+   * Single path for leaving and expulsion. Deletes the membership (any role) and, only if it was deleted and in the same
+   * transaction, the user's participations in activities of the Trip that start after `at` (decisionRequired marks included;
+   * those already started are kept as record) and writes `notifications`.
+   */
+  removeMember: (membershipId: ObjectId, userId: ObjectId, notifications: readonly TripNotificationDraft[], at: Date) => AsyncResult<boolean>;
 }
 
 export interface TripMemberAdministrationPort {

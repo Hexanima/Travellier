@@ -43,9 +43,11 @@ export const expelTripParticipant: UseCase<
     // Any admin can only be expelled by the owner (a Trip without owner blocks it).
     if (target.value.role === "admin" && (ownerId.value === undefined || ownerId.value !== actorUserId)) return err(new UnauthorizedError());
     // The expelled user is the only recipient: no actor, no data of the Trip, nothing for the rest of the members.
+    // One instant (read with the lock held) for the notice and for the cleanup of future participations.
+    const at = now();
     const notices = buildTripNotifications({ type: "member.expelled", tripId, operationRef: target.value.id, actorId: null,
-      recipients: [targetUserId], payload: { tripId }, createdAt: now() });
-    const removed = await scope.removeMember(target.value.id, targetUserId, notices);
+      recipients: [targetUserId], payload: { tripId }, createdAt: at });
+    const removed = await scope.removeMember(target.value.id, targetUserId, notices, at);
     if (!removed.ok) return removed;
     return removed.value ? ok(undefined) : err(new TripMemberNotFoundError());
   }),
