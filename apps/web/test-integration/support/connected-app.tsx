@@ -22,7 +22,8 @@ export function fakeSessionStorage(initial: AuthenticatedSession | null): Native
   return {
     get current() { return box.current; },
     read: async () => box.current,
-    save: async (session: AuthenticatedSession) => { box.current = session; },
+    // El refresh token rota en cada restauracion: se escribe sobre el mismo objeto para que el siguiente montaje de la misma persona lo herede.
+    save: async (session: AuthenticatedSession) => { if (initial !== null) Object.assign(initial, session); box.current = initial ?? session; },
     clear: async () => { box.current = null; },
   } as NativeSessionStorage & { current: AuthenticatedSession | null };
 }
@@ -68,6 +69,17 @@ export async function type(name: string, value: string, scope: ParentNode = docu
   const event = element!.tagName === "SELECT" ? "change" : "input";
   await act(async () => { Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(element, value); element!.dispatchEvent(new Event(event, { bubbles: true })); });
 }
+/** Escribe en un control identificado por prefijo de `aria-label` (filas de pagos y reparto). */
+export async function typeByAria(prefix: string, value: string, scope: ParentNode = document.body) {
+  const element = scope.querySelector(`[aria-label^="${prefix}"]`) as HTMLInputElement | HTMLSelectElement | null;
+  expect(element, `Control «${prefix}»
+${text().slice(0, 600)}`).not.toBeNull();
+  const select = element!.tagName === "SELECT";
+  const proto = select ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  await act(async () => { Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(element, value); element!.dispatchEvent(new Event(select ? "change" : "input", { bubbles: true })); });
+}
+/** Marca la opcion de radio cuyo texto de etiqueta empieza con `label`. */
+export const chooseRadio = (label: string) => click(Array.from(document.querySelectorAll("label")).find((item) => item.textContent?.trim().startsWith(label))?.querySelector("input"), `opcion «${label}»`);
 export const submit = (scope: ParentNode = document.body) =>
   act(async () => { scope.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
 
@@ -109,6 +121,7 @@ export async function mountApp(options: MountOptions): Promise<Mounted> {
 
 /** Desmonta todo lo montado (afterEach): simula cerrar la app; el estado del servidor sigue en el harness. */
 export async function unmountAll(): Promise<void> {
+  await settle(2);
   await act(async () => mounted.splice(0).forEach((item) => item.root.unmount()));
   document.body.replaceChildren();
 }
@@ -121,4 +134,33 @@ export function ensureNodeFetch(): void {
 export function prepareDom(): void {
   Element.prototype.scrollIntoView = vi.fn();
   window.scrollTo = vi.fn() as never;
+}
+
+export type FetchFault = {
+  method: string;
+  path: RegExp;
+  /** `before`: la solicitud nunca llega al servidor; `after`: el servidor la procesa pero la respuesta se pierde. */
+  mode: "before" | "after";
+  times?: number;
+};
+/**
+ * Falla de red controlada sobre el fetch que usa la App: solo afecta solicitudes que coinciden con una regla (las llamadas del
+ * harness a otras rutas pasan intactas). Devuelve `restore` y los intentos observados.
+ */
+export function injectFetchFaults(faults: FetchFault[]) {
+  const real = globalThis.fetch;
+  const remaining = faults.map((fault) => ({ ...fault, left: fault.times ?? 1 }));
+  const seen: Array<{ method: string; path: string; faulted: boolean }> = [];
+  globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    const method = (init?.method ?? "GET").toUpperCase();
+    const path = new URL(url).pathname;
+    const fault = remaining.find((item) => item.left > 0 && item.method === method && item.path.test(path));
+    seen.push({ method, path, faulted: fault !== undefined });
+    if (!fault) return real(input, init);
+    fault.left -= 1;
+    if (fault.mode === "after") await (await real(input, init)).text();
+    throw new TypeError("Failed to fetch (simulado)");
+  }) as typeof fetch;
+  return { seen, restore: () => { globalThis.fetch = real; } };
 }

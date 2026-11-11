@@ -7,7 +7,7 @@ export const PASSWORD = "Sup3r-secret-pass";
 export const OUTBOUND = { departureAt: "2099-03-01T08:00:00.000Z", arrivalAt: "2099-03-01T10:00:00.000Z" };
 export const RETURN = { departureAt: "2099-03-06T18:00:00.000Z", arrivalAt: "2099-03-06T20:00:00.000Z" };
 
-export type Person = { name: string; email: string; id: string; token: string; refreshToken?: string };
+export type Person = { name: string; email: string; id: string; token: string; refreshToken?: string; session?: { accessToken: string; refreshToken: string } };
 export type Group = {
   harness: E2EHarness; tripId: string; inviteCode: string; destinationId: string; dayIds: Record<string, string>;
   owner: Person; admin: Person; participant: Person;
@@ -35,7 +35,8 @@ export async function insertPerson(h: E2EHarness, name: string, email: string): 
 
 export const sessionOf = (person: Person) => {
   if (person.refreshToken === undefined) throw new Error(`${person.name} no tiene sesion real`);
-  return { accessToken: person.token, refreshToken: person.refreshToken };
+  // Mismo objeto en todos los montajes: el cliente rota el refresh token al restaurar la sesion y lo deja escrito aca.
+  return (person.session ??= { accessToken: person.token, refreshToken: person.refreshToken });
 };
 
 /**
