@@ -113,6 +113,49 @@ describe("Trip member administration routes", () => {
     expect((await handleApiRequest(transferRequest(JSON.stringify({ userId: targetId })), { trips: {} } as never)).statusCode).toBe(503);
   });
 
+  describe("POST /trips/:tripId/leave", () => {
+    const leaveRequest = (overrides: Record<string, unknown> = {}) => ({ method: "POST", url: `/trips/${tripId}/leave`, authenticatedUserId: actorId, ...overrides });
+
+    it("leaves using only the JWT actor and path id, answering 204 without body and without touching the expulsion", async () => {
+      const leaveTrip = vi.fn().mockResolvedValue(ok(undefined)), expelMember = vi.fn();
+      const response = await handleApiRequest(leaveRequest({ body: JSON.stringify({ actorUserId: "spoofed", userId: "spoofed" }) }), { trips: { leaveTrip, expelMember } } as never);
+      expect(response).toEqual({ statusCode: 204, headers: {}, body: "" });
+      expect(leaveTrip).toHaveBeenCalledWith({ tripId, actorUserId: actorId });
+      expect(expelMember).not.toHaveBeenCalled();
+    });
+
+    it("needs no body", async () => {
+      const leaveTrip = vi.fn().mockResolvedValue(ok(undefined));
+      expect((await handleApiRequest(leaveRequest(), { trips: { leaveTrip } } as never)).statusCode).toBe(204);
+    });
+
+    it("requires authentication, rejects invalid ids and reports a missing dependency", async () => {
+      const leaveTrip = vi.fn();
+      const dependencies = { trips: { leaveTrip } } as never;
+      expect((await handleApiRequest(leaveRequest({ authenticatedUserId: undefined }), dependencies)).statusCode).toBe(401);
+      expect((await handleApiRequest(leaveRequest({ url: "/trips/not-an-id/leave" }), dependencies)).statusCode).toBe(400);
+      expect(leaveTrip).not.toHaveBeenCalled();
+      expect((await handleApiRequest(leaveRequest(), { trips: {} } as never)).statusCode).toBe(503);
+    });
+
+    it("answers 409 for the owner and 404 for a non-member or a missing Trip", async () => {
+      const leaveTrip = vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: new TripOwnerProtectedError() })
+        .mockResolvedValueOnce({ ok: false, error: new TripNotFoundError() })
+        .mockResolvedValueOnce({ ok: false, error: new TripMemberNotFoundError() });
+      const dependencies = { trips: { leaveTrip } } as never;
+      const statuses = [];
+      for (let index = 0; index < 3; index += 1) statuses.push((await handleApiRequest(leaveRequest(), dependencies)).statusCode);
+      expect(statuses).toEqual([409, 404, 404]);
+    });
+
+    it("does not answer to other methods", async () => {
+      const leaveTrip = vi.fn().mockResolvedValue(ok(undefined));
+      expect((await handleApiRequest(leaveRequest({ method: "GET" }), { trips: { leaveTrip } } as never)).statusCode).not.toBe(204);
+      expect(leaveTrip).not.toHaveBeenCalled();
+    });
+  });
+
   it("does not let the expulsion route capture the role route", async () => {
     const expelMember = vi.fn(), changeMemberRole = vi.fn().mockResolvedValue(ok(undefined));
     const dependencies = { trips: { expelMember, changeMemberRole } } as never;

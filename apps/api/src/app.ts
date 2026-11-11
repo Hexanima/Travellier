@@ -35,6 +35,7 @@ import {
   type TripMemberSummary,
   type ListTripMembersPayload,
   type ExpelTripParticipantPayload,
+  type LeaveTripPayload,
   type ChangeTripMemberRolePayload,
   type TransferTripOwnershipPayload,
   type CreateJourneyDestinationPayload,
@@ -210,6 +211,7 @@ export interface TripApi extends TripInvitationApi {
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
   listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
   expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
+  leaveTrip?: (payload: LeaveTripPayload) => AsyncResult<void>;
   changeMemberRole?: (payload: ChangeTripMemberRolePayload) => AsyncResult<void>;
   transferOwnership?: (payload: TransferTripOwnershipPayload) => AsyncResult<void>;
   createDestination?: (payload: CreateJourneyDestinationPayload) => AsyncResult<TripDestination>;
@@ -1102,6 +1104,17 @@ export const handleApiRequest = async (
         destinationId: destinationId.value, transportId: transportId.value, ...input });
       return result.ok ? jsonResponse(200, { transport: result.value }) : errorResponse(result.error);
     }
+  }
+
+  const leaveMatch = request.url?.match(/^\/trips\/([^/?]+)\/leave$/);
+  if (request.method === "POST" && leaveMatch) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId(leaveMatch[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.leaveTrip === undefined) return unavailableResponse();
+    // Explicit action without body: the actor is only the JWT user; the confirmation belongs to the client.
+    const result = await dependencies.trips.leaveTrip({ tripId: tripId.value, actorUserId: request.authenticatedUserId });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
   }
 
   const memberRoleMatch = request.url?.match(/^\/trips\/([^/?]+)\/members\/([^/?]+)\/role$/);
