@@ -154,6 +154,12 @@
 
 .ui-feedback--success { color: var(--ui-color-accent); }
 
+.pull-to-refresh__status {
+  margin: 0 0 var(--ui-space-2);
+  text-align: center;
+  color: var(--ui-color-accent);
+}
+
 .ui-spinner {
   width: 1em;
   height: 1em;
