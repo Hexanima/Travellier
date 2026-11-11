@@ -36,3 +36,23 @@ export const staleIndexes = (pages: readonly GalleryPageData[], now: number, mar
   pages.flatMap((page, index) => isStale(page, now, margin) ? [index] : []);
 /** The cursor to ask for the next page: the one the last page returned (null when there is no more). */
 export const currentCursor = (pages: readonly GalleryPageData[]): string | null => pages.length === 0 ? null : pages[pages.length - 1]!.nextCursor;
+
+/**
+ * Silent refresh of the first page (T121). A signed url is never swapped for a known photo (the image would reload every cycle; expired urls have their own
+ * refresh): only the ids matter. Photos the answer has and the first page does not go first (the answer is newest first); the first page keeps the rest, the
+ * following pages and its `nextCursor` (the next page still starts where the old first page ended). The exception is a single complete page (no cursor in
+ * the answer either): there the answer is the truth and removed photos leave. Same array when the ids did not change.
+ */
+export const mergeFirstPage = (pages: readonly GalleryPageData[], fresh: GalleryPageData): GalleryPageData[] => {
+  const first = pages[0];
+  if (!first || first.cursor !== null) return pages as GalleryPageData[];
+  const known = new Map(first.photos.map((photo) => [photo.id, photo]));
+  const later = new Set(pages.slice(1).flatMap((page) => page.photos.map((photo) => photo.id)));
+  const answer = fresh.photos.filter((photo) => !later.has(photo.id)).map((photo) => known.get(photo.id) ?? photo);
+  const complete = pages.length === 1 && first.nextCursor === null && fresh.nextCursor === null;
+  const answered = new Set(answer.map((photo) => photo.id));
+  const photos = complete ? answer : [...answer, ...first.photos.filter((photo) => !answered.has(photo.id))];
+  if (photos.length === first.photos.length && photos.every((photo, index) => photo.id === first.photos[index]!.id)) return pages as GalleryPageData[];
+  const expiresAtMs = Math.min(Number.POSITIVE_INFINITY, ...photos.map((photo) => photo.expiresAtMs));
+  return pages.map((page, index) => index === 0 ? { ...first, photos, expiresAtMs } : page);
+};

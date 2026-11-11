@@ -8,6 +8,7 @@ import { openPostFrom } from "./open-post.js";
 import { authorLabel, type PhotoPeople } from "./photo-people.js";
 import { canGoBack, photoAnchor, readPhoto } from "./post-origin.js";
 import type { TripFailure } from "./trip-management-api.js";
+import { useRefreshGuard } from "./trip-refresh.js";
 import type { GalleryPages } from "./use-gallery.js";
 
 const stateOf = (state: unknown): Record<string, unknown> => typeof state === "object" && state !== null && !Array.isArray(state) ? { ...(state as Record<string, unknown>) } : {};
@@ -105,6 +106,8 @@ export function PhotoBrowser({ gallery, people, timeZone, tripId, label, originL
   });
   const select = (id: string) => navigate(here, { replace: true, state: { ...stateOf(location.state), photo: id } });
   const viewed = viewing ? photos.find((item) => item.id === viewing) : undefined;
+  // The viewer is a modal: the Trip refresh waits while it is open (T121) and catches up once when it closes.
+  useRefreshGuard(viewed !== undefined);
 
   const failure = phase === "initial-error" || phase === "more-error" ? error : undefined;
   const unavailable = failure !== undefined && ["not-found", "forbidden"].includes(failure.kind);

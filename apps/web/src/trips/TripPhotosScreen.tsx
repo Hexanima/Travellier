@@ -6,6 +6,7 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import { useGalleryPages } from "./use-gallery.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { useInTripShell } from "./trip-state.js";
+import { useTripRefreshLoader } from "./trip-refresh.js";
 import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
@@ -19,6 +20,7 @@ export function TripPhotosScreen({ members, timeZone = Intl.DateTimeFormat().res
 function PhotosContent({ tripId, members, timeZone }: { tripId: string; members: TripPhotosScreenProps["members"]; timeZone: string }) {
   const inShell = useInTripShell();
   const gallery = useGalleryPages();
+  useTripRefreshLoader("photos", () => gallery.refreshFirstPage());
   const [people, setPeople] = useState<PhotoPeople>(unknownPeople);
   useEffect(() => {
     let cancelled = false;
