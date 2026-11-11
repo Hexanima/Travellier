@@ -23,7 +23,7 @@ const emptyStep = (): UrbanStepFormValues => ({ line: "", fromStop: "", toStop: 
 const initialValues = (existing?: JourneyTransport): TransportFormValues => existing ? formValuesFromTransport(existing) : {
   timeZone: currentTimeZone(),
   type: "flight", departurePlace: "", departureAt: "", arrivalPlace: "", arrivalAt: "",
-  costPerPerson: "", flightNumber: "", company: "", steps: [],
+  costPerPerson: "", costCurrency: "", flightNumber: "", company: "", steps: [],
 };
 
 export function TransportForm({ tripId, destinationId, direction, existing, complementary, neighbors, saveCoordinator, journey, onSaved }: Props) {
@@ -91,6 +91,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
   const isLongBus = values.type === "bus_long";
   const isUrbanBus = values.type === "bus_local";
   const hasCost = isFlight || isLongBus;
+  const missingCurrency = savedTransport !== undefined && savedTransport.costPerPerson !== null && (savedTransport.costCurrency ?? null) === null;
   const placeLabel = (which: "departure" | "arrival") => {
     if (isFlight) return which === "departure" ? "Aeropuerto de origen" : "Aeropuerto de destino";
     if (isLongBus) return which === "departure" ? "Terminal de origen" : "Terminal de destino";
@@ -129,6 +130,14 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       {hasCost ? <TextField label="Costo por persona (opcional)" name="costPerPerson" type="number" step="any"
         value={values.costPerPerson} error={errors.costPerPerson} loading={saving}
         onChange={(event) => update("costPerPerson", event.target.value)} /> : null}
+      {hasCost ? <SelectField label="Moneda del costo" name="costCurrency" value={values.costCurrency}
+        error={errors.costCurrency} loading={saving} onChange={(event) => update("costCurrency", event.target.value)}>
+        <option value="">Elegí una moneda</option>
+        <option value="ARS">Pesos argentinos · ARS</option>
+        <option value="EUR">Euros · EUR</option>
+        <option value="USD">Dólares · USD</option>
+      </SelectField> : null}
+      {hasCost && missingCurrency ? <Feedback variant="error">Moneda sin indicar: este costo se guardó sin moneda. Elegí la moneda para guardar los cambios.</Feedback> : null}
       {isUrbanBus ? (
         <fieldset className="journey-steps">
           <legend>Tramos del colectivo</legend>

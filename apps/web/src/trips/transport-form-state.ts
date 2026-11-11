@@ -1,6 +1,8 @@
 import { validateUrbanTransportSteps } from "app-domain";
-import type { JourneyTransport, TransportDirection, TransportInput, TransportType, UrbanTransportStep } from "./trip-journey-api.js";
+import type { JourneyTransport, TransportCurrency, TransportDirection, TransportInput, TransportType, UrbanTransportStep } from "./trip-journey-api.js";
 import { currentTimeZone, localStepInstant, parseLocalDateTime, toLocalDateTime } from "./transport-local-time.js";
+
+const isCurrency = (value: string): value is TransportCurrency => value === "ARS" || value === "EUR" || value === "USD";
 
 export type UrbanStepFormValues = { line: string; fromStop: string; toStop: string; estimatedTime: string; estimatedAt?: string };
 
@@ -11,6 +13,8 @@ export type TransportFormValues = {
   arrivalPlace: string;
   arrivalAt: string;
   costPerPerson: string;
+  /** "" = not chosen yet. */
+  costCurrency: string;
   flightNumber: string;
   company: string;
   steps: UrbanStepFormValues[];
@@ -35,6 +39,8 @@ export const formValuesFromTransport = (transport: JourneyTransport, timeZone = 
   arrivalPlace: transport.arrivalPlace,
   arrivalAt: toLocalDateTime(transport.arrivalAt, timeZone),
   costPerPerson: transport.costPerPerson === null ? "" : String(transport.costPerPerson),
+  // A previous cost without a currency is never preselected: the person must choose it.
+  costCurrency: transport.costCurrency ?? "",
   flightNumber: transport.type === "flight" ? transport.details.flightNumber ?? "" : "",
   company: transport.type === "bus_long" ? transport.details.company ?? "" : "",
   steps: transport.type === "bus_local" ? transport.details.steps.map((step) => ({ ...step,
@@ -94,7 +100,9 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
     costPerPerson = Number(values.costPerPerson);
     if (!Number.isFinite(costPerPerson)) errors.costPerPerson = "Ingresá un costo válido.";
+    else if (!isCurrency(values.costCurrency)) errors.costCurrency = "Elegí la moneda del costo.";
   }
+  const costCurrency: TransportCurrency | null = costPerPerson !== null && isCurrency(values.costCurrency) ? values.costCurrency : null;
 
   let steps: Extract<UrbanTransportStep, { estimatedAt: string }>[] = [];
   if (values.type === "bus_local") {
@@ -136,10 +144,10 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   if (Object.keys(errors).length > 0 || !departure || !arrival) return { ok: false, errors };
 
   const base = { direction, departurePlace, departureAt: departure.iso, arrivalPlace,
-    arrivalAt: arrival.iso, costPerPerson };
+    arrivalAt: arrival.iso, costPerPerson, costCurrency };
   switch (values.type) {
     case "bus_local":
-      return { ok: true, value: { ...base, type: "bus_local", costPerPerson: null, details: { steps } } };
+      return { ok: true, value: { ...base, type: "bus_local", costPerPerson: null, costCurrency: null, details: { steps } } };
     case "bus_long": {
       const company = values.company.trim();
       return { ok: true, value: { ...base, type: "bus_long", details: { company: company || null } } };
@@ -150,6 +158,6 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
     }
     case "car":
     case "other":
-      return { ok: true, value: { ...base, type: values.type, costPerPerson: null, details: {} } };
+      return { ok: true, value: { ...base, type: values.type, costPerPerson: null, costCurrency: null, details: {} } };
   }
 };
