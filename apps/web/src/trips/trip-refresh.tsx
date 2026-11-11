@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- the hooks live next to their provider on purpose (same pattern as use-gallery) */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import type { AppLifecycle } from "../native/app-lifecycle.js";

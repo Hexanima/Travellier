@@ -57,7 +57,7 @@ describe("TripRefreshProvider", () => {
     expect(load).not.toHaveBeenCalled();
     await tick(1_000);
     expect(load).toHaveBeenCalledTimes(1);
-    expect(load.mock.calls[0]![0].signal.aborted).toBe(false);
+    expect((load.mock.calls[0] as unknown as [{ signal: AbortSignal }])[0].signal.aborted).toBe(false);
     await tick(45_000);
     expect(load).toHaveBeenCalledTimes(2);
   });
