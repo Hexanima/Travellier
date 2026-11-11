@@ -219,6 +219,8 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
             <p className="journey-intro">Organizá los destinos en el orden del viaje. Configurá la ida y la vuelta de cada uno; las fechas del viaje se derivan de estos transportes.</p>
             {costs ? <TransportCostSummary totals={costs.transportCostTotals} transports={costs.transports}
               destinations={costs.destinations} headingLevel={2} /> : null}
+            {costsFailed && costs ? <p data-transport-costs-stale role="status">Los totales pueden estar desactualizados.{" "}
+              <Button onClick={() => void loadCosts()}>Reintentar totales</Button></p> : null}
             {costsFailed && !costs ? <p data-transport-costs-unavailable>No pudimos cargar los totales de costo de transporte.{" "}
               <Button onClick={() => void loadCosts()}>Reintentar totales</Button></p> : null}
             <div className="journey-destinations">

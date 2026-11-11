@@ -445,6 +445,27 @@ describe("TripJourneyScreen", () => {
       expect((forms()[1]!.querySelector('[name="departurePlace"]') as HTMLInputElement).value).toBe("Sin guardar");
     });
 
+    it("keeps the previous totals with a stale warning when the refresh after saving fails, and retries", async () => {
+      const itinerary = itineraryApi();
+      const { container, createTransport } = await render({ itinerary });
+      const forms = () => Array.from(container.querySelectorAll<HTMLFormElement>("form.journey-transport-form"));
+      expect(container.querySelector("[data-transport-costs-stale]")).toBeNull();
+      itinerary.get.mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+      await change(forms()[0]!, "departurePlace", "AEP");
+      await change(forms()[0]!, "arrivalPlace", "BRC");
+      await change(forms()[0]!, "departureAt", "2026-10-10T08:00");
+      await change(forms()[0]!, "arrivalAt", "2026-10-10T10:00");
+      await submit(forms()[0]!);
+      await flush();
+      expect(createTransport).toHaveBeenCalledOnce();
+      expect(container.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+      expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
+      expect(container.querySelector("[data-transport-costs-stale]")?.textContent).toContain("Los totales pueden estar desactualizados");
+      await act(async () => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar totales")?.click());
+      expect(container.querySelector("[data-transport-costs-stale]")).toBeNull();
+      expect(container.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+    });
+
     it("behaves as before without an itinerary client", async () => {
       const { container } = await render();
       expect(container.querySelector("[data-transport-costs]")).toBeNull();
