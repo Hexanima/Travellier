@@ -282,3 +282,11 @@ describe("generateItineraryDays", () => {
     ] });
   });
 });
+
+describe("generateItineraryDays with previous costs", () => {
+  it("regenerates over a stored cost without currency", async () => {
+    const [out, back] = singleDay();
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [{ ...out!, costPerPerson: 500, costCurrency: null }, back!] });
+    expect(result.ok).toBe(true);
+  });
+});
