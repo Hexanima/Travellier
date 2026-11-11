@@ -14,6 +14,8 @@ export interface TripMemberSummary {
   id: ObjectId;
   userId: ObjectId;
   name: string | null;
+  /** true solo para el titular actual del viaje (`trips.ownerId`); el titular siempre es admin. */
+  isOwner: boolean;
   role: TripRole;
   joinedAt: Date;
 }
