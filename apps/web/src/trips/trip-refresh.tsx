@@ -106,6 +106,11 @@ export function useRefreshGuard(active: boolean) {
   useEffect(() => (active ? api?.pause() : undefined), [api, active]);
 }
 
+/** Whether a refresh provider exists above (the shell only offers the gesture and the button then). */
+export function useHasTripRefresh(): boolean {
+  return useContext(Context) !== undefined;
+}
+
 /** Refreshes the mounted screens now (pull to refresh and «Actualizar»); resolves when they finish. Without a provider it does nothing. */
 export function useRefreshNow(): () => Promise<void> {
   const api = useContext(Context);

@@ -343,6 +343,19 @@ describe("TripBalanceScreen: refresh", () => {
     expect(container.querySelector('[data-testid="trips"]')?.textContent).toBe('MIS VIAJES {"tripGone":true}');
     expect(container.textContent).not.toContain("Pesos (ARS)");
   });
+  it("a pull down at the top refreshes the balance (the «Actualizar balance» button stays as the alternative)", async () => {
+    Object.defineProperty(window, "scrollY", { configurable: true, writable: true, value: 0 });
+    const get = vi.fn().mockResolvedValue(ok(balance()));
+    const { container } = await render({ get });
+    const touch = (type: string, y?: number) => act(async () => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "touches", { value: y === undefined ? [] : [{ clientY: y, clientX: 0 }] });
+      container.querySelector("h1")!.dispatchEvent(event);
+    });
+    await touch("touchstart", 100); await touch("touchmove", 200); await touch("touchend");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(button(container, "Actualizar balance")).toBeDefined();
+  });
   it("the manual refresh does show the status while it runs", async () => {
     const second = deferred<unknown>();
     const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockReturnValueOnce(second.promise);

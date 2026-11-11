@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
+import { Button, Feedback, List, ListItem, LoadingState, PullToRefresh } from "../components/index.js";
 import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText, memberStatus, reasonText, settlementText, isCurrentUser, type ExcludedAction } from "./balance-view.js";
 import type { ExpenseCurrency } from "./expense-draft.js";
 import { formatCents } from "./expense-format.js";
@@ -85,6 +85,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
   return <main className="app-shell trips-shell itinerary-shell">
+    <PullToRefresh onRefresh={() => load()}>
     <div className="trips-panel">
       <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
       <header className="itinerary-header">
@@ -112,6 +113,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
           : <BalanceSections tripId={tripId ?? ""} ready={state} create={create} location={location} navigate={navigate} />}
       </> : null}
     </div>
+    </PullToRefresh>
   </main>;
 }
 

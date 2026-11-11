@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Tabs, type TabItem } from "../components/index.js";
+import { Button, PullToRefresh, Tabs, type TabItem } from "../components/index.js";
+import { useHasTripRefresh, useRefreshNow } from "./trip-refresh.js";
 import { ShellFrame } from "./trip-context.js";
 import { useTripName } from "./trip-state.js";
 import { canGoBack, noticesOrigin, originLabel, readOrigin, withNoBack } from "./post-origin.js";
@@ -19,6 +20,8 @@ export function TripShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const name = useTripName();
+  const hasRefresh = useHasTripRefresh();
+  const refreshNow = useRefreshNow();
   const root = rootTabOf(location.pathname, tripId);
   const select = useCallback((tab: TripTab, panel?: DiaryPanel) => {
     // The entry is replaced so the tabs never pile up history: Back from a root screen leaves to Mis viajes.
@@ -30,7 +33,9 @@ export function TripShell() {
   }, [location, navigate, tripId]);
   if (!root) return <Outlet />;
   const fromNotices = readOrigin(location.state, tripId ?? "").label === "avisos";
-  const content = <ShellFrame><Outlet /></ShellFrame>;
+  // The listings refresh on a pull and on the visible «Actualizar» button (the accessible alternative to the gesture); both only exist with the refresh provider.
+  const refreshable = <ShellFrame>{hasRefresh ? <div className="trip-shell-refresh"><Button onClick={() => { void refreshNow(); }}>Actualizar</Button></div> : null}<Outlet /></ShellFrame>;
+  const content = hasRefresh ? <PullToRefresh onRefresh={refreshNow}>{refreshable}</PullToRefresh> : refreshable;
   return <main className="app-shell trips-shell itinerary-shell trip-shell">
     <div className="trips-panel">
       {/* Opened from the notices center (the origin travels in the entry state): the way back is that center, never another Trip. */}
