@@ -156,6 +156,14 @@ describe("itinerary: silent refresh", () => {
     expect(container.textContent).toContain("Modificado");
   });
 
+  it("an activity that appears in a refresh asks for its participation only once", async () => {
+    const { participationGet } = await mount({ results: [() => ({ ok: true, value: multiDay() }), () => ({ ok: true, value: withNewActivity(multiDay()) })] });
+    const asked = (id: string) => participationGet.mock.calls.filter((call) => call[1] === id).length;
+    expect(asked(itineraryId(71))).toBe(0);
+    await refresh();
+    expect(asked(itineraryId(71))).toBe(1);
+  });
+
   it("an activity removed by the server while its detail is open follows the existing «ya no existe» flow", async () => {
     const without = multiDay();
     without.activities = without.activities.filter((a) => a.id !== A);

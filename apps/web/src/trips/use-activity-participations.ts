@@ -66,7 +66,8 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     let failed = false;
     await Promise.all(activityIds.map(async (activityId) => {
       const before = current.current[activityId];
-      if (removed.current.has(activityId) || before?.kind === "loading" || (before?.kind === "ready" && (before.saving || before.confirming))) return;
+      // An activity with no state yet is asked for by the load effect (a second read here would duplicate it).
+      if (!before || removed.current.has(activityId) || before.kind === "loading" || (before?.kind === "ready" && (before.saving || before.confirming))) return;
       const started = writes.current[activityId] ?? 0;
       try {
         const result = await api.get(tripId, activityId);
