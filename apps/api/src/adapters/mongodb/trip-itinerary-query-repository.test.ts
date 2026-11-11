@@ -32,7 +32,7 @@ describe("Mongo itinerary query", () => {
     await db.collection("destinations").insertOne({ _id: destination, tripId: trip, name: "Córdoba", order: 1, createdAt: departure });
     await db.collection("itineraryDays").insertOne({ _id: day, tripId: trip, destinationId: destination, date: new Date("2026-09-25T00:00:00Z"), type: "activity", startsAt: arrival, endsAt: null, order: 1 });
     await db.collection("transports").insertOne({ _id: transport, tripId: trip, destinationId: destination, direction: "outbound", type: "car",
-      departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: departure, arrivalAt: arrival, costPerPerson: null, details: {} });
+      departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: departure, arrivalAt: arrival, costPerPerson: null, costCurrency: null, details: {} });
     await db.collection("activities").insertOne({ _id: activity, tripId: trip, dayId: day, title: "Paseo", description: null,
       scheduledAt: new Date("2026-09-25T12:00:00.789Z"), mapsUrl: null, status: "confirmed", createdBy: actor, createdAt: arrival });
     await db.collection("posts").insertOne({ _id: post, tripId: trip, dayId: day, authorId: actor, description: null, mapsUrl: null,
@@ -171,6 +171,35 @@ describe("Mongo itinerary query", () => {
     expect(commands.filter((name) => name === "find" || name === "aggregate").length).toBe(first);
     expect(commands.some((name) => ["update", "insert", "delete", "findAndModify"].includes(name))).toBe(false);
     expect(await db.collection("trips").findOne({ _id: trip })).toMatchObject({ destinationOrderRevision: 12 });
+  });
+
+  describe("transport cost currency", () => {
+    const setCost = (fields: Record<string, unknown>) => db.collection("transports").updateOne({ _id: transport }, { $set: fields });
+
+    it("reads the stored currency and totals it apart from expenses", async () => {
+      await setCost({ costPerPerson: 50.25, costCurrency: "USD" });
+      expect(await query()).toMatchObject({ ok: true, value: {
+        transports: [{ costPerPerson: 50.25, costCurrency: "USD" }],
+        transportCostTotals: { byCurrency: [{ currency: "USD", totalCents: 5025, transportCount: 1 }], withoutCurrency: { transportCount: 0 } },
+        expenseSummary: { byCurrency: [{ currency: "EUR", totalCents: 4250 }] },
+      } });
+    });
+
+    it("reads a previous cost without the field as null without writing it", async () => {
+      await setCost({ costPerPerson: 50 });
+      const before = await db.collection("transports").findOne({ _id: transport });
+      expect(await query()).toMatchObject({ ok: true, value: {
+        transports: [{ costPerPerson: 50, costCurrency: null }],
+        transportCostTotals: { byCurrency: [], withoutCurrency: { transportCount: 1 } },
+      } });
+      expect(await db.collection("transports").findOne({ _id: transport })).toEqual(before);
+    });
+
+    it("reads an unknown stored currency as null", async () => {
+      await setCost({ costPerPerson: 50, costCurrency: "BRL" });
+      expect(await query()).toMatchObject({ ok: true, value: { transports: [{ costCurrency: null }],
+        transportCostTotals: { byCurrency: [], withoutCurrency: { transportCount: 1 } } } });
+    });
   });
 
   it("reads transports and days from the same snapshot during a committed mutation", async () => {

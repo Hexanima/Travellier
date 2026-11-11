@@ -1,5 +1,5 @@
 import { MongoServerError, ObjectId as MongoObjectId, type ClientSession, type Db } from "mongodb";
-import { createObjectId, err, JourneyConflictError, ok, TaggedError, TripNotFoundError, UnknownError, ValidationError,
+import { createCurrency, createObjectId, err, JourneyConflictError, ok, TaggedError, TripNotFoundError, UnknownError, ValidationError,
   type AsyncResult, type ItineraryDay, type ObjectId, type Transport, type TripDestination, type TripJourneyPort } from "app-domain";
 
 type DestinationDocument = Omit<TripDestination, "id" | "tripId"> & { _id: MongoObjectId; tripId: MongoObjectId };
@@ -20,12 +20,16 @@ const toDestination = (value: DestinationDocument): TripDestination => ({
 });
 const toTransport = (value: TransportDocument): Transport => {
   const { _id, ...fields } = value;
-  return { ...fields, id: domainId(_id), tripId: domainId(value.tripId), destinationId: domainId(value.destinationId) } as Transport;
+  // A missing or unknown stored currency reads as null ("sin indicar"): never inferred nor written back.
+  const currency = createCurrency((value as { costCurrency?: unknown }).costCurrency);
+  return { ...fields, costCurrency: currency.ok ? currency.value : null,
+    id: domainId(_id), tripId: domainId(value.tripId), destinationId: domainId(value.destinationId) } as Transport;
 };
 const transportDocument = (value: Transport): TransportDocument => ({
   _id: new MongoObjectId(value.id), tripId: new MongoObjectId(value.tripId), destinationId: new MongoObjectId(value.destinationId),
   direction: value.direction, type: value.type, departurePlace: value.departurePlace, departureAt: value.departureAt,
-  arrivalPlace: value.arrivalPlace, arrivalAt: value.arrivalAt, costPerPerson: value.costPerPerson, details: value.details,
+  arrivalPlace: value.arrivalPlace, arrivalAt: value.arrivalAt, costPerPerson: value.costPerPerson,
+  costCurrency: value.costCurrency ?? null, details: value.details,
 });
 const failure = (error: unknown) => err(error instanceof TaggedError ? error :
   error instanceof MongoServerError && error.code === 11000 ? new JourneyConflictError() :
