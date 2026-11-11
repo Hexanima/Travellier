@@ -131,6 +131,15 @@ describe("TripRefreshProvider", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  it("una pausa breve en la que no hubo nada que refrescar no dispara un refresco al soltarla", async () => {
+    const load = vi.fn(ok);
+    const Toggle = () => { const [on, setOn] = useState(true); return <><button type="button" data-action="release" onClick={() => setOn(false)}>Soltar</button><Probe load={load} guard={on} /></>; };
+    await mount(<Toggle />);
+    await tick(10_000);
+    await press("[data-action=release]");
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it("al desmontar detiene el intervalo y aborta el refresco en curso", async () => {
     let signal: AbortSignal | undefined;
     const load = vi.fn((ctx: { signal: AbortSignal }) => { signal = ctx.signal; return new Promise<RefreshOutcome>(() => undefined); });

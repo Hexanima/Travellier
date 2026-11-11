@@ -30,6 +30,7 @@ export function TripRefreshProvider({ tripId, lifecycle, intervalMs = tripRefres
   navigateRef.current = navigate;
   const loaders = useRef(new Map<string, Registered>());
   const paused = useRef(0);
+  const skipped = useRef(false);
   const cycle = useRef<{ signal: AbortSignal; inflight: Map<string, Promise<void>>; run: (respectGap: boolean) => void } | undefined>(undefined);
 
   const refreshAll = useCallback((): Promise<void> => {
@@ -54,8 +55,8 @@ export function TripRefreshProvider({ tripId, lifecycle, intervalMs = tripRefres
       return () => {
         if (released) return;
         released = true; paused.current -= 1;
-        // What was skipped while paused is caught up once.
-        if (paused.current === 0) cycle.current?.run(false);
+        // Only what was actually skipped while paused (a tick or a return to the foreground) is caught up, once.
+        if (paused.current === 0 && skipped.current) { skipped.current = false; cycle.current?.run(false); }
       };
     },
     refreshNow: () => refreshAll(),
@@ -66,7 +67,8 @@ export function TripRefreshProvider({ tripId, lifecycle, intervalMs = tripRefres
     const inflight = new Map<string, Promise<void>>();
     let last = Number.NEGATIVE_INFINITY;
     const run = (respectGap: boolean) => {
-      if (document.visibilityState !== "visible" || paused.current > 0) return;
+      if (document.visibilityState !== "visible") return;
+      if (paused.current > 0) { skipped.current = true; return; }
       const now = Date.now();
       if (respectGap && now - last < minGapMs) return;
       last = now;
