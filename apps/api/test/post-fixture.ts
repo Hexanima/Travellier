@@ -34,7 +34,7 @@ export class PostFixture {
       "postPhotos", "postExpenses", "comments", "postLikes", "commentLikes", "activityVotes", "activityParticipations", "storageDeletionJobs", "outboxEvents"])
       await this.db.collection(name).deleteMany({});
     this.trip = new ObjectId(); this.actor = new ObjectId(); this.destination = new ObjectId(); this.day = new ObjectId();
-    await this.db.collection("trips").insertOne({ _id: this.trip, inviteCode: this.trip.toHexString(), visibility: "public", votingEnabled: false, expenseMode: "register" });
+    await this.db.collection("trips").insertOne({ _id: this.trip, inviteCode: this.trip.toHexString(), visibility: "public", votingEnabled: false, expenseMode: "register", ownerId: this.actor });
     await this.db.collection("tripMembers").insertOne({ tripId: this.trip, userId: this.actor, role: "participant", joinedAt: new Date() });
     await this.db.collection("destinations").insertOne({ _id: this.destination, tripId: this.trip, name: "Córdoba", order: 1, createdAt: new Date() });
     await this.db.collection("itineraryDays").insertOne({ _id: this.day, tripId: this.trip, destinationId: this.destination, type: "activity", order: 1,
