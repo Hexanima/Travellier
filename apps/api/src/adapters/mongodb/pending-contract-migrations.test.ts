@@ -14,6 +14,7 @@ const expensePaymentsVersion = "0006-adapt-legacy-expense-paid-by";
 const pushDeviceVersion = "0007-push-device-indexes";
 const inboxVersion = "0008-notification-inbox-indexes";
 const rateLimitVersion = "0009-rate-limit-ttl-index";
+const tripOwnerVersion = "0010-trip-owner-from-created-by";
 let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
@@ -90,6 +91,70 @@ describe("incremental pending contracts", () => {
     await migrateMongoSchema(database);
     expect(await database.collection("_migrations").countDocuments({ id: rateLimitVersion })).toBe(1);
     expect(await database.collection("rateLimits").find().toArray()).toEqual([counter]);
+  });
+
+  describe("0010 derives the owner from createdBy (T114)", () => {
+    const creator = new ObjectId(), other = new ObjectId();
+    const reapply = async () => {
+      await database.collection("_migrations").deleteOne({ id: tripOwnerVersion });
+      await migrateMongoSchema(database);
+    };
+    const seed = async () => {
+      await migrateMongoSchema(database);
+      const base = { name: "Viaje", visibility: "private", expenseMode: "register", createdAt: new Date("2026-09-24T12:00:00.000Z") };
+      const ids = { legacy: new ObjectId(), nullOwner: new ObjectId(), transferred: new ObjectId(), noCreator: new ObjectId(), stringCreator: new ObjectId(), nullCreator: new ObjectId() };
+      await database.collection("trips").insertMany([
+        { _id: ids.legacy, inviteCode: "A", ...base, createdBy: creator, destinationOrderRevision: 3 },
+        { _id: ids.nullOwner, inviteCode: "B", ...base, createdBy: creator, ownerId: null },
+        { _id: ids.transferred, inviteCode: "C", ...base, createdBy: creator, ownerId: other },
+        { _id: ids.noCreator, inviteCode: "D", ...base },
+        { _id: ids.stringCreator, inviteCode: "E", ...base, createdBy: creator.toHexString() },
+        { _id: ids.nullCreator, inviteCode: "F", ...base, createdBy: null },
+      ]);
+      await database.collection("activities").insertOne({ _id: new ObjectId(), tripId: ids.legacy, createdBy: creator });
+      return ids;
+    };
+
+    it("sets only ownerId from createdBy on trips without a valid owner and nothing else", async () => {
+      const ids = await seed();
+      const before = await snapshotDocuments(database);
+      await reapply();
+      const after = await snapshotDocuments(database);
+      const of = (docs: typeof after.trips, id: ObjectId) => docs.find(({ _id }) => _id.equals(id))!;
+      expect(of(after.trips, ids.legacy)).toEqual({ ...of(before.trips, ids.legacy), ownerId: creator });
+      expect(of(after.trips, ids.nullOwner)).toEqual({ ...of(before.trips, ids.nullOwner), ownerId: creator });
+      for (const untouched of [ids.transferred, ids.noCreator, ids.stringCreator, ids.nullCreator]) {
+        expect(of(after.trips, untouched)).toEqual(of(before.trips, untouched));
+      }
+      expect(of(after.trips, ids.noCreator)).not.toHaveProperty("ownerId");
+      expect(of(after.trips, ids.stringCreator)).not.toHaveProperty("ownerId");
+      expect(of(after.trips, ids.transferred).ownerId).toEqual(other);
+      for (const name of Object.keys(after).filter((collection) => collection !== "trips" && collection !== "_migrations")) {
+        expect(after[name], name).toEqual(before[name]);
+      }
+      expect(await database.collection("_migrations").countDocuments({ id: tripOwnerVersion })).toBe(1);
+    });
+
+    it("is idempotent and never overwrites an owner set after the first run", async () => {
+      const ids = await seed();
+      await reapply();
+      await database.collection("trips").updateOne({ _id: ids.legacy }, { $set: { ownerId: other } });
+      const settled = await snapshotDocuments(database);
+      await migrateMongoSchema(database);
+      await reapply();
+      await reapply();
+      expect(await snapshotDocuments(database)).toEqual({ ...settled, _migrations: expect.any(Array) });
+      expect((await database.collection("trips").findOne({ _id: ids.legacy }))!.ownerId).toEqual(other);
+    });
+
+    it("tolerates concurrent runs without corrupting trips", async () => {
+      const ids = await seed();
+      await database.collection("_migrations").deleteOne({ id: tripOwnerVersion });
+      await Promise.all([migrateMongoSchema(database), migrateMongoSchema(database)]);
+      expect(await database.collection("trips").find({ ownerId: creator }).sort({ _id: 1 }).toArray()).toHaveLength(2);
+      expect((await database.collection("trips").findOne({ _id: ids.transferred }))!.ownerId).toEqual(other);
+      expect(await database.collection("trips").countDocuments({})).toBe(6);
+    });
   });
 
   it("applies 0007 twice without touching existing push devices", async () => {
