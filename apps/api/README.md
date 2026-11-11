@@ -122,7 +122,7 @@ Rutas con `Authorization: Bearer <accessToken>`; el actor sale siempre del JWT (
 Matriz de permisos y errores:
 
 - Cambiar rol y transferir: solo el titular (`trips.ownerId`). Actor no integrante, 404; integrante que no es titular, 403 `Forbidden`; destino no integrante, 404 `TripMemberNotFoundError`. Nadie rebaja al titular a `participant`: 409 `TripOwnerProtectedError`. Transferir al propio titular: 422 (`userId`, `same_owner`).
-- Repetir un cambio de rol ya aplicado (incluido `admin` sobre el titular) es idempotente: 204 sin escribir datos. Una transferencia repetida no lo es: el anterior titular ya no lo es y recibe 403.
+- Repetir un cambio de rol ya aplicado (incluido `admin` sobre el titular) es idempotente: 204; confirma la transacción y solo incrementa `destinationOrderRevision` (candado interno). Una transferencia repetida no lo es: el anterior titular ya no lo es y recibe 403.
 - Transferir: `trips.ownerId` pasa al destino, que queda `admin`, y el anterior titular conserva `admin`; todo en una transacción.
 - Expulsar: los admins expulsan participantes; solo el titular expulsa admins; nadie expulsa al titular (ni él mismo). Rechazos con 403 `Forbidden` (también para un actor sin membresía); destino inexistente, 404. El expulsado, admin o participante, recibe el aviso `member.expelled` en la misma transacción. Aún no se limpian sus participaciones futuras en actividades (MEM-04, T116).
 - Un viaje sin `ownerId` rechaza toda operación del titular (403) hasta migrarlo; no se usa `createdBy` como respaldo.
