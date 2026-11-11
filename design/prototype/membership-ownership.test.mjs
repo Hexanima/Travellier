@@ -193,3 +193,5 @@ test('group buttons name the person, and the member count is singular for one',(
 test('the catalog views rewritten by T117 never mention voting',()=>{
  for(const view of ['trip-settings','delete-trip','group','remove-member',...newViews])for(const role of ['admin','participant']){const html=renderV1({...createState(),view,role});assert.ok(html.length>100,view);assert.ok(!/vot(o|ar|aci)/i.test(html),view+' '+role);}
 });
+
+test('create-trip no menciona votación y fija titular, admin y gastos en modo registro',()=>{const html=renderV1({...createState(),view:'create-trip'});assert.ok(!/vot(o|ar|aci)/i.test(html));assert.match(html,/Quien crea el viaje queda como titular y admin. Los gastos empiezan en modo registro./);});

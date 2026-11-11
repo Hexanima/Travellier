@@ -80,7 +80,7 @@ Collage conserva la marca «Idea futura» de la exploración anterior. Offline, 
 
 ## Salida, titularidad y moneda de transportes · T117 (2026-11-11)
 
-Propuesta para el PRD del 2026-11-08, **pendiente de aprobación del usuario**: Grupo con titular y roles, gestionar integrante, cambio de rol, transferencia, salida (con la opción de transferir o eliminar para el titular), moneda en el costo de transporte con «Moneda sin indicar» y resumen por moneda, y «ex integrante» en gastos y balance. Cinco vistas nuevas (`member-manage`, `role-change`, `transfer-owner`, `leave-trip`, `leave-owner`): 61 entradas en el catálogo. Evidencia: 237 pruebas unitarias aprobadas (46 nuevas) y `verify-membership.mjs` a 320/390 px. Decisiones provisorias y límites en [PRD-AUDIT.md](PRD-AUDIT.md); no se rehicieron las capturas de `review/` ni la validación con Impeccable (la hace la sesión principal).
+Propuesta para el PRD del 2026-11-08, **pendiente de aprobación del usuario**: Grupo con titular y roles, gestionar integrante, cambio de rol, transferencia, salida (con la opción de transferir o eliminar para el titular), moneda en el costo de transporte con «Moneda sin indicar» y resumen por moneda, y «ex integrante» en gastos y balance. Cinco vistas nuevas (`member-manage`, `role-change`, `transfer-owner`, `leave-trip`, `leave-owner`): 61 entradas en el catálogo. Evidencia: 238 pruebas unitarias aprobadas (47 nuevas) y `verify-membership.mjs` a 320/390 px. Decisiones provisorias y límites en [PRD-AUDIT.md](PRD-AUDIT.md); no se rehicieron las capturas de `review/`. Impeccable sí se ejecutó (detector sin hallazgos nuevos; revisión de diseño 28/40); ver PRD-AUDIT.md.
 
 ## Evidencia
 
