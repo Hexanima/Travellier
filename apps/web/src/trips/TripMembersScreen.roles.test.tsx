@@ -284,3 +284,16 @@ describe.each(ops)("members: rejections on $name", ({ viewer, method, run }) => 
     expect(dialog()).toBeNull();
   });
 });
+
+describe("members: rejections on transfer (same_owner)", () => {
+  it("same_owner closes the dialog, says the person is already titular and refreshes the list", async () => {
+    const list = vi.fn().mockResolvedValueOnce(listing([nico, bea, ana, luz], ids.owner)).mockResolvedValue(listing([{ ...nico, isOwner: false }, { ...bea, isOwner: true }, ana, luz], ids.owner, ids.bea));
+    const failing = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", code: "same_owner" } });
+    await mount("owner", { list, api: { transferOwnership: failing } });
+    await gestionar("Bea"); await click("Transferir titularidad"); await acknowledge(); await click("Confirmar transferencia");
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(dialog()).toBeNull();
+    expect(document.body.textContent).toContain("Esa persona ya es titular. Actualizamos los integrantes.");
+  });
+});
