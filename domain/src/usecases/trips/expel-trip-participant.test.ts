@@ -30,8 +30,8 @@ const expulsionNotice = (userId: ObjectId) => {
     operationKey: `member.expelled:${membershipId}`, payload: { tripId }, createdAt: now() }];
 };
 
-const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean } = {}) => {
-  const roles = new Map<ObjectId, TripRole>([[owner, "admin"], [admin, "admin"], [participant, "participant"], [otherParticipant, "participant"]]);
+const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; ownerRole?: TripRole } = {}) => {
+  const roles = new Map<ObjectId, TripRole>([[owner, options.ownerRole ?? "admin"], [admin, "admin"], [participant, "participant"], [otherParticipant, "participant"]]);
   const calls = { findOwnerId: 0 };
   const removeMember = vi.fn(async (...args: [membershipId: ObjectId, userId: ObjectId, notifications: unknown]): Promise<Result<boolean>> =>
     ok(options.removed === false ? false : roles.delete(args[1])));
@@ -58,7 +58,7 @@ describe("expelTripParticipant", () => {
     expect(removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, expulsionNotice(participant));
     expect(JSON.stringify(removeMember.mock.calls[0]?.[2])).not.toContain(actor);
     expect(roles.has(participant)).toBe(false);
-    expect(calls.findOwnerId).toBe(0);
+    expect(calls.findOwnerId).toBe(1);
   });
 
   it("lets the owner expel an admin with the same notice", async () => {
@@ -113,13 +113,26 @@ describe("expelTripParticipant", () => {
     expect(await expel(port, admin, participant)).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
   });
 
-  it("reads the owner only when the target is an admin", async () => {
+  it("always reads the owner inside the transaction", async () => {
     const participantCase = createFake();
     await expel(participantCase.port, admin, participant);
-    expect(participantCase.calls.findOwnerId).toBe(0);
+    expect(participantCase.calls.findOwnerId).toBe(1);
     const adminCase = createFake();
     await expel(adminCase.port, owner, admin);
     expect(adminCase.calls.findOwnerId).toBe(1);
+  });
+
+  it("never expels the owner even with inconsistent data (owner with participant role)", async () => {
+    const { port, removeMember, roles } = createFake({ ownerRole: "participant" });
+    expect(await expel(port, admin, owner)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
+    expect(roles.has(owner)).toBe(true);
+  });
+
+  it("lets an admin expel a participant in a Trip without owner", async () => {
+    const { port, removeMember } = createFake({ ownerId: null });
+    expect(await expel(port, admin, participant)).toEqual({ ok: true, value: undefined });
+    expect(removeMember).toHaveBeenCalledTimes(1);
   });
 
   it("propagates port and removal failures", async () => {

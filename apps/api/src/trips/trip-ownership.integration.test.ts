@@ -177,6 +177,15 @@ describe("Trip admins, ownership transfer and expulsion (T115)", () => {
     await expectConsistent(tripId);
   }, 30_000);
 
+  it("never expels the owner even when seeded data gives it the participant role", async () => {
+    const tripId = await newTrip();
+    await database.collection("tripMembers").updateOne({ tripId: new ObjectId(tripId), userId: users.A }, { $set: { role: "participant" } });
+    const before = await fullSnapshot(tripId);
+    expect((await expel("B", tripId, "A")).status).toBe(403);
+    expect(await fullSnapshot(tripId)).toEqual(before);
+    expect(await roleOf(tripId, "A")).toBe("participant");
+  }, 30_000);
+
   it("applies the expulsion matrix of admins, owner and participants", async () => {
     const tripId = await newTrip({ D: "admin" });
     const before = await fullSnapshot(tripId);
