@@ -62,3 +62,15 @@ export function expenseFormData(data){
  const shares=[];for(let i=0;data['shareMember'+i]!==undefined;i++)shares.push({memberId:data['shareMember'+i],unit:data['shareUnit'+i],value:data['shareValue'+i]});
  return {...data,...(data.paymentRows!==undefined||data.paymentMember0!==undefined?{payments}:{}),...(data.shareMember0!==undefined?{shares}:{})};
 }
+// Planning reference only: never a post expense and never part of the balance. No conversions between currencies.
+// A leg shared by two destinations is stored twice, so it is counted once. Costs without a currency are listed apart and never summed.
+export function transportCosts(trip){
+ const seen=new Set(),byCurrency=new Map(),unspecified=[];
+ for(const tr of trip.transports){
+  if(tr.costPerPerson==null)continue;
+  const key=[tr.departureAt,tr.arrivalAt,tr.departurePlace,tr.arrivalPlace].join('|');if(seen.has(key))continue;seen.add(key);
+  if(!tr.costCurrency){unspecified.push(tr);continue;}
+  byCurrency.set(tr.costCurrency,(byCurrency.get(tr.costCurrency)||0)+cents(tr.costPerPerson));
+ }
+ return {byCurrency:[...byCurrency].map(([currency,n])=>({currency,total:n/100})),unspecified};
+}

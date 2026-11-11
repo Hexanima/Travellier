@@ -34,7 +34,7 @@ export const getDraft=(s,id)=>s.formDrafts?.[formKey(s,id)]||{};
 export function navigate(state,view,context){
   const s=transition(state,{type:'view',value:view});
   if(view==='mixed-day')s.destinationId='roma';
-  if(view==='remove-member'&&['Martín','Juli'].includes(context))s.memberName=context;
+  if(['remove-member','member-manage','role-change','transfer-owner'].includes(view)&&['Martín','Juli','Ana'].includes(context))s.memberName=context;
   if(['vote','proposed','vote-disabled'].includes(view))s.activityId='museos';
   if(view==='participation')s.activityId=context||state.activityId||'paseo';
   if(view==='activity-edit'&&!['activity-edit','delete-activity'].includes(state.view)){
