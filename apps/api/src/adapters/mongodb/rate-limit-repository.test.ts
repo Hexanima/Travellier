@@ -75,6 +75,14 @@ describe("MongoDB rate limit repository", () => {
     expect(left).toEqual(["aXb|k1", "login-ip|k1", "login:k1|k", "login|k", "login|k1x", "login|k10", "logon|k1"].sort());
   });
 
+  it("escapes regex metacharacters and anchors the _id prefix", () => {
+    const pattern = new RegExp(resetFilter("a.b", "k(1)+")._id.$regex);
+    expect(pattern.test("a.b:k(1)+:1700000000000")).toBe(true);
+    expect(pattern.test("aXb:k(1)+:1700000000000")).toBe(false);
+    expect(pattern.test("a.b:k1:1700000000000")).toBe(false);
+    expect(pattern.test("x:a.b:k(1)+:1")).toBe(false);
+  });
+
   it("reset filters by an anchored _id prefix so the _id index is used, not a collection scan", async () => {
     await hit();
     const explained = await database.command({

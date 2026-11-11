@@ -21,7 +21,7 @@ const guard = async <T>(work: () => Promise<T>): AsyncResult<T> => {
 const isDuplicateKey = (error: unknown): boolean =>
   typeof error === "object" && error !== null && (error as { code?: unknown }).code === DUPLICATE_KEY;
 
-const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\/-]/g, "\$&");
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\/-]/g, "\\$&");
 
 /**
  * Filter for `reset`: every window of one (bucket, key). The anchored, escaped prefix of `_id` (`<bucket>:<keyHash>:<windowStart>`) lets Mongo

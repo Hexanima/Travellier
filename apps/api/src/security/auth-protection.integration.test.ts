@@ -203,8 +203,10 @@ type RawResponse = { status: number; text: string; requestId: string | undefined
 function sendRequest(options: RequestOptions, url: string, write: (req: ClientRequest) => void): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     let finished = false;
+    let responseStarted = false;
     const done = (action: () => void) => { if (!finished) { finished = true; action(); } };
     const req = httpRequest(url, options, (response) => {
+      responseStarted = true;
       let text = "";
       response.on("data", (chunk: Buffer) => { text += chunk.toString("utf8"); });
       response.on("end", () => done(() => resolve(
@@ -216,7 +218,7 @@ function sendRequest(options: RequestOptions, url: string, write: (req: ClientRe
     req.on("error", (error: NodeJS.ErrnoException) => {
       const lateWriterError = error.code === "EPIPE" || error.code === "ECONNRESET";
       // With a response already started, the outcome is decided by the response events above.
-      if (!(lateWriterError && req.res !== undefined)) done(() => reject(error));
+      if (!(lateWriterError && responseStarted)) done(() => reject(error));
     });
     write(req);
   });

@@ -60,7 +60,7 @@ describe("redactForLog", () => {
 describe("redactingLogger", () => {
   it("passes every entry through redactForLog before emitting and keeps the entry fields", () => {
     const received: unknown[] = [];
-    const logger = redactingLogger((entry: Record<string, unknown>) => received.push(entry));
+    const logger = redactingLogger((entry: Record<string, unknown>) => received.push(entry))!;
     logger({ event: "error", requestId: "r", path: "/x", errorName: "E", stack: ["  at f (mongodb://u:pw@h/db)"], code: "INVITE" });
     expect(received).toEqual([{ event: "error", requestId: "r", path: "/x", errorName: "E", stack: ["  at f (mongodb://[REDACTED]@h/db)"], code: "[REDACTED]" }]);
   });
