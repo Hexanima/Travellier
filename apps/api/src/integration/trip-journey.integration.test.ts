@@ -1,6 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
+import { processStorageDeletionJobs } from "app-domain";
 
+import { createMongoPhotoLinkRepository } from "../adapters/mongodb/photo-link-repository.js";
+import { createMongoStorageDeletionJobRepository } from "../adapters/mongodb/storage-deletion-job-repository.js";
 import { E2E_DATABASE_PREFIX, startE2EHarness, type E2EHarness, type HttpResult } from "../../test/e2e-harness.js";
 
 /**
@@ -321,5 +324,160 @@ describe("integrated API journey (T103)", () => {
     const allowed = await call("A", "GET", "/trips", undefined, { origin: "http://localhost:5173" });
     expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
     expect((await call("A", "GET", "/trips", undefined, { origin: "https://evil.example" })).headers.get("access-control-allow-origin")).toBeNull();
+  }, 30_000);
+
+  // From here on the clock is controlled (only Date), so tokens must outlive 2099: re-sign long-lived ones for the same users.
+  const held = async (person: Person) => (await h.db.collection("activityParticipations")
+    .find({ tripId: new ObjectId(tripId), userId: new ObjectId(ids[person]) }).toArray()).map((p) => String(p.activityId)).sort();
+  const sorted = (...values: string[]) => [...values].sort();
+  const COST_TOTALS = { byCurrency: [{ currency: "ARS", totalCents: 1250050, transportCount: 1 }, { currency: "USD", totalCents: 2025, transportCount: 1 }],
+    withoutCurrency: { transportCount: 0 } };
+  const content = ["posts", "postPhotos", "postExpenses", "comments", "postLikes", "activities"];
+  const contentState = () => data(content);
+  const rowsOf = (balance: { currencies: Array<{ currency: string; balances: Array<{ userId: string; netCents: number; formerMember: boolean }> }> }, currency: string) =>
+    Object.fromEntries(balance.currencies.find((entry) => entry.currency === currency)!.balances.map((row) => [row.userId, [row.netCents, row.formerMember]]));
+
+  it("lets a participant leave: future plans removed, started ones and all her content kept as a former member", async () => {
+    for (const person of ["A", "B"] as const) tok[person] = await h.tokenFor(ids[person]);
+    // D also plans Museo (started at the controlled clock) and Paseo (not yet); C comments and likes before leaving.
+    for (const activity of [activityIds.museo, activityIds.paseo]) {
+      expectStatus(await call("D", "PUT", activitiesPath(`/${activity}/participation`), { status: "going" }), 200);
+    }
+    const comment = expectStatus(await call("C", "POST", tripPath(`/posts/${postIds.root}/comments`), { text: "Qué buena cena" }), 201);
+    const like = await call("C", "PUT", tripPath(`/posts/${postIds.root}/like`));
+    expect([200, 204], like.text).toContain(like.status);
+    expect(await held("C")).toEqual(sorted(activityIds.museo, activityIds.paseo));
+    const before = { content: await contentState(), balance: await balanceOf("A"), others: (await h.db.collection("activityParticipations")
+      .find({ userId: { $ne: new ObjectId(ids.C) } }).sort({ _id: 1 }).toArray()) };
+    await withClock(async () => { expect(expectStatus(await call("C", "POST", tripPath("/leave")), 204).text).toBe(""); });
+    // Membership and access are gone; the started plan stays as a record, the future one is deleted, nobody else is touched.
+    expect(await h.db.collection("tripMembers").countDocuments({ tripId: new ObjectId(tripId), userId: new ObjectId(ids.C) })).toBe(0);
+    expect(await held("C")).toEqual([activityIds.museo]);
+    expect(await h.db.collection("activityParticipations").find({ userId: { $ne: new ObjectId(ids.C) } }).sort({ _id: 1 }).toArray()).toEqual(before.others);
+    for (const path of ["", "/members", "/activities", "/posts", "/photos", "/itinerary", "/balance"]) expect((await call("C", "GET", tripPath(path))).status, path).toBe(404);
+    expect((await call("C", "POST", tripPath("/posts"), { description: "No debería" })).status).toBe(404);
+    // Posts, expenses, comments, likes and photos remain, identified as those of a former member.
+    expect(await contentState()).toEqual(before.content);
+    const branch = expectStatus(await call("A", "GET", tripPath(`/posts/${postIds.branch}`)), 200).json;
+    expect(branch).toMatchObject({ post: { authorId: ids.C }, expense: { payments: [{ userId: ids.C }], formerMemberIds: [ids.C] } });
+    const comments = expectStatus(await call("A", "GET", tripPath(`/posts/${postIds.root}/comments`)), 200).json.comments;
+    expect(comments).toMatchObject([{ id: comment.json.comment.id, authorId: ids.C, authorIsFormerMember: true }]);
+    expect(await h.db.collection("postLikes").countDocuments({ tripId: new ObjectId(tripId), userId: new ObjectId(ids.C) })).toBe(1);
+    // The balance keeps C's payments and shares with the same amounts, now marked as former member.
+    const balance = await balanceOf("A");
+    expect(balance.includedExpenseCount).toBe(before.balance.includedExpenseCount);
+    expect(rowsOf(balance, "ARS")).toEqual({ [ids.A]: [1000, false], [ids.B]: [0, false], [ids.C]: [-2500, true], [ids.D]: [1500, false] });
+    expect(rowsOf(balance, "USD")).toEqual({ [ids.A]: [-2000, false], [ids.B]: [-2000, false], [ids.C]: [4000, true] });
+    // Leaving twice finds no membership.
+    expect((await call("C", "POST", tripPath("/leave"))).status).toBe(404);
+    expect((await call("A", "GET", tripPath("/members"))).json.members.map((m: { userId: string }) => m.userId).sort()).toEqual(sorted(ids.A, ids.B, ids.D));
+  }, 30_000);
+
+  it("keeps the owner from leaving, lets only her transfer ownership, and an admin who is no longer the owner leaves and cannot delete", async () => {
+    const guarded = () => data(["trips", "tripMembers", "activityParticipations", "storageDeletionJobs", "postPhotos"]);
+    const before = await guarded();
+    const refused = await call("A", "POST", tripPath("/leave"));
+    expect(refused.status).toBe(409);
+    expect(refused.json.error.code).toBe("TripOwnerProtectedError");
+    // Only the owner transfers; a non-member target is refused. None of this writes.
+    expect((await call("B", "POST", tripPath("/transfer-ownership"), { userId: ids.D })).status).toBe(403);
+    expect((await call("A", "POST", tripPath("/transfer-ownership"), { userId: ids.C })).status).toBeGreaterThanOrEqual(400);
+    expect(await guarded()).toEqual(before);
+    expectStatus(await call("A", "POST", tripPath("/transfer-ownership"), { userId: ids.B }), 204);
+    const members = expectStatus(await call("B", "GET", tripPath("/members")), 200).json;
+    expect(members.ownerId).toBe(ids.B);
+    expect(Object.fromEntries(members.members.map((m: { userId: string; role: string }) => [m.userId, m.role]))).toMatchObject({ [ids.A]: "admin", [ids.B]: "admin" });
+    // The former owner is an admin without ownership: she cannot delete the Trip (403, no writes) but may leave.
+    const beforeDelete = await guarded();
+    expect((await call("A", "DELETE", tripPath())).status).toBe(403);
+    expect(await guarded()).toEqual(beforeDelete);
+    expect(await held("A")).toEqual(sorted(activityIds.museo, activityIds.paseo));
+    await withClock(async () => { expectStatus(await call("A", "POST", tripPath("/leave")), 204); });
+    expect(await held("A")).toEqual([activityIds.museo]);
+    expect((await call("A", "GET", tripPath())).status).toBe(404);
+    expect(await h.db.collection("posts").countDocuments({ tripId: new ObjectId(tripId), authorId: new ObjectId(ids.A) })).toBe(1);
+    expect((await call("B", "GET", tripPath("/members"))).json.members.map((m: { userId: string }) => m.userId).sort()).toEqual(sorted(ids.B, ids.D));
+    // A's own second Trip is unaffected.
+    expectStatus(await call("A", "GET", `/trips/${otherTripId}`), 200);
+  }, 30_000);
+
+  it("lets the owner expel a participant with the same cleanup, and the transport currency totals stay intact", async () => {
+    expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
+    const before = await contentState();
+    // Nobody else expels the owner or acts without being a member.
+    expect((await call("X", "DELETE", tripPath(`/members/${ids.D}`))).status).toBeGreaterThanOrEqual(400);
+    expect((await call("D", "DELETE", tripPath(`/members/${ids.B}`))).status).toBe(403);
+    expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
+    await withClock(async () => { expectStatus(await call("B", "DELETE", tripPath(`/members/${ids.D}`)), 204); });
+    expect(await h.db.collection("tripMembers").countDocuments({ tripId: new ObjectId(tripId), userId: new ObjectId(ids.D) })).toBe(0);
+    expect(await held("D")).toEqual([activityIds.museo]);
+    expect((await call("D", "GET", tripPath())).status).toBe(404);
+    expect(await contentState()).toEqual(before);
+    const balance = await balanceOf("B");
+    expect(rowsOf(balance, "ARS")).toEqual({ [ids.A]: [1000, true], [ids.B]: [0, false], [ids.C]: [-2500, true], [ids.D]: [1500, true] });
+    const itinerary = expectStatus(await call("B", "GET", tripPath("/itinerary")), 200).json.itinerary;
+    expect(itinerary.transportCostTotals).toEqual(COST_TOTALS);
+    expect(itinerary.days.map((day: { type: string }) => day.type)).toHaveLength(8);
+  }, 30_000);
+
+  it("keeps post chains and expenses when an activity is deleted, and removes only its participations", async () => {
+    const before = await data(["posts", "postExpenses", "postPhotos"]);
+    expect(await h.db.collection("activityParticipations").countDocuments({ activityId: new ObjectId(activityIds.cena) })).toBe(1);
+    const otherPlans = await h.db.collection("activityParticipations").find({ activityId: { $ne: new ObjectId(activityIds.cena) } }).sort({ _id: 1 }).toArray();
+    expectStatus(await call("B", "DELETE", activitiesPath(`/${activityIds.cena}`)), 204);
+    expect(await h.db.collection("activityParticipations").countDocuments({ activityId: new ObjectId(activityIds.cena) })).toBe(0);
+    expect(await h.db.collection("activityParticipations").find({}).sort({ _id: 1 }).toArray()).toEqual(otherPlans);
+    const after = await data(["posts", "postExpenses", "postPhotos"]);
+    expect(after.postExpenses).toEqual(before.postExpenses);
+    expect(after.postPhotos).toEqual(before.postPhotos);
+    expect(after.posts).toEqual((before.posts as Array<{ _id: ObjectId; activityId?: ObjectId | null }>).map((post) =>
+      post._id.toHexString() === postIds.root ? { ...post, activityId: null } : post));
+    const chain = expectStatus(await call("B", "GET", tripPath(`/posts/${postIds.child}`)), 200).json;
+    expect(chain).toMatchObject({ post: { parentPostId: postIds.root }, parent: { id: postIds.root }, rootActivityId: null });
+    expect((await balanceOf("B")).includedExpenseCount).toBe(3);
+  }, 30_000);
+
+  it("deletes the Trip only for its owner, queues the storage cleanup without touching storage and the worker removes only that Trip's keys", async () => {
+    // Former members and strangers cannot delete; nothing is written.
+    const guarded = () => data(["trips", "tripMembers", "posts", "postPhotos", "storageDeletionJobs"]);
+    const before = await guarded();
+    for (const person of ["A", "C", "D", "X"] as const) expect((await call(person, "DELETE", tripPath())).status, person).toBe(404);
+    expect(await guarded()).toEqual(before);
+    const stamp = new Date("2026-11-01T00:00:00.000Z");
+    for (const key of [...photoKeys, otherPhotoKey]) h.cleanupStorage.put(key, stamp);
+    h.cleanupStorage.put("trips/unrelated/other.jpg", stamp);
+    expectStatus(await call("B", "DELETE", tripPath()), 204);
+    expect(h.cleanupStorage.deleteCalls).toBe(0);
+    expect((await call("B", "GET", tripPath())).status).toBe(404);
+    expect((await listed("B"))).toEqual([]);
+    for (const name of ["tripMembers", "destinations", "transports", "itineraryDays", "activities", "activityParticipations", "posts", "postPhotos", "postExpenses", "comments", "postLikes"]) {
+      expect(await h.db.collection(name).countDocuments({ tripId: new ObjectId(tripId) }), name).toBe(0);
+    }
+    const jobs = await h.db.collection("storageDeletionJobs").find({}).toArray();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ tripId: new ObjectId(tripId), status: "pending" });
+    expect([...jobs[0]!.objectKeys].sort()).toEqual(sorted(...photoKeys));
+    // The other Trip and its photo are intact.
+    expectStatus(await call("A", "GET", `/trips/${otherTripId}`), 200);
+    expect(await h.db.collection("postPhotos").countDocuments({ s3Key: otherPhotoKey })).toBe(1);
+    const now = new Date("2099-01-01T00:00:00.000Z");
+    let owners = 0;
+    const run = () => processStorageDeletionJobs({ jobs: createMongoStorageDeletionJobRepository(h.db), links: createMongoPhotoLinkRepository(h.db), storage: h.cleanupStorage,
+      now: () => now, createOwner: () => `t103-worker-${++owners}`, deadline: new Date(now.getTime() + 45_000), maxJobs: 10 });
+    expect(await run()).toEqual({ ok: true, value: { processed: 1, completed: 1, failed: 0, exhausted: 0, resolvedKeys: 2, rejectedKeys: 0, claimFailed: false } });
+    expect([...h.cleanupStorage.deleted].sort()).toEqual(sorted(...photoKeys));
+    expect(h.cleanupStorage.keys()).toEqual(sorted(otherPhotoKey, "trips/unrelated/other.jpg"));
+    expect(await run()).toMatchObject({ ok: true, value: { processed: 0 } });
+    expect(await h.db.collection("storageDeletionJobs").findOne({})).toMatchObject({ status: "completed" });
+  }, 30_000);
+
+  it("ran in isolation: only its own prefixed database exists and no real environment was used", async () => {
+    const names = (await h.client.db().admin().listDatabases()).databases.map((database) => database.name).filter((name) => !["admin", "local", "config"].includes(name));
+    expect(names).toEqual([h.db.databaseName]);
+    expect(h.db.databaseName.startsWith(E2E_DATABASE_PREFIX)).toBe(true);
+    expect(h.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(process.env.S3_BUCKET_NAME ?? "").toBe("");
+    // Every key the app asked the (fake) storage to sign or inspect belongs to a journey Trip.
+    expect(h.storage.heads.every((key) => key.startsWith(`trips/${tripId}/`) || key.startsWith(`trips/${otherTripId}/`))).toBe(true);
   }, 30_000);
 });
