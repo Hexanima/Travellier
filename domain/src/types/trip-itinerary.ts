@@ -87,6 +87,13 @@ export interface ItineraryExpenseTotals {
 }
 export type ItineraryExpenseSummary = ItineraryExpenseTotals & { expenseCount: number };
 
+/** Transport cost per person by currency in cents (fixed order ARS, EUR, USD); never converted nor summed across currencies. */
+export interface TransportCostTotals {
+  byCurrency: { currency: Currency; totalCents: number; transportCount: number }[];
+  /** Transports with a cost but no usable currency or amount: counted, but they add to no total. */
+  withoutCurrency: { transportCount: number };
+}
+
 export interface TripItinerary {
   tripId: ObjectId;
   expenseMode: Trip["expenseMode"];
@@ -101,4 +108,6 @@ export interface TripItinerary {
   expenseSummary: ItineraryExpenseSummary & { outsideItinerary: ItineraryExpenseSummary };
   /** One entry per expense of the Trip, by `occurredAt` then id. */
   expenses: ItineraryExpenseAttribution[];
+  /** Whole Trip transport costs per person, separate from post expenses and balance. */
+  transportCostTotals: TransportCostTotals;
 }
