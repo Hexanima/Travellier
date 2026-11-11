@@ -66,6 +66,36 @@ describe("destination and transport routes", () => {
     expect(updateTransport).toHaveBeenCalledTimes(1);
   });
 
+  describe("transport cost currency payload", () => {
+    const base = `/trips/${trip}/destinations/${destination}/transports`;
+    const body = { direction: "outbound", type: "car", departurePlace: "Origen", departureAt: "2026-09-24T08:00:00.000Z",
+      arrivalPlace: "Destino", arrivalAt: "2026-09-24T09:00:00.000Z", costPerPerson: 10, details: {} };
+
+    it("passes costCurrency on create and on update", async () => {
+      const createTransport = vi.fn().mockResolvedValue(ok({ id: transport }));
+      const updateTransport = vi.fn().mockResolvedValue(ok({ id: transport }));
+      const dependencies = { trips: { createTransport, updateTransport } } as never;
+      expect((await handleApiRequest({ method: "POST", url: base, authenticatedUserId: actor as never,
+        body: JSON.stringify({ ...body, costCurrency: "EUR" }) }, dependencies)).statusCode).toBe(201);
+      expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ costPerPerson: 10, costCurrency: "EUR" }));
+      expect((await handleApiRequest({ method: "PATCH", url: `${base}/${transport}`, authenticatedUserId: actor as never,
+        body: JSON.stringify({ costCurrency: "USD" }) }, dependencies)).statusCode).toBe(200);
+      expect(updateTransport).toHaveBeenCalledWith({ authenticatedUserId: actor, tripId: trip, destinationId: destination, transportId: transport, costCurrency: "USD" });
+    });
+
+    it("rejects a currency of the wrong type with 400 before the use case", async () => {
+      const createTransport = vi.fn();
+      const updateTransport = vi.fn();
+      const dependencies = { trips: { createTransport, updateTransport } } as never;
+      expect((await handleApiRequest({ method: "POST", url: base, authenticatedUserId: actor as never,
+        body: JSON.stringify({ ...body, costCurrency: 840 }) }, dependencies)).statusCode).toBe(400);
+      expect((await handleApiRequest({ method: "PATCH", url: `${base}/${transport}`, authenticatedUserId: actor as never,
+        body: JSON.stringify({ costCurrency: ["USD"] }) }, dependencies)).statusCode).toBe(400);
+      expect(createTransport).not.toHaveBeenCalled();
+      expect(updateTransport).not.toHaveBeenCalled();
+    });
+  });
+
   it("rejects malformed route IDs before accessing data", async () => {
     const listDestinations = vi.fn();
     const listTransports = vi.fn();

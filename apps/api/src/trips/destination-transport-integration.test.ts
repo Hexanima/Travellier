@@ -108,4 +108,71 @@ describe("local destination and transport API", () => {
       await client.close();
     }
   }, 20_000);
+
+  it("requires the currency of a transport cost and keeps rejected writes out of the database", async () => {
+    const databaseName = "journey_currency_api_test";
+    const client = new MongoClient(server.getUri());
+    await client.connect();
+    const database = client.db(databaseName);
+    await migrateMongoSchema(database);
+    const local = await createLocalApi({ MONGODB_URI: server.getUri(), MONGODB_DATABASE_NAME: databaseName, JWT_SECRET: "journey-secret" });
+    await new Promise<void>((resolve) => local.app.listen(0, resolve));
+    const base = `http://127.0.0.1:${(local.app.address() as AddressInfo).port}`;
+    const tokens = createAuthenticationTokenAdapter({ jwtSecret: "journey-secret", accessTokenLifetimeMs: 900_000 });
+    const parsed = createObjectId(new ObjectId().toHexString());
+    if (!parsed.ok) throw parsed.error;
+    const token = await tokens.createAccessToken(parsed.value);
+    if (!token.ok) throw token.error;
+    const headers = { authorization: `Bearer ${token.value}`, "content-type": "application/json" };
+    const send = (method: string, url: string, body: unknown) => fetch(`${base}${url}`, { method, headers, body: JSON.stringify(body) });
+    try {
+      const created = await send("POST", "/trips", { name: "Costos", primaryDestination: "Costos principal" });
+      expect(created.status).toBe(201);
+      const trip = (await created.json() as { trip: { id: string; primaryDestination: { id: string } } }).trip;
+      const path = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
+      const body = { direction: "outbound", type: "car", departurePlace: "Origen", departureAt: "2026-09-24T08:00:00Z",
+        arrivalPlace: "Destino", arrivalAt: "2026-09-24T09:00:00Z", costPerPerson: 100, details: {} };
+      const count = () => database.collection("transports").countDocuments({});
+      const days = () => database.collection("itineraryDays").find({}).sort({ order: 1 }).toArray();
+
+      const withoutCurrency = await send("POST", path, body);
+      expect(withoutCurrency.status).toBe(422);
+      expect(await withoutCurrency.json()).toMatchObject({ error: { code: "ValidationError", fields: [{ field: "costCurrency", code: "required" }] } });
+      expect((await send("POST", path, { ...body, costCurrency: "BRL" })).status).toBe(422);
+      expect((await send("POST", path, { ...body, costPerPerson: null, costCurrency: "ARS" })).status).toBe(422);
+      expect(await count()).toBe(0);
+      expect(await days()).toHaveLength(0);
+
+      const saved = await send("POST", path, { ...body, costCurrency: "USD" });
+      expect(saved.status).toBe(201);
+      const savedTransport = (await saved.json() as { transport: { id: string; costCurrency: string } }).transport;
+      expect(savedTransport.costCurrency).toBe("USD");
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) })).toMatchObject({ costPerPerson: 100, costCurrency: "USD" });
+
+      const stored = await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) });
+      const daysBefore = await days();
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { costCurrency: "XXX" })).status).toBe(422);
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { costPerPerson: null, costCurrency: "EUR" })).status).toBe(422);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) })).toEqual(stored);
+      expect(await days()).toEqual(daysBefore);
+
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { costCurrency: "EUR" })).status).toBe(200);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) })).toMatchObject({ costPerPerson: 100, costCurrency: "EUR" });
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { costPerPerson: null })).status).toBe(200);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) })).toMatchObject({ costPerPerson: null, costCurrency: null });
+
+      // Previous record: cost stored without currency, edited without choosing one.
+      await database.collection("transports").updateOne({ _id: new ObjectId(savedTransport.id) }, { $set: { costPerPerson: 80 }, $unset: { costCurrency: "" } });
+      const previous = await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) });
+      const listed = await (await fetch(`${base}${path}`, { headers })).json() as { transports: { costPerPerson: number; costCurrency: null }[] };
+      expect(listed.transports[0]).toMatchObject({ costPerPerson: 80, costCurrency: null });
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { arrivalPlace: "Otro" })).status).toBe(422);
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(savedTransport.id) })).toEqual(previous);
+      expect((await send("PATCH", `${path}/${savedTransport.id}`, { costCurrency: "ARS" })).status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve, reject) => local.app.close((error) => error ? reject(error) : resolve()));
+      await local.close();
+      await client.close();
+    }
+  }, 30_000);
 });
