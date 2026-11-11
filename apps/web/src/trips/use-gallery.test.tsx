@@ -335,6 +335,48 @@ describe("useGalleryPages", () => {
       expect(api.hasMore).toBe(true);
     });
   });
+  describe("url renewal warning and silent refresh (T121)", () => {
+    const setup = (fresh: GalleryPhoto[], next: string) => {
+      let renewPage2 = false;
+      const { list } = tracked((cursor, call) => {
+        if (call === 1) return page([photo(3), photo(2), photo(1)], "c1");
+        if (cursor === "c1") return renewPage2 ? fail("network") : page([photo(0)], "c2");
+        return page(call === 3 || call === 4 ? fresh : [photo(9), photo(8), photo(7)], next);
+      });
+      return { list, failPage2: () => { renewPage2 = true; } };
+    };
+    const loadSecondAndFailItsRenewal = async (failPage2: () => void) => {
+      await act(async () => api.loadMore());
+      failPage2();
+      await act(async () => api.imageError(itineraryId(0)));
+      await flush();
+      expect(api.refreshFailed).toBe(true);
+    };
+    it("a restart that drops the page whose url renewal failed clears the warning, and a later successful renewal does not bring it back", async () => {
+      const { list, failPage2 } = setup([photo(9), photo(8), photo(7)], "f1");
+      await mount(list);
+      await loadSecondAndFailItsRenewal(failPage2);
+      await act(async () => { void api.refreshFirstPage(); });
+      await flush(); await flush();
+      expect(ids()).toEqual([9, 8, 7].map(itineraryId));
+      expect(api.refreshFailed).toBe(false);
+      expect(api.refreshError).toBeUndefined();
+      await act(async () => api.imageError(itineraryId(9)));
+      await flush(); await flush();
+      expect(api.refreshFailed).toBe(false);
+      expect(api.refreshError).toBeUndefined();
+    });
+    it("a normal refresh (no restart) keeps the warning while the failed page still exists", async () => {
+      const { list, failPage2 } = setup([photo(4), photo(3), photo(2)], "c1");
+      await mount(list);
+      await loadSecondAndFailItsRenewal(failPage2);
+      await act(async () => { void api.refreshFirstPage(); });
+      await flush(); await flush();
+      expect(ids()).toEqual([4, 3, 2, 1, 0].map(itineraryId));
+      expect(api.refreshFailed).toBe(true);
+      expect(api.refreshError).toEqual({ kind: "network" });
+    });
+  });
   it("refreshes expired pages when the window gets the focus again", async () => {
     let clock = NOW;
     const list = vi.fn().mockImplementation(async () => page([photo(5, `u${list.mock.calls.length}`, clock + 300_000)], null));

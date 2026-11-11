@@ -151,7 +151,12 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
           if (next === current.pages) return current;
           // The pages restarted from the answer: a «Cargar más» or an error tied to the old cursor no longer applies.
           const restarted = currentCursor(next) !== currentCursor(current.pages);
-          return restarted ? { ...current, pages: next, phase: "idle", error: undefined } : { ...current, pages: next };
+          if (!restarted) return { ...current, pages: next };
+          // A url renewal that failed for a page that no longer exists must not keep (or bring back) the warning.
+          const kept = new Set(next.map((item) => pageKey(item.cursor)));
+          for (const failedId of [...failedPages.current]) if (!kept.has(failedId)) failedPages.current.delete(failedId);
+          const refreshFailed = failedPages.current.size > 0;
+          return { ...current, pages: next, phase: "idle", error: undefined, refreshFailed, refreshError: refreshFailed ? current.refreshError : undefined };
         });
         outcome = { status: "ok" };
       } finally { pending.current.delete(id); resolve(outcome); }
