@@ -87,13 +87,14 @@ describe("local Trip member API", () => {
 
       const listed = await fetch(memberUrl, { headers: participantHeaders });
       expect(listed.status).toBe(200);
-      const listedBody = await listed.json() as { members: Array<Record<string, unknown>> };
+      const listedBody = await listed.json() as { members: Array<Record<string, unknown>>; ownerId: string | null };
+      expect(listedBody.ownerId).toBe(adminId.toHexString());
       expect(listedBody.members).toHaveLength(2);
       expect(listedBody.members).toEqual(expect.arrayContaining([
-        expect.objectContaining({ userId: adminId.toHexString(), name: "Admin", role: "admin" }),
-        expect.objectContaining({ userId: participantId.toHexString(), name: "Participante", role: "participant" }),
+        expect.objectContaining({ userId: adminId.toHexString(), name: "Admin", role: "admin", isOwner: true }),
+        expect.objectContaining({ userId: participantId.toHexString(), name: "Participante", role: "participant", isOwner: false }),
       ]));
-      expect(Object.keys(listedBody.members[0] ?? {}).sort()).toEqual(["id", "joinedAt", "name", "role", "userId"]);
+      expect(Object.keys(listedBody.members[0] ?? {}).sort()).toEqual(["id", "isOwner", "joinedAt", "name", "role", "userId"]);
 
       const expelUrl = `${memberUrl}/${participantId.toHexString()}`;
       expect((await fetch(expelUrl, { method: "DELETE", headers: participantHeaders })).status).toBe(403);

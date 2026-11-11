@@ -60,7 +60,7 @@ describe("individual participation persistence", () => {
       await db.collection(name).deleteMany({});
     }
     trip = new ObjectId(); actor = new ObjectId(); other = new ObjectId(); activity = new ObjectId(); otherActivity = new ObjectId();
-    await db.collection("trips").insertOne({ _id: trip, inviteCode: trip.toHexString(), visibility: "public", votingEnabled: false });
+    await db.collection("trips").insertOne({ _id: trip, inviteCode: trip.toHexString(), visibility: "public", votingEnabled: false, ownerId: other });
     await db.collection("tripMembers").insertMany([
       { tripId: trip, userId: actor, role: "participant", joinedAt: new Date() },
       { tripId: trip, userId: other, role: "admin", joinedAt: new Date() },
