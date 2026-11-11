@@ -4,7 +4,9 @@ import { ObjectId as MongoObjectId, type Db } from "mongodb";
 import {
   createObjectId,
   createTrip,
+  changeTripMemberRole,
   expelTripParticipant,
+  transferTripOwnership,
   getTrip,
   getTripItinerary,
   getTripBalance,
@@ -60,6 +62,7 @@ import { createMongoTripJourneyRepository } from "../adapters/mongodb/trip-journ
 import { createMongoTripItineraryQueryRepository } from "../adapters/mongodb/trip-itinerary-query-repository.js";
 import { createMongoTripBalanceQueryRepository } from "../adapters/mongodb/trip-balance-query-repository.js";
 import { createMongoTripDeletionRepository } from "../adapters/mongodb/trip-deletion-repository.js";
+import { createMongoTripMemberAdministrationRepository } from "../adapters/mongodb/trip-member-administration-repository.js";
 import { createTripInvitationApi } from "./trip-invitation-api.js";
 import { createMongoTripActivityRepository } from "../adapters/mongodb/trip-activity-repository.js";
 import { createMongoTripParticipationRepository } from "../adapters/mongodb/trip-participation-repository.js";
@@ -96,6 +99,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
   const balance = createMongoTripBalanceQueryRepository(database);
   const journeyDependencies = { journeys, members, createId };
   const deletion = createMongoTripDeletionRepository(database);
+  const memberAdministration = createMongoTripMemberAdministrationRepository(database);
   const activityDependencies = { activities: createMongoTripActivityRepository(database), createId, now: () => new Date() };
   const participationDependencies = { participations: createMongoTripParticipationRepository(database), createId, now: () => new Date() };
   const postDependencies = { posts: createMongoTripPostRepository(database), createId, now: () => new Date(), ...(storage ? { storage } : {}) };
@@ -146,7 +150,9 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     joinPublic: (payload) => joinPublicTrip.execute({ members: publicJoinMembers, now: () => new Date() }, payload),
     updateConfiguration: (payload) => updateTripConfiguration.execute({ trips }, payload),
     listMembers: (payload) => listTripMembers.execute({ members }, payload),
-    expelMember: (payload) => expelTripParticipant.execute({ members, now: () => new Date() }, payload),
+    expelMember: (payload) => expelTripParticipant.execute({ administration: memberAdministration, now: () => new Date() }, payload),
+    changeMemberRole: (payload) => changeTripMemberRole.execute({ administration: memberAdministration }, payload),
+    transferOwnership: (payload) => transferTripOwnership.execute({ administration: memberAdministration }, payload),
     createDestination: (payload) => createJourneyDestination.execute({ ...journeyDependencies, createId, now: () => new Date() }, payload),
     listDestinations: (payload) => listJourneyDestinations.execute({ ...journeyDependencies, deletion }, payload),
     updateDestination: (payload) => updateJourneyDestination.execute(journeyDependencies, payload),

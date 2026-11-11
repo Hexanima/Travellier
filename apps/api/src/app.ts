@@ -35,6 +35,8 @@ import {
   type TripMemberSummary,
   type ListTripMembersPayload,
   type ExpelTripParticipantPayload,
+  type ChangeTripMemberRolePayload,
+  type TransferTripOwnershipPayload,
   type CreateJourneyDestinationPayload,
   type UpdateJourneyDestinationPayload,
   type DeleteJourneyDestinationPayload,
@@ -208,6 +210,8 @@ export interface TripApi extends TripInvitationApi {
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;
   listMembers?: (payload: ListTripMembersPayload) => AsyncResult<TripMemberSummary[]>;
   expelMember?: (payload: ExpelTripParticipantPayload) => AsyncResult<void>;
+  changeMemberRole?: (payload: ChangeTripMemberRolePayload) => AsyncResult<void>;
+  transferOwnership?: (payload: TransferTripOwnershipPayload) => AsyncResult<void>;
   createDestination?: (payload: CreateJourneyDestinationPayload) => AsyncResult<TripDestination>;
   listDestinations?: (payload: { authenticatedUserId: ObjectId; tripId: ObjectId }) => AsyncResult<TripDestination[]>;
   updateDestination?: (payload: UpdateJourneyDestinationPayload) => AsyncResult<TripDestination>;
@@ -358,6 +362,9 @@ const errorResponse = (error: { tag: string }): ApiResponse => {
   }
   if (error.tag === "JourneyConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: "Journey resource already exists." } });
+  }
+  if (error.tag === "TripOwnerProtectedError") {
+    return jsonResponse(409, { error: { code: error.tag, message: "The Trip owner is protected." } });
   }
   if (error.tag === "LastDestinationError" || error.tag === "DeletionConflictError") {
     return jsonResponse(409, { error: { code: error.tag, message: error.tag === "LastDestinationError"
@@ -1095,6 +1102,32 @@ export const handleApiRequest = async (
         destinationId: destinationId.value, transportId: transportId.value, ...input });
       return result.ok ? jsonResponse(200, { transport: result.value }) : errorResponse(result.error);
     }
+  }
+
+  const memberRoleMatch = request.url?.match(/^\/trips\/([^/?]+)\/members\/([^/?]+)\/role$/);
+  const transferOwnershipMatch = request.url?.match(/^\/trips\/([^/?]+)\/transfer-ownership$/);
+  if ((request.method === "PUT" && memberRoleMatch) || (request.method === "POST" && transferOwnershipMatch)) {
+    if (request.authenticatedUserId === undefined) return jsonResponse(401, { error: "Unauthorized" });
+    const tripId = createObjectId((memberRoleMatch ?? transferOwnershipMatch)?.[1] ?? "");
+    if (!tripId.ok) return invalidRequestResponse();
+    if (payload === undefined) return invalidRequestResponse();
+    const invalid = (field: string, code: string, message: string) => errorResponse(new ValidationError([{ field, code, message }]));
+    if (memberRoleMatch) {
+      const targetUserId = createObjectId(memberRoleMatch[2] ?? "");
+      if (!targetUserId.ok) return invalidRequestResponse();
+      if (payload.role !== "admin" && payload.role !== "participant") return invalid("role", "invalid", "The role must be admin or participant.");
+      if (dependencies.trips?.changeMemberRole === undefined) return unavailableResponse();
+      const result = await dependencies.trips.changeMemberRole({
+        tripId: tripId.value, actorUserId: request.authenticatedUserId, targetUserId: targetUserId.value, role: payload.role,
+      });
+      return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+    }
+    if (!isString(payload.userId)) return invalid("userId", "required", "The new owner is required.");
+    const targetUserId = createObjectId(payload.userId);
+    if (!targetUserId.ok) return invalidRequestResponse();
+    if (dependencies.trips?.transferOwnership === undefined) return unavailableResponse();
+    const result = await dependencies.trips.transferOwnership({ tripId: tripId.value, actorUserId: request.authenticatedUserId, targetUserId: targetUserId.value });
+    return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
   }
 
   const membersMatch = request.url?.match(/^\/trips\/([^/?]+)\/members$/);
