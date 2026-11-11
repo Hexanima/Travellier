@@ -1357,21 +1357,54 @@ export const handleApiRequest = async (
 
 class PayloadTooLargeError extends Error {}
 
-/** Reads at most `limit` bytes: a larger Content-Length or a larger stream raises `PayloadTooLargeError` (leaving the loop destroys the stream). */
-const readRequestBody = async (request: IncomingMessage, limit: number): Promise<string> => {
+/** Maximum time an oversized request keeps being drained (discarded) so the client can read the 413 before the connection is released. */
+const DRAIN_TIMEOUT_MS = 10_000;
+
+/**
+ * Reads at most `limit` bytes: a larger Content-Length or a larger stream raises `PayloadTooLargeError`. On overflow nothing more is kept; the
+ * remainder is discarded (not destroyed) so the 413 reaches the client instead of a connection reset. The stream is destroyed only if the drain
+ * does not finish within the timeout.
+ */
+const readRequestBody = (request: IncomingMessage, limit: number): Promise<string> => {
   const declared = Number(request.headers["content-length"]);
-  if (Number.isFinite(declared) && declared > limit) throw new PayloadTooLargeError();
-  const chunks: Buffer[] = [];
-  let size = 0;
-
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > limit) throw new PayloadTooLargeError();
-    chunks.push(buffer);
+  if (Number.isFinite(declared) && declared > limit) {
+    discardRemainder(request);
+    return Promise.reject(new PayloadTooLargeError());
   }
+  return new Promise<string>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > limit) {
+        cleanup();
+        chunks.length = 0;
+        discardRemainder(request);
+        reject(new PayloadTooLargeError());
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = () => { cleanup(); resolve(Buffer.concat(chunks).toString("utf8")); };
+    const onError = (error: Error) => { cleanup(); reject(error); };
+    const cleanup = () => {
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("error", onError);
+    };
+    request.on("data", onData);
+    request.once("end", onEnd);
+    request.once("error", onError);
+  });
+};
 
-  return Buffer.concat(chunks).toString("utf8");
+const discardRemainder = (request: IncomingMessage): void => {
+  if (request.readableEnded || request.destroyed) return;
+  const timer = setTimeout(() => request.destroy(), DRAIN_TIMEOUT_MS);
+  timer.unref();
+  request.once("close", () => clearTimeout(timer));
+  request.resume();
 };
 
 export const defaultCorsOrigins = [
@@ -1443,8 +1476,9 @@ export const createRequestHandler = (
         );
       } catch (error: unknown) {
         if (!(error instanceof PayloadTooLargeError)) throw error;
-        // The unread body is not worth keeping the connection for.
-        apiResponse = { ...payloadTooLargeResponse(), headers: { ...payloadTooLargeResponse().headers, connection: "close" } };
+        // The rest of the body is discarded in the background (see discardRemainder); closing the socket now would reset the connection
+        // and the client would never see this response.
+        apiResponse = payloadTooLargeResponse();
       }
       apiResponse = { ...apiResponse, headers: { ...apiResponse.headers, "x-request-id": metadata.requestId } };
       errorCode = apiErrorCode(apiResponse);

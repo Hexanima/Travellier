@@ -137,6 +137,18 @@ describe("API protection over a real HTTP server", () => {
     expect(logs.find((entry) => entry.status === 413)?.errorCode).toBe("PayloadTooLarge");
   }, 30_000);
 
+  it("answers 413 to a chunked body without Content-Length that exceeds the limit, and the client receives it", async () => {
+    const s = spies();
+    await serve(s);
+    const chunk = Buffer.alloc(8 * 1024, 120);
+    const response = await chunkedRequest(`${base}/auth/login`, chunk, 64);
+    expect(response.status).toBe(413);
+    expect(response.requestId).toBeTruthy();
+    expect(JSON.parse(response.text)).toEqual({ error: { code: "PayloadTooLarge", message: "The request body is too large." } });
+    expect(s.login).not.toHaveBeenCalled();
+    expect(logs.find((entry) => entry.event === "response" && entry.status === 413)?.errorCode).toBe("PayloadTooLarge");
+  }, 30_000);
+
   it("applies the small limit to auth routes and accepts a larger legitimate body on a content route", async () => {
     const s = spies();
     await serve(s);
@@ -179,16 +191,51 @@ describe("API protection over a real HTTP server", () => {
   });
 });
 
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type ClientRequest, type RequestOptions } from "node:http";
 
-function rawRequest(method: string, url: string, body: string): Promise<{ status: number; text: string; requestId: string | undefined }> {
+type RawResponse = { status: number; text: string; requestId: string | undefined };
+
+/**
+ * Sends a request and resolves with the response. The server may answer 413 and close without reading the body, so EPIPE/ECONNRESET raised
+ * by the request writer after the response arrived are expected and ignored; any error before a response (or a response that never
+ * completes) still rejects.
+ */
+function sendRequest(options: RequestOptions, url: string, write: (req: ClientRequest) => void): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
-    const req = httpRequest(url, { method, headers: { ...JSON_HEADERS, authorization: "Bearer t", "content-length": Buffer.byteLength(body) } }, (response) => {
+    let finished = false;
+    const done = (action: () => void) => { if (!finished) { finished = true; action(); } };
+    const req = httpRequest(url, options, (response) => {
       let text = "";
       response.on("data", (chunk: Buffer) => { text += chunk.toString("utf8"); });
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, text, requestId: response.headers["x-request-id"] as string | undefined }));
+      response.on("end", () => done(() => resolve(
+        { status: response.statusCode ?? 0, text, requestId: response.headers["x-request-id"] as string | undefined })));
+      // A response cut off before its end is a real failure.
+      response.on("error", (error) => done(() => reject(error)));
+      response.on("close", () => done(() => reject(new Error("response closed before it ended"))));
     });
-    req.on("error", reject);
-    req.end(body);
+    req.on("error", (error: NodeJS.ErrnoException) => {
+      const lateWriterError = error.code === "EPIPE" || error.code === "ECONNRESET";
+      // With a response already started, the outcome is decided by the response events above.
+      if (!(lateWriterError && req.res !== undefined)) done(() => reject(error));
+    });
+    write(req);
+  });
+}
+
+function rawRequest(method: string, url: string, body: string): Promise<RawResponse> {
+  return sendRequest(
+    { method, headers: { ...JSON_HEADERS, authorization: "Bearer t", "content-length": Buffer.byteLength(body) } }, url, (req) => req.end(body));
+}
+
+/** Streams `count` chunks with Transfer-Encoding: chunked (no Content-Length). */
+function chunkedRequest(url: string, chunk: Buffer, count: number): Promise<RawResponse> {
+  return sendRequest({ method: "POST", headers: { ...JSON_HEADERS } }, url, (req) => {
+    let sent = 0;
+    const next = () => {
+      if (req.destroyed || sent >= count) { if (!req.destroyed) req.end(); return; }
+      sent += 1;
+      if (req.write(chunk)) setImmediate(next); else req.once("drain", next);
+    };
+    next();
   });
 }
