@@ -113,8 +113,7 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
   it("la clasificacion usa instantes UTC: el mismo viaje cae del mismo lado sea cual sea la zona del proceso", async () => {
     await open();
     await loaded();
-    // El desfase del proceso es 0 (UTC) o 180 min (Buenos Aires): la clasificacion no cambia con ninguno.
-    expect([0, 180]).toContain(new Date("2099-03-01T08:00:00.000Z").getTimezoneOffset());
+    // Instantes UTC: el resultado no depende de la zona horaria del proceso.
     expect(only(["Futuro 2099", "Terminado 2020"])).toEqual(["Futuro 2099"]);
   });
 
