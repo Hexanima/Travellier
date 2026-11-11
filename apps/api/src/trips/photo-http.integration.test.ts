@@ -48,7 +48,10 @@ describe("photo protocol HTTP API", () => {
   const fields = (response: { body?: string }) => body(response).error.fields.map((issue: { field: string; code: string }) => `${issue.field}/${issue.code}`);
   const data = async () => Promise.all(["posts", "postPhotos", "activities", "activityParticipations"]
     .map((name) => f.db.collection(name).find().sort({ _id: 1 }).toArray()));
-  const expel = (admin: ObjectId, target = f.actor) => f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(target) });
+  const expel = async (admin: ObjectId, target = f.actor) => {
+    if (target === f.actor) await f.releaseOwnership();
+    return f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(target) });
+  };
   const photoView = ["expiresAt", "id", "order", "postId", "uploadedAt", "uploaderId", "url"];
 
   describe("authentication, ids and membership", () => {

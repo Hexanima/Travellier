@@ -272,7 +272,7 @@ describe("photo persistence and transactions", () => {
   const deleteTrip = () => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) });
 
   concurrent("makes an expulsion wait for an in-flight photo save, which keeps the former member's photos with uploaderId", async () => {
-    const admin = await addMember("admin"), list = keys(2);
+    const admin = await addMember("admin"), list = keys(2); await f.releaseOwnership();
     const paused = pauseAfterFirst("postPhotos", "insertOne");
     const saving = launch(createPost(list));
     let expelling!: ReturnType<typeof expel>;
@@ -292,7 +292,7 @@ describe("photo persistence and transactions", () => {
   });
 
   concurrent("makes a photo save wait for an in-flight expulsion and then fail with 404 without writing photos", async () => {
-    const admin = await addMember("admin"), list = keys(1);
+    const admin = await addMember("admin"), list = keys(1); await f.releaseOwnership();
     const paused = pauseAfterFirst("trips", "updateOne");
     const expelling = launch(expel(admin));
     let saving!: ReturnType<typeof createPost>;
@@ -526,7 +526,7 @@ describe("photo persistence and transactions", () => {
     it("lets a read that started before an expulsion finish on its snapshot and answers 404 to the next page", async () => {
       const admin = await addMember("admin");
       for (let i = 0; i < 4; i++) await seedPhotos(await seedPost({ createdAt: at(i) }), 2);
-      const first = await page({ limit: 3 }), expected = await expectedIds();
+      const first = await page({ limit: 3 }), expected = await expectedIds(); await f.releaseOwnership();
       const paused = pauseAfterFirst("tripMembers", "findOne");
       const reading = launch(list({ limit: 3, cursor: first.nextCursor }));
       let expelled!: Awaited<ReturnType<typeof expel>>;
@@ -544,7 +544,7 @@ describe("photo persistence and transactions", () => {
 
     it("keeps serving the photos of a former member to the remaining members, with their ids", async () => {
       const admin = await addMember("admin");
-      await seedPhotos(await seedPost({ createdAt: at(1) }), 2);
+      await seedPhotos(await seedPost({ createdAt: at(1) }), 2); await f.releaseOwnership();
       expect((await expel(admin)).ok).toBe(true);
       const result = await page({}, admin);
       expect(result.photos).toHaveLength(2);
@@ -588,7 +588,7 @@ describe("photo persistence and transactions", () => {
   });
 
   it("serves the photos of a former member to the remaining members after the expulsion", async () => {
-    const admin = await addMember("admin"), { post } = await created(keys(1));
+    const admin = await addMember("admin"), { post } = await created(keys(1)); await f.releaseOwnership();
     expect((await expel(admin)).ok).toBe(true);
     const read = await f.api.getPostPhotos!({ tripId: domainId(f.trip), authenticatedUserId: domainId(admin), postId: post.id });
     expect(read).toMatchObject({ ok: true, value: [{ uploaderId: f.actor.toHexString(), order: 1 }] });

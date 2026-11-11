@@ -94,6 +94,7 @@ describe("like HTTP API", () => {
       const response = await f.request(method, url);
       expect([response.statusCode, body(response).error.code], `${method} ${url}`).toEqual([404, "TripNotFoundError"]);
     }
+    await f.releaseOwnership();
     expect((await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) })).ok).toBe(true);
     for (const [method, url] of calls(f.trip.toHexString())) {
       const response = await f.request(method, url);
@@ -128,6 +129,7 @@ describe("like HTTP API", () => {
     const other = await addMember("admin"), third = await addMember();
     await f.request("PUT", postUrl()); await f.request("PUT", postUrl(), undefined, other);
     await f.request("PUT", commentUrl(), undefined, other); await f.request("PUT", commentUrl());
+    await f.releaseOwnership();
     expect((await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(other), targetUserId: domainId(f.actor) })).ok).toBe(true);
     const asOther = await f.request("GET", readUrl(), undefined, other);
     expect(asOther.statusCode, asOther.body).toBe(200);

@@ -184,6 +184,7 @@ describe("post persistence and transactions", () => {
   it("serializes creation with expulsion and rejects further reads and edits", async () => {
     expect(f.api.createPost).toBeTypeOf("function");
     const admin = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: admin, role: "admin" });
+    await f.releaseOwnership();
     const [created, expelled] = await Promise.all([f.api.createPost!(f.input()),
       f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) })]);
     expect(expelled.ok).toBe(true);

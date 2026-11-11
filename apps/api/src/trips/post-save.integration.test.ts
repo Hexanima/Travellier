@@ -496,7 +496,7 @@ describe("joint post save and idempotent retry", () => {
     });
 
     concurrent("a POST with a new activity and an expulsion of its author: the expulsion waits for the save, which stays whole", async () => {
-      const admin = await addMember("admin");
+      const admin = await addMember("admin"); await f.releaseOwnership();
       const paused = pauseAfterFirst("activities", "insertOne");
       const saving = launch(post({ id: newId(), description: "Cena", newActivity: withDuration(), photos: photoRefs(1) }));
       let expelling!: Promise<{ ok: boolean }>;
@@ -514,7 +514,7 @@ describe("joint post save and idempotent retry", () => {
     });
 
     concurrent("an expulsion that wins the lock makes the joint save answer 404 and write nothing", async () => {
-      const admin = await addMember("admin");
+      const admin = await addMember("admin"); await f.releaseOwnership();
       const paused = pauseAfterFirst("trips", "updateOne");
       const expelling = launch(f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) }));
       let saving!: ReturnType<typeof post>;
