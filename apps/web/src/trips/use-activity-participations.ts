@@ -24,8 +24,12 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   const generation = useRef(0);
   // Activities deleted in this Trip: a late read or write must not bring their state (or a conflict modal) back.
   const removed = useRef(new Set<string>());
+  // Writes per activity: every publication (load, save, apply, removal) bumps it, so a silent read that started before one is known to be older.
+  const writes = useRef<Record<string, number>>({});
+  const bump = (id: string) => { writes.current[id] = (writes.current[id] ?? 0) + 1; };
   const publish = useCallback((id: string, state: ParticipationState) => {
     if (removed.current.has(id)) return;
+    bump(id);
     current.current = { ...current.current, [id]: state };
     setStates(current.current);
   }, []);
@@ -63,15 +67,19 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     await Promise.all(activityIds.map(async (activityId) => {
       const before = current.current[activityId];
       if (removed.current.has(activityId) || before?.kind === "loading" || (before?.kind === "ready" && (before.saving || before.confirming))) return;
+      const started = writes.current[activityId] ?? 0;
       try {
         const result = await api.get(tripId, activityId);
         if (generation.current !== revision || removed.current.has(activityId)) return;
         if (!result.ok) { failed = true; return; }
+        // Something local (a save, an applied answer) happened while the read was in flight: the read is older than what is shown.
+        if ((writes.current[activityId] ?? 0) !== started) return;
         const now = current.current[activityId];
         if (now?.kind === "loading" || (now?.kind === "ready" && (now.saving || now.confirming))) return;
         const fresh = fromResponse(result.value);
+        // Same answer and mark as the server: keep the local feedback (error and retry of a failed save, «guardado»).
         const same = now?.kind === "ready" && now.status === fresh.status && now.decisionRequired?.changedAt === fresh.decisionRequired?.changedAt &&
-          now.decisionRequired?.reason === fresh.decisionRequired?.reason && !now.error && !now.failedStatus && !now.saved;
+          now.decisionRequired?.reason === fresh.decisionRequired?.reason;
         if (!same) publish(activityId, fresh);
       } catch { failed = true; }
     }));
