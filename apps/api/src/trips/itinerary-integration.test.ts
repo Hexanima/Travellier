@@ -37,7 +37,7 @@ describe("aggregate itinerary HTTP API", () => {
   it("returns configured days, chronological activity/post contexts and daily expenses in one GET", async () => {
     const trip = await createTrip(), tripId = new ObjectId(trip.id);
     const transportsPath = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
-    const transportInput = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, details: {} };
+    const transportInput = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, costCurrency: "ARS", details: {} };
     const outboundResponse = await post(transportsPath, { ...transportInput, direction: "outbound", departureAt: "2026-09-25T08:00:00.123Z", arrivalAt: "2026-09-25T10:00:00.456Z" });
     expect(outboundResponse.status).toBe(201);
     const outbound = (await outboundResponse.json() as { transport: { id: string } }).transport;
@@ -82,10 +82,49 @@ describe("aggregate itinerary HTTP API", () => {
     ]);
   });
 
+  it("totals transport costs per currency across destinations, apart from post expenses", async () => {
+    const trip = await createTrip(), tripId = new ObjectId(trip.id);
+    const second = await post(`/trips/${trip.id}/destinations`, { name: "Mendoza" });
+    expect(second.status).toBe(201);
+    const secondId = (await second.json() as { destination: { id: string } }).destination.id;
+    const path = (destinationId: string) => `/trips/${trip.id}/destinations/${destinationId}/transports`;
+    const base_ = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", details: {} };
+    const slot = (direction: string, from: string, to: string) => ({ direction, departureAt: from, arrivalAt: to });
+    const created = [
+      await post(path(trip.primaryDestination.id), { ...base_, ...slot("outbound", "2026-09-25T08:00:00Z", "2026-09-25T10:00:00Z"), costPerPerson: 100.1, costCurrency: "ARS" }),
+      await post(path(trip.primaryDestination.id), { ...base_, ...slot("return", "2026-09-26T18:00:00Z", "2026-09-26T20:00:00Z"), costPerPerson: 20, costCurrency: "USD" }),
+      await post(path(secondId), { ...base_, ...slot("outbound", "2026-09-27T08:00:00Z", "2026-09-27T10:00:00Z"), costPerPerson: 0.2, costCurrency: "ARS" }),
+      await post(path(secondId), { ...base_, ...slot("return", "2026-09-28T18:00:00Z", "2026-09-28T20:00:00Z"), costPerPerson: null }),
+    ];
+    expect(created.map((response) => response.status)).toEqual([201, 201, 201, 201]);
+    type Totals = { byCurrency: { currency: string; totalCents: number; transportCount: number }[]; withoutCurrency: { transportCount: number } };
+    type Itinerary = { transportCostTotals: Totals; transports: { costPerPerson: number | null; costCurrency: string | null }[];
+      expenseSummary: { byCurrency: unknown[]; expenseCount: number } };
+    const get = async () => (await (await fetch(`${base}/trips/${trip.id}/itinerary`, { headers })).json() as { itinerary: Itinerary }).itinerary;
+    const days = await db.collection("itineraryDays").find({ tripId }).sort({ order: 1 }).toArray();
+    const postId = new ObjectId();
+    await db.collection("posts").insertOne({ _id: postId, tripId, dayId: days[0]!._id, authorId: actor, description: null, mapsUrl: null,
+      activityId: null, transportId: null, parentPostId: null, createdAt: new Date("2026-09-25T09:00:00Z") });
+    await db.collection("postExpenses").insertOne({ tripId, postId, totalAmount: 5, currency: "EUR", breakdown: null, paidBy: null, createdAt: new Date() });
+    const mixed = await get();
+    expect(mixed.transportCostTotals).toEqual({
+      byCurrency: [{ currency: "ARS", totalCents: 10030, transportCount: 2 }, { currency: "USD", totalCents: 2000, transportCount: 1 }],
+      withoutCurrency: { transportCount: 0 },
+    });
+    expect(mixed.expenseSummary).toMatchObject({ expenseCount: 1, byCurrency: [{ currency: "EUR", totalCents: 500, expenseCount: 1 }] });
+
+    // A previous record: cost stored directly without currency.
+    await db.collection("transports").updateOne({ tripId, destinationId: new ObjectId(secondId), direction: "return" }, { $set: { costPerPerson: 40 } });
+    const previous = await get();
+    expect(previous.transportCostTotals).toEqual({ ...mixed.transportCostTotals, withoutCurrency: { transportCount: 1 } });
+    expect(previous.transports.filter((t) => t.costPerPerson !== null && t.costCurrency === null)).toHaveLength(1);
+    expect(previous.expenseSummary).toEqual(mixed.expenseSummary);
+  });
+
   it("projects posts without a day by context and returns unplaced posts with ISO milliseconds", async () => {
     const trip = await createTrip();
     const transportsPath = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
-    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, details: {} };
+    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, costCurrency: "ARS", details: {} };
     expect((await post(transportsPath, { ...input, direction: "outbound", departureAt: "2026-09-25T08:00:00.123Z", arrivalAt: "2026-09-25T10:00:00.456Z" })).status).toBe(201);
     expect((await post(transportsPath, { ...input, direction: "return", departureAt: "2026-09-26T18:00:00.789Z", arrivalAt: "2026-09-26T20:00:00.123Z" })).status).toBe(201);
     const tripId = new ObjectId(trip.id);
@@ -114,7 +153,7 @@ describe("aggregate itinerary HTTP API", () => {
   it("recomputes the expense projection after reschedule, relink and delete through the real endpoints without touching persisted amounts", async () => {
     const trip = await createTrip(), tripId = new ObjectId(trip.id);
     const transportsPath = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
-    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, details: {} };
+    const input = { type: "car", departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: 999, costCurrency: "ARS", details: {} };
     expect((await post(transportsPath, { ...input, direction: "outbound", departureAt: "2026-09-25T08:00:00.123Z", arrivalAt: "2026-09-25T10:00:00.456Z" })).status).toBe(201);
     expect((await post(transportsPath, { ...input, direction: "return", departureAt: "2026-09-26T18:00:00.789Z", arrivalAt: "2026-09-26T20:00:00.123Z" })).status).toBe(201);
     type Itinerary = { days: { id: string; startsAt: string; expenseSummary: { byCurrency: { currency: string; totalCents: number; expenseCount: number }[]; expenseCount: number } }[];
