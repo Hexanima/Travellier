@@ -197,3 +197,113 @@ describe("useActivityParticipations conflicts", () => {
     });
   });
 });
+
+describe("useActivityParticipations.reload (silent refresh)", () => {
+  it("brings the new answer and the new mark without going through loading", async () => {
+    let current: ParticipationResponse | null = answered("going");
+    const api = { get: vi.fn(async () => ({ ok: true as const, value: current })), set: vi.fn(async () => conflict()) } satisfies TripParticipationApi;
+    const { hook, state } = await setup(api);
+    expect(state().status).toBe("going");
+    current = pending();
+    const kinds: string[] = [];
+    const get = api.get;
+    api.get = vi.fn(async () => { kinds.push(hook().states[A]!.kind); return get(); });
+    await act(async () => { await hook().reload([A]); });
+    expect(kinds).toEqual(["ready"]);
+    expect(state().status).toBe("pending"); expect(state().decisionRequired).toEqual(mark);
+  });
+  it("does not step over a save or a confirmation in progress", async () => {
+    const gate = deferred<TripResult<ParticipationResponse>>();
+    const api = makeApi(() => gate.promise, answered("not_going"));
+    const { hook, state } = await setup(api);
+    await act(async () => { void hook().change(A, "going"); });
+    expect(state().saving).toBe("going");
+    api.get.mockResolvedValueOnce({ ok: true, value: pending() });
+    await act(async () => { await hook().reload([A]); });
+    expect(state().saving).toBe("going"); expect(state().status).toBe("not_going");
+    await act(async () => gate.resolve({ ok: true, value: answered("going") }));
+    expect(state().status).toBe("going");
+  });
+  it("keeps a confirmation open and its answer", async () => {
+    const api = makeApi(async () => conflict(), answered("not_going"));
+    const { hook, state } = await setup(api);
+    await act(async () => hook().change(A, "going"));
+    expect(state().confirming).toBeDefined();
+    api.get.mockResolvedValueOnce({ ok: true, value: pending() });
+    await act(async () => { await hook().reload([A]); });
+    expect(state().confirming).toBeDefined(); expect(state().status).toBe("not_going");
+  });
+  it("a failed reload keeps what is shown and reports the failure", async () => {
+    const api = makeApi(async () => conflict(), answered("going"));
+    const { hook, state } = await setup(api);
+    api.get.mockResolvedValueOnce({ ok: false, error: { kind: "network" } } as never);
+    let outcome: string | undefined;
+    await act(async () => { outcome = await hook().reload([A]); });
+    expect(outcome).toBe("error"); expect(state().status).toBe("going"); expect(state().error).toBeUndefined();
+  });
+  it("does not bring back an activity removed meanwhile", async () => {
+    const gate = deferred<TripResult<ParticipationResponse | null>>();
+    const api = makeApi(async () => conflict(), answered("going"));
+    const { hook } = await setup(api);
+    api.get.mockReturnValueOnce(gate.promise as never);
+    let pendingReload: Promise<unknown> | undefined;
+    await act(async () => { pendingReload = hook().reload([A]); });
+    await act(async () => hook().remove(A));
+    await act(async () => { gate.resolve({ ok: true, value: pending() }); await pendingReload; });
+    expect(hook().states[A]).toBeUndefined();
+  });
+  it("a slow read that started before a quick save is dropped: the save wins and the mark stays removed", async () => {
+    const gate = deferred<TripResult<ParticipationResponse | null>>();
+    const api = makeApi(async () => ({ ok: true, value: answered("going") }), pending());
+    const { hook, state } = await setup(api);
+    expect(state().decisionRequired).toEqual(mark);
+    api.get.mockReturnValueOnce(gate.promise as never);
+    let slow: Promise<unknown> | undefined;
+    await act(async () => { slow = hook().reload([A]); });
+    await act(async () => { await hook().change(A, "going"); });
+    expect(state().status).toBe("going"); expect(state().saved).toBe(true); expect(state().decisionRequired).toBeUndefined();
+    await act(async () => { gate.resolve({ ok: true, value: pending() }); await slow; });
+    expect(state().status).toBe("going"); expect(state().decisionRequired).toBeUndefined(); expect(state().saved).toBe(true);
+  });
+  it("a read without writes in between is applied", async () => {
+    const gate = deferred<TripResult<ParticipationResponse | null>>();
+    const api = makeApi(async () => conflict(), answered("going"));
+    const { hook, state } = await setup(api);
+    api.get.mockReturnValueOnce(gate.promise as never);
+    let slow: Promise<unknown> | undefined;
+    await act(async () => { slow = hook().reload([A]); });
+    await act(async () => { gate.resolve({ ok: true, value: pending() }); await slow; });
+    expect(state().status).toBe("pending"); expect(state().decisionRequired).toEqual(mark);
+  });
+  it("a read that started before an applied answer (apply) is dropped", async () => {
+    const gate = deferred<TripResult<ParticipationResponse | null>>();
+    const api = makeApi(async () => conflict(), pending());
+    const { hook, state } = await setup(api);
+    api.get.mockReturnValueOnce(gate.promise as never);
+    let slow: Promise<unknown> | undefined;
+    await act(async () => { slow = hook().reload([A]); });
+    await act(async () => hook().apply(A, answered("going")));
+    await act(async () => { gate.resolve({ ok: true, value: pending() }); await slow; });
+    expect(state().status).toBe("going"); expect(state().decisionRequired).toBeUndefined();
+  });
+  it("a failed save keeps its error and retry through a reload with the same server state, and a different state replaces it", async () => {
+    const api = makeApi(async () => ({ ok: false, error: { kind: "network" } }), answered("not_going"));
+    const { hook, state } = await setup(api);
+    await act(async () => hook().change(A, "going"));
+    expect(state().failedStatus).toBe("going"); expect(state().error).toBeDefined();
+    await act(async () => { await hook().reload([A]); });
+    expect(state().failedStatus).toBe("going"); expect(state().error).toBeDefined(); expect(state().status).toBe("not_going");
+    api.get.mockResolvedValueOnce({ ok: true, value: answered("going") });
+    await act(async () => { await hook().reload([A]); });
+    expect(state().status).toBe("going"); expect(state().error).toBeUndefined(); expect(state().failedStatus).toBeUndefined();
+  });
+  it("a «saved» feedback survives a reload with the same server state", async () => {
+    const api = makeApi(async () => ({ ok: true, value: answered("going") }), answered("not_going"));
+    const { hook, state } = await setup(api);
+    await act(async () => hook().change(A, "going"));
+    expect(state().saved).toBe(true);
+    api.get.mockResolvedValueOnce({ ok: true, value: answered("going") });
+    await act(async () => { await hook().reload([A]); });
+    expect(state().saved).toBe(true);
+  });
+});

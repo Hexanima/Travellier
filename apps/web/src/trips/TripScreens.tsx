@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, TextField } from "../components/index.js";
 import { classifyTrips, nextBoundaryMs, parseFilter, type TripFilter } from "./trip-list-filter.js";
@@ -32,6 +32,12 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
     rememberFilter(next);
     setSearchParams(next === "finished" ? { filter: "finished" } : {}, { replace: true });
   };
+  // Coming from a Trip that was deleted or whose access was revoked (the refresh of the Trip leaves here with `tripGone`): a brief generic notice, no name or data
+  // of that Trip. Read once and cleaned from the entry so a reload or a return does not repeat it.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [tripGone] = useState(() => (location.state as { tripGone?: unknown } | null)?.tripGone === true);
+  useEffect(() => { if (tripGone) navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [nowMs, setNowMs] = useState(() => now());
   const nowRef = useRef(now);
   nowRef.current = now;
@@ -102,6 +108,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
           </div>
           <Link className="trips-create-link" to="/trips/new">Crear viaje</Link>
         </header>
+        {tripGone ? <Feedback variant="info">Ya no tenés acceso a ese viaje.</Feedback> : null}
         <nav className="trips-entry-actions" aria-label="Unirse a un viaje">
           <Link className="trips-join-link" to="/trips/join">Unirse con código</Link>
           <Link className="trips-join-link" to="/trips/explore">Explorar viajes públicos</Link>

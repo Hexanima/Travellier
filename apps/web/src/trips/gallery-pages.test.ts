@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { itineraryId } from "./itinerary-test-fixture.js";
-import { appendPage, currentCursor, flatten, isStale, makePage, replacePage, staleIndexes } from "./gallery-pages.js";
+import { appendPage, currentCursor, flatten, isStale, makePage, mergeFirstPage, replacePage, staleIndexes } from "./gallery-pages.js";
 import type { GalleryPhoto } from "./trip-gallery-api.js";
 
 const photo = (n: number, url = `https://s3.test/${n}`, expiresAtMs = 1_000_000): GalleryPhoto => ({
@@ -61,5 +61,57 @@ describe("gallery pages model", () => {
     const pages = appendPage(appendPage([], makePage(null, { photos: [photo(1)], nextCursor: "c1" })), makePage("c1", { photos: [photo(2)], nextCursor: "c2" }));
     expect(currentCursor(pages)).toBe("c2");
     expect(currentCursor(appendPage(pages, makePage("c2", { photos: [], nextCursor: null })))).toBeNull();
+  });
+});
+
+describe("mergeFirstPage (silent refresh of the first page)", () => {
+  const start = () => appendPage(appendPage([], makePage(null, { photos: [photo(3, "old3"), photo(2, "old2")], nextCursor: "c1" })), makePage("c1", { photos: [photo(1, "old1")], nextCursor: null }));
+  it("returns the same pages when no photo appeared or left (the signed urls are not swapped: no image reload)", () => {
+    const pages = start();
+    expect(mergeFirstPage(pages, makePage(null, { photos: [photo(3, "new3"), photo(2, "new2")], nextCursor: "other" }))).toBe(pages);
+  });
+  it("puts new photos first, keeps the known ones with their urls, the next pages and the cursor", () => {
+    const pages = start();
+    const next = mergeFirstPage(pages, makePage(null, { photos: [photo(5, "new5"), photo(4, "new4"), photo(3, "new3")], nextCursor: "other" }));
+    expect(ids(next)).toEqual([itineraryId(5), itineraryId(4), itineraryId(3), itineraryId(2), itineraryId(1)]);
+    expect(flatten(next).map((item) => item.url)).toEqual(["new5", "new4", "old3", "old2", "old1"]);
+    expect(next[0]).toMatchObject({ cursor: null, nextCursor: "c1" });
+    expect(next[1]).toBe(pages[1]);
+  });
+  it("does not repeat a photo that already sits in a later page", () => {
+    const next = mergeFirstPage(start(), makePage(null, { photos: [photo(1, "new1"), photo(3, "new3")], nextCursor: "x" }));
+    expect(ids(next)).toEqual([itineraryId(3), itineraryId(2), itineraryId(1)]);
+  });
+  it("with a single page and a complete answer, the answer is the truth (a removed photo leaves)", () => {
+    const pages = appendPage([], makePage(null, { photos: [photo(3, "old3"), photo(2, "old2")], nextCursor: null }));
+    const next = mergeFirstPage(pages, makePage(null, { photos: [photo(3, "new3")], nextCursor: null }));
+    expect(ids(next)).toEqual([itineraryId(3)]);
+    expect(flatten(next).map((item) => item.url)).toEqual(["old3"]);
+  });
+  it("with more new photos than a page (no overlap with the old first page), it restarts from the fresh page and its cursor, keeping known urls, with no gap", () => {
+    const pages = start();
+    const next = mergeFirstPage(pages, makePage(null, { photos: [photo(8, "new8"), photo(7, "new7")], nextCursor: "fresh" }));
+    expect(ids(next)).toEqual([itineraryId(8), itineraryId(7)]);
+    expect(next).toHaveLength(1);
+    expect(next[0]).toMatchObject({ cursor: null, nextCursor: "fresh" });
+    expect(currentCursor(next)).toBe("fresh");
+  });
+  it("with no overlap, a photo the fresh page has that was already loaded keeps its loaded snapshot and url", () => {
+    const pages = start();
+    // 1 sits in a later page, not in the old first page: the fresh page has no id of the old first one.
+    const next = mergeFirstPage(pages, makePage(null, { photos: [photo(8, "new8"), photo(1, "new1")], nextCursor: "fresh" }));
+    expect(ids(next)).toEqual([itineraryId(8), itineraryId(1)]);
+    expect(flatten(next).map((item) => item.url)).toEqual(["new8", "old1"]);
+  });
+  it("with a normal overlap it does not discard the following pages", () => {
+    const pages = start();
+    const next = mergeFirstPage(pages, makePage(null, { photos: [photo(9, "new9"), photo(2, "new2")], nextCursor: "fresh" }));
+    expect(next).toHaveLength(2);
+    expect(next[1]).toBe(pages[1]);
+    expect(next[0]).toMatchObject({ nextCursor: "c1" });
+  });
+  it("ignores pages that do not start at the first cursor", () => {
+    const pages = [makePage("c1", { photos: [photo(1)], nextCursor: null })];
+    expect(mergeFirstPage(pages, makePage(null, { photos: [photo(9)], nextCursor: null }))).toBe(pages);
   });
 });

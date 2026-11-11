@@ -8,5 +8,7 @@ export { List, ListItem } from "./List.js";
 export type { ListItemProps, ListProps } from "./List.js";
 export { Modal } from "./Modal.js";
 export type { ModalProps } from "./Modal.js";
+export { PullToRefresh } from "./PullToRefresh.js";
+export type { PullToRefreshProps } from "./PullToRefresh.js";
 export { Tabs } from "./Tabs.js";
 export type { TabItem, TabsProps } from "./Tabs.js";

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useParams } from "react-router-dom";
-import { appendPage, currentCursor, flatten, makePage, replacePage, staleIndexes, type GalleryPageData } from "./gallery-pages.js";
+import { appendPage, currentCursor, flatten, makePage, mergeFirstPage, replacePage, staleIndexes, type GalleryPageData } from "./gallery-pages.js";
+import type { RefreshOutcome } from "./trip-refresh.js";
 import { readPhoto, readRestore } from "./post-origin.js";
 import type { GalleryPage, GalleryPhoto, TripGalleryApi } from "./trip-gallery-api.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
@@ -31,6 +32,8 @@ const pageKey = (cursor: string | null) => cursor ?? "";
 
 export type GalleryPages = {
   photos: GalleryPhoto[]; phase: Phase; error: TripFailure | undefined; hasMore: boolean; refreshFailed: boolean; refreshError: TripFailure | undefined; failed: ReadonlySet<string>;
+  /** Silent refresh of the first page (T121); the Trip refresh provider calls it. */
+  refreshFirstPage: () => Promise<RefreshOutcome>;
   loadMore: () => void; retry: () => void; restart: () => void; retryRefresh: () => void; imageError: (photoId: string) => void; retryImage: (photoId: string) => void;
 };
 
@@ -122,6 +125,44 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
     else commit((current) => ({ ...current, pages: [], phase: "initial-error", error: result.error }));
   }), [enqueue, request, commit]);
 
+  /**
+   * Silent refresh of the first page (T121), through the same serialized queue. New photos go first; what is loaded (later pages, urls, snapshots) stays.
+   * It shares the `pending` mark of the first page with the expired-url refresh, so the two never run at once. A failure leaves the gallery as it is.
+   */
+  const refreshFirstPage = useCallback((): Promise<RefreshOutcome> => new Promise((resolve) => {
+    const gen = generation.current;
+    const id = pageKey(null);
+    const { phase, pages } = stateRef.current;
+    if (!mounted.current || pages.length === 0 || (phase !== "idle" && phase !== "more-loading" && phase !== "more-error") || pending.current.has(id)) { resolve({ status: "ok" }); return; }
+    pending.current.add(id);
+    enqueue(async () => {
+      let outcome: RefreshOutcome = { status: "error" };
+      try {
+        if (outdated(gen)) return;
+        const result = await request(null);
+        if (outdated(gen)) return;
+        if (!result.ok) {
+          const { kind } = result.error;
+          outcome = { status: kind === "not-found" || kind === "forbidden" ? "gone" : kind === "unauthorized" ? "unauthorized" : "error" };
+          return;
+        }
+        commit((current) => {
+          const next = mergeFirstPage(current.pages, makePage(null, result.value));
+          if (next === current.pages) return current;
+          // The pages restarted from the answer: a «Cargar más» or an error tied to the old cursor no longer applies.
+          const restarted = currentCursor(next) !== currentCursor(current.pages);
+          if (!restarted) return { ...current, pages: next };
+          // A url renewal that failed for a page that no longer exists must not keep (or bring back) the warning.
+          const kept = new Set(next.map((item) => pageKey(item.cursor)));
+          for (const failedId of [...failedPages.current]) if (!kept.has(failedId)) failedPages.current.delete(failedId);
+          const refreshFailed = failedPages.current.size > 0;
+          return { ...current, pages: next, phase: "idle", error: undefined, refreshFailed, refreshError: refreshFailed ? current.refreshError : undefined };
+        });
+        outcome = { status: "ok" };
+      } finally { pending.current.delete(id); resolve(outcome); }
+    });
+  }), [enqueue, request, commit]);
+
   const loadMore = useCallback(() => {
     const cursor = currentCursor(stateRef.current.pages);
     if (cursor === null || loadingCursor.current === cursor) return;
@@ -132,7 +173,12 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
       const result = await (outdated(gen) ? Promise.resolve(undefined) : request(cursor));
       if (loadingCursor.current === cursor) loadingCursor.current = null;
       // A late answer for a cursor that is no longer the current one (or from before a restart) is dropped.
-      if (!result || outdated(gen) || currentCursor(stateRef.current.pages) !== cursor) return;
+      if (!result || outdated(gen)) return;
+      if (currentCursor(stateRef.current.pages) !== cursor) {
+        // The pages restarted meanwhile (silent refresh): nobody else resets the spinner of the dropped request.
+        if (stateRef.current.phase === "more-loading" && loadingCursor.current === null) commit((current) => ({ ...current, phase: "idle" }));
+        return;
+      }
       if (result.ok) commit((current) => ({ ...current, pages: appendPage(current.pages, makePage(cursor, result.value)), phase: "idle" }));
       else commit((current) => ({ ...current, phase: "more-error", error: result.error }));
     });
@@ -214,5 +260,5 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
 
   const photos = useMemo(() => flatten(state.pages), [state.pages]);
   return { photos, phase: state.phase, error: state.error, hasMore: currentCursor(state.pages) !== null, refreshFailed: state.refreshFailed, refreshError: state.refreshError, failed: state.failed,
-    loadMore, retry, restart, retryRefresh, imageError, retryImage };
+    refreshFirstPage, loadMore, retry, restart, retryRefresh, imageError, retryImage };
 }

@@ -12,6 +12,7 @@ import { createNativeSessionStorage, type NativeSessionStorage } from './auth/na
 import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
+import { capacitorAppLifecycle, type AppLifecycle } from './native/app-lifecycle.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { ExternalLinkContext } from './trips/external-link-context.js'
 import { createPhotoFileReader } from './native/photo-file.js'
@@ -93,6 +94,8 @@ type AppProps = {
   externalLink?: ExternalLinkPort
   /** Native calendar sync; by default it exists only on a native platform (inert on the web) and nothing runs until the person enables it. */
   calendarSync?: CalendarSyncService
+  /** Resume signal of the app for the Trip refresh (T121); by default the Capacitor `appStateChange` on a native platform, nothing on the web (it uses `visibilitychange`/`focus`). */
+  lifecycle?: AppLifecycle
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -115,7 +118,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync, lifecycle }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -263,6 +266,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activePosts])
   const linkPort = useMemo(() => externalLink ?? createCapacitorCapabilities().externalLink, [externalLink])
+  const appLifecycle = Capacitor.isNativePlatform() ? capacitorAppLifecycle : undefined
   // Without a reservation api there is no photo section. Device defaults are built on first need and request nothing at startup.
   const photoDeps = useMemo<PostPhotoDeps | undefined>(() => {
     const reserve = activePhotos?.reserve
@@ -482,7 +486,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripContentLayout gallery={galleryProvider} trips={tripManagement} />
+            <TripContentLayout gallery={galleryProvider} trips={tripManagement} lifecycle={lifecycle ?? appLifecycle} />
           </TripRoute>
         }>
         <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={tripManagement} members={tripMembers} apiBaseUrl={apiBaseUrl} />} />

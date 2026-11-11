@@ -26,6 +26,8 @@ import { ExportIcsButton } from "../calendar/ExportIcsButton.js";
 import { CalendarSync } from "../calendar/CalendarSync.js";
 import type { CalendarSyncService } from "../calendar/calendar-sync-service.js";
 import { useInTripShell, useTripName } from "./trip-state.js";
+import { useRefreshGuard, useTripRefreshLoader, type RefreshLoader } from "./trip-refresh.js";
+import { sameValue } from "./same-value.js";
 import { Heading } from "./Heading.js";
 import { DestinationPicker } from "./DestinationPicker.js";
 import { destinationChoices, destinationForDate } from "./trip-itinerary-destinations.js";
@@ -136,9 +138,40 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   }, [confirmingId]);
   // The control that opened the dialog is gone after a removal: move focus to the announcement without scrolling.
   useEffect(() => { if (notice) noticeRef.current?.focus({ preventScroll: true }); }, [notice]);
+  // Silent refresh (T121): same data path as the load but without `refreshing`/`refreshError` and without touching dialogs. Anything that applies data
+  // (a load, a local save/removal) bumps `epoch`, so an answer that started before it is dropped instead of undoing it.
+  const epoch = useRef(0);
+  const mounted = useRef(true);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const participationRef = useRef(participation);
+  participationRef.current = participation;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const refreshSilently: RefreshLoader = async ({ signal }) => {
+    // The first load (or its error screen with the retry button) belongs to the screen; a refresh never replaces it.
+    if (!tripId || stateRef.current.kind !== "ready") return { status: "ok" };
+    const started = epoch.current;
+    const stale = () => signal.aborted || !mounted.current || epoch.current !== started;
+    let result: Awaited<ReturnType<typeof itinerary.get>>;
+    try { result = await itinerary.get(tripId); } catch { return { status: "error" }; }
+    if (stale()) return { status: "error" };
+    if (!result.ok) {
+      const { kind } = result.error;
+      return { status: kind === "not-found" || kind === "forbidden" ? "gone" : kind === "unauthorized" ? "unauthorized" : "error" };
+    }
+    const value = result.value;
+    setState((current) => current.kind === "ready" && sameValue(current.value, value) ? current : { kind: "ready", value });
+    // The answers and «Modificado» marks come from another endpoint: they are refreshed in the same cycle.
+    const outcome = await participationRef.current.reload(value.activities.map((activity) => activity.id));
+    return { status: outcome };
+  };
+  useTripRefreshLoader("itinerary", refreshSilently);
+  const savingParticipation = Object.values(participation.states).some((entry) => entry.kind === "ready" && !!entry.saving);
+  useRefreshGuard(confirmingId !== undefined || savingParticipation);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      epoch.current += 1;
       if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
       setRefreshing(attempt > 0); setRefreshError(false);
@@ -164,6 +197,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
     return () => { cancelled = true; };
   }, [tripId, itinerary, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
   const onSaved = (activity: ActivityResponse, created: ParticipationResponse | null = null) => {
+    epoch.current += 1;
     if (created) participation.apply(activity.id, created);
     // Reflect only a successful server write; retain posts and expenses until the aggregate refreshes.
     setState((current) => {
@@ -184,6 +218,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   const removedIds = useRef(new Set<string>());
   const onRemoved = (activityId: string, outcome: "removed" | "gone") => {
     removedIds.current.add(activityId);
+    epoch.current += 1;
     participation.remove(activityId);
     const control = trigger.current;
     if (control && (control.closest(".activity-dialog") || control.closest(`[data-itinerary-item="${activityId}"]`))) trigger.current = null;

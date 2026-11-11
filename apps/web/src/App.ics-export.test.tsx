@@ -44,7 +44,7 @@ describe("App .ics export", () => {
     const text = await blobText(blobs[0]);
     expect(text).toContain("X-WR-CALNAME:Córdoba 2026\r\n");
     expect(text).toContain("SUMMARY:Visita al museo");
-    expect(container.querySelector('[role="status"]')?.textContent).toMatch(/^Se generó la exportación el .*Si no aparece el archivo, probá de nuevo\.$/);
+    expect(container.querySelector('[role="status"]:not(.pull-to-refresh__status)')?.textContent).toMatch(/^Se generó la exportación el .*Si no aparece el archivo, probá de nuevo\.$/);
   });
   it("leaves no global URL patch behind (checked after the previous test's cleanup)", () => {
     for (const [key, descriptor] of originalUrl) expect(Object.getOwnPropertyDescriptor(URL, key)?.value).toBe(descriptor?.value);

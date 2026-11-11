@@ -10,6 +10,8 @@ import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
 import { useInTripShell } from "./trip-state.js";
+import { useTripRefreshLoader } from "./trip-refresh.js";
+import { sameValue } from "./same-value.js";
 import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
@@ -73,9 +75,31 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Silent refresh (T121): no `refreshing`/`refreshError`; a load that starts meanwhile bumps `epoch` and the older answer is dropped. The detail of a memory
+  // (comments, likes) is not refreshed here: it would step over a comment draft.
+  const epoch = useRef(0);
+  const mounted = useRef(true);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useTripRefreshLoader("memories", async ({ signal }) => {
+    if (!tripId || stateRef.current.kind !== "ready") return { status: "ok" };
+    const started = epoch.current;
+    let result: Awaited<ReturnType<typeof posts.list>>;
+    try { result = await posts.list(tripId); } catch { return { status: "error" }; }
+    if (signal.aborted || !mounted.current || epoch.current !== started) return { status: "error" };
+    if (!result.ok) {
+      const { kind } = result.error;
+      return { status: kind === "not-found" || kind === "forbidden" ? "gone" : kind === "unauthorized" ? "unauthorized" : "error" };
+    }
+    const next = merge(result.value, localPost.current);
+    setState((current) => current.kind === "ready" && sameValue(current.posts, next) ? current : { kind: "ready", posts: next });
+    return { status: "ok" };
+  });
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
+      epoch.current += 1;
       if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
       setRefreshing(true); setRefreshError(false);

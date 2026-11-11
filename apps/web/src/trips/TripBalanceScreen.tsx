@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
+import { Button, Feedback, List, ListItem, LoadingState, PullToRefresh } from "../components/index.js";
 import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText, memberStatus, reasonText, settlementText, isCurrentUser, type ExcludedAction } from "./balance-view.js";
 import type { ExpenseCurrency } from "./expense-draft.js";
 import { formatCents } from "./expense-format.js";
@@ -54,7 +54,11 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
     try {
       const result = await balance.get(tripId);
       if (mine !== generation.current) return;
-      if (!result.ok) { fail(result.error); return; }
+      if (!result.ok) {
+        // An automatic refresh (the screen already had data) that finds the Trip gone or the access revoked leaves for Mis viajes, with no data left on screen (T121).
+        if (silent && ["not-found", "forbidden"].includes(result.error.kind)) { navigate("/trips", { replace: true, state: { tripGone: true } }); return; }
+        fail(result.error); return;
+      }
       const value = result.value;
       // Register mode shows no debts, so it needs neither names nor memories.
       const [people, titles] = value.expenseMode === "register" ? [unknownPeople, undefined] : await Promise.all([
@@ -81,6 +85,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
   return <main className="app-shell trips-shell itinerary-shell">
+    <PullToRefresh onRefresh={() => load()}>
     <div className="trips-panel">
       <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
       <header className="itinerary-header">
@@ -108,6 +113,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
           : <BalanceSections tripId={tripId ?? ""} ready={state} create={create} location={location} navigate={navigate} />}
       </> : null}
     </div>
+    </PullToRefresh>
   </main>;
 }
 

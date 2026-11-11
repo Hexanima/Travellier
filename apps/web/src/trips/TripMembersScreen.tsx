@@ -7,6 +7,8 @@ import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 import { useInTripShell } from "./trip-state.js";
+import { useRefreshGuard, useTripRefreshLoader } from "./trip-refresh.js";
+import { sameValue } from "./same-value.js";
 import { Heading } from "./Heading.js";
 
 export type TripSharing = {
@@ -58,12 +60,14 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const [deleteError, setDeleteError] = useState<string>();
   const deletingRef = useRef(false);
 
+  const epoch = useRef(0);
   const load = useCallback(async () => {
     if (!tripId) {
       setLoadError("not-found");
       setLoading(false);
       return;
     }
+    epoch.current += 1;
     setLoading(true);
     setLoadError(undefined);
     setTrip(undefined);
@@ -93,6 +97,35 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   }, [tripId, trips, members]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Silent refresh (T121): never empties the Trip or the list. A load or a write (expel, delete) bumps `epoch`, so an older answer is dropped.
+  const mounted = useRef(true);
+  const tripRef = useRef(trip);
+  tripRef.current = trip;
+  const memberListRef = useRef(memberList);
+  memberListRef.current = memberList;
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useTripRefreshLoader("members", async ({ signal }) => {
+    if (!tripId || !tripRef.current || !memberListRef.current || expellingRef.current || deletingRef.current) return { status: "ok" };
+    const started = epoch.current;
+    const stale = () => signal.aborted || !mounted.current || epoch.current !== started || expellingRef.current || deletingRef.current;
+    const failure = (kind: string) => ({ status: kind === "not-found" || kind === "forbidden" ? "gone" : kind === "unauthorized" ? "unauthorized" : "error" }) as const;
+    try {
+      const detail = await trips.get(tripId);
+      if (stale()) return { status: "error" };
+      if (!detail.ok) return failure(detail.error.kind);
+      if (detail.value.kind !== "member") return { status: "gone" };
+      const listing = await members.list(tripId);
+      if (stale()) return { status: "error" };
+      if (!listing.ok) return failure(listing.error.kind);
+      if (!listing.value.members.some((member) => member.userId === listing.value.currentUserId)) return { status: "gone" };
+      const nextTrip = detail.value, nextList = listing.value;
+      setTrip((current) => sameValue(current, nextTrip) ? current : nextTrip);
+      setMemberList((current) => sameValue(current, nextList) ? current : nextList);
+      return { status: "ok" };
+    } catch { return { status: "error" }; }
+  });
+  useRefreshGuard(target !== undefined || deleteOpen || expelling || deleting);
 
   const actor = memberList?.members.find((member) => member.userId === memberList.currentUserId);
   const canExpel = actor?.role === "admin";
@@ -126,6 +159,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const confirmExpel = async () => {
     if (!tripId || !target || !canExpel || target.role !== "participant" || expellingRef.current || deletingRef.current) return;
     expellingRef.current = true;
+    epoch.current += 1;
     setExpelling(true);
     setExpelError(undefined);
     try {
@@ -151,6 +185,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
       setExpelError("No pudimos expulsar a esta persona. Intentá nuevamente.");
     } finally {
       expellingRef.current = false;
+      epoch.current += 1;
       setExpelling(false);
     }
   };
@@ -158,6 +193,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const confirmDelete = async () => {
     if (!tripId || !deleteOpen || !canExpel || deletingRef.current || expellingRef.current) return;
     deletingRef.current = true;
+    epoch.current += 1;
     setDeleting(true);
     setDeleteError(undefined);
     try {
@@ -186,6 +222,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
       setDeleteError("No pudimos eliminar el viaje. Intentá nuevamente.");
     } finally {
       deletingRef.current = false;
+      epoch.current += 1;
       setDeleting(false);
     }
   };

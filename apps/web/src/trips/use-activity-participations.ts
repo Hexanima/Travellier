@@ -24,8 +24,12 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   const generation = useRef(0);
   // Activities deleted in this Trip: a late read or write must not bring their state (or a conflict modal) back.
   const removed = useRef(new Set<string>());
+  // Writes per activity: every publication (load, save, apply) bumps it, so a silent read that started before one is known to be older. A removal does not: it is dropped through `removed`.
+  const writes = useRef<Record<string, number>>({});
+  const bump = (id: string) => { writes.current[id] = (writes.current[id] ?? 0) + 1; };
   const publish = useCallback((id: string, state: ParticipationState) => {
     if (removed.current.has(id)) return;
+    bump(id);
     current.current = { ...current.current, [id]: state };
     setStates(current.current);
   }, []);
@@ -51,6 +55,37 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   useEffect(() => {
     for (const activityId of activityIds) if (!current.current[activityId] && !removed.current.has(activityId)) void load(activityId);
   }, [activityIds, load]);
+
+  /**
+   * Silent refresh (T121): asks again for the answer and mark of these activities without going through `loading` and without touching one that is saving or
+   * waiting for a confirmation (the person is deciding). A failure keeps what is shown; a removed activity never comes back. Resolves `error` if any read failed.
+   */
+  const reload = useCallback(async (activityIds: readonly string[]): Promise<"ok" | "error"> => {
+    if (!api || !tripId) return "ok";
+    const revision = generation.current;
+    let failed = false;
+    await Promise.all(activityIds.map(async (activityId) => {
+      const before = current.current[activityId];
+      // An activity with no state yet is asked for by the load effect (a second read here would duplicate it).
+      if (!before || removed.current.has(activityId) || before.kind === "loading" || (before?.kind === "ready" && (before.saving || before.confirming))) return;
+      const started = writes.current[activityId] ?? 0;
+      try {
+        const result = await api.get(tripId, activityId);
+        if (generation.current !== revision || removed.current.has(activityId)) return;
+        if (!result.ok) { failed = true; return; }
+        // Something local (a save, an applied answer) happened while the read was in flight: the read is older than what is shown.
+        if ((writes.current[activityId] ?? 0) !== started) return;
+        const now = current.current[activityId];
+        if (now?.kind === "loading" || (now?.kind === "ready" && (now.saving || now.confirming))) return;
+        const fresh = fromResponse(result.value);
+        // Same answer and mark as the server: keep the local feedback (error and retry of a failed save, «guardado»).
+        const same = now?.kind === "ready" && now.status === fresh.status && now.decisionRequired?.changedAt === fresh.decisionRequired?.changedAt &&
+          now.decisionRequired?.reason === fresh.decisionRequired?.reason;
+        if (!same) publish(activityId, fresh);
+      } catch { failed = true; }
+    }));
+    return failed ? "error" : "ok";
+  }, [api, tripId, publish]);
 
   /** Sends one write and publishes its outcome; a failure never touches the answer or the mark. */
   const write = useCallback(async (activityId: string, previous: Ready, target: PersonalParticipationStatus, confirmation?: ParticipationConfirmation) => {
@@ -105,5 +140,5 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     setStates(rest);
   }, []);
 
-  return { states, change, confirmChange, cancelConfirmation, apply, retry, remove };
+  return { states, change, confirmChange, cancelConfirmation, apply, retry, remove, reload };
 }
