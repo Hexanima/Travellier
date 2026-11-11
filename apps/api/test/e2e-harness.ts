@@ -59,11 +59,38 @@ export interface E2EHarness {
   close: () => Promise<void>;
 }
 
+/** Runs every step even when one fails, and rethrows the first error afterwards (so no mongod/socket outlives a failed step). */
+const runAll = async (steps: Array<() => Promise<unknown>>): Promise<void> => {
+  let failure: { error: unknown } | undefined;
+  for (const step of steps) {
+    try { await step(); } catch (error) { failure ??= { error }; }
+  }
+  if (failure !== undefined) throw failure.error;
+};
+
 export const startE2EHarness = async (name: string): Promise<E2EHarness> => {
   const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  let client: MongoClient | undefined;
+  let server: Server | undefined;
+  try {
+    return await composeHarness(name, replSet, (created) => { client = created; }, (created) => { server = created; });
+  } catch (error) {
+    // Partial cleanup: the in-memory mongod must not stay alive when the setup fails after it was created.
+    const openServer = server, openClient = client;
+    await runAll([
+      async () => { if (openServer?.listening === true) await new Promise<void>((resolve, reject) => openServer.close((e) => e === undefined ? resolve() : reject(e))); },
+      async () => { await openClient?.close(); },
+      async () => { await replSet.stop(); },
+    ]).catch(() => undefined);
+    throw error;
+  }
+};
+
+const composeHarness = async (name: string, replSet: MongoMemoryReplSet, onClient: (client: MongoClient) => void, onServer: (server: Server) => void): Promise<E2EHarness> => {
   const databaseName = `${E2E_DATABASE_PREFIX}${name}`;
   assertIsolatedEnvironment({ MONGODB_URI: replSet.getUri(), MONGODB_DATABASE_NAME: databaseName });
   const client = new MongoClient(replSet.getUri());
+  onClient(client);
   await client.connect();
   const db = client.db(databaseName);
   await migrateMongoSchema(db);
@@ -75,7 +102,8 @@ export const startE2EHarness = async (name: string): Promise<E2EHarness> => {
     trips: createTripApi(db, { storage }),
     pushDevices: createPushDeviceApi(db),
   }, createJwtMiddleware({ jwtSecret: E2E_JWT_SECRET }));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onServer(server);
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const tokens = createAuthenticationTokenAdapter({ jwtSecret: E2E_JWT_SECRET, accessTokenLifetimeMs: HUNDRED_YEARS_MS });
 
@@ -107,10 +135,10 @@ export const startE2EHarness = async (name: string): Promise<E2EHarness> => {
       return Object.fromEntries(await Promise.all(collections.map(async (collection) =>
         [collection, await db.collection(collection).find().sort({ _id: 1 }).toArray()] as const)));
     },
-    close: async () => {
-      await new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error)));
-      await client.close();
-      await replSet.stop();
-    },
+    close: () => runAll([
+      () => new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))),
+      () => client.close(),
+      () => replSet.stop(),
+    ]),
   };
 };
