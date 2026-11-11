@@ -245,13 +245,24 @@ const jsonResponse = (statusCode: number, payload: unknown): ApiResponse => ({
   body: JSON.stringify(payload),
 });
 
-const invalidRequestResponse = (): ApiResponse =>
+export const invalidRequestResponse = (): ApiResponse =>
   jsonResponse(400, {
     error: {
       code: "InvalidRequest",
       message: "The request body must be valid JSON.",
     },
   });
+
+/** Error code of a JSON error response, for logs; HTML pages have none. */
+export const apiErrorCode = (response: ApiResponse): string | undefined => {
+  if (response.statusCode < 400) return undefined;
+  try {
+    const payload = JSON.parse(response.body) as { error?: string | { code?: string } };
+    return typeof payload.error === "string" ? payload.error : payload.error?.code;
+  } catch {
+    return undefined;
+  }
+};
 
 const errorResponse = (error: { tag: string }): ApiResponse => {
   if (error instanceof ValidationError) {
@@ -1436,14 +1447,7 @@ export const createRequestHandler = (
         apiResponse = { ...payloadTooLargeResponse(), headers: { ...payloadTooLargeResponse().headers, connection: "close" } };
       }
       apiResponse = { ...apiResponse, headers: { ...apiResponse.headers, "x-request-id": metadata.requestId } };
-      if (apiResponse.statusCode >= 400) {
-        try {
-          const payload = JSON.parse(apiResponse.body) as { error?: string | { code?: string } };
-          errorCode = typeof payload.error === "string" ? payload.error : payload.error?.code;
-        } catch {
-          // HTML error pages have no JSON error code; their HTTP status is still logged.
-        }
-      }
+      errorCode = apiErrorCode(apiResponse);
       response.writeHead(apiResponse.statusCode, apiResponse.headers);
       response.end(apiResponse.body);
     } catch (error: unknown) {
