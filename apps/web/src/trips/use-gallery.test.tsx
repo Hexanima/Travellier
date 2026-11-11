@@ -278,6 +278,63 @@ describe("useGalleryPages", () => {
     expect(state.max).toBe(1);
     expect(urls()).toEqual(["b5", "a4"]);
   });
+  describe("silent refresh concurrent with «Cargar más» (T121)", () => {
+    const answers = (hold: "refresh" | "more", gate: { promise: Promise<unknown> }, fresh: { photos: GalleryPhoto[]; next: string }) => tracked(async (cursor, call) => {
+      if (call === 1) return page([photo(3), photo(2), photo(1)], "c1");
+      if (cursor === "c1") { if (hold === "more") await gate.promise; return page([photo(0)], "c2"); }
+      if (cursor === "f1" || cursor === "c2") return page([photo(cursor === "f1" ? 6 : 20)], null);
+      if (hold === "refresh") await gate.promise;
+      return page(fresh.photos, fresh.next);
+    });
+    it("a refresh that restarts the pages while «Cargar más» waits leaves the gallery idle, enabled, and the next «Cargar más» continues from the fresh cursor", async () => {
+      const gate = deferred<unknown>();
+      const { list } = answers("refresh", gate, { photos: [photo(9), photo(8), photo(7)], next: "f1" });
+      await mount(list);
+      let outcome: unknown;
+      await act(async () => { void api.refreshFirstPage().then((value) => { outcome = value; }); });
+      await act(async () => api.loadMore());
+      expect(api.phase).toBe("more-loading");
+      await act(async () => gate.resolve(undefined));
+      await flush(); await flush(); await flush();
+      expect(outcome).toEqual({ status: "ok" });
+      expect(api.phase).toBe("idle");
+      expect(api.error).toBeUndefined();
+      expect(ids()).toEqual([itineraryId(9), itineraryId(8), itineraryId(7)]);
+      expect(api.hasMore).toBe(true);
+      await act(async () => api.loadMore());
+      await flush();
+      expect(list).toHaveBeenLastCalledWith(tripId, { cursor: "f1" });
+      expect(api.phase).toBe("idle");
+      expect(ids()).toEqual([itineraryId(9), itineraryId(8), itineraryId(7), itineraryId(6)]);
+    });
+    it("the reverse order (the «Cargar más» request first, then the refresh) ends idle with the fresh pages and keeps going from their cursor", async () => {
+      const gate = deferred<unknown>();
+      const { list } = answers("more", gate, { photos: [photo(9), photo(8), photo(7)], next: "f1" });
+      await mount(list);
+      await act(async () => api.loadMore());
+      await act(async () => { void api.refreshFirstPage(); });
+      await act(async () => gate.resolve(undefined));
+      await flush(); await flush(); await flush();
+      expect(api.phase).toBe("idle");
+      expect(ids()).toEqual([itineraryId(9), itineraryId(8), itineraryId(7)]);
+      await act(async () => api.loadMore());
+      await flush();
+      expect(list).toHaveBeenLastCalledWith(tripId, { cursor: "f1" });
+      expect(ids()).toEqual([itineraryId(9), itineraryId(8), itineraryId(7), itineraryId(6)]);
+    });
+    it("a refresh that overlaps the first page, concurrent with «Cargar más», keeps working: new photos first, page 2 appended, idle", async () => {
+      const gate = deferred<unknown>();
+      const { list } = answers("refresh", gate, { photos: [photo(4), photo(3), photo(2)], next: "f1" });
+      await mount(list);
+      await act(async () => { void api.refreshFirstPage(); });
+      await act(async () => api.loadMore());
+      await act(async () => gate.resolve(undefined));
+      await flush(); await flush(); await flush();
+      expect(api.phase).toBe("idle");
+      expect(ids()).toEqual([4, 3, 2, 1, 0].map(itineraryId));
+      expect(api.hasMore).toBe(true);
+    });
+  });
   it("refreshes expired pages when the window gets the focus again", async () => {
     let clock = NOW;
     const list = vi.fn().mockImplementation(async () => page([photo(5, `u${list.mock.calls.length}`, clock + 300_000)], null));

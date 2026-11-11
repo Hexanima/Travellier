@@ -56,6 +56,25 @@ describe("photos: silent refresh of the first page", () => {
     expect(document.body.textContent).not.toContain("Cargando fotos");
   });
 
+  it("a refresh that restarts the gallery while «Cargar más» waits leaves the button enabled and continues from the fresh cursor", async () => {
+    const gate = deferred<unknown>();
+    const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2), photo(1)], "c1")).mockReturnValueOnce(gate.promise)
+      .mockResolvedValueOnce(page([photo(0)], "c2")).mockResolvedValueOnce(page([photo(6)], null));
+    await mount(list);
+    await refresh();
+    await loadMore();
+    await act(async () => gate.resolve(page([photo(9), photo(8), photo(7)], "f1")));
+    await act(async () => { await Promise.resolve(); });
+    expect(thumbs()).toEqual(ids(9, 8, 7));
+    const more = () => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Cargar más");
+    expect(document.body.textContent).not.toContain("Cargando más fotos");
+    expect(more()).toBeDefined();
+    expect(more()!.disabled).toBe(false);
+    await loadMore();
+    expect(list).toHaveBeenLastCalledWith(tripId, { cursor: "f1" });
+    expect(thumbs()).toEqual(ids(9, 8, 7, 6));
+  });
+
   it("an identical page changes nothing: same nodes and the same signed urls (no image reload)", async () => {
     const list = vi.fn().mockResolvedValueOnce(page([photo(3), photo(2)], null)).mockResolvedValueOnce(page([photo(3, "b"), photo(2, "b")], null));
     await mount(list);

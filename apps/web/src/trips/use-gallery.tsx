@@ -148,7 +148,10 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
         }
         commit((current) => {
           const next = mergeFirstPage(current.pages, makePage(null, result.value));
-          return next === current.pages ? current : { ...current, pages: next };
+          if (next === current.pages) return current;
+          // The pages restarted from the answer: a «Cargar más» or an error tied to the old cursor no longer applies.
+          const restarted = currentCursor(next) !== currentCursor(current.pages);
+          return restarted ? { ...current, pages: next, phase: "idle", error: undefined } : { ...current, pages: next };
         });
         outcome = { status: "ok" };
       } finally { pending.current.delete(id); resolve(outcome); }
@@ -165,7 +168,12 @@ export function useGalleryPages(filter: GalleryFilter = {}, { reuse = true }: { 
       const result = await (outdated(gen) ? Promise.resolve(undefined) : request(cursor));
       if (loadingCursor.current === cursor) loadingCursor.current = null;
       // A late answer for a cursor that is no longer the current one (or from before a restart) is dropped.
-      if (!result || outdated(gen) || currentCursor(stateRef.current.pages) !== cursor) return;
+      if (!result || outdated(gen)) return;
+      if (currentCursor(stateRef.current.pages) !== cursor) {
+        // The pages restarted meanwhile (silent refresh): nobody else resets the spinner of the dropped request.
+        if (stateRef.current.phase === "more-loading" && loadingCursor.current === null) commit((current) => ({ ...current, phase: "idle" }));
+        return;
+      }
       if (result.ok) commit((current) => ({ ...current, pages: appendPage(current.pages, makePage(cursor, result.value)), phase: "idle" }));
       else commit((current) => ({ ...current, phase: "more-error", error: result.error }));
     });
