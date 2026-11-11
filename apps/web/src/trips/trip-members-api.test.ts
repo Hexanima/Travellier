@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { createHttpClient } from "../api/index.js";
 import { createTripMembersApi } from "./trip-members-api.js";
 
 const tripId = "507f191e810c19729de860ea";
@@ -86,5 +87,21 @@ describe("createTripMembersApi", () => {
     const client = (code: string) => ({ get: vi.fn(), delete: failure(code), put: failure(code), post: failure(code) });
     expect(await call(client("TripOwnerProtectedError"))).toEqual({ ok: false, error: { kind: "conflict", code: "TripOwnerProtectedError" } });
     expect(await call(client("HttpError"))).toEqual({ ok: false, error: { kind: "conflict" } });
+  });
+
+  it("surfaces same_owner from the real 422 ValidationError body of transfer-ownership", async () => {
+    const body = { error: { code: "ValidationError", message: "Validation failed", fields: [{ field: "userId", code: "same_owner", message: "La persona ya es titular." }] } };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 422, headers: { "content-type": "application/json" } }));
+    const client = createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "t", onUnauthorized: () => undefined });
+    const api = createTripMembersApi(client);
+    expect(await api.transferOwnership(tripId, userId)).toEqual({ ok: false, error: { kind: "validation", code: "same_owner" } });
+  });
+
+  it("keeps a 422 without same_owner as a plain validation failure", async () => {
+    const body = { error: { code: "ValidationError", message: "x", fields: [{ field: "userId", code: "invalid", message: "x" }] } };
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 422 }));
+    const client = createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "t", onUnauthorized: () => undefined });
+    const api = createTripMembersApi(client);
+    expect(await api.transferOwnership(tripId, userId)).toEqual({ ok: false, error: { kind: "validation", code: "ValidationError" } });
   });
 });

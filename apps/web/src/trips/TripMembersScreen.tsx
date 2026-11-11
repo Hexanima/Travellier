@@ -30,7 +30,7 @@ type Outcome = { ok: true } | { ok: false; error: { kind: string; code?: string 
 
 const permissionChanged = "Tu permiso cambió. Actualizamos los integrantes.";
 const ownerProtected = "El titular debe transferir o eliminar el viaje.";
-const sameOwner = "Esa persona ya era titular. Actualizamos los integrantes.";
+const sameOwner = "Esa persona ya es titular. Actualizamos los integrantes.";
 
 const defaultCopyText = async (text: string) => {
   if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");

@@ -40,13 +40,14 @@ const isMemberList = (value: unknown): value is TripMemberList =>
   Array.isArray(value.members) && value.members.every(isMember);
 
 type Failure = { ok: false; error: { kind: ApiErrorKind; code?: string } };
-type Outcome = { ok: true; value: unknown } | { ok: false; error: { kind: ApiErrorKind; code?: string } };
+type Outcome = { ok: true; value: unknown } | { ok: false; error: { kind: ApiErrorKind; code?: string; fields?: readonly { code: string }[] } };
 
 const done = (result: Outcome): TripMembersResult<void> => {
   if (result.ok) return { ok: true, value: undefined };
-  const { kind, code } = result.error;
+  const { kind, code, fields } = result.error;
   const failure: Failure = { ok: false, error: { kind } };
-  if (code && code !== "HttpError") failure.error.code = code;
+  if (kind === "validation" && fields?.some((field) => field.code === "same_owner")) failure.error.code = "same_owner";
+  else if (code && code !== "HttpError") failure.error.code = code;
   return failure;
 };
 
