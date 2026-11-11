@@ -13,6 +13,7 @@ const eventVersion = "0005-notification-outbox-indexes";
 const expensePaymentsVersion = "0006-adapt-legacy-expense-paid-by";
 const pushDeviceVersion = "0007-push-device-indexes";
 const inboxVersion = "0008-notification-inbox-indexes";
+const rateLimitVersion = "0009-rate-limit-ttl-index";
 let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
@@ -77,6 +78,18 @@ describe("incremental pending contracts", () => {
     await migrateMongoSchema(database);
     expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
     expect(await database.collection("outboxEvents").find({}, { projection: { _id: 0 } }).toArray()).toEqual([event]);
+  });
+
+  it("versions the TTL index of rateLimits and keeps it idempotent without touching counters (T102)", async () => {
+    await migrateMongoSchema(database);
+    const indexes = await database.collection("rateLimits").listIndexes().toArray();
+    expect(indexes).toContainEqual(expect.objectContaining({ name: "expiresAt_ttl", key: { expiresAt: 1 }, expireAfterSeconds: 0 }));
+    expect(await database.collection("_migrations").countDocuments({ id: rateLimitVersion })).toBe(1);
+    const counter = { _id: "auth.login.ip:k:0", bucket: "auth.login.ip", keyHash: "k", count: 2, expiresAt: new Date("2999-01-01T00:00:00.000Z") };
+    await database.collection<{ _id: string }>("rateLimits").insertOne({ ...counter });
+    await migrateMongoSchema(database);
+    expect(await database.collection("_migrations").countDocuments({ id: rateLimitVersion })).toBe(1);
+    expect(await database.collection("rateLimits").find().toArray()).toEqual([counter]);
   });
 
   it("applies 0007 twice without touching existing push devices", async () => {
