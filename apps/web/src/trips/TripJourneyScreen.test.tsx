@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { TripJourneyScreen } from "./TripJourneyScreen.js";
 import type { JourneyTransport, TransportDirection, TransportInput, TripJourneyApi } from "./trip-journey-api.js";
+import { itineraryFixture, withUnindicatedTransportCost } from "./itinerary-test-fixture.js";
+import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripManagementApi, TripResult } from "./trip-management-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -23,7 +25,7 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-async function render(options: { trip?: unknown; destinations?: unknown; loadFailure?: boolean; transports?: JourneyTransport[] } = {}) {
+async function render(options: { trip?: unknown; destinations?: unknown; loadFailure?: boolean; transports?: JourneyTransport[]; itinerary?: TripItineraryApi } = {}) {
   const get = vi.fn().mockResolvedValue({ ok: true, value: options.trip ?? trip });
   const listDestinations = vi.fn().mockResolvedValue(options.loadFailure
     ? { ok: false, error: { kind: "network" } }
@@ -47,7 +49,7 @@ async function render(options: { trip?: unknown; destinations?: unknown; loadFai
   roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${tripId}/journey`]}>
     <Routes><Route path="/trips/:tripId/journey" element={<TripJourneyScreen trips={{ get } as unknown as TripManagementApi}
-      journey={journey} />} /></Routes>
+      journey={journey} itinerary={options.itinerary} />} /></Routes>
   </MemoryRouter>));
   return { container, get, listDestinations, listTransports, createDestination, deleteDestination, createTransport, updateTransport };
 }
@@ -385,5 +387,89 @@ describe("TripJourneyScreen", () => {
     await act(async () => Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Reintentar")?.click());
     expect(container.querySelectorAll("form.journey-transport-form")).toHaveLength(2);
+  });
+
+  describe("transport cost totals", () => {
+    const itineraryApi = (value: TripItineraryResponse = itineraryFixture() as TripItineraryResponse) =>
+      ({ get: vi.fn().mockResolvedValue({ ok: true, value }) });
+    const flush = () => act(async () => { await Promise.resolve(); });
+
+    it("shows the per-currency total of the trip, apart from expenses and balance", async () => {
+      const itinerary = itineraryApi();
+      const { container } = await render({ itinerary });
+      expect(itinerary.get).toHaveBeenCalledWith(tripId);
+      expect(container.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+      expect(container.textContent).toContain("Total del viaje");
+      expect(container.textContent).toContain("No es un gasto ni entra en el balance");
+      expect(container.querySelectorAll("form.journey-transport-form")).toHaveLength(2);
+    });
+
+    it("lists a previous cost without currency apart", async () => {
+      const { container } = await render({ itinerary: itineraryApi(withUnindicatedTransportCost(itineraryFixture() as TripItineraryResponse)) });
+      expect(container.querySelector("[data-transport-cost-unindicated]")?.textContent).toContain("Moneda sin indicar");
+    });
+
+    it("does not block the screen when the itinerary fails, and offers a retry", async () => {
+      const itinerary = { get: vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } })
+        .mockResolvedValue({ ok: true, value: itineraryFixture() }) };
+      const { container } = await render({ itinerary: itinerary as unknown as TripItineraryApi });
+      expect(container.querySelector("[data-transport-costs]")).toBeNull();
+      expect(container.querySelector("[data-transport-costs-unavailable]")?.textContent).toContain("No pudimos cargar los totales");
+      expect(container.querySelectorAll("form.journey-transport-form")).toHaveLength(2);
+      await act(async () => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar totales")?.click());
+      expect(container.querySelector("[data-transport-costs]")).not.toBeNull();
+      expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
+    });
+
+    it("refreshes only the totals after saving a transport, keeping destinations and entered forms", async () => {
+      const itinerary = itineraryApi();
+      const { container, listDestinations, listTransports, createTransport } = await render({ itinerary });
+      const forms = () => Array.from(container.querySelectorAll<HTMLFormElement>("form.journey-transport-form"));
+      await change(forms()[1]!, "departurePlace", "Sin guardar");
+      const calls = { destinations: listDestinations.mock.calls.length, transports: listTransports.mock.calls.length };
+      const updated = itineraryFixture() as TripItineraryResponse;
+      updated.transportCostTotals = { byCurrency: [{ currency: "EUR", totalCents: 4000, transportCount: 1 }], withoutCurrency: { transportCount: 0 } };
+      itinerary.get.mockResolvedValueOnce({ ok: true, value: updated });
+      await change(forms()[0]!, "departurePlace", "AEP");
+      await change(forms()[0]!, "arrivalPlace", "BRC");
+      await change(forms()[0]!, "departureAt", "2026-10-10T08:00");
+      await change(forms()[0]!, "arrivalAt", "2026-10-10T10:00");
+      await submit(forms()[0]!);
+      await flush();
+      expect(createTransport).toHaveBeenCalledOnce();
+      expect(itinerary.get).toHaveBeenCalledTimes(2);
+      expect(listDestinations.mock.calls.length).toBe(calls.destinations);
+      expect(listTransports.mock.calls.length).toBe(calls.transports);
+      expect(container.querySelector('[data-transport-currency="EUR"]')?.textContent).toContain("EUR 40,00");
+      expect(container.querySelector('[data-transport-currency="ARS"]')).toBeNull();
+      expect((forms()[1]!.querySelector('[name="departurePlace"]') as HTMLInputElement).value).toBe("Sin guardar");
+    });
+
+    it("keeps the previous totals with a stale warning when the refresh after saving fails, and retries", async () => {
+      const itinerary = itineraryApi();
+      const { container, createTransport } = await render({ itinerary });
+      const forms = () => Array.from(container.querySelectorAll<HTMLFormElement>("form.journey-transport-form"));
+      expect(container.querySelector("[data-transport-costs-stale]")).toBeNull();
+      itinerary.get.mockResolvedValueOnce({ ok: false, error: { kind: "network" } });
+      await change(forms()[0]!, "departurePlace", "AEP");
+      await change(forms()[0]!, "arrivalPlace", "BRC");
+      await change(forms()[0]!, "departureAt", "2026-10-10T08:00");
+      await change(forms()[0]!, "arrivalAt", "2026-10-10T10:00");
+      await submit(forms()[0]!);
+      await flush();
+      expect(createTransport).toHaveBeenCalledOnce();
+      expect(container.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+      expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
+      expect(container.querySelector("[data-transport-costs-stale]")?.textContent).toContain("Los totales pueden estar desactualizados");
+      await act(async () => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar totales")?.click());
+      expect(container.querySelector("[data-transport-costs-stale]")).toBeNull();
+      expect(container.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+    });
+
+    it("behaves as before without an itinerary client", async () => {
+      const { container } = await render();
+      expect(container.querySelector("[data-transport-costs]")).toBeNull();
+      expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
+    });
   });
 });

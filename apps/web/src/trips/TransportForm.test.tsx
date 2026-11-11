@@ -15,7 +15,14 @@ const saved: JourneyTransport = {
   id: transportId, tripId, destinationId, direction: "outbound", type: "flight",
   departurePlace: "AEP", departureAt: "2026-10-01T12:00:00.000Z",
   arrivalPlace: "BRC", arrivalAt: "2026-10-01T14:00:00.000Z",
-  costPerPerson: 150, details: { flightNumber: "AR123" },
+  costPerPerson: 150, costCurrency: "ARS", details: { flightNumber: "AR123" },
+};
+const previous: JourneyTransport = { ...saved, costCurrency: null };
+const fillRoute = async (container: HTMLElement) => {
+  await setField(container, "departurePlace", "AEP");
+  await setField(container, "arrivalPlace", "BRC");
+  await setField(container, "departureAt", "2026-10-01T12:00");
+  await setField(container, "arrivalAt", "2026-10-01T14:00");
 };
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => {
@@ -225,11 +232,11 @@ describe("TransportForm", () => {
   it("shows only the fields pertinent to each transport type", async () => {
     const { container } = await render();
     const cases: { type: TransportType; visible: string[]; hidden: string[] }[] = [
-      { type: "flight", visible: ["flightNumber", "costPerPerson"], hidden: ["company", "step-line-0"] },
-      { type: "bus_long", visible: ["company", "costPerPerson"], hidden: ["flightNumber", "step-line-0"] },
-      { type: "bus_local", visible: ["step-line-0"], hidden: ["flightNumber", "company", "costPerPerson"] },
-      { type: "car", visible: [], hidden: ["flightNumber", "company", "costPerPerson", "step-line-0"] },
-      { type: "other", visible: [], hidden: ["flightNumber", "company", "costPerPerson", "step-line-0"] },
+      { type: "flight", visible: ["flightNumber", "costPerPerson", "costCurrency"], hidden: ["company", "step-line-0"] },
+      { type: "bus_long", visible: ["company", "costPerPerson", "costCurrency"], hidden: ["flightNumber", "step-line-0"] },
+      { type: "bus_local", visible: ["step-line-0"], hidden: ["flightNumber", "company", "costPerPerson", "costCurrency"] },
+      { type: "car", visible: [], hidden: ["flightNumber", "company", "costPerPerson", "costCurrency", "step-line-0"] },
+      { type: "other", visible: [], hidden: ["flightNumber", "company", "costPerPerson", "costCurrency", "step-line-0"] },
     ];
     for (const { type, visible, hidden } of cases) {
       await setField(container, "type", type);
@@ -285,6 +292,93 @@ describe("TransportForm", () => {
     await submit(container);
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Revisá");
     expect((container.querySelector('[name="flightNumber"]') as HTMLInputElement).value).toBe("AR123");
+  });
+
+  describe("cost currency", () => {
+    const options = (container: HTMLElement) => Array.from(container.querySelectorAll('[name="costCurrency"] option')).map((option) => option.textContent);
+
+    it("offers the three currencies with no preselection", async () => {
+      const { container } = await render();
+      expect(options(container)).toEqual(["Elegí una moneda", "Pesos argentinos · ARS", "Euros · EUR", "Dólares · USD"]);
+      expect(container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "");
+      expect(container.textContent).toContain("Moneda del costo");
+    });
+
+    it("blocks a cost without currency, shows the error on the field and sends nothing", async () => {
+      const { container, createTransport } = await render();
+      await fillRoute(container);
+      await setField(container, "costPerPerson", "120");
+      await submit(container);
+      expect(createTransport).not.toHaveBeenCalled();
+      const select = container.querySelector('[name="costCurrency"]') as HTMLSelectElement;
+      expect(select.getAttribute("aria-invalid")).toBe("true");
+      expect(container.textContent).toContain("Elegí la moneda del costo.");
+      await setField(container, "costCurrency", "EUR");
+      expect(container.textContent).not.toContain("Elegí la moneda del costo.");
+      await submit(container);
+      expect(createTransport).toHaveBeenCalledWith(tripId, destinationId, expect.objectContaining({ costPerPerson: 120, costCurrency: "EUR" }));
+    });
+
+    it("saves a transport without cost and without currency", async () => {
+      const { container, createTransport } = await render();
+      await fillRoute(container);
+      await submit(container);
+      expect(createTransport).toHaveBeenCalledWith(tripId, destinationId, expect.objectContaining({ costPerPerson: null, costCurrency: null }));
+    });
+
+    it("flags a previous cost without currency, leaves the select empty and blocks until one is chosen", async () => {
+      const { container, updateTransport } = await render(previous);
+      expect(container.textContent).toContain("Moneda sin indicar");
+      const notice = Array.from(container.querySelectorAll('[role="status"]')).find((item) => item.textContent?.includes("Moneda sin indicar"))!;
+      expect(notice).toBeDefined();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(notice.id).not.toBe("");
+      expect(container.querySelector('[name="costCurrency"]')?.getAttribute("aria-describedby")).toContain(notice.id);
+      expect(container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "");
+      await submit(container);
+      expect(updateTransport).not.toHaveBeenCalled();
+      expect(container.querySelector('[name="costCurrency"]')?.getAttribute("aria-invalid")).toBe("true");
+      await setField(container, "costCurrency", "USD");
+      await submit(container);
+      expect(updateTransport).toHaveBeenCalledWith(tripId, destinationId, transportId, expect.objectContaining({ costPerPerson: 150, costCurrency: "USD" }));
+    });
+
+    it("does not flag a record that already has a currency or no cost", async () => {
+      const first = await render(saved);
+      expect(first.container.textContent).not.toContain("Moneda sin indicar");
+      expect(first.container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "ARS");
+      const second = await render({ ...saved, costPerPerson: null, costCurrency: null });
+      expect(second.container.textContent).not.toContain("Moneda sin indicar");
+    });
+
+    it("shows a server currency error next to the select", async () => {
+      const { container, createTransport } = await render();
+      await fillRoute(container);
+      await setField(container, "costPerPerson", "10");
+      await setField(container, "costCurrency", "USD");
+      createTransport.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "costCurrency", message: "Moneda inválida." }] } });
+      await submit(container);
+      expect(container.textContent).toContain("Moneda inválida.");
+      expect(container.querySelector('[name="costCurrency"]')?.getAttribute("aria-invalid")).toBe("true");
+    });
+
+    it("keeps the draft after a network failure and when switching type back and forth", async () => {
+      const { container, createTransport } = await render();
+      await fillRoute(container);
+      await setField(container, "costPerPerson", "75");
+      await setField(container, "costCurrency", "EUR");
+      createTransport.mockRejectedValueOnce(new Error("offline"));
+      await submit(container);
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos guardar");
+      expect(container.querySelector('[name="costPerPerson"]')).toHaveProperty("value", "75");
+      expect(container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "EUR");
+      await setField(container, "type", "car");
+      await setField(container, "type", "bus_long");
+      expect(container.querySelector('[name="costPerPerson"]')).toHaveProperty("value", "75");
+      expect(container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "EUR");
+      await submit(container);
+      expect(createTransport).toHaveBeenLastCalledWith(tripId, destinationId, expect.objectContaining({ type: "bus_long", costPerPerson: 75, costCurrency: "EUR" }));
+    });
   });
 
   it("prevents duplicate submissions while saving", async () => {

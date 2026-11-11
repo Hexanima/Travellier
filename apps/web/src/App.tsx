@@ -484,7 +484,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="/trips/:tripId/journey" element={
           <TripRoute sessionReady={sessionReady} hasSession={hasSession}>
-            <TripJourneyScreen trips={tripManagement} journey={tripJourney} />
+            <TripJourneyScreen trips={tripManagement} journey={tripJourney} itinerary={tripItinerary} />
           </TripRoute>
         } />
         <Route element={

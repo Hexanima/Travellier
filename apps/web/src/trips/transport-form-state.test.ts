@@ -6,7 +6,7 @@ import type { JourneyTransport } from "./trip-journey-api.js";
 const values: TransportFormValues = {
   type: "flight", departurePlace: " AEP ", departureAt: "2026-10-01T09:00",
   arrivalPlace: " BRC ", arrivalAt: "2026-10-01T11:00",
-  costPerPerson: "150", flightNumber: " AR123 ", company: "Ignorar",
+  costPerPerson: "150", costCurrency: "ARS", flightNumber: " AR123 ", company: "Ignorar",
   steps: [{ line: "21", fromStop: "A", toStop: "B", estimatedTime: "09:00" }],
 };
 
@@ -17,6 +17,33 @@ const precise: JourneyTransport = {
 };
 
 describe("prepareTransportInput", () => {
+  it("requires a currency when there is a cost, without sending", () => {
+    for (const type of ["flight", "bus_long"] as const) {
+      expect(prepareTransportInput({ ...values, type, costCurrency: "" }, "outbound")).toEqual({
+        ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
+    }
+  });
+
+  it("sends the chosen currency with the cost, and null for both when there is no cost", () => {
+    expect(prepareTransportInput({ ...values, type: "bus_long", costCurrency: "USD" }, "outbound"))
+      .toMatchObject({ ok: true, value: { costPerPerson: 150, costCurrency: "USD" } });
+    expect(prepareTransportInput({ ...values, costPerPerson: " ", costCurrency: "" }, "outbound"))
+      .toMatchObject({ ok: true, value: { costPerPerson: null, costCurrency: null } });
+  });
+
+  it("sends a currency without cost as null so the server decides", () => {
+    expect(prepareTransportInput({ ...values, costPerPerson: "", costCurrency: "EUR" }, "outbound"))
+      .toMatchObject({ ok: true, value: { costPerPerson: null, costCurrency: null } });
+  });
+
+  it("does not preselect a currency for a previous cost without one, and loads the saved one", () => {
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 80, costCurrency: null })).toMatchObject({ costPerPerson: "80", costCurrency: "" });
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 80 })).toMatchObject({ costCurrency: "" });
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 80, costCurrency: "EUR" })).toMatchObject({ costCurrency: "EUR" });
+    expect(prepareTransportInput(formValuesFromTransport({ ...precise, costPerPerson: 80, costCurrency: null }), "return", undefined, undefined, precise))
+      .toMatchObject({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
+  });
+
   it("preserves the original timestamps when editing another field", () => {
     const loaded = formValuesFromTransport(precise);
     expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, precise.direction, undefined, undefined, precise))
@@ -61,7 +88,7 @@ describe("prepareTransportInput", () => {
     expect(result).toEqual({ ok: true, value: {
       direction: "outbound", type: "flight", departurePlace: "AEP",
       departureAt: new Date("2026-10-01T09:00").toISOString(), arrivalPlace: "BRC",
-      arrivalAt: new Date("2026-10-01T11:00").toISOString(), costPerPerson: 150,
+      arrivalAt: new Date("2026-10-01T11:00").toISOString(), costPerPerson: 150, costCurrency: "ARS",
       details: { flightNumber: "AR123" },
     } });
   });
@@ -72,7 +99,7 @@ describe("prepareTransportInput", () => {
     });
     for (const type of ["car", "other"] as const) {
       expect(prepareTransportInput({ ...values, type }, "outbound")).toMatchObject({
-        ok: true, value: { type, details: {}, costPerPerson: null },
+        ok: true, value: { type, details: {}, costPerPerson: null, costCurrency: null },
       });
     }
   });
@@ -83,7 +110,7 @@ describe("prepareTransportInput", () => {
       { line: "8", fromStop: " Plaza ", toStop: " Hotel ", estimatedTime: "09:25" },
     ];
     expect(prepareTransportInput({ ...values, type: "bus_local", steps }, "outbound")).toMatchObject({
-      ok: true, value: { type: "bus_local", costPerPerson: null, details: { steps: [
+      ok: true, value: { type: "bus_local", costPerPerson: null, costCurrency: null, details: { steps: [
         { line: "21", fromStop: "Terminal", toStop: "Plaza", estimatedAt: new Date("2026-10-01T09:00").toISOString() },
         { line: "8", fromStop: "Plaza", toStop: "Hotel", estimatedAt: new Date("2026-10-01T09:25").toISOString() },
       ] } },

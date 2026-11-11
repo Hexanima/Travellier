@@ -3,6 +3,7 @@ import type { ApiClientError, HttpClient } from "../api/index.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
 
 export type TransportDirection = "outbound" | "return";
+export type TransportCurrency = "ARS" | "EUR" | "USD";
 export type TransportType = "bus_local" | "bus_long" | "flight" | "car" | "other";
 export type UrbanTransportStep = { line: string; fromStop: string; toStop: string } & (
   | { estimatedAt: string; estimatedTime?: never }
@@ -16,6 +17,8 @@ type TransportBase = {
   arrivalPlace: string;
   arrivalAt: string;
   costPerPerson: number | null;
+  /** Absent or null on a previous record: the currency was never indicated. */
+  costCurrency?: TransportCurrency | null;
 };
 
 export type TransportInput = TransportBase & (

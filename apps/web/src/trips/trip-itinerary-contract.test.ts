@@ -111,6 +111,21 @@ describe("itinerary contract with the real read model", () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
     expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
   });
+  it.each([
+    ["missing", undefined],
+    ["not an object", 5],
+    ["unknown currency", { byCurrency: [{ currency: "BRL", totalCents: 100, transportCount: 1 }], withoutCurrency: { transportCount: 0 } }],
+    ["non-integer cents", { byCurrency: [{ currency: "ARS", totalCents: 10.5, transportCount: 1 }], withoutCurrency: { transportCount: 0 } }],
+    ["negative cents", { byCurrency: [{ currency: "ARS", totalCents: -1, transportCount: 1 }], withoutCurrency: { transportCount: 0 } }],
+    ["bad count", { byCurrency: [{ currency: "ARS", totalCents: 1, transportCount: "1" }], withoutCurrency: { transportCount: 0 } }],
+    ["no withoutCurrency", { byCurrency: [] }],
+    ["bad withoutCurrency", { byCurrency: [], withoutCurrency: { transportCount: 1.5 } }],
+  ])("rejects malformed transportCostTotals (%s)", async (_name, totals) => {
+    const itinerary = await respond();
+    (itinerary as unknown as Record<string, unknown>).transportCostTotals = totals;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it.each(["UTC", "America/Argentina/Buenos_Aires"])("projects every post exactly once in %s", async (timeZone) => {
     const { result } = await read();
     if (!result.ok) throw new Error("rejected");
