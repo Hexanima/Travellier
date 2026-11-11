@@ -157,7 +157,7 @@ describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
       .map((entry) => [entry.currency, [entry.totalCents, entry.expenseCount]]));
     expect(totals.EUR).toEqual([1500, 1]);
     expect(totals.USD).toEqual([4000, 1]);
-    expect(totals.ARS?.[1]).toBeGreaterThanOrEqual(4);
+    expect(totals.ARS).toEqual([19_500, 4]);
   });
 
   // ---- fallos, cancelacion, reintento y recarga ----
