@@ -4,7 +4,7 @@ import {createSimulation,currentTrip,command,localDate,localTime,localInstant} f
 import {createState} from './public/state.mjs';
 import {renderScreen} from './public/playable-screens.mjs';
 const render=(sim,view,extra={})=>renderScreen({...createState(),sim,view,destinationId:'roma',transportDirection:'outbound',activityId:'paseo',...extra});
-const inputs=html=>Object.fromEntries([...html.matchAll(/<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/g)].map(x=>[x[1],x[2]]));
+const inputs=html=>({...Object.fromEntries([...html.matchAll(/<input[^>]*name="([^"]+)"[^>]*value="([^"]*)"/g)].map(x=>[x[1],x[2]])),...(html.includes('name="costCurrency"')?{costCurrency:html.match(/name="costCurrency"[\s\S]*?<option value="([^"]*)" selected/)?.[1]??''}:{})});
 const exact=at=>{const d=new Date(at);return localTime(at)+':'+String(d.getSeconds()).padStart(2,'0')+'.'+String(d.getMilliseconds()).padStart(3,'0');};
 const notices=(before,after)=>after.notifications.filter(n=>!before.notifications.some(x=>x.id===n.id));
 const urban=()=>{const sim=createSimulation(),tr=currentTrip(sim).transports[0];Object.assign(tr,{type:'bus_local',departureAt:localInstant('2026-10-10','08:00'),details:{steps:[{line:'L1',fromStop:'Centro',toStop:'Aeropuerto',estimatedAt:new Date(Date.parse(localInstant('2026-10-11','10:15'))+30123).toISOString()}]}});return {sim,tr};};

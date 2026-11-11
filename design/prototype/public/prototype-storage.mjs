@@ -7,6 +7,7 @@ export function encodeTravelState(s){
 export function restoreTravelState(seed,json){
  try{const data=JSON.parse(json);if(data.version!==1||!Array.isArray(data.trips)||!Array.isArray(data.notifications)||!Number.isInteger(data.sequence))return seed;
   if(!data.trips.every(t=>Array.isArray(t.activities)&&Array.isArray(t.posts)&&Array.isArray(t.members)&&Array.isArray(t.destinations)&&Array.isArray(t.transports)))return seed;
+  for(const t of data.trips)t.ownerId||=t.members.find(m=>m.role==='admin')?.id;
   return {...seed,...data,role:data.trips.find(t=>t.id===data.tripId)?.members.find(m=>m.id===seed.profile.id)?.role||'participant'};
  }catch{return seed;}
 }

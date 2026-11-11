@@ -3,7 +3,7 @@ import {activityTimeLabel} from './activities.mjs';
 import {hasHistoricalSteps,urbanSteps,savedInstant} from './timing.mjs';
 import {createState} from './state.mjs';
 import {createSimulation,currentTrip,command,tripDays,destinationWindow,localDate,localTime,validatePostLinks} from './simulation.mjs';
-import {renderScreen,asset,btn,go,calendarFile,galleryPhotos,tripNavigation,tripSection,diaryAction,spontaneousDefaults,expensePreview,destinationChoices,destinationForDate,renderDestinationPicker} from './playable-screens.mjs';
+import {renderScreen,currencyErrorField,transferFormError,asset,btn,go,calendarFile,galleryPhotos,tripNavigation,tripSection,diaryAction,spontaneousDefaults,expensePreview,destinationChoices,destinationForDate,renderDestinationPicker} from './playable-screens.mjs';
 import {expenseFormData,expenseSummary} from './expenses.mjs';
 import {foundations} from './exported-screens.mjs';
 import {catalog,groups,titleFor} from './catalog.mjs';
@@ -32,7 +32,7 @@ function showDecisionInfo(id){
 }
 dialog.addEventListener('cancel',()=>{pendingDecision=null;});
 const composer=['compose','post-edit','post-links','spontaneous','expense-edit','photo-picker','photo-permission'];
-const contexts=['view','date','postId','postTab','photo','activityId','activityTab','galleryActivityId','galleryPhoto','destinationId','memberId','transportDirection','transportId','commentId','publicTripId','editPostId','postOrigin','linkStandalone','linkKind','steps'];
+const contexts=['view','date','postId','postTab','photo','activityId','activityTab','galleryActivityId','galleryPhoto','destinationId','memberId','transportDirection','transportId','commentId','publicTripId','editPostId','postOrigin','linkStandalone','linkKind','steps','transferFromLeave'];
 const snapshot=()=>({...Object.fromEntries(contexts.map(x=>[x,state[x]])),tripId:state.sim.tripId,tripRole:state.sim.role,bodyScrollTop:document.querySelector('.phone-body')?.scrollTop||0});
 state.commentDrafts={};
 state.tripPanels={};
@@ -55,7 +55,7 @@ function hydrate(){state.draft=state.drafts[draftKey()]||{};}
 function open(view,record='',replace=false,captureDraft=true){
  rememberTripPanel();
  if(captureDraft)capture();if(!replace&&(state.view!==view||view==='post'&&record&&record!==state.postId))state.history=[...state.history,snapshot()].slice(-50);
- const t=currentTrip(state.sim),from=state.view;state.notice='';
+ const t=currentTrip(state.sim),from=state.view;state.notice='';if(view!=='leave-trip')state.afterTransfer=false;
  if(view==='post-links'&&from!=='spontaneous')state.linkKind=null;
  if(view==='post'&&(from!=='post'||record&&record!==state.postId)){state.postTab='children';state.photo=0;}
  if(['post','comments','post-edit'].includes(view)&&record)state.postId=record;
@@ -63,7 +63,7 @@ function open(view,record='',replace=false,captureDraft=true){
  if(['participation'].includes(view)&&(from!==view||record&&record!==state.activityId))state.activityTab='memories';
  if(['participation','activity-edit','delete-activity'].includes(view)&&record)state.activityId=record;
  if(['destination-edit','delete-destination'].includes(view))state.destinationId=record||state.destinationId;
- if(view==='remove-member')state.memberId=record||state.memberId;
+ if(['remove-member','member-manage','role-change','transfer-owner'].includes(view)){if(view==='transfer-owner')state.transferFromLeave=record==='leave';state.memberId=record==='leave'?null:record||state.memberId;}
  if(view==='public-trip')state.publicTripId=record||state.publicTripId;
  if(['transport-edit','transport-detail'].includes(view)&&record){const tr=t?.transports.find(x=>x.id===record);if(tr){state.destinationId=tr.destinationId;state.transportDirection=tr.direction;state.transportId=tr.id;state.transportType=tr.type;state.steps=tr.details.steps?.length||1;}else{const d=t?.destinations.find(x=>record===x.id+'-return'||record===x.id+'-outbound');if(d){state.destinationId=d.id;state.transportDirection=record.endsWith('-return')?'return':'outbound';state.transportId=record;state.transportType='flight';state.steps=1;}}}
  if(view==='mixed-day'){state.date='2026-10-16';state.destinationId='roma';}
@@ -115,7 +115,7 @@ function chooseLink(link){
 }
 function focusHeading(){const h=document.querySelector('.phone-header h2,.trip-name');if(h){h.tabIndex=-1;h.focus({preventScroll:true});}}
 function toast(message){state.notice=message;const n=document.querySelector('#phone-notice');if(n){n.hidden=false;n.querySelector('p').textContent=message;}document.querySelector('#announcement').textContent=message;}
-function apply(action,follow=true,onSuccess){if(state.scenario==='loading')return false;if(state.scenario==='error'){toast('No pudimos guardar los cambios. Tu decisión anterior se conserva; volvé a intentar.');return false;}const result=command(state.sim,action);if(result.confirmation){showConflict(result.confirmation,action,follow,onSuccess);return false;}if(result.error){const el=document.querySelector('.phone .inline-error');if(el){el.hidden=false;el.textContent=result.error;el.tabIndex=-1;el.focus();}else toast(result.error);return false;}state.sim=result.state;persistTravel();state.role=state.sim.role;if(action.type==='publish-post'&&state.sim.postId)state.postId=state.sim.postId;if(action.type==='save-activity'&&state.sim.activityId)state.activityId=state.sim.activityId;if(['delete-trip','create-trip'].includes(action.type))state.history=[];if(follow&&result.view){if(['profile','settings','save-destination','save-transport','save-activity','delete-activity','delete-destination','remove-member','edit-comment','save-links','publish-post','permission'].includes(action.type))returnView(result.view);else open(result.view,'',true);}else render();if(result.message)toast(result.message);onSuccess?.();return true;}
+function apply(action,follow=true,onSuccess){if(state.scenario==='loading')return false;if(state.scenario==='error'){toast('No pudimos guardar los cambios. Tu decisión anterior se conserva; volvé a intentar.');return false;}const result=command(state.sim,action);if(result.confirmation){showConflict(result.confirmation,action,follow,onSuccess);return false;}if(result.error){const el=document.querySelector('.phone .inline-error'),invalid=currencyErrorField(action,result.error)&&document.querySelector('.phone [name=costCurrency]');if(el){el.hidden=false;el.textContent=result.error;if(invalid){invalid.setAttribute('aria-invalid','true');invalid.focus();}else{el.tabIndex=-1;el.focus();}}else toast(result.error);return false;}state.sim=result.state;persistTravel();state.role=state.sim.role;if(action.type==='publish-post'&&state.sim.postId)state.postId=state.sim.postId;if(action.type==='save-activity'&&state.sim.activityId)state.activityId=state.sim.activityId;if(['delete-trip','create-trip','leave-trip'].includes(action.type))state.history=[];if(follow&&result.view){if(['profile','settings','save-destination','save-transport','save-activity','delete-activity','delete-destination','remove-member','set-role','transfer-owner','edit-comment','save-links','publish-post','permission'].includes(action.type))returnView(result.view);else open(result.view,'',true);}else render();if(result.message)toast(result.message);onSuccess?.();return true;}
 function activeTrip(){const t=currentTrip(state.sim);if(!t)return;state.expenseMode=t.expenseMode;if(!t.destinations.some(d=>d.id===state.destinationId))state.destinationId=t.destinations[0]?.id;if(!tripDays(t).includes(state.date))state.date=tripDays(t)[0]||localDate(state.sim.now);}
 const appTitle=view=>({post:'Recuerdo',balance:'Balance',location:'Ubicación','post-links':'Vincular recuerdo','invite-fallback':'Invitación','connection-error':'Sin conexión','delete-destination':'Eliminar destino','mixed-day':'Itinerario'})[view]||titleFor(view);
 function header(){const t=currentTrip(state.sim),home=['trips','empty','discover','profile'].includes(state.view),tripView=Boolean(tripSection(state.view));return home?'<header class="phone-header home-header"><h2>'+titleFor(state.view)+'</h2>'+btn(asset('home-imgIconBell'),'view','notifications','icon-button','aria-label="Notificaciones"')+'</header>':tripView?'<header class="phone-header">'+btn(asset('day-imgIconBack'),'leave-trip','','icon-button','aria-label="Volver a Mis viajes"')+'<div class="trip-heading"><p class="trip-name">'+e(t?.name||'Mis viajes')+'</p><p class="trip-meta">'+(t?.members.length||0)+(t?.members.length===1?' integrante':' integrantes')+'</p></div>'+btn(asset('day-imgIconMore'),'view','trip-settings','icon-button','aria-label="Opciones del viaje"')+'</header>':'<header class="phone-header detail-header">'+btn(asset('day-imgIconBack'),'back','','icon-button','aria-label="Volver"')+'<h2>'+appTitle(state.view)+'</h2><span class="header-placeholder"></span></header>';}
@@ -169,6 +169,8 @@ document.addEventListener('click',async event=>{
  if(action==='confirm-decision'){const pending=pendingDecision;pendingDecision=null;dialog.close();if(pending)apply({...pending.action,confirmedConflicts:pending.conflicts},pending.follow,pending.onSuccess);return;}
  if(action==='participation'){apply({type:action,id:state.activityId,value},false);return;}
  if(['remove-member','delete-trip','delete-destination','delete-activity'].includes(action)){apply({type:action,id:value});return;}
+ if(action==='set-role'){apply({type:'set-role',id:value,value:record});return;}
+ if(action==='leave-membership'){apply({type:'leave-trip'});return;}
  if(action==='post-like'){const scroll=document.querySelector('.phone-body').scrollTop;apply({type:'post-like',id:state.postId},false);document.querySelector('.phone-body').scrollTop=scroll;return;}
  if(action==='comment-like'){const scroll=document.querySelector('.phone-body').scrollTop;apply({type:'comment-like',id:value,postId:state.postId},false);document.querySelector('.phone-body').scrollTop=scroll;return;}
  if(action==='pick-photo'){const key=draftKey(),d=state.drafts[key]||{};d.photos=d.photos?.includes(value)?d.photos.filter(id=>id!==value):[...(d.photos||[]),value];state.drafts[key]=d;hydrate();render();return;}
@@ -200,6 +202,7 @@ document.addEventListener('submit',event=>{
  if(f.id==='post-design'){publishCurrentPost();return;}
  if(state.scenario==='error'){const el=f.querySelector('.inline-error');if(el){el.hidden=false;el.textContent='No pudimos guardar los cambios. Revisá tu conexión y volvé a intentar.';el.tabIndex=-1;el.focus();}return;}
  if(f.id==='trip-design'){if(apply({type:'create-trip',data})){state.destinationId=currentTrip(state.sim).destinations[0].id;state.transportDirection='outbound';state.postId=null;state.activityId=null;state.date=localDate(state.sim.now);open('transports','',true);}return;}
+ if(f.id==='transfer-owner-design'){const invalid=transferFormError(data,currentTrip(state.sim).members.filter(m=>m.id!==state.sim.profile.id));if(invalid){const el=f.querySelector('.inline-error'),input=f.querySelector('[name='+invalid.field+']');f.querySelectorAll('[aria-invalid]').forEach(x=>x.removeAttribute('aria-invalid'));input.setAttribute('aria-invalid','true');el.hidden=false;el.textContent=invalid.message;input.focus();return;}const fromLeave=state.transferFromLeave;apply({type:'transfer-owner',id:data.newOwner},true,()=>{state.transferFromLeave=false;if(fromLeave){open('leave-trip');state.afterTransfer=true;render();}});return;}
  if(f.id==='settings-design'){apply({type:'settings',data});return;}
  if(f.id==='destination-design'){apply({type:'save-destination',id:state.destinationId==='new'?null:state.destinationId,data});return;}
  if(f.id==='transport-design'){if(apply({type:'save-transport',data})){delete state.drafts['transport:'+state.sim.tripId+':'+state.destinationId+':'+state.transportDirection];state.transportDirection='return';open('transports','',true);}return;}
@@ -224,6 +227,8 @@ document.addEventListener('submit',event=>{
  }
 });
 document.addEventListener('change',event=>{
+ if(event.target.name==='costCurrency'&&event.target.closest('#transport-design'))event.target.removeAttribute('aria-invalid');
+ if(event.target.name==='newOwner'&&event.target.closest('#transfer-owner-design')){const f=event.target.closest('form'),label=f.querySelector('[data-owner-name]');if(label)label.textContent=event.target.value?event.target.selectedOptions[0].textContent:'la persona elegida';event.target.removeAttribute('aria-invalid');}
  if(event.target.closest('#expense-design')&&/^(paymentUnit|shareUnit)/.test(event.target.name)){capture();const name=event.target.name;render();document.querySelector('[name="'+name+'"]')?.focus();return;}
  const el=event.target;if(el.id==='screen-select'){state.history=[];studioOpen(el.value);return;}
  if(el.id==='role-select'){capture();state.sim.role=el.value;render();return;}
