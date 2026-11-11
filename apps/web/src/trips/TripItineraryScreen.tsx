@@ -29,6 +29,7 @@ import { useInTripShell, useTripName } from "./trip-state.js";
 import { useRefreshGuard, useTripRefreshLoader, type RefreshLoader } from "./trip-refresh.js";
 import { sameValue } from "./same-value.js";
 import { Heading } from "./Heading.js";
+import { TransportCostSummary } from "./TransportCostSummary.js";
 import { DestinationPicker } from "./DestinationPicker.js";
 import { destinationChoices, destinationForDate } from "./trip-itinerary-destinations.js";
 import "./itinerary.css";
@@ -334,6 +335,8 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         <ExpenseLines totals={view.tripExpenses} />
         {view.outsideExpensePosts.length > 0 ? <Button onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
       </section> : null}
+      {state.kind === "ready" ? <TransportCostSummary totals={state.value.transportCostTotals} transports={state.value.transports}
+        destinations={state.value.destinations} headingLevel={sub} /> : null}
       {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
         <Heading level={sub}>Todavía no hay itinerario</Heading>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>

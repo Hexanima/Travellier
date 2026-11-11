@@ -86,9 +86,22 @@ describe("TransportDialog", () => {
     await mount(build({ type: "other", details: {} }));
     expect(document.querySelector("dl")).toBeNull();
   });
-  it("does not show the cost per person", async () => {
-    await mount(build({ costPerPerson: 999 }));
-    expect(text()).not.toContain("999");
+  it("shows the cost per person with its currency", async () => {
+    await mount(build({ costPerPerson: 1234.5, costCurrency: "USD" }));
+    expect(document.querySelector("[data-transport-cost]")?.textContent).toBe("Costo por persona: USD 1.234,50");
+    expect(text()).not.toContain("Moneda sin indicar");
+  });
+  it("shows a previous cost without currency as the plain amount, flagged, with the way to fix it", async () => {
+    await mount(build({ costPerPerson: 80, costCurrency: null }));
+    expect(document.querySelector("[data-transport-cost]")?.textContent).toContain("Costo por persona: 80,00");
+    expect(text()).toContain("Moneda sin indicar");
+    expect(text()).toContain("Editá el transporte para elegir la moneda");
+  });
+  it("shows nothing about cost when the transport has none", async () => {
+    await mount(build({ costPerPerson: null, costCurrency: null }));
+    expect(document.querySelector("[data-transport-cost]")).toBeNull();
+    expect(text()).not.toContain("Costo");
+    expect(text()).not.toContain("Moneda sin indicar");
   });
   it("moves the focus to the heading on open, has no alert, and returns the focus to the trigger on close", async () => {
     const onClose = vi.fn();

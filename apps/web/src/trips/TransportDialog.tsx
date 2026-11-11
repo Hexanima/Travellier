@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Modal } from "../components/index.js";
 import { formatActivityClock } from "./activity-time-format.js";
+import { formatTransportCost } from "./transport-cost-summary.js";
 import { transportDaySlices, transportLabels, transportSteps } from "./transport-detail.js";
 import type { ItineraryTransportResponse, TripItineraryResponse } from "./trip-itinerary-api.js";
 import "./itinerary.css";
@@ -13,8 +14,8 @@ const filled = (value: unknown): value is string => typeof value === "string" &&
 
 /**
  * Detail of one transport segment from the loaded itinerary (no request of its own). Instants keep their exact ISO value in `dateTime`;
- * the local days come from the itinerary projection and the intermediate ones carry no hour. The cost per person is not shown: it has no
- * currency yet (T119/T120).
+ * the local days come from the itinerary projection and the intermediate ones carry no hour. The cost per person carries its currency; a
+ * previous cost without one shows the plain amount, flagged, and is never assumed to be in any currency.
  */
 export function TransportDialog({ transport, itinerary, timeZone, onClose, memories }: Props) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -35,6 +36,9 @@ export function TransportDialog({ transport, itinerary, timeZone, onClose, memor
       <p>Salida: <time dateTime={transport.departureAt}>{moment.format(new Date(transport.departureAt))}</time><br />
         Llegada: <time dateTime={transport.arrivalAt}>{moment.format(new Date(transport.arrivalAt))}</time><br />
         <span className="activity-context">Horarios en {timeZone}</span></p>
+      {transport.costPerPerson !== null ? <p data-transport-cost>Costo por persona: {formatTransportCost(transport.costPerPerson, transport.costCurrency)}
+        {transport.costCurrency ? null : <><br /><strong role="status">Moneda sin indicar</strong><br />
+          <span className="activity-context">Editá el transporte para elegir la moneda.</span></>}</p> : null}
       {shown.length > 0 ? <dl className="transport-facts">{shown.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : null}
       {steps.length > 0 ? <section aria-labelledby={`transport-steps-${transport.id}`}>
         <h4 id={`transport-steps-${transport.id}`}>Tramos</h4>

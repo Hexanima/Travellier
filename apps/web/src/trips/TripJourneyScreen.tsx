@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router-dom";
 
 import { Button, Feedback, LoadingState, Modal, TextField } from "../components/index.js";
+import { TransportCostSummary } from "./TransportCostSummary.js";
+import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TransportForm, type TransportSaveCoordinator } from "./TransportForm.js";
 import type { JourneyDestination, JourneyTransport, TransportDirection, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
 
-type Props = { trips: Pick<TripManagementApi, "get">; journey: TripJourneyApi };
+/** `itinerary` is optional: it only supplies the transport cost totals, which the server computes per currency. */
+type Props = { trips: Pick<TripManagementApi, "get">; journey: TripJourneyApi; itinerary?: TripItineraryApi };
 
 const destinationTimestamp = (transport: JourneyTransport) =>
   Date.parse(transport.direction === "outbound" ? transport.arrivalAt : transport.departureAt);
@@ -34,7 +37,7 @@ const validationContext = (destinationId: string, direction: TransportDirection,
   };
 };
 
-export function TripJourneyScreen({ trips, journey }: Props) {
+export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
   const { tripId } = useParams();
   const [trip, setTrip] = useState<TripDetail>();
   const [destinations, setDestinations] = useState<JourneyDestination[]>([]);
@@ -42,6 +45,9 @@ export function TripJourneyScreen({ trips, journey }: Props) {
   const confirmedJourney = useRef<{ destinations: JourneyDestination[]; transports: Record<string, JourneyTransport[]> }>({
     destinations: [], transports: {},
   });
+  const [costs, setCosts] = useState<TripItineraryResponse>();
+  const [costsFailed, setCostsFailed] = useState(false);
+  const costsRequest = useRef(0);
   const [savingTransport, setSavingTransport] = useState(false);
   const savingTransportRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -55,6 +61,19 @@ export function TripJourneyScreen({ trips, journey }: Props) {
   const deletingRef = useRef(false);
   const [deleteError, setDeleteError] = useState<string>();
   const [deleteMessage, setDeleteMessage] = useState("");
+
+  // Totals are a complement: a failure never blocks the destinations and transports, and the last answer wins.
+  const loadCosts = useCallback(async () => {
+    if (!itinerary || !tripId) return;
+    const request = ++costsRequest.current;
+    try {
+      const result = await itinerary.get(tripId);
+      if (request !== costsRequest.current) return;
+      if (result.ok) { setCosts(result.value); setCostsFailed(false); } else setCostsFailed(true);
+    } catch {
+      if (request === costsRequest.current) setCostsFailed(true);
+    }
+  }, [itinerary, tripId]);
 
   const load = useCallback(async () => {
     if (!tripId) { setLoadError("No encontramos este viaje."); setLoading(false); return; }
@@ -80,12 +99,13 @@ export function TripJourneyScreen({ trips, journey }: Props) {
       confirmedJourney.current = { destinations: ordered, transports: loadedTransports };
       setDestinations(ordered);
       setTransports(loadedTransports);
+      void loadCosts();
     } catch {
       setLoadError("No pudimos cargar los destinos y transportes.");
     } finally {
       setLoading(false);
     }
-  }, [tripId, trips, journey]);
+  }, [tripId, trips, journey, loadCosts]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -164,6 +184,7 @@ export function TripJourneyScreen({ trips, journey }: Props) {
     // Publish the confirmed response before releasing the save lock, even if React has not rendered yet.
     confirmedJourney.current = { ...confirmedJourney.current, transports: updated };
     setTransports(updated);
+    void loadCosts();
   };
 
   const saveCoordinator: TransportSaveCoordinator = {
@@ -196,6 +217,10 @@ export function TripJourneyScreen({ trips, journey }: Props) {
         {!loading && !loadError && trip?.kind === "member" ? (
           <>
             <p className="journey-intro">Organizá los destinos en el orden del viaje. Configurá la ida y la vuelta de cada uno; las fechas del viaje se derivan de estos transportes.</p>
+            {costs ? <TransportCostSummary totals={costs.transportCostTotals} transports={costs.transports}
+              destinations={costs.destinations} headingLevel={2} /> : null}
+            {costsFailed && !costs ? <p data-transport-costs-unavailable>No pudimos cargar los totales de costo de transporte.{" "}
+              <Button onClick={() => void loadCosts()}>Reintentar totales</Button></p> : null}
             <div className="journey-destinations">
               {destinations.map((destination) => {
                 const saved = transports[destination.id] ?? [];

@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { itineraryFixture, itineraryId, linkPost, settleItinerary, throughClientValidator } from "./itinerary-test-fixture.js";
+import { itineraryFixture, itineraryId, linkPost, settleItinerary, throughClientValidator, withUnindicatedTransportCost } from "./itinerary-test-fixture.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TripItineraryScreen } from "./TripItineraryScreen.js";
 
@@ -227,6 +227,31 @@ describe("itinerary screen expenses", () => {
     it("shows nothing for an expense counted on its publication", async () => {
       const container = await render(attributed("2026-09-25T12:00:00.123Z", "2026-09-26T15:00:00.000Z", "publication"));
       expect(line(container)).not.toContain("Gasto del");
+    });
+  });
+
+  describe("transport costs in the Trip summary", () => {
+    const transportSection = (container: HTMLElement) => container.querySelector<HTMLElement>("section[data-transport-costs]");
+    it("shows the transport total by currency in its own section, apart from expenses and balance", async () => {
+      const container = await render(fixture());
+      const section = transportSection(container)!;
+      expect(section.querySelector("h2")?.textContent).toBe("Total del viaje");
+      expect(section.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+      expect(section.textContent).toContain("No es un gasto ni entra en el balance");
+      expect(tripSection(container)?.contains(section)).toBe(false);
+      expect(tripSection(container)?.textContent).not.toContain("999");
+    });
+    it("flags a previous cost without currency and does not add it", async () => {
+      const container = await render(withUnindicatedTransportCost(fixture()));
+      const section = transportSection(container)!;
+      expect(section.querySelector("[data-transport-cost-unindicated]")?.textContent).toContain("Moneda sin indicar");
+      expect(section.querySelector('[data-transport-currency="ARS"]')?.textContent).toContain("ARS 999,00");
+    });
+    it("shows nothing when no transport has a cost", async () => {
+      const value = fixture();
+      value.transports.forEach((transport) => { transport.costPerPerson = null; transport.costCurrency = null; });
+      value.transportCostTotals = { byCurrency: [], withoutCurrency: { transportCount: 0 } };
+      expect(transportSection(await render(value))).toBeNull();
     });
   });
 });
