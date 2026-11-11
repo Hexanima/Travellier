@@ -20,6 +20,7 @@ const transport = {
   arrivalPlace: "Centro",
   arrivalAt: new Date("2026-09-24T09:00:00.000Z"),
   costPerPerson: null,
+  costCurrency: null,
   details: { steps: [{ line: "20", fromStop: "Terminal", toStop: "Centro", estimatedAt: new Date("2026-09-24T08:30:00Z") }] },
 } satisfies CreateTransportInput;
 

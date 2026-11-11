@@ -13,7 +13,7 @@ const actorId = id("507f1f77bcf86cd799439011");
 const destinationId = id("507f1f77bcf86cd799439013");
 const destination: TripDestination = { id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: new Date() };
 const transport: Transport = { id: id("507f1f77bcf86cd799439014"), tripId, destinationId, direction: "outbound", type: "car",
-  departurePlace: "Origen", departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "Destino", arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: null, details: {} };
+  departurePlace: "Origen", departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "Destino", arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: null, costCurrency: null, details: {} };
 const member = { id: id("507f1f77bcf86cd799439015"), tripId, userId: actorId, role: "participant" as const, joinedAt: new Date() };
 
 const journeyStub = (overrides: Partial<TripJourneyPort>): TripJourneyPort => {
@@ -118,5 +118,82 @@ describe("journey use cases", () => {
       ok: false, error: { tag: "TransportNotFoundError" },
     });
     expect(replaceTransport).not.toHaveBeenCalled();
+  });
+});
+
+describe("transport cost currency", () => {
+  const context = { authenticatedUserId: actorId, tripId, destinationId, transportId: transport.id };
+  const setup = (stored: Transport = transport) => {
+    const insertTransport = vi.fn(async (value: Transport) => ok(value));
+    const replaceTransport = vi.fn(async (value: Transport) => ok(value));
+    const replaceItineraryDays = vi.fn(async () => ok(undefined));
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
+      findDestination: async () => ok(destination), findTransport: async () => ok(stored), insertTransport, replaceTransport, replaceItineraryDays,
+    }), createId: () => transport.id } as never;
+    return { deps, insertTransport, replaceTransport, replaceItineraryDays };
+  };
+  const previous: Transport = { ...transport, costPerPerson: 80, costCurrency: null };
+  const priced: Transport = { ...transport, costPerPerson: 80, costCurrency: "USD" };
+
+  it("rejects a new cost without currency without inserting or regenerating", async () => {
+    const { deps, insertTransport, replaceItineraryDays } = setup();
+    const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId, costPerPerson: 10, costCurrency: undefined });
+    expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "costCurrency" }] } });
+    expect(insertTransport).not.toHaveBeenCalled();
+    expect(replaceItineraryDays).not.toHaveBeenCalled();
+  });
+
+  it("creates a transport with cost and currency", async () => {
+    const { deps, insertTransport } = setup();
+    const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId, costPerPerson: 10, costCurrency: "EUR" });
+    expect(result).toEqual(ok({ ...transport, costPerPerson: 10, costCurrency: "EUR" }));
+    expect(insertTransport).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a currency when a previous cost without one is edited", async () => {
+    const { deps, replaceTransport, replaceItineraryDays } = setup(previous);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: 90 } as never))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency", code: "required" }] } });
+    expect(await updateJourneyTransport.execute(deps, { ...context, arrivalPlace: "Otro" } as never))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency", code: "required" }] } });
+    expect(replaceTransport).not.toHaveBeenCalled();
+    expect(replaceItineraryDays).not.toHaveBeenCalled();
+  });
+
+  it("accepts choosing the currency of a previous cost", async () => {
+    const { deps, replaceTransport } = setup(previous);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costCurrency: "ARS" } as never)).toEqual(ok({ ...previous, costCurrency: "ARS" }));
+    expect(replaceTransport).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes cost and currency together", async () => {
+    const { deps } = setup(priced);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: 5, costCurrency: "EUR" } as never))
+      .toEqual(ok({ ...priced, costPerPerson: 5, costCurrency: "EUR" }));
+  });
+
+  it("clears the currency when the cost is removed", async () => {
+    const { deps } = setup(priced);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: null } as never))
+      .toEqual(ok({ ...priced, costPerPerson: null, costCurrency: null }));
+  });
+
+  it("rejects a currency sent while removing the cost", async () => {
+    const { deps, replaceTransport } = setup(priced);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: null, costCurrency: "USD" } as never))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency", code: "invalid" }] } });
+    expect(replaceTransport).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored currency when other fields change", async () => {
+    const { deps } = setup(priced);
+    expect(await updateJourneyTransport.execute(deps, { ...context, arrivalPlace: "Otro" } as never))
+      .toEqual(ok({ ...priced, arrivalPlace: "Otro" }));
+  });
+
+  it("requires a currency when a cost is added to a transport without one", async () => {
+    const { deps } = setup(transport);
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: 5 } as never))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency" }] } });
   });
 });

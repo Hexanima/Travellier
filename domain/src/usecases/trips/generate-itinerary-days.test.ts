@@ -15,7 +15,7 @@ const destination = (value = 2, order = 1): TripDestination => ({
 const transport = (value: number, destinationId: ObjectId, direction: Transport["direction"],
   departureAt: string, arrivalAt: string): Transport => ({
   id: id(value), tripId, destinationId, direction, type: "car", departurePlace: "Origin", arrivalPlace: "Destination",
-  departureAt: new Date(departureAt), arrivalAt: new Date(arrivalAt), costPerPerson: null, details: {},
+  departureAt: new Date(departureAt), arrivalAt: new Date(arrivalAt), costPerPerson: null, costCurrency: null, details: {},
 });
 const day = (destinationId: ObjectId, type: string, date: string, startsAt: string, endsAt: string, order: number) => ({
   tripId, destinationId, type, date: new Date(date), startsAt: new Date(startsAt), endsAt: new Date(endsAt), order,

@@ -10,6 +10,7 @@ import type { TripDeletionPort } from "../../ports/trip-deletion-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
+import type { Currency } from "../../value-objects/money.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
 import { regenerateItinerary } from "./regenerate-itinerary.js";
 
@@ -29,6 +30,8 @@ export interface JourneyTransportFields {
   arrivalPlace: string;
   arrivalAt: Date;
   costPerPerson: number | null;
+  /** Required with a cost; omitted or null means no currency. */
+  costCurrency?: Currency | null;
   details: Transport["details"];
 }
 export interface CreateJourneyTransportPayload extends DestinationContext, JourneyTransportFields {}
@@ -46,7 +49,8 @@ const invalid = (field: string, message: string) => err(new ValidationError([{ f
 const transportFromPayload = (payload: CreateJourneyTransportPayload, id: ObjectId): Transport => ({
   id, tripId: payload.tripId, destinationId: payload.destinationId, direction: payload.direction, type: payload.type,
   departurePlace: payload.departurePlace, departureAt: payload.departureAt, arrivalPlace: payload.arrivalPlace,
-  arrivalAt: payload.arrivalAt, costPerPerson: payload.costPerPerson, details: payload.details,
+  arrivalAt: payload.arrivalAt, costPerPerson: payload.costPerPerson,
+  costCurrency: payload.costCurrency ?? null, details: payload.details,
 } as Transport);
 
 export type JourneyDestinationSummary = TripDestination & { hasRecords: boolean };
@@ -134,6 +138,9 @@ const updateTransportInJourney: UseCase<JourneyDependencies, UpdateJourneyTransp
       arrivalPlace: payload.arrivalPlace === undefined ? current.arrivalPlace : payload.arrivalPlace,
       arrivalAt: payload.arrivalAt === undefined ? current.arrivalAt : payload.arrivalAt,
       costPerPerson: payload.costPerPerson === undefined ? current.costPerPerson : payload.costPerPerson,
+      // Removing the cost clears the currency; otherwise the stored one is kept unless a new one is sent.
+      costCurrency: payload.costCurrency !== undefined ? payload.costCurrency :
+        payload.costPerPerson === null ? null : current.costCurrency ?? null,
       details: details as Transport["details"],
     }, payload.transportId));
     if (!candidate.ok) return candidate;

@@ -3,7 +3,7 @@ import { createTransport, readTransport, type Transport } from "./transport.js";
 
 const transport = (times: string[]) => ({
   id: "507f1f77bcf86cd799439014", tripId: "507f191e810c19729de860ea", destinationId: "507f1f77bcf86cd799439013",
-  direction: "outbound", type: "bus_local", departurePlace: "A", arrivalPlace: "B", costPerPerson: null,
+  direction: "outbound", type: "bus_local", departurePlace: "A", arrivalPlace: "B", costPerPerson: null, costCurrency: null,
   departureAt: new Date("2026-10-03T23:30:00.123Z"), arrivalAt: new Date("2026-10-04T01:00:00.456Z"),
   details: { steps: times.map((time) => ({ line: "1", fromStop: "A", toStop: "B", estimatedAt: new Date(time) })) },
 } as unknown as Transport);
