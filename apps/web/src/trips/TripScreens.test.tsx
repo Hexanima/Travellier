@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CreateTripScreen, TripsListScreen } from "./TripScreens.js";
 import type { TripManagementApi, TripResult, TripSummary } from "./trip-management-api.js";
+import { resetRememberedFilter } from "./trips-filter-memory.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +20,7 @@ const trip = {
 const roots: ReturnType<typeof createRoot>[] = [];
 
 afterEach(async () => {
+  resetRememberedFilter();
   await act(async () => roots.splice(0).forEach((root) => root.unmount()));
   document.body.replaceChildren();
 });
@@ -92,7 +94,7 @@ describe("Trip screens", () => {
 
     expect(container.getAttribute("role")).toBeNull();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar tus viajes");
-    await act(async () => container.querySelector("button")?.click());
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Reintentar")?.click());
     expect(list).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("Patagonia");
   });

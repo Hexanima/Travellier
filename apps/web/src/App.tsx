@@ -38,6 +38,7 @@ import { PublicTripConfirmationScreen, TripExploreScreen } from './trips/TripExp
 import { TripJoinScreen } from './trips/TripJoinScreen.js'
 import { TripMembersScreen } from './trips/TripMembersScreen.js'
 import { CreateTripScreen, TripsListScreen } from './trips/TripScreens.js'
+import { resetRememberedFilter } from './trips/trips-filter-memory.js'
 import { createTripManagementApi, type TripManagementApi } from './trips/trip-management-api.js'
 import { createTripMembersApi, type TripMembersApi } from './trips/trip-members-api.js'
 import { createTripPostApi, type TripPostApi } from './trips/trip-post-api.js'
@@ -174,6 +175,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         if (session.current !== undefined) opener.current?.discard()
         setNoticeAnnounced(false)
         session.current = undefined
+        resetRememberedFilter()
         setHasSession(false)
       },
     })
@@ -400,6 +402,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
 
   const onAuthenticated = async (authenticatedSession: AuthenticatedSession) => {
     sessionRevision.current += 1
+    resetRememberedFilter()
     // With a previous session (possibly another account) a notice waiting for a session is not retaken.
     if (session.current !== undefined) opener.current?.discard()
     setNoticeAnnounced(false)
@@ -420,6 +423,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     // The device token is revoked with the outgoing bearer before the session is dropped.
     await revokePush()
     session.current = undefined
+    resetRememberedFilter()
     setHasSession(false)
     await queueStorageOperation(() => storage.clear())
     navigate('/login')

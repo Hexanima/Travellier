@@ -92,7 +92,7 @@ describe("App gallery integration", () => {
     expect(title(container)).toBe("Fotos");
     await act(async () => go(-1));
     expect(title(container)).not.toBe("Fotos");
-    expect(container.querySelector("[role=tablist]")).toBeNull(); // Back from the Fotos tab leaves to Mis viajes, not to the Posts tab
+    expect(container.querySelector('[role=tablist][aria-label="Secciones del viaje"]')).toBeNull(); // Back from the Fotos tab leaves to Mis viajes, not to the Posts tab
   });
   it("grid, viewer, «Ver recuerdo», back, viewer reopened, close: lands on the grid", async () => {
     const container = await render(["/trips", base], props());
