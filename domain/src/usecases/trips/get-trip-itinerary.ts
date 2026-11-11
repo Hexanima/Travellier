@@ -6,6 +6,7 @@ import { err, ok } from "../../types/result.js";
 import type { ItineraryDay } from "../../entities/itinerary-day.js";
 import type { Transport } from "../../entities/transport.js";
 import { attributeExpense, totalizeExpenses } from "../../entities/expense-projection.js";
+import { transportCostTotals } from "../../entities/transport-cost-projection.js";
 import { resolvePostChain } from "../../entities/post.js";
 import type { ItineraryItem, ItineraryPostContext, TripItinerary, TripItinerarySnapshot } from "../../types/trip-itinerary.js";
 import type { UseCase } from "../../types/usecase.js";
@@ -121,6 +122,7 @@ const compose = (snapshot: TripItinerarySnapshot): TripItinerary => {
     }),
     expenseSummary: { ...totalizeExpenses(attributions), outsideItinerary: totalizeExpenses(attributions.filter((value) => value.dayId === null)) },
     expenses: attributions,
+    transportCostTotals: transportCostTotals(transports),
   };
 };
 

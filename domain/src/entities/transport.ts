@@ -1,5 +1,6 @@
 import { ValidationError } from "../errors/validation-error.js";
 import { err, ok, type Result } from "../types/result.js";
+import { CURRENCIES, type Currency } from "../value-objects/money.js";
 import type { ObjectId } from "../value-objects/object-id.js";
 
 export type TransportDirection = "outbound" | "return";
@@ -27,6 +28,8 @@ interface TransportBase {
   arrivalPlace: string;
   arrivalAt: Date;
   costPerPerson: number | null;
+  /** Required with a cost on new writes; previous records may read without it ("sin indicar"). */
+  costCurrency: Currency | null;
 }
 
 export type Transport = TransportBase & (
@@ -90,8 +93,10 @@ export const validateUrbanTransportSteps = (steps: readonly UrbanTransportStep[]
 
 const validateTransport = (
   input: CreateTransportInput,
-  allowLegacySteps: boolean,
+  allowLegacy: boolean,
 ): Result<Transport, ValidationError> => {
+  const allowLegacySteps = allowLegacy;
+  const allowLegacyCurrency = allowLegacy;
   if (input.direction !== "outbound" && input.direction !== "return") {
     return invalid("direction", "invalid", "Transport direction is invalid.");
   }
@@ -113,6 +118,17 @@ const validateTransport = (
   }
   if (input.costPerPerson !== null && (typeof input.costPerPerson !== "number" || !Number.isFinite(input.costPerPerson))) {
     return invalid("costPerPerson", "invalid", "Cost per person must be a finite number or null.");
+  }
+  const currency: unknown = input.costCurrency;
+  if (currency !== undefined && currency !== null && !CURRENCIES.some((candidate) => candidate === currency)) {
+    return invalid("costCurrency", "invalid_currency", "Cost currency must be ARS, EUR or USD.");
+  }
+  if (input.costPerPerson === null) {
+    if (currency !== undefined && currency !== null) {
+      return invalid("costCurrency", "invalid", "A currency requires a cost.");
+    }
+  } else if ((currency === undefined || currency === null) && !allowLegacyCurrency) {
+    return invalid("costCurrency", "required", "Cost currency is required when there is a cost.");
   }
   if (!isRecord(input.details)) {
     return invalid("details", "invalid", "Transport details are invalid.");

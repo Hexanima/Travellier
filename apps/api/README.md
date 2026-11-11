@@ -341,6 +341,8 @@ El cliente acepta los DTO nuevos sin inventar estados de aprobación ni realizar
 
 Los POST/PATCH de transporte urbano requieren `details.steps[].estimatedAt` como ISO UTC completo con milisegundos (por ejemplo, `2026-10-04T00:30:00.345Z`). Se almacena como BSON `Date` y se serializa igual en GET de transportes e itinerario. Cada instante debe estar entre salida y llegada, en orden no decreciente. Un PATCH de los límites también revalida los tramos; un rechazo responde 422 con `error.fields` y aborta la transacción.
 
+T119: los POST/PATCH de transportes aceptan `costCurrency` (`ARS`, `EUR` o `USD`), obligatoria cuando hay `costPerPerson`. Un costo sin moneda se rechaza con 422 (`fields[].field = "costCurrency"`, código `required`), una moneda fuera de la lista con `invalid_currency` y una moneda sin costo con `invalid`; un tipo distinto de texto o `null` responde 400. Un rechazo no guarda ni regenera el itinerario. En PATCH, `costPerPerson: null` limpia la moneda; si no se envía `costCurrency` se conserva la guardada. Los costos previos sin moneda se leen como «sin indicar» y editar ese transporte (cualquier campo) exige elegir moneda. El formulario web actual (`apps/web/src/trips/transport-form-state.ts`) envía `costPerPerson` sin `costCurrency`. Hasta T120: (a) crear desde la app un vuelo u ómnibus de larga distancia CON costo responde 422; (b) editar desde la app cualquier campo (fechas, lugar, etc.) de un transporte previo con costo sin moneda también responde 422 (aplica a los transportes dev con costo cargados antes de T119): la única salida desde la app es borrar el costo; editar un transporte que ya tiene moneda funciona porque el PATCH conserva la guardada; (c) `TransportForm.tsx` asigna el error al campo `costCurrency`, que no existe en el formulario, así que la persona solo ve el mensaje genérico «Revisá los datos del transporte…» sin saber qué falla.
+
 Los GET siguen leyendo tramos históricos con `estimatedTime: "HH:mm"`, sin convertirlos ni escribir durante la lectura. Editar ese transporte requiere reenviar todos sus tramos con `estimatedAt`, después de reconfirmar sus horas locales en la app. No hay migración automática: los documentos anteriores conservan sus datos y referencias hasta esa confirmación. Actualizar el cliente junto con la API, ya que los clientes anteriores enviaban horas sin fecha.
 
 `GET /trips/:tripId/itinerary` requiere `Authorization: Bearer <accessToken>` y membresía del Trip, tanto para admin como para participante. Un Trip público también requiere membresía para acceder a este contenido.
@@ -354,7 +356,8 @@ HTTP 200 devuelve `{ itinerary }`, con configuración, destinos, días, transpor
 | `days` | Franjas persistidas ordenadas por `order`, sin fusionar fechas coincidentes. Incluyen `items` y `expenseSummary`. |
 | `days[].items` | Referencias `{ kind: "transport" \| "activity" \| "post", id, at }` ordenadas por instante; empate por tipo (transporte, actividad, post) y después por ID. |
 | `activities` | Campos del PRD, ordenados por `scheduledAt` e ID. `postIds` referencia sus publicaciones directas y descendientes (toda la cadena, publicada el día que sea), por `createdAt` e ID. |
-| `transports` | Campos existentes, ordenados por `departureAt` e ID. `postIds` referencia todas las publicaciones vinculadas, directas y descendientes, por `createdAt` e ID; no hay endpoint de detalle de transporte: sus recuerdos se leen aquí. |
+| `transports` | Campos existentes, ordenados por `departureAt` e ID. `postIds` referencia todas las publicaciones vinculadas, directas y descendientes, por `createdAt` e ID; no hay endpoint de detalle de transporte: sus recuerdos se leen aquí. T119: cada transporte incluye `costCurrency` (`ARS`/`EUR`/`USD` o `null`). «Moneda sin indicar» = `costPerPerson` distinto de `null` con `costCurrency: null` (registros previos o con valor desconocido); se lee así sin migrarlo ni escribirlo. |
+| `transportCostTotals` | T119: costo por persona de los transportes del Trip, a nivel Trip (los días no lo incluyen). `byCurrency`: `{ currency, totalCents, transportCount }` en orden fijo ARS, EUR, USD, solo monedas con costos, sumado en centavos enteros sin conversiones ni mezcla de monedas y sin multiplicar por integrantes. `withoutCurrency.transportCount`: transportes con costo sin moneda usable o con monto inválido (por ejemplo, negativo); se cuentan pero no se suman, y sus ids salen de `transports[]` con `costCurrency: null` y `costPerPerson` presente. Es independiente de `expenseSummary`, `expenses` y el balance. |
 | `posts` | Publicaciones con un día proyectable, una sola vez, por `createdAt` e ID. T56: `dayId` se calcula por contexto (nunca el guardado): actividad efectiva, o la franja de publicación (`startsAt <= createdAt < endsAt`; sin franja contenedora, la de menor `order` con la misma fecha UTC), o la franja de tránsito del transporte. `context` (aditivo) trae `parentPostId` real, `rootPostId`, `rootActivityId`, `rootTransportId` y `placement` (`activity`, `transport`, `independent`). `parentPostId` queda `null` si el padre no está en `posts` (el real va en `context`). Conserva los vínculos independientes y `expense`. |
 | `unplacedPosts` | Publicaciones sin día proyectable (publicadas fuera de las fechas existentes o en un Trip sin itinerario), con el mismo shape, `dayId: null` y su `expense`. Ninguna publicación se pierde; no entran en `postIds`, `items` ni `expenseSummary`. Compatibilidad transitoria: el cliente actual las ignora hasta T63.
 
@@ -403,13 +406,14 @@ Ejemplo completo con un post vinculado a actividad, transporte y otro post; su g
       "id": "000000000000000000000005", "tripId": "000000000000000000000001", "destinationId": "000000000000000000000003",
       "direction": "outbound", "type": "car", "departurePlace": "Origen", "arrivalPlace": "Córdoba",
       "departureAt": "2026-09-25T08:00:00.123Z", "arrivalAt": "2026-09-25T10:00:00.456Z",
-      "costPerPerson": null, "details": {}, "postIds": ["000000000000000000000007"]
+      "costPerPerson": null, "costCurrency": null, "details": {}, "postIds": ["000000000000000000000007"]
     }, {
       "id": "00000000000000000000000b", "tripId": "000000000000000000000001", "destinationId": "000000000000000000000003",
       "direction": "return", "type": "car", "departurePlace": "Córdoba", "arrivalPlace": "Origen",
       "departureAt": "2026-09-25T18:00:00.789Z", "arrivalAt": "2026-09-25T20:00:00.123Z",
-      "costPerPerson": null, "details": {}, "postIds": []
+      "costPerPerson": null, "costCurrency": null, "details": {}, "postIds": []
     }],
+    "transportCostTotals": { "byCurrency": [], "withoutCurrency": { "transportCount": 0 } },
     "activities": [{
       "id": "000000000000000000000006", "tripId": "000000000000000000000001", "dayId": "000000000000000000000004",
       "title": "Paseo", "description": null, "scheduledAt": "2026-09-25T12:00:00.000Z", "mapsUrl": null,

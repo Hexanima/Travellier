@@ -35,7 +35,7 @@ describe("persisted itinerary transactions", () => {
   });
   const context = () => ({ authenticatedUserId: domainId(actor), tripId: domainId(trip), destinationId: domainId(destination) });
   const input = (direction: "outbound" | "return") => ({ ...context(), direction, type: "car" as const,
-    departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: null, details: {},
+    departurePlace: "Origen", arrivalPlace: "Destino", costPerPerson: null, costCurrency: null, details: {},
     departureAt: new Date(direction === "outbound" ? "2026-09-25T08:00:00.123Z" : "2026-09-26T18:00:00.789Z"),
     arrivalAt: new Date(direction === "outbound" ? "2026-09-25T10:00:00.456Z" : "2026-09-26T20:00:00.123Z") });
   const days = () => database.collection("itineraryDays").find({ tripId: trip }).sort({ order: 1 }).toArray();
@@ -252,7 +252,7 @@ describe("persisted itinerary transactions", () => {
       const repository = createMongoTripJourneyRepository(database);
       const listed = await repository.listItineraryDays(domainId(trip));
       expect(listed.ok && listed.value.map((day) => day.type)).toEqual(["transit_out", "activity", "activity", "transit_return"]);
-      expect((await api.updateTransport!({ ...context(), transportId: outbound.id, costPerPerson: 7 })).ok).toBe(true);
+      expect((await api.updateTransport!({ ...context(), transportId: outbound.id, costPerPerson: 7, costCurrency: "ARS" })).ok).toBe(true);
       expect(await database.collection("itineraryDays").findOne({ _id: legacy._id })).toEqual(legacy);
       expect(await repository.listItineraryDays(domainId(trip))).toMatchObject({ ok: true });
       expect((await days()).filter((day) => day.type !== "arrival")).toHaveLength(4);
@@ -407,11 +407,11 @@ describe("persisted itinerary transactions", () => {
     if (!outbound.ok) throw new Error("Creation failed");
     const patches = await Promise.all([
       api.updateTransport!({ ...context(), transportId: outbound.value.id, arrivalPlace: "Nuevo destino" }),
-      api.updateTransport!({ ...context(), transportId: outbound.value.id, costPerPerson: 42, departureAt: new Date("2026-09-24T20:00:00Z") }),
+      api.updateTransport!({ ...context(), transportId: outbound.value.id, costPerPerson: 42, costCurrency: "USD", departureAt: new Date("2026-09-24T20:00:00Z") }),
     ]);
     expect(patches.every((result) => result.ok)).toBe(true);
     expect(await database.collection("transports").findOne({ _id: new ObjectId(outbound.value.id) }))
-      .toMatchObject({ arrivalPlace: "Nuevo destino", costPerPerson: 42, departureAt: new Date("2026-09-24T20:00:00Z") });
+      .toMatchObject({ arrivalPlace: "Nuevo destino", costPerPerson: 42, costCurrency: "USD", departureAt: new Date("2026-09-24T20:00:00Z") });
     expect(await days()).toHaveLength(5);
     expect((await days()).map((day) => day.order)).toEqual([1, 2, 3, 4, 5]);
   });

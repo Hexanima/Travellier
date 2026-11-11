@@ -11,7 +11,7 @@ const id = (number: number): ObjectId => {
 const tripId = id(1), destinationId = id(2), actorId = id(3);
 const outbound: Transport = { id: id(4), tripId, destinationId, direction: "outbound", type: "car",
   departurePlace: "Origen", departureAt: new Date("2026-09-25T08:00:00.123Z"), arrivalPlace: "Destino",
-  arrivalAt: new Date("2026-09-25T10:00:00.456Z"), costPerPerson: null, details: {} };
+  arrivalAt: new Date("2026-09-25T10:00:00.456Z"), costPerPerson: null, costCurrency: null, details: {} };
 const returning: Transport = { ...outbound, id: id(5), direction: "return",
   departureAt: new Date("2026-09-26T18:00:00.789Z"), arrivalAt: new Date("2026-09-26T20:00:00.123Z") };
 
@@ -96,7 +96,7 @@ describe("transport itinerary persistence", () => {
     expect(state.days).toHaveLength(5);
     expect(state.days.slice(1).map((day) => day.id)).toEqual(previous);
     const expanded = structuredClone(state.days);
-    await update({ departureAt: new Date("2026-09-24T20:00:00Z"), costPerPerson: 42 });
+    await update({ departureAt: new Date("2026-09-24T20:00:00Z"), costPerPerson: 42, costCurrency: "ARS" });
     expect(state.days).toEqual(expanded);
   });
 
@@ -147,7 +147,7 @@ describe("transport itinerary persistence", () => {
       state.transports = state.transports.map((item) => item.id === returnTransport.id
         ? { ...item, departureAt: new Date("2026-09-26T01:00:00Z"), arrivalAt: new Date("2026-09-26T03:00:00Z") } : item);
       const snapshot = structuredClone(state);
-      expect(await update({ costPerPerson: 1 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await update({ costPerPerson: 1, costCurrency: "ARS" })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
       expect(state).toEqual(snapshot);
     });
 
@@ -155,30 +155,30 @@ describe("transport itinerary persistence", () => {
       const departure = returning.departureAt;
       const duration = 90;
       const exact = await withDuration(new Date(departure.getTime() - duration * 60_000), duration, 2);
-      expect(await exact.update({ costPerPerson: 5 })).toMatchObject({ ok: true });
+      expect(await exact.update({ costPerPerson: 5, costCurrency: "ARS" })).toMatchObject({ ok: true });
       const late = await withDuration(new Date(departure.getTime() - duration * 60_000 + 1), duration, 2);
       const previous = structuredClone(late.state);
-      expect(await late.update({ costPerPerson: 5 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await late.update({ costPerPerson: 5, costCurrency: "ARS" })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
       expect(late.state).toEqual(previous);
     });
 
     it("keeps the previous behavior for activities without duration", async () => {
       const { state, update } = await withDuration(new Date("2026-09-26T17:00:00Z"), undefined, 2);
-      expect(await update({ costPerPerson: 1 } as never)).toMatchObject({ ok: true });
+      expect(await update({ costPerPerson: 1, costCurrency: "ARS" } as never)).toMatchObject({ ok: true });
       expect(state.activities).toHaveLength(1);
     });
 
     it("accepts a duration crossing midnight UTC across contiguous activity slices", async () => {
       const { state, update } = await withDuration(new Date("2026-09-25T23:00:00Z"), 2 * HOUR, 1);
       expect(state.days.filter((day) => day.type === "activity")).toHaveLength(2);
-      expect(await update({ costPerPerson: 9 })).toMatchObject({ ok: true });
+      expect(await update({ costPerPerson: 9, costCurrency: "ARS" })).toMatchObject({ ok: true });
     });
 
     it("does not modify activities nor kept slice ids on success", async () => {
       const { state, update } = await withDuration(new Date("2026-09-25T12:00:00Z"), HOUR, 1);
       const activities = structuredClone(state.activities);
       const ids = state.days.map((day) => day.id);
-      expect(await update({ costPerPerson: 11 })).toMatchObject({ ok: true });
+      expect(await update({ costPerPerson: 11, costCurrency: "ARS" })).toMatchObject({ ok: true });
       expect(state.activities).toEqual(activities);
       expect(state.days.map((day) => day.id)).toEqual(ids);
     });
@@ -260,7 +260,7 @@ describe("transport itinerary persistence", () => {
     expect((await updateJourneyTransport.execute(deps, { authenticatedUserId: actorId, tripId, destinationId,
       transportId: state.transports.find((transport) => transport.direction === "return")!.id, departureAt })).ok).toBe(true);
     const activity = addActivity(state.days.find((day) => day.type === "activity")!.id, departureAt);
-    expect((await update({ costPerPerson: 42 })).ok).toBe(true);
+    expect((await update({ costPerPerson: 42, costCurrency: "ARS" })).ok).toBe(true);
     expect(state.activities[0]).toEqual(activity);
   });
 
@@ -268,11 +268,11 @@ describe("transport itinerary persistence", () => {
     const { state, configure, update, addActivity } = fixture();
     await configure();
     const activity = addActivity(state.days[2]!.id, state.days[2]!.startsAt);
-    expect((await update({ costPerPerson: 42 })).ok).toBe(true);
+    expect((await update({ costPerPerson: 42, costCurrency: "ARS" })).ok).toBe(true);
     expect(state.activities[0]).toEqual(activity);
     state.activities[0]!.dayId = state.days[1]!.id;
     const previous = structuredClone(state);
-    expect(await update({ costPerPerson: 43 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+    expect(await update({ costPerPerson: 43, costCurrency: "ARS" })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
     expect(state).toEqual(previous);
   });
 
@@ -282,7 +282,7 @@ describe("transport itinerary persistence", () => {
       await configure();
       state.activities.push({ dayId: state.days[1]!.id, scheduledAt } as never);
       const previous = structuredClone(state);
-      expect(await update({ costPerPerson: 42 })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
+      expect(await update({ costPerPerson: 42, costCurrency: "ARS" })).toMatchObject({ ok: false, error: { tag: "ItineraryConflictError" } });
       expect(state).toEqual(previous);
     },
   );

@@ -12,7 +12,7 @@ const time = (hour: number) => new Date(`2026-09-25T${String(hour).padStart(2, "
 function fixture() {
   const day = { id: id(4), tripId, destinationId, date: time(0), type: "activity" as const, startsAt: time(10), endsAt: time(18), order: 2 };
   const transport = { id: id(5), tripId, destinationId, direction: "outbound" as const, type: "car" as const,
-    departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, details: {} };
+    departurePlace: "Origen", arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, costCurrency: "ARS" as const, details: {} };
   const activity = { id: id(6), tripId, dayId: day.id, title: "Paseo", description: null, scheduledAt: time(12), durationMinutes: null, mapsUrl: null,
     createdBy: actor, createdAt: time(17) };
   const post = { id: id(7), tripId, dayId: day.id, authorId: actor, description: null, mapsUrl: null,
@@ -494,5 +494,61 @@ describe("getTripItinerary expense projection (T81)", () => {
     f.snapshot.expenses = [expense(23, id(10), 1), expense(22, id(12), 1), expense(21, id(11), 1)];
     const value = await run(f);
     expect(value.expenses.map((e) => e.expenseId)).toEqual([id(21), id(22), id(23)]);
+  });
+
+  describe("transport cost totals", () => {
+    const withCosts = (f: ReturnType<typeof fixture>) => {
+      const other = id(30);
+      f.snapshot.destinations.push({ id: other, tripId, name: "Mendoza", order: 2, createdAt: time(0) });
+      const extra = (n: number, destinationId: domain.ObjectId, costPerPerson: number | null, costCurrency: domain.Currency | null) =>
+        ({ ...f.transport, id: id(n), destinationId, costPerPerson, costCurrency });
+      f.snapshot.transports = [
+        { ...f.transport, costPerPerson: 100.1, costCurrency: "USD" },
+        extra(31, f.transport.destinationId, 50, "ARS"),
+        extra(32, other, 0.2, "USD"),
+        extra(33, other, 10, "EUR"),
+        extra(34, other, null, null),
+      ] as never;
+    };
+
+    it("totals several destinations with mixed currencies, separate from expenses", async () => {
+      const f = fresh();
+      withCosts(f);
+      const value = await run(f);
+      expect(value.transportCostTotals).toEqual({
+        byCurrency: [
+          { currency: "ARS", totalCents: 5000, transportCount: 1 },
+          { currency: "EUR", totalCents: 1000, transportCount: 1 },
+          { currency: "USD", totalCents: 10030, transportCount: 2 },
+        ],
+        withoutCurrency: { transportCount: 0 },
+      });
+      expect(value.transports.map((t) => t.costCurrency)).toEqual(["USD", "ARS", "USD", "EUR", null]);
+    });
+
+    it("counts a previous cost without currency apart and does not sum it", async () => {
+      const f = fresh();
+      withCosts(f);
+      (f.snapshot.transports[1] as { costCurrency: null }).costCurrency = null;
+      const value = await run(f);
+      expect(value.transportCostTotals.withoutCurrency).toEqual({ transportCount: 1 });
+      expect(value.transportCostTotals.byCurrency.map((t) => t.currency)).toEqual(["EUR", "USD"]);
+    });
+
+    it("leaves expenses and the expense summary identical with and without transport costs", async () => {
+      const withoutCosts = fresh();
+      mk(withoutCosts, 10, { activityId: withoutCosts.activity.id });
+      withoutCosts.snapshot.expenses = [expense(20, id(10), 12.5, "USD")];
+      withoutCosts.snapshot.transports = [{ ...withoutCosts.transport, costPerPerson: null, costCurrency: null }];
+      const withTransports = fresh();
+      mk(withTransports, 10, { activityId: withTransports.activity.id });
+      withTransports.snapshot.expenses = [expense(20, id(10), 12.5, "USD")];
+      withCosts(withTransports);
+      const [a, b] = [await run(withoutCosts), await run(withTransports)];
+      expect(b.expenses).toEqual(a.expenses);
+      expect(b.expenseSummary).toEqual(a.expenseSummary);
+      expect(b.days.map((d) => d.expenseSummary)).toEqual(a.days.map((d) => d.expenseSummary));
+      expect(a.transportCostTotals).toEqual({ byCurrency: [], withoutCurrency: { transportCount: 0 } });
+    });
   });
 });

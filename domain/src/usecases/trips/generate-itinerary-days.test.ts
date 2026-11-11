@@ -15,7 +15,7 @@ const destination = (value = 2, order = 1): TripDestination => ({
 const transport = (value: number, destinationId: ObjectId, direction: Transport["direction"],
   departureAt: string, arrivalAt: string): Transport => ({
   id: id(value), tripId, destinationId, direction, type: "car", departurePlace: "Origin", arrivalPlace: "Destination",
-  departureAt: new Date(departureAt), arrivalAt: new Date(arrivalAt), costPerPerson: null, details: {},
+  departureAt: new Date(departureAt), arrivalAt: new Date(arrivalAt), costPerPerson: null, costCurrency: null, details: {},
 });
 const day = (destinationId: ObjectId, type: string, date: string, startsAt: string, endsAt: string, order: number) => ({
   tripId, destinationId, type, date: new Date(date), startsAt: new Date(startsAt), endsAt: new Date(endsAt), order,
@@ -280,5 +280,13 @@ describe("generateItineraryDays", () => {
       day(id(2), "activity", "2026-09-25T00:00:00Z", "2026-09-25T01:00:00Z", "2026-09-25T05:00:00Z", 3),
       day(id(2), "transit_return", "2026-09-25T00:00:00Z", "2026-09-25T05:00:00Z", "2026-09-25T07:00:00Z", 4),
     ] });
+  });
+});
+
+describe("generateItineraryDays with previous costs", () => {
+  it("regenerates over a stored cost without currency", async () => {
+    const [out, back] = singleDay();
+    const result = await generateItineraryDays.execute({}, { ...input(), transports: [{ ...out!, costPerPerson: 500, costCurrency: null }, back!] });
+    expect(result.ok).toBe(true);
   });
 });

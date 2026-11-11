@@ -56,9 +56,9 @@ export const itineraryFixture = () => {
     destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: time(0) }], days,
     transports: [
       { id: itineraryId(6), tripId, destinationId, direction: "outbound", type: "car", departurePlace: "Buenos Aires",
-        arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, details: {}, postIds: [itineraryId(11)] },
+        arrivalPlace: "Córdoba", departureAt: time(8), arrivalAt: time(10), costPerPerson: 999, costCurrency: "ARS", details: {}, postIds: [itineraryId(11)] },
       { id: itineraryId(7), tripId, destinationId, direction: "return", type: "car", departurePlace: "Córdoba",
-        arrivalPlace: "Buenos Aires", departureAt: time(18), arrivalAt: time(20), costPerPerson: null, details: {}, postIds: [] },
+        arrivalPlace: "Buenos Aires", departureAt: time(18), arrivalAt: time(20), costPerPerson: null, costCurrency: null, details: {}, postIds: [] },
     ], activities: [activity(8, 12, "Paseo por el centro"), activity(9, 14, "Visita al museo")], posts,
     unplacedPosts: [] as typeof posts,
     expenseSummary: { ...days[1].expenseSummary, outsideItinerary: { byCurrency: [] as typeof days[1]["expenseSummary"]["byCurrency"],

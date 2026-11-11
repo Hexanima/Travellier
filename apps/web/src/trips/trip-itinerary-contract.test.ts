@@ -17,7 +17,7 @@ const ids = { outDay: id(4), activityDay: id(5), returnDay: id(6), outbound: id(
 
 function snapshot(): domain.TripItinerarySnapshot {
   const base = { tripId, destinationId, date: at(0) };
-  const transport = { tripId, destinationId, type: "car" as const, departurePlace: "Origen", arrivalPlace: "Córdoba", costPerPerson: 10, details: {} };
+  const transport = { tripId, destinationId, type: "car" as const, departurePlace: "Origen", arrivalPlace: "Córdoba", costPerPerson: 10, costCurrency: "ARS" as const, details: {} };
   const post = (n: number, createdAt: Date, links: Partial<{ activityId: domain.ObjectId; transportId: domain.ObjectId; parentPostId: domain.ObjectId }> = {}) => ({
     id: id(n), tripId, dayId: ids.activityDay, authorId: actor, description: `post ${n}`, mapsUrl: null,
     activityId: links.activityId ?? null, transportId: links.transportId ?? null, parentPostId: links.parentPostId ?? null, createdAt,
@@ -94,6 +94,22 @@ describe("itinerary contract with the real read model", () => {
   it("is accepted by the client validator, so no valid response is rejected", async () => {
     const { itinerary, result } = await read();
     expect(result).toEqual({ ok: true, value: itinerary });
+  });
+  it("accepts transport costs with currency and a previous cost without one, and keeps the cost totals", async () => {
+    const f = snapshot();
+    f.transports = [{ ...f.transports[0]!, costPerPerson: 10, costCurrency: "USD" }, { ...f.transports[1]!, costPerPerson: 5, costCurrency: null }];
+    const { itinerary, result } = await read(f);
+    expect(result).toEqual({ ok: true, value: itinerary });
+    expect(itinerary.transports.map((transport) => transport.costCurrency)).toEqual(["USD", null]);
+    expect((itinerary as unknown as { transportCostTotals: unknown }).transportCostTotals).toEqual({
+      byCurrency: [{ currency: "USD", totalCents: 1000, transportCount: 1 }], withoutCurrency: { transportCount: 1 },
+    });
+  });
+  it("rejects a transport with an unknown currency", async () => {
+    const itinerary = await respond();
+    itinerary.transports[0] = { ...itinerary.transports[0]!, costCurrency: "BRL" } as never;
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { itinerary } });
+    expect(await createTripItineraryApi({ get }).get(itinerary.tripId)).toEqual({ ok: false, error: { kind: "server" } });
   });
   it.each(["UTC", "America/Argentina/Buenos_Aires"])("projects every post exactly once in %s", async (timeZone) => {
     const { result } = await read();

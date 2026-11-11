@@ -119,7 +119,7 @@ describe("projectPostRoots", () => {
       destinations: [{ id: destinationId, tripId, name: "Córdoba", order: 1, createdAt: at(0) }],
       days: [day, { ...day, id: id(5), type: "transit_out", startsAt: at(8), endsAt: at(10), order: 1 }],
       transports: [{ id: transportId, tripId, destinationId, direction: "outbound", type: "car", departurePlace: "Origen", arrivalPlace: "Córdoba",
-        departureAt: at(8), arrivalAt: at(10), costPerPerson: 1, details: {} } as never],
+        departureAt: at(8), arrivalAt: at(10), costPerPerson: 1, costCurrency: "ARS", details: {} } as never],
       activities: [activity(activityA), activity(activityB)], posts, expenses: [] };
     const itinerary = await getTripItinerary.execute({
       members: { findByTripAndUser: async () => ok({ id: id(9), tripId, userId: actor, role: "participant" as const, joinedAt: at(0) }) },

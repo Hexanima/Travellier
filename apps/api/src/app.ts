@@ -491,10 +491,14 @@ const transportInstant = (value: string): Date => {
   return new Date(value);
 };
 
+/** Absent or null is allowed; a string (even outside ARS/EUR/USD) reaches the domain, which answers 422. */
+const optionalCurrencyText = (value: unknown) => value === undefined || value === null || typeof value === "string";
+
 const transportPayload = (payload: Record<string, unknown>): JourneyTransportFields | undefined => {
   if (!isString(payload.direction) || !isString(payload.type) || !isString(payload.departurePlace) ||
     !isString(payload.departureAt) || !isString(payload.arrivalPlace) || !isString(payload.arrivalAt) ||
     !(payload.costPerPerson === null || typeof payload.costPerPerson === "number") ||
+    !optionalCurrencyText(payload.costCurrency) ||
     typeof payload.details !== "object" || payload.details === null || Array.isArray(payload.details)) return undefined;
   return {
     direction: payload.direction as JourneyTransportFields["direction"],
@@ -504,6 +508,7 @@ const transportPayload = (payload: Record<string, unknown>): JourneyTransportFie
     arrivalPlace: payload.arrivalPlace,
     arrivalAt: transportInstant(payload.arrivalAt),
     costPerPerson: payload.costPerPerson,
+    ...(payload.costCurrency === undefined ? {} : { costCurrency: payload.costCurrency as JourneyTransportFields["costCurrency"] }),
     details: transportDetails(payload.details as Record<string, unknown>),
   };
 };
@@ -511,12 +516,13 @@ const transportPayload = (payload: Record<string, unknown>): JourneyTransportFie
 const transportUpdatePayload = (
   payload: Record<string, unknown>,
 ): Omit<UpdateJourneyTransportPayload, "authenticatedUserId" | "tripId" | "destinationId" | "transportId"> | undefined => {
-  const fields = ["direction", "type", "departurePlace", "departureAt", "arrivalPlace", "arrivalAt", "costPerPerson", "details"] as const;
+  const fields = ["direction", "type", "departurePlace", "departureAt", "arrivalPlace", "arrivalAt", "costPerPerson", "costCurrency", "details"] as const;
   const has = (field: typeof fields[number]) => Object.hasOwn(payload, field);
   if (!fields.some(has) ||
     (["direction", "type", "departurePlace", "departureAt", "arrivalPlace", "arrivalAt"] as const)
       .some((field) => has(field) && !isString(payload[field])) ||
     (has("costPerPerson") && !(payload.costPerPerson === null || typeof payload.costPerPerson === "number")) ||
+    (has("costCurrency") && !(payload.costCurrency === null || typeof payload.costCurrency === "string")) ||
     (has("details") && (typeof payload.details !== "object" || payload.details === null || Array.isArray(payload.details)))) return undefined;
   return {
     ...(has("direction") ? { direction: payload.direction as JourneyTransportFields["direction"] } : {}),
@@ -526,6 +532,7 @@ const transportUpdatePayload = (
     ...(has("arrivalPlace") ? { arrivalPlace: payload.arrivalPlace as string } : {}),
     ...(has("arrivalAt") ? { arrivalAt: transportInstant(payload.arrivalAt as string) } : {}),
     ...(has("costPerPerson") ? { costPerPerson: payload.costPerPerson as number | null } : {}),
+    ...(has("costCurrency") ? { costCurrency: payload.costCurrency as JourneyTransportFields["costCurrency"] } : {}),
     ...(has("details") ? { details: transportDetails(payload.details as Record<string, unknown>) } : {}),
   };
 };

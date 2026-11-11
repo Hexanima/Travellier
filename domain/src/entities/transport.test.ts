@@ -19,6 +19,7 @@ const common = {
   arrivalPlace: "Bariloche",
   arrivalAt: new Date("2026-09-25T08:00:00.000Z"),
   costPerPerson: null,
+  costCurrency: null,
 };
 
 const local = {
@@ -51,6 +52,7 @@ describe("createTransport", () => {
       departurePlace: "Terminal de Retiro",
       arrivalPlace: "Terminal Bariloche",
       costPerPerson: 120000,
+      costCurrency: "ARS",
       details: { company: "Via Bariloche" },
     };
     expect(createTransport(input)).toEqual({ ok: true, value: input });
@@ -115,10 +117,49 @@ describe("createTransport", () => {
     issue({ ...local, costPerPerson }, "costPerPerson", "invalid");
   });
 
+  it.each(["ARS", "EUR", "USD"] as const)("accepts a cost in %s", (costCurrency) => {
+    const input = { ...local, costPerPerson: 1500.5, costCurrency };
+    expect(createTransport(input)).toEqual({ ok: true, value: input });
+  });
+
+  it.each([undefined, null])("rejects a cost without currency (%s)", (costCurrency) => {
+    issue({ ...local, costPerPerson: 100, costCurrency }, "costCurrency", "required");
+  });
+
+  it.each(["BRL", "usd", 840, ""])("rejects an invalid currency %s", (costCurrency) => {
+    issue({ ...local, costPerPerson: 100, costCurrency }, "costCurrency", "invalid_currency");
+  });
+
+  it("rejects a currency without cost", () => {
+    issue({ ...local, costPerPerson: null, costCurrency: "ARS" }, "costCurrency", "invalid");
+  });
+
+  it.each([undefined, null])("accepts no cost and no currency (%s)", (costCurrency) => {
+    const input = { ...local, costPerPerson: null, costCurrency };
+    expect(createTransport(input as CreateTransportInput)).toEqual({ ok: true, value: input });
+  });
+
   it.each([
     [{ ...local, type: "train" }, "type"],
     [{ ...local, direction: "transfer" }, "direction"],
   ])("rejects an unknown discriminator", (input, field) => {
     issue(input, field as string, "invalid");
+  });
+});
+
+describe("readTransport costs", () => {
+  it.each([undefined, null])("reads a previous cost without currency (%s)", (costCurrency) => {
+    const input = { ...local, costPerPerson: 100, costCurrency } as CreateTransportInput;
+    expect(readTransport(input)).toEqual({ ok: true, value: input });
+  });
+
+  it("reads a cost with currency", () => {
+    const input = { ...local, costPerPerson: 100, costCurrency: "EUR" as const };
+    expect(readTransport(input)).toEqual({ ok: true, value: input });
+  });
+
+  it("rejects a stored invalid currency", () => {
+    expect(readTransport({ ...local, costPerPerson: 100, costCurrency: "BRL" } as unknown as CreateTransportInput))
+      .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency", code: "invalid_currency" }] } });
   });
 });

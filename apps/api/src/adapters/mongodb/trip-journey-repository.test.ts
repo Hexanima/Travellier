@@ -39,7 +39,7 @@ describe("Mongo Trip journey repository", () => {
   const destination = (trip: ObjectId, name: string): TripDestination => ({ id: domainId(new ObjectId()), tripId: domainId(trip), name, order: 1, createdAt: new Date() });
   const transport = (trip: ObjectId, target: ObjectId): Transport => ({ id: domainId(new ObjectId()), tripId: domainId(trip), destinationId: domainId(target),
     direction: "outbound", type: "car", departurePlace: "Origen", departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "Destino",
-    arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: null, details: {} });
+    arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: null, costCurrency: null, details: {} });
 
   it("appends concurrent destinations with distinct contiguous orders", async () => {
     const repository = createMongoTripJourneyRepository(database);
@@ -81,6 +81,37 @@ describe("Mongo Trip journey repository", () => {
     const repository = createMongoTripJourneyRepository(database);
     expect(await repository.insertTransport(transport(tripId, firstId))).toMatchObject({ ok: true });
     expect(await repository.insertTransport(transport(tripId, firstId))).toMatchObject({ ok: false, error: { tag: "JourneyConflictError" } });
+  });
+
+  describe("transport cost currency", () => {
+    it("stores and reads the cost currency, also after replacing", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const priced: Transport = { ...transport(tripId, firstId), costPerPerson: 120.5, costCurrency: "EUR" };
+      expect(await repository.insertTransport(priced)).toMatchObject({ ok: true });
+      expect(await database.collection("transports").findOne({ _id: new ObjectId(priced.id) })).toMatchObject({ costPerPerson: 120.5, costCurrency: "EUR" });
+      expect(await repository.findTransport(domainId(tripId), domainId(firstId), priced.id)).toMatchObject({ ok: true, value: { costCurrency: "EUR" } });
+      expect(await repository.replaceTransport({ ...priced, costCurrency: "USD" })).toMatchObject({ ok: true, value: { costCurrency: "USD" } });
+      expect(await repository.listTransports(domainId(tripId), domainId(firstId))).toMatchObject({ ok: true, value: [{ costCurrency: "USD" }] });
+    });
+
+    it("reads a previous document without the field as null and does not write it", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const _id = new ObjectId();
+      const stored = { _id, tripId, destinationId: firstId, direction: "outbound", type: "car", departurePlace: "A",
+        departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "B", arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: 80, details: {} };
+      await database.collection("transports").insertOne(stored);
+      expect(await repository.findTransport(domainId(tripId), domainId(firstId), domainId(_id))).toMatchObject({ ok: true, value: { costPerPerson: 80, costCurrency: null } });
+      expect(await repository.listTransports(domainId(tripId), domainId(firstId))).toMatchObject({ ok: true, value: [{ costCurrency: null }] });
+      expect(await database.collection("transports").findOne({ _id })).toEqual(stored);
+    });
+
+    it("reads an unknown stored currency as null", async () => {
+      const repository = createMongoTripJourneyRepository(database);
+      const _id = new ObjectId();
+      await database.collection("transports").insertOne({ _id, tripId, destinationId: firstId, direction: "outbound", type: "car", departurePlace: "A",
+        departureAt: new Date("2026-09-24T08:00:00Z"), arrivalPlace: "B", arrivalAt: new Date("2026-09-24T09:00:00Z"), costPerPerson: 80, costCurrency: "BRL", details: {} });
+      expect(await repository.findTransport(domainId(tripId), domainId(firstId), domainId(_id))).toMatchObject({ ok: true, value: { costCurrency: null } });
+    });
   });
 
   describe("legacy arrival rows and activity references", () => {
