@@ -1,5 +1,5 @@
 // Shared synthetic itinerary for client tests; IDs and timestamps follow the HTTP contract.
-import { attributeExpense, totalizeExpenses, type ObjectId } from "app-domain";
+import { attributeExpense, totalizeExpenses, transportCostTotals, type ObjectId } from "app-domain";
 import { createTripItineraryApi, type TripItineraryResponse } from "./trip-itinerary-api.js";
 export const itineraryId = (n: number) => n.toString(16).padStart(24, "0");
 type LinkablePost = { id: string; activityId: string | null; transportId: string | null; parentPostId: string | null;
@@ -14,6 +14,17 @@ export const linkPost = <T extends LinkablePost>(post: T, links: { activityId?: 
   post.context = { parentPostId: post.parentPostId, rootPostId: links.rootPostId ?? post.parentPostId ?? post.id, rootActivityId, rootTransportId,
     placement: rootActivityId !== null ? "activity" : rootTransportId !== null ? "transport" : "independent" };
   return post;
+};
+/** Totals as the backend computes them from the transports (per currency, without converting); a cost without currency is only counted. */
+export const transportTotalsOf = (transports: readonly { costPerPerson: number | null; costCurrency?: "ARS" | "EUR" | "USD" | null }[]): TripItineraryResponse["transportCostTotals"] =>
+  transportCostTotals(transports.map((transport) => ({ costPerPerson: transport.costPerPerson, costCurrency: transport.costCurrency ?? null })));
+/** Variant with a previous transport cost that has no currency: it appears in `withoutCurrency` and adds to no total. */
+export const withUnindicatedTransportCost = <T extends { transports: { direction: string; costPerPerson: number | null; costCurrency?: "ARS" | "EUR" | "USD" | null }[];
+  transportCostTotals: TripItineraryResponse["transportCostTotals"] }>(value: T, amount = 50): T => {
+  const inbound = value.transports.find((transport) => transport.direction === "return")!;
+  inbound.costPerPerson = amount; inbound.costCurrency = null;
+  value.transportCostTotals = transportTotalsOf(value.transports);
+  return value;
 };
 export const itineraryFixture = () => {
   const tripId = itineraryId(1), destinationId = itineraryId(2);
@@ -61,6 +72,7 @@ export const itineraryFixture = () => {
         arrivalPlace: "Buenos Aires", departureAt: time(18), arrivalAt: time(20), costPerPerson: null, costCurrency: null, details: {}, postIds: [] },
     ], activities: [activity(8, 12, "Paseo por el centro"), activity(9, 14, "Visita al museo")], posts,
     unplacedPosts: [] as typeof posts,
+    transportCostTotals: { byCurrency: [{ currency: "ARS" as "ARS" | "EUR" | "USD", totalCents: 99900, transportCount: 1 }], withoutCurrency: { transportCount: 0 } },
     expenseSummary: { ...days[1].expenseSummary, outsideItinerary: { byCurrency: [] as typeof days[1]["expenseSummary"]["byCurrency"],
       withoutCurrency: { expenseCount: 0 }, expenseCount: 0 } },
     expenses: [{ expenseId: itineraryId(12), postId: itineraryId(10), rootPostId: itineraryId(10), source: "publication" as "activity" | "publication",
@@ -146,6 +158,7 @@ export const settleItinerary = (value: TripItineraryResponse): TripItineraryResp
   for (const day of value.days) day.expenseSummary = wire(totalizeExpenses(attributions.filter((entry) => String(entry.dayId) === day.id)));
   value.expenses = wire(attributions) as unknown as TripItineraryResponse["expenses"];
   value.expenseSummary = wire({ ...totalizeExpenses(attributions), outsideItinerary: totalizeExpenses(attributions.filter((entry) => entry.dayId === null)) });
+  value.transportCostTotals = transportTotalsOf(value.transports);
   return value;
 };
 /** Passes a payload through the real client validator, as the screen would receive it over HTTP. */

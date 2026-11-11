@@ -49,6 +49,8 @@ const count = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
 const currencies = ["ARS", "EUR", "USD"];
 const currencyTotal = (v: unknown) => record(v) && currencies.includes(v.currency as string) && count(v.totalCents) && count(v.expenseCount);
 const totals = (v: unknown) => record(v) && list(v.byCurrency, currencyTotal) && record(v.withoutCurrency) && count(v.withoutCurrency.expenseCount);
+const transportTotal = (v: unknown) => record(v) && currencies.includes(v.currency as string) && count(v.totalCents) && count(v.transportCount);
+const transportTotals = (v: unknown) => record(v) && list(v.byCurrency, transportTotal) && record(v.withoutCurrency) && count(v.withoutCurrency.transportCount);
 const summary = (v: unknown) => totals(v) && count((v as RecordValue).expenseCount);
 const tripSummary = (v: unknown) => summary(v) && summary((v as RecordValue).outsideItinerary);
 const attribution = (v: unknown) => record(v) && id(v.expenseId) && id(v.postId) && id(v.rootPostId) && ["activity", "publication"].includes(v.source as string) &&
@@ -79,7 +81,8 @@ const post = (v: unknown) => entity(v) && (v.dayId === undefined || nullableId(v
 const transport = (v: unknown) => {
   if (!entity(v) || !id(v.destinationId) || !timestamp(v.departureAt) || !timestamp(v.arrivalAt) || !ids(v.postIds)) return false;
   // Reuse transport validation rather than introducing a different set of valid details in the client.
-  return readTransport(journeyTransportForDomain(v)).ok;
+  return (v.costCurrency === undefined || v.costCurrency === null || currencies.includes(v.costCurrency as string)) &&
+    readTransport(journeyTransportForDomain(v)).ok;
 };
 
 const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse => {
@@ -87,7 +90,7 @@ const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse 
       !["register", "balance"].includes(v.expenseMode as string) ||
       !list(v.destinations, destination) || !list(v.days, day) || !list(v.transports, transport) ||
       !list(v.activities, activity) || !list(v.posts, post) || !list(v.unplacedPosts, post) ||
-      !tripSummary(v.expenseSummary) || !list(v.expenses, attribution)) return false;
+      !tripSummary(v.expenseSummary) || !transportTotals(v.transportCostTotals) || !list(v.expenses, attribution)) return false;
   const allPosts = [...v.posts, ...v.unplacedPosts];
   const sets = Object.fromEntries(["destinations", "days", "transports", "activities", "posts"].map((key) => {
     const values = (key === "posts" ? allPosts : v[key]) as RecordValue[];
