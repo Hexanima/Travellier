@@ -160,6 +160,8 @@
   color: var(--ui-color-accent);
 }
 
+.pull-to-refresh__status:empty { margin: 0; }
+
 .ui-spinner {
   width: 1em;
   height: 1em;

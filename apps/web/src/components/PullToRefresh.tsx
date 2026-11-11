@@ -8,7 +8,7 @@ export type PullToRefreshProps = { onRefresh: () => Promise<unknown> | void; chi
 /**
  * Pull down at the top of the page to refresh (T121). No package: it reads the touch events itself, only starts with the page at the top (`scrollY === 0`)
  * and one finger, and is cancelled if the page scrolls or the finger goes up. It never blocks scrolling (no `preventDefault`). The pull gesture is not the only
- * way: every listing also has an «Actualizar» button. The state is announced politely in a status region that exists only while pulling or refreshing.
+ * way: every listing also has an «Actualizar» button. The state is announced politely in a status region that is always mounted (live regions inserted together with their text are not announced by some readers): only its text changes, and it takes no space while empty.
  */
 export function PullToRefresh({ onRefresh, children, threshold = pullThresholdPx }: PullToRefreshProps) {
   const [pull, setPull] = useState(0);
@@ -40,7 +40,7 @@ export function PullToRefresh({ onRefresh, children, threshold = pullThresholdPx
 
   const armed = pull >= threshold;
   return <div className="pull-to-refresh" onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={reset}>
-    {refreshing || armed ? <p className="pull-to-refresh__status" role="status" aria-live="polite">{refreshing ? "Actualizando…" : "Soltá para actualizar"}</p> : null}
+    <p className="pull-to-refresh__status" role="status" aria-live="polite">{refreshing ? "Actualizando…" : armed ? "Soltá para actualizar" : ""}</p>
     {children}
   </div>;
 }

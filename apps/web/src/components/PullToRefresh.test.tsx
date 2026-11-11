@@ -65,8 +65,11 @@ describe("PullToRefresh", () => {
     let finish!: () => void;
     const onRefresh = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     const row = await mount(onRefresh);
+    expect(status()).not.toBeNull();
+    expect(status()?.textContent).toBe("");
+    const region = status();
     await touch(row, "touchstart", 100); await touch(row, "touchmove", 140);
-    expect(status()).toBeNull();
+    expect(status()?.textContent).toBe("");
     await touch(row, "touchmove", 190);
     expect(status()?.getAttribute("aria-live")).toBe("polite");
     expect(status()?.textContent).toContain("Soltá para actualizar");
@@ -75,11 +78,12 @@ describe("PullToRefresh", () => {
     await pull(row, 100, 200);
     expect(onRefresh).toHaveBeenCalledTimes(1);
     await act(async () => finish());
-    expect(status()).toBeNull();
+    expect(status()?.textContent).toBe("");
+    expect(status()).toBe(region);
   });
   it("a refresh that fails does not leave the indicator stuck", async () => {
     const row = await mount(async () => { throw new Error("boom"); });
     await pull(row, 100, 200);
-    expect(status()).toBeNull();
+    expect(status()?.textContent).toBe("");
   });
 });
