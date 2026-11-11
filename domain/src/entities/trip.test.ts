@@ -35,6 +35,7 @@ describe("createTripWithAdmin", () => {
           visibility: "private",
           inviteCode: "VIAJE-X7K2",
           expenseMode: "register",
+          ownerId: creatorId,
           createdBy: creatorId,
           createdAt,
         },
@@ -47,6 +48,14 @@ describe("createTripWithAdmin", () => {
         },
       },
     });
+  });
+
+  it("makes the creator the owner and an admin member while keeping createdBy as history", () => {
+    const result = createTripWithAdmin({ tripId, creatorMembershipId: membershipId, creatorId, name: "Patagonia", inviteCode: "VIAJE-X7K2", createdAt });
+    if (!result.ok) throw result.error;
+    expect(result.value.trip.ownerId).toBe(creatorId);
+    expect(result.value.trip.createdBy).toBe(creatorId);
+    expect(result.value.creatorMembership).toMatchObject({ userId: result.value.trip.ownerId, role: "admin" });
   });
 
   it("keeps visibility, expense mode and description without a voting setting", () => {
