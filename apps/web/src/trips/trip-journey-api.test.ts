@@ -41,6 +41,19 @@ describe("createTripJourneyApi", () => {
     expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [legacy] });
     expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: false, error: { kind: "server" } });
   });
+  it("reads a cost with currency and a previous cost without currency, and rejects an unknown currency", async () => {
+    const priced = { ...transport, costCurrency: "USD" };
+    const previous = { ...transport, costCurrency: null };
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, value: { transports: [priced] } })
+      .mockResolvedValueOnce({ ok: true, value: { transports: [previous] } })
+      .mockResolvedValueOnce({ ok: true, value: { transports: [transport] } })
+      .mockResolvedValueOnce({ ok: true, value: { transports: [{ ...transport, costCurrency: "BRL" }] } });
+    const api = createTripJourneyApi({ get, post: vi.fn(), patch: vi.fn() } as never);
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [priced] });
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [previous] });
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: true, value: [transport] });
+    expect(await api.listTransports(tripId, destinationId)).toEqual({ ok: false, error: { kind: "server" } });
+  });
   it("distinguishes an itinerary 409 from a duplicate transport through the HTTP client", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "ItineraryConflictError" } }), { status: 409 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "JourneyConflictError" } }), { status: 409 }));
