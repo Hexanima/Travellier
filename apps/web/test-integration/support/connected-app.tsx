@@ -88,6 +88,8 @@ let go: NavigateFunction = () => undefined;
 function Spy() { go = useNavigate(); const location = useLocation(); here = { path: location.pathname }; return null; }
 export const currentPath = () => here.path;
 export const navigate = (to: string) => act(async () => { void go(to); });
+/** Atras del dispositivo: retrocede una entrada del historial. */
+export const goBack = () => act(async () => { void go(-1); });
 
 export type MountOptions = {
   harness: E2EHarness;
