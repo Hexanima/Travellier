@@ -4,7 +4,7 @@ import { processStorageDeletionJobs } from "app-domain";
 
 import { createMongoPhotoLinkRepository } from "../adapters/mongodb/photo-link-repository.js";
 import { createMongoStorageDeletionJobRepository } from "../adapters/mongodb/storage-deletion-job-repository.js";
-import { E2E_DATABASE_PREFIX, startE2EHarness, type E2EHarness, type HttpResult } from "../../test/e2e-harness.js";
+import { E2E_DATABASE_PREFIX, assertIsolatedEnvironment, startE2EHarness, type E2EHarness, type HttpResult } from "../../test/e2e-harness.js";
 
 /**
  * T103: one chained journey over real HTTP (auth included) against an in-memory MongoDB replica set and fake object storage.
@@ -57,7 +57,10 @@ describe("integrated API journey (T103)", () => {
     expect(await h.db.collection("users").findOne({ _id: new ObjectId(ids.A) }, { projection: { name: 1 } })).toMatchObject({ name: null });
     // The same email cannot register twice (and nothing is written for the second attempt).
     const before = await h.db.collection("users").countDocuments();
-    expect((await h.register("ana@example.com", PASSWORD)).status).toBeGreaterThanOrEqual(400);
+    // Observed: a duplicate email answers 422 RegistrationFailed (generic, does not reveal that the email exists).
+    const duplicate = await h.register("ana@example.com", PASSWORD);
+    expect(duplicate.status, duplicate.text).toBe(422);
+    expect(duplicate.json.error.code).toBe("RegistrationFailed");
     expect(await h.db.collection("users").countDocuments()).toBe(before);
     const login = expectStatus(await h.login("ana@example.com", PASSWORD), 200);
     expect(login.json).toEqual({ accessToken: expect.any(String), refreshToken: expect.any(String) });
@@ -99,6 +102,30 @@ describe("integrated API journey (T103)", () => {
     expect((await call("X", "GET", tripPath())).status).toBe(404);
     expect((await call("X", "POST", "/trips/join", { code: "NO-SUCH-CODE" })).status).toBe(404);
     expect(await h.db.collection("tripMembers").countDocuments({ tripId: new ObjectId(tripId), userId: new ObjectId(ids.X) })).toBe(0);
+  }, 30_000);
+
+  it("manages admins: only the owner names or removes them, an admin who is not the owner cannot expel the owner, and a rejection writes nothing", async () => {
+    const roles = async () => Object.fromEntries((expectStatus(await call("C", "GET", tripPath("/members")), 200).json.members as Array<{ userId: string; role: string }>)
+      .map((m) => [m.userId, m.role]));
+    expect(await roles()).toMatchObject({ [ids.A]: "admin", [ids.B]: "admin", [ids.C]: "participant" });
+    // B is an admin but not the owner: she cannot name, remove admins nor expel the owner. Each rejection aborts the transaction: identical snapshot.
+    const before = await h.snapshot();
+    const names = await call("B", "PUT", tripPath(`/members/${ids.C}/role`), { role: "admin" });
+    expect(names.status, names.text).toBe(403);
+    const removes = await call("B", "PUT", tripPath(`/members/${ids.A}/role`), { role: "participant" });
+    expect(removes.status, removes.text).toBe(403);
+    const expelsOwner = await call("B", "DELETE", tripPath(`/members/${ids.A}`));
+    expect(expelsOwner.status, expelsOwner.text).toBe(403);
+    // A plain participant cannot expel the owner either.
+    expect((await call("C", "DELETE", tripPath(`/members/${ids.A}`))).status).toBe(403);
+    expect(await h.snapshot()).toEqual(before);
+    expect(await roles()).toMatchObject({ [ids.A]: "admin", [ids.B]: "admin", [ids.C]: "participant" });
+    // The owner removes B's admin role: the member list reflects it. Then she names B again so the rest of the journey keeps its state.
+    expectStatus(await call("A", "PUT", tripPath(`/members/${ids.B}/role`), { role: "participant" }), 204);
+    expect(await roles()).toMatchObject({ [ids.A]: "admin", [ids.B]: "participant" });
+    expect((await call("B", "PUT", tripPath(`/members/${ids.C}/role`), { role: "admin" })).status).toBe(403);
+    expectStatus(await call("A", "PUT", tripPath(`/members/${ids.B}/role`), { role: "admin" }), 204);
+    expect(await roles()).toEqual({ [ids.A]: "admin", [ids.B]: "admin", [ids.C]: "participant", [ids.D]: "participant" });
   }, 30_000);
 
   it("derives the itinerary from transports with cost totals per currency and rejects a cost without currency with no writes", async () => {
@@ -267,8 +294,9 @@ describe("integrated API journey (T103)", () => {
     const ghost = await upload("D");
     const before = await data(["postPhotos", "posts"]);
     const refused = await call("D", "PATCH", tripPath(`/posts/${postIds.diego}`), { photos: [{ key: ghost }] });
-    expect(refused.status, refused.text).toBeGreaterThanOrEqual(400);
-    expect(refused.status).toBeLessThan(500);
+    // Observed: 422 ValidationError with field photos[0].key and code not_uploaded.
+    expect(refused.status, refused.text).toBe(422);
+    expect(refused.json.error.fields).toMatchObject([{ field: "photos[0].key", code: "not_uploaded" }]);
     expect(await data(["postPhotos", "posts"])).toEqual(before);
     // Uploaded (simulated PUT to the signed URL) and confirmed through the post.
     h.storage.put(ghost);
@@ -345,7 +373,9 @@ describe("integrated API journey (T103)", () => {
     }
     const comment = expectStatus(await call("C", "POST", tripPath(`/posts/${postIds.root}/comments`), { text: "Qué buena cena" }), 201);
     const like = await call("C", "PUT", tripPath(`/posts/${postIds.root}/like`));
-    expect([200, 204], like.text).toContain(like.status);
+    // Observed: the like toggle answers 200 with the new state and count.
+    expect(like.status, like.text).toBe(200);
+    expect(like.json).toEqual({ like: { liked: true, count: 1 } });
     expect(await held("C")).toEqual(sorted(activityIds.museo, activityIds.paseo));
     const before = { content: await contentState(), balance: await balanceOf("A"), others: (await h.db.collection("activityParticipations")
       .find({ userId: { $ne: new ObjectId(ids.C) } }).sort({ _id: 1 }).toArray()) };
@@ -381,7 +411,10 @@ describe("integrated API journey (T103)", () => {
     expect(refused.json.error.code).toBe("TripOwnerProtectedError");
     // Only the owner transfers; a non-member target is refused. None of this writes.
     expect((await call("B", "POST", tripPath("/transfer-ownership"), { userId: ids.D })).status).toBe(403);
-    expect((await call("A", "POST", tripPath("/transfer-ownership"), { userId: ids.C })).status).toBeGreaterThanOrEqual(400);
+    // Observed: C already left, so the target is not a member: 404 TripMemberNotFoundError.
+    const toFormerMember = await call("A", "POST", tripPath("/transfer-ownership"), { userId: ids.C });
+    expect(toFormerMember.status, toFormerMember.text).toBe(404);
+    expect(toFormerMember.json.error.code).toBe("TripMemberNotFoundError");
     expect(await guarded()).toEqual(before);
     expectStatus(await call("A", "POST", tripPath("/transfer-ownership"), { userId: ids.B }), 204);
     const members = expectStatus(await call("B", "GET", tripPath("/members")), 200).json;
@@ -404,8 +437,9 @@ describe("integrated API journey (T103)", () => {
   it("lets the owner expel a participant with the same cleanup, and the transport currency totals stay intact", async () => {
     expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
     const before = await contentState();
-    // Nobody else expels the owner or acts without being a member.
-    expect((await call("X", "DELETE", tripPath(`/members/${ids.D}`))).status).toBeGreaterThanOrEqual(400);
+    // A non-member cannot expel anyone, and a participant cannot expel the owner (the admin-versus-owner case is in the admin management test).
+    // Observed: a non-member gets 403 Forbidden here (not 404 as on reads).
+    expect((await call("X", "DELETE", tripPath(`/members/${ids.D}`))).status).toBe(403);
     expect((await call("D", "DELETE", tripPath(`/members/${ids.B}`))).status).toBe(403);
     expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
     await withClock(async () => { expectStatus(await call("B", "DELETE", tripPath(`/members/${ids.D}`)), 204); });
@@ -472,11 +506,17 @@ describe("integrated API journey (T103)", () => {
   }, 30_000);
 
   it("ran in isolation: only its own prefixed database exists and no real environment was used", async () => {
-    const names = (await h.client.db().admin().listDatabases()).databases.map((database) => database.name).filter((name) => !["admin", "local", "config"].includes(name));
-    expect(names).toEqual([h.db.databaseName]);
+    // The environment the harness composed (not the developer's shell) is the one the guard accepts: loopback in-memory URI, t103_ database.
+    const harnessEnvironment = { MONGODB_URI: h.replSet.getUri(), MONGODB_DATABASE_NAME: h.db.databaseName };
     expect(h.db.databaseName.startsWith(E2E_DATABASE_PREFIX)).toBe(true);
+    expect(harnessEnvironment.MONGODB_URI).toMatch(/^mongodb:\/\/127\.0\.0\.1:\d+\//);
+    expect(() => assertIsolatedEnvironment(harnessEnvironment)).not.toThrow();
+    // And the same guard refuses the dangerous variants whatever the shell exports (the harness never reads process.env).
+    expect(() => assertIsolatedEnvironment({ ...harnessEnvironment, S3_BUCKET_NAME: "real-bucket" })).toThrow();
+    expect(() => assertIsolatedEnvironment({ ...harnessEnvironment, MONGODB_URI: "mongodb+srv://u:p@cluster.mongodb.net/db" })).toThrow();
+    expect(() => assertIsolatedEnvironment({ ...harnessEnvironment, MONGODB_DATABASE_NAME: "travellier" })).toThrow();
     expect(h.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    expect(process.env.S3_BUCKET_NAME ?? "").toBe("");
+    expect(h.storage.heads.length).toBeGreaterThan(0);
     // Every key the app asked the (fake) storage to sign or inspect belongs to a journey Trip.
     expect(h.storage.heads.every((key) => key.startsWith(`trips/${tripId}/`) || key.startsWith(`trips/${otherTripId}/`))).toBe(true);
   }, 30_000);
