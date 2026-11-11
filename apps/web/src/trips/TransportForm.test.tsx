@@ -329,6 +329,11 @@ describe("TransportForm", () => {
     it("flags a previous cost without currency, leaves the select empty and blocks until one is chosen", async () => {
       const { container, updateTransport } = await render(previous);
       expect(container.textContent).toContain("Moneda sin indicar");
+      const notice = Array.from(container.querySelectorAll('[role="status"]')).find((item) => item.textContent?.includes("Moneda sin indicar"))!;
+      expect(notice).toBeDefined();
+      expect(container.querySelector('[role="alert"]')).toBeNull();
+      expect(notice.id).not.toBe("");
+      expect(container.querySelector('[name="costCurrency"]')?.getAttribute("aria-describedby")).toContain(notice.id);
       expect(container.querySelector('[name="costCurrency"]')).toHaveProperty("value", "");
       await submit(container);
       expect(updateTransport).not.toHaveBeenCalled();

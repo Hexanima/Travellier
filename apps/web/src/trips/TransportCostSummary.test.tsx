@@ -49,6 +49,8 @@ describe("TransportCostSummary", () => {
       transports: [transport("t1", 10, "EUR"), transport("t2", 80.5, null, "return")] });
     const block = container.querySelector("[data-transport-cost-unindicated]")!;
     expect(block.textContent).toContain("Moneda sin indicar");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(block.querySelector('[role="status"]')?.textContent).toContain("Moneda sin indicar");
     expect(block.querySelector('[data-transport-cost-line="t2"]')?.textContent).toBe("Córdoba · Buenos Aires → Córdoba: 80,50");
     expect(block.querySelector('[data-transport-cost-line="t1"]')).toBeNull();
     expect(container.querySelector('[data-transport-currency="EUR"]')?.textContent).toContain("EUR 10,00");

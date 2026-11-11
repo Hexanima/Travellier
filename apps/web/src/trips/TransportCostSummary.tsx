@@ -20,7 +20,7 @@ export function TransportCostSummary({ totals, transports, destinations, heading
     {totals.byCurrency.map((entry) => <p className="itinerary-expense-total" key={entry.currency} data-transport-currency={entry.currency}>
       <strong>{formatCents(entry.totalCents, entry.currency)}</strong> · <span>{entry.transportCount === 1 ? "1 transporte" : `${entry.transportCount} transportes`}</span></p>)}
     {unindicated.length > 0 || totals.withoutCurrency.transportCount > 0 ? <div data-transport-cost-unindicated>
-      <Feedback variant="error">Moneda sin indicar: {totals.withoutCurrency.transportCount === 1 ? "1 transporte tiene" : `${totals.withoutCurrency.transportCount} transportes tienen`} costo sin moneda y no se suma. Editá cada transporte para elegirla.</Feedback>
+      <Feedback variant="error" role="status">Moneda sin indicar: {totals.withoutCurrency.transportCount === 1 ? "1 transporte tiene" : `${totals.withoutCurrency.transportCount} transportes tienen`} costo sin moneda y no se suma. Editá cada transporte para elegirla.</Feedback>
       <ul>{unindicated.map((line) => <li key={line.id} data-transport-cost-line={line.id}>
         {line.destination ? `${line.destination} · ` : ""}{line.route}: {line.amount}</li>)}</ul>
     </div> : null}

@@ -110,6 +110,7 @@ export function SelectField({ children, className, ...props }: SelectFieldProps)
         <select
           {...selectProps}
           {...controlProps}
+          aria-describedby={[selectProps["aria-describedby"], controlProps["aria-describedby"]].filter(Boolean).join(" ") || undefined}
           className={["ui-control", className].filter(Boolean).join(" ")}
         >
           {children}

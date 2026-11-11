@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi } from "./trip-journey-api.js";
@@ -27,6 +27,7 @@ const initialValues = (existing?: JourneyTransport): TransportFormValues => exis
 };
 
 export function TransportForm({ tripId, destinationId, direction, existing, complementary, neighbors, saveCoordinator, journey, onSaved }: Props) {
+  const currencyNoticeId = `${useId()}-currency-notice`;
   const [values, setValues] = useState(() => initialValues(existing));
   const [savedTransport, setSavedTransport] = useState(existing);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -130,14 +131,14 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       {hasCost ? <TextField label="Costo por persona (opcional)" name="costPerPerson" type="number" step="any"
         value={values.costPerPerson} error={errors.costPerPerson} loading={saving}
         onChange={(event) => update("costPerPerson", event.target.value)} /> : null}
-      {hasCost ? <SelectField label="Moneda del costo" name="costCurrency" value={values.costCurrency}
+      {hasCost ? <SelectField label="Moneda del costo" name="costCurrency" aria-describedby={hasCost && missingCurrency ? currencyNoticeId : undefined} value={values.costCurrency}
         error={errors.costCurrency} loading={saving} onChange={(event) => update("costCurrency", event.target.value)}>
         <option value="">Elegí una moneda</option>
         <option value="ARS">Pesos argentinos · ARS</option>
         <option value="EUR">Euros · EUR</option>
         <option value="USD">Dólares · USD</option>
       </SelectField> : null}
-      {hasCost && missingCurrency ? <Feedback variant="error">Moneda sin indicar: este costo se guardó sin moneda. Elegí la moneda para guardar los cambios.</Feedback> : null}
+      {hasCost && missingCurrency ? <Feedback variant="error" role="status" id={currencyNoticeId}>Moneda sin indicar: este costo se guardó sin moneda. Elegí la moneda para guardar los cambios.</Feedback> : null}
       {isUrbanBus ? (
         <fieldset className="journey-steps">
           <legend>Tramos del colectivo</legend>
