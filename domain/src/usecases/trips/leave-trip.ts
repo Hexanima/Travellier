@@ -30,11 +30,11 @@ export const leaveTrip: UseCase<LeaveTripDependencies, LeaveTripPayload, void, T
     const ownerId = await scope.findOwnerId();
     if (!ownerId.ok) return ownerId;
     if (ownerId.value === actorUserId) return err(new TripOwnerProtectedError());
-    // Without an owner who is a member (inconsistent data), an admin leaving could leave the Trip without admin.
+    // Without an owner who is a member and admin (inconsistent data), an admin leaving could leave the Trip without admin.
     if (member.value.role === "admin") {
       const owner = ownerId.value === undefined ? undefined : await scope.findMember(ownerId.value);
       if (owner !== undefined && !owner.ok) return owner;
-      if (owner?.value === undefined) return err(new TripOwnerProtectedError());
+      if (owner?.value === undefined || owner.value.role !== "admin") return err(new TripOwnerProtectedError());
     }
     const removed = await scope.removeMember(member.value.id, actorUserId, [], now());
     if (!removed.ok) return removed;

@@ -21,8 +21,8 @@ const membershipIds = new Map<ObjectId, ObjectId>([
 ]);
 const at = new Date("2026-10-04T12:00:00.789Z");
 
-const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; ownerIsMember?: boolean } = {}) => {
-  const roles = new Map<ObjectId, TripRole>([[owner, "admin"], [admin, "admin"], [participant, "participant"]]);
+const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; ownerIsMember?: boolean; ownerRole?: TripRole } = {}) => {
+  const roles = new Map<ObjectId, TripRole>([[owner, options.ownerRole ?? "admin"], [admin, "admin"], [participant, "participant"]]);
   if (options.ownerIsMember === false) roles.delete(owner);
   const events: string[] = [];
   const removeMember = vi.fn(async (...args: [membershipId: ObjectId, userId: ObjectId, notifications: unknown, at: Date]): Promise<Result<boolean>> => {
@@ -89,6 +89,26 @@ describe("leaveTrip", () => {
       expect(await leave(participantCase, participant)).toEqual({ ok: true, value: undefined });
       expect(participantCase.removeMember).toHaveBeenCalledTimes(1);
     });
+
+  it("rejects an admin when the owner is a member with the participant role (inconsistent data), without writing", async () => {
+    const fake = createFake({ ownerRole: "participant" });
+    expect(await leave(fake, admin)).toMatchObject({ ok: false, error: { tag: "TripOwnerProtectedError" } });
+    expect(fake.removeMember).not.toHaveBeenCalled();
+    expect(fake.now).not.toHaveBeenCalled();
+    expect(fake.roles.has(admin)).toBe(true);
+  });
+
+  it("lets an admin leave when the owner is an admin member", async () => {
+    const fake = createFake({ ownerRole: "admin" });
+    expect(await leave(fake, admin)).toEqual({ ok: true, value: undefined });
+    expect(fake.removeMember).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a participant leave when the owner has the participant role", async () => {
+    const fake = createFake({ ownerRole: "participant" });
+    expect(await leave(fake, participant)).toEqual({ ok: true, value: undefined });
+    expect(fake.removeMember).toHaveBeenCalledTimes(1);
+  });
 
   it("propagates port and removal failures", async () => {
     const failure = new UnknownError("database failure");
