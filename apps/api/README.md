@@ -135,7 +135,7 @@ Matriz de permisos y errores:
 | POST | `/trips/:tripId/leave` | — (sin cuerpo; el usuario sale solo del JWT) | 204 |
 
 - Cualquier integrante sale; la confirmación es del cliente (T118). Actor sin membresía, segundo intento o Trip inexistente: 404. El titular recibe 409 `TripOwnerProtectedError` sin escribir nada hasta transferir la titularidad o eliminar el Trip. Id inválido, 400; sin token, 401.
-- Un Trip sin `ownerId` o con titular no integrante bloquea la salida solo a admins (409); los participantes salen.
+- Si el Trip no tiene `ownerId` o su titular no es un integrante con rol `admin` (titular no integrante o con rol `participant`), se bloquea la salida solo a admins (409 `TripOwnerProtectedError`, sin escribir); los participantes salen.
 - Salida y expulsión usan la misma baja (`removeMember`): borra la membresía y, en la misma transacción y bajo el candado del Trip, las participaciones del usuario en actividades del Trip cuyo inicio (`scheduledAt`) es posterior al instante de la baja, sea cual sea su estado (`going`, `not_going`, `pending`) y con su `decisionRequired`. El instante se lee dentro de la transacción. Una actividad que empieza exactamente en ese instante ya inició: su participación se conserva. Las participaciones de actividades ya iniciadas se conservan como registro. No se reasigna a nadie ni se tocan otros usuarios, actividades, posts, fotos, comentarios, likes, pagos ni partes.
 - La salida voluntaria no emite avisos; la expulsión mantiene `member.expelled` solo para el expulsado. El aviso va después de la limpieza (última escritura) y un fallo revierte todo. Sin migraciones: los usuarios expulsados antes de T116 conservan sus participaciones futuras.
 
