@@ -121,4 +121,205 @@ describe("integrated API journey (T103)", () => {
       withoutCurrency: { transportCount: 0 } });
     expect(itinerary.expenseSummary).toMatchObject({ expenseCount: 0, byCurrency: [] });
   }, 30_000);
+
+  const participationOf = async (person: Person, activity: string) =>
+    (await call(person, "GET", activitiesPath(`/${activity}/participation`))).json.participation;
+  const stored = (activity: string, person: Person) =>
+    h.db.collection("activityParticipations").findOne({ activityId: new ObjectId(activity), userId: new ObjectId(ids[person]) });
+  const scheduleState = () => data(["activities", "activityParticipations", "outboxEvents", "posts"]);
+
+  it("marks the author going, answers 409 on a personal conflict without writing and saves everything once confirmed", async () => {
+    const day3 = dayIds["2099-03-03:activity"]!;
+    const museo = expectStatus(await call("A", "POST", activitiesPath(), { dayId: day3, title: "Museo", scheduledAt: "2099-03-03T12:00:00.000Z", durationMinutes: 60 }), 201);
+    activityIds.museo = museo.json.activity.id;
+    expect(museo.json.activity.createdBy).toBe(ids.A);
+    expect(museo.json.participation).toMatchObject({ userId: ids.A, activityId: activityIds.museo, status: "going", decisionRequired: null });
+    // Explicit going by others; the rest start without a response.
+    expect(await participationOf("D", activityIds.museo)).toBeNull();
+    for (const person of ["B", "C"] as const) {
+      const going = expectStatus(await call(person, "PUT", activitiesPath(`/${activityIds.museo}/participation`), { status: "going" }), 200);
+      expect(going.json.participation).toMatchObject({ userId: ids[person], status: "going" });
+    }
+    // B goes to Museo (12:00-13:00) and now plans Cena (12:30-13:30): refused, nothing saved.
+    const cena = { dayId: day3, title: "Cena", scheduledAt: "2099-03-03T12:30:00.000Z", durationMinutes: 60 };
+    const before = await scheduleState();
+    const refused = await call("B", "POST", activitiesPath(), cena);
+    expect(refused.status, refused.text).toBe(409);
+    expect(refused.json.error).toMatchObject({ code: "ParticipationConflictError", conflicts: [{ activityId: activityIds.museo }],
+      activity: { scheduledAt: cena.scheduledAt, durationMinutes: 60 } });
+    expect(await scheduleState()).toEqual(before);
+    const { conflicts, activity } = refused.json.error as { conflicts: Array<{ activityId: string; scheduledAt: string; durationMinutes: number }>; activity: unknown };
+    const confirmed = expectStatus(await call("B", "POST", activitiesPath(), { ...cena,
+      confirmedConflicts: conflicts.map(({ activityId, scheduledAt, durationMinutes }) => ({ activityId, scheduledAt, durationMinutes })), confirmedActivity: activity }), 201);
+    activityIds.cena = confirmed.json.activity.id;
+    expect(confirmed.json.participation).toMatchObject({ userId: ids.B, status: "going" });
+    // Only B's own previous plan changed; A and C keep theirs.
+    expect(await stored(activityIds.museo, "B")).toMatchObject({ status: "not_going" });
+    expect(await stored(activityIds.museo, "A")).toMatchObject({ status: "going" });
+    expect(await stored(activityIds.museo, "C")).toMatchObject({ status: "going" });
+    expect(await h.db.collection("activities").countDocuments({ tripId: new ObjectId(tripId) })).toBe(2);
+    // A manual "pending" is rejected over HTTP: validation error, no writes.
+    const beforePending = await scheduleState();
+    const pending = await call("B", "PUT", activitiesPath(`/${activityIds.cena}/participation`), { status: "pending" });
+    expect(pending.status).toBe(422);
+    expect(await scheduleState()).toEqual(beforePending);
+  }, 30_000);
+
+  it("moves a participant with a new conflict to pending with a persisted mark, and only an explicit answer clears it", async () => {
+    const paseo = expectStatus(await call("A", "POST", activitiesPath(), { dayId: dayIds["2099-03-04:activity"], title: "Paseo",
+      scheduledAt: "2099-03-04T10:00:00.000Z", durationMinutes: 60 }), 201);
+    activityIds.paseo = paseo.json.activity.id;
+    for (const person of ["B", "C"] as const) {
+      expectStatus(await call(person, "PUT", activitiesPath(`/${activityIds.paseo}/participation`), { status: "going" }), 200);
+    }
+    // A moves Paseo onto the 3rd, 13:00-14:00: it overlaps Cena (B going) but not A's Museo (ends 13:00) nor anything of C.
+    const moved = expectStatus(await call("A", "PATCH", activitiesPath(`/${activityIds.paseo}`), { dayId: dayIds["2099-03-03:activity"], scheduledAt: "2099-03-03T13:00:00.000Z" }), 200);
+    expect(Object.keys(moved.json)).toEqual(["activity"]);
+    expect(moved.text).not.toContain("decisionRequired");
+    expect(moved.text).not.toContain(ids.B);
+    const marked = await participationOf("B", activityIds.paseo);
+    expect(marked).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict" } });
+    expect(marked.decisionRequired.changedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(await stored(activityIds.paseo, "B")).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict", changedAt: expect.any(Date) } });
+    // Everyone else keeps going and has no mark; B's Cena plan is untouched.
+    for (const person of ["A", "C"] as const) {
+      expect(await participationOf(person, activityIds.paseo)).toMatchObject({ status: "going", decisionRequired: null });
+    }
+    expect(await stored(activityIds.cena, "B")).toMatchObject({ status: "going" });
+    // The mark survives a rejected manual pending, and a cancelled plan change (409) leaves state and mark as they were.
+    const before = await scheduleState();
+    expect((await call("B", "PUT", activitiesPath(`/${activityIds.paseo}/participation`), { status: "pending" })).status).toBe(422);
+    expect((await call("B", "PUT", activitiesPath(`/${activityIds.paseo}/participation`), { status: "going" })).status).toBe(409);
+    expect(await scheduleState()).toEqual(before);
+    expect(await participationOf("B", activityIds.paseo)).toMatchObject({ status: "pending", decisionRequired: { reason: "schedule_conflict" } });
+    // Editing only the title does not unlink anyone nor touch marks.
+    expectStatus(await call("A", "PATCH", activitiesPath(`/${activityIds.paseo}`), { title: "Paseo largo" }), 200);
+    const afterTitle = await scheduleState();
+    expect(afterTitle.activityParticipations).toEqual(before.activityParticipations);
+    expect(await h.db.collection("activities").findOne({ _id: new ObjectId(activityIds.paseo) })).toMatchObject({ title: "Paseo largo" });
+    // The explicit answer is what clears the mark.
+    const answered = expectStatus(await call("B", "PUT", activitiesPath(`/${activityIds.paseo}/participation`), { status: "not_going" }), 200);
+    expect(answered.json.participation).toMatchObject({ status: "not_going", decisionRequired: null });
+    expect(await stored(activityIds.paseo, "B")).toMatchObject({ status: "not_going", decisionRequired: null });
+    expect(await participationOf("C", activityIds.paseo)).toMatchObject({ status: "going" });
+  }, 30_000);
+
+  const postIds = {} as Record<"root" | "child" | "branch" | "diego", string>;
+  const pct = (person: Person, value = 100) => ({ userId: ids[person], unit: "percent", value });
+  const rest = (person: Person) => ({ userId: ids[person], unit: "remainder", value: null });
+  const amount = (person: Person, value: number) => ({ userId: ids[person], unit: "amount", value });
+  const balanceOf = async (person: Person) => expectStatus(await call(person, "GET", tripPath("/balance")), 200).json.balance;
+
+  it("keeps post chains with expenses (multiple payments and shares) and balances per currency, leaving incomplete ones out", async () => {
+    expectStatus(await call("A", "PATCH", tripPath("/config"), { expenseMode: "balance" }), 200);
+    const post = async (person: Person, body: unknown) => expectStatus(await call(person, "POST", tripPath("/posts"), body), 201).json;
+    const root = await post("A", { description: "Cena en el centro", activityId: activityIds.cena,
+      expense: { totalAmount: 90, currency: "ARS", payments: [amount("A", 70), amount("B", 20)], shares: [pct("A", 50), amount("B", 20), rest("C")] } });
+    postIds.root = root.post.id;
+    expect(root).toMatchObject({ post: { authorId: ids.A, activityId: activityIds.cena, parentPostId: null }, expense: { completeness: { status: "complete" } } });
+    const child = await post("B", { description: "El postre", parentPostId: postIds.root,
+      expense: { totalAmount: 40, currency: "USD", payments: [pct("C")], shares: [rest("A"), rest("B")] } });
+    postIds.child = child.post.id;
+    const branch = await post("C", { description: "Otra rama", parentPostId: postIds.root,
+      expense: { totalAmount: 15, currency: "EUR", payments: [pct("C")] } });
+    postIds.branch = branch.post.id;
+    expect(branch.expense.completeness).toMatchObject({ status: "incomplete" });
+    const diego = await post("D", { description: "Mate de la tarde",
+      expense: { totalAmount: 30, currency: "ARS", payments: [pct("D")], shares: [rest("D"), rest("A")] } });
+    postIds.diego = diego.post.id;
+    // Children link to their immediate parent only; the root activity is projected walking the chain.
+    expect(child.post).toMatchObject({ parentPostId: postIds.root, activityId: null });
+    expect(branch.post).toMatchObject({ parentPostId: postIds.root, activityId: null });
+    const chain = expectStatus(await call("D", "GET", tripPath(`/posts/${postIds.branch}`)), 200);
+    expect(chain.json).toMatchObject({ post: { id: postIds.branch }, parent: { id: postIds.root }, children: [], rootActivityId: activityIds.cena });
+    const itinerary = expectStatus(await call("B", "GET", tripPath("/itinerary")), 200).json.itinerary;
+    const context = (id: string) => [...itinerary.posts, ...itinerary.unplacedPosts].find((p: { id: string }) => p.id === id).context;
+    expect(["root", "child", "branch"].map((key) => context(postIds[key as "root"]).rootActivityId)).toEqual([activityIds.cena, activityIds.cena, activityIds.cena]);
+    expect(context(postIds.diego).rootActivityId).toBeNull();
+    // Expenses go to the day of their root activity (the 3rd); the independent one uses its own publication instant.
+    const byPost = Object.fromEntries(itinerary.expenses.map((e: { postId: string }) => [e.postId, e]));
+    for (const key of ["root", "child", "branch"] as const) expect(byPost[postIds[key]]).toMatchObject({ rootActivityId: activityIds.cena, dayId: dayIds["2099-03-03:activity"] });
+    expect(byPost[postIds.diego]).toMatchObject({ rootActivityId: null, source: "publication" });
+    // Balance: only complete expenses count, per currency, in cents and without conversion.
+    const balance = await balanceOf("D");
+    expect(balance).toMatchObject({ expenseMode: "balance", includedExpenseCount: 3, excludedExpenses: [expect.objectContaining({ postId: postIds.branch, currency: "EUR", reasons: ["missing_shares"] })] });
+    expect(balance.currencies.map((entry: { currency: string }) => entry.currency)).toEqual(["ARS", "USD"]);
+    const rows = (currency: string) => Object.fromEntries(balance.currencies.find((entry: { currency: string }) => entry.currency === currency).balances
+      .map((row: { userId: string; netCents: number; formerMember: boolean }) => [row.userId, [row.netCents, row.formerMember]]));
+    expect(rows("ARS")).toEqual({ [ids.A]: [1000, false], [ids.B]: [0, false], [ids.C]: [-2500, false], [ids.D]: [1500, false] });
+    expect(rows("USD")).toEqual({ [ids.A]: [-2000, false], [ids.B]: [-2000, false], [ids.C]: [4000, false] });
+    expect(balance.currencies[0].settlements).toEqual([{ fromUserId: ids.C, toUserId: ids.D, cents: 1500 }, { fromUserId: ids.C, toUserId: ids.A, cents: 1000 }]);
+  }, 30_000);
+
+  const photoKeys: string[] = [];
+  const upload = async (person: Person) => {
+    const reserved = expectStatus(await call(person, "POST", tripPath("/photo-uploads"), { files: [{ contentType: "image/jpeg", sizeBytes: 1000 }] }), 201);
+    const { key } = reserved.json.uploads[0] as { key: string };
+    expect(key).toContain(`trips/${tripId}/photos/${ids[person]}/`);
+    return key;
+  };
+
+  it("confirms photos only after the object exists, and reads them as signed URLs without exposing the storage key", async () => {
+    // A reserved key whose file was never uploaded cannot be attached: refused, nothing written.
+    const ghost = await upload("D");
+    const before = await data(["postPhotos", "posts"]);
+    const refused = await call("D", "PATCH", tripPath(`/posts/${postIds.diego}`), { photos: [{ key: ghost }] });
+    expect(refused.status, refused.text).toBeGreaterThanOrEqual(400);
+    expect(refused.status).toBeLessThan(500);
+    expect(await data(["postPhotos", "posts"])).toEqual(before);
+    // Uploaded (simulated PUT to the signed URL) and confirmed through the post.
+    h.storage.put(ghost);
+    const confirmed = expectStatus(await call("D", "PATCH", tripPath(`/posts/${postIds.diego}`), { photos: [{ key: ghost }] }), 200);
+    expect(confirmed.json.photos).toHaveLength(1);
+    const second = await upload("B");
+    h.storage.put(second);
+    expectStatus(await call("B", "PATCH", tripPath(`/posts/${postIds.child}`), { photos: [{ key: second }] }), 200);
+    photoKeys.push(ghost, second);
+    expect(await h.db.collection("postPhotos").countDocuments({ tripId: new ObjectId(tripId), s3Key: { $in: photoKeys } })).toBe(2);
+    // Reads: signed (expiring) URLs for members; the response carries no key field.
+    const read = expectStatus(await call("A", "GET", tripPath(`/posts/${postIds.diego}/photos`)), 200).json;
+    expect(read.photos).toHaveLength(1);
+    expect(Object.keys(read.photos[0]).sort()).toEqual(["expiresAt", "id", "order", "postId", "uploadedAt", "uploaderId", "url"]);
+    expect(read.photos[0]).toMatchObject({ postId: postIds.diego, uploaderId: ids.D });
+    expect(h.storage.downloads.length).toBeGreaterThan(0);
+    expect(h.storage.downloads.every((download) => download.expiresInSeconds > 0)).toBe(true);
+    const gallery = expectStatus(await call("C", "GET", tripPath("/photos")), 200).json;
+    expect(gallery.photos).toHaveLength(2);
+    expect(gallery.photos.map((photo: { postId: string }) => photo.postId).sort()).toEqual([postIds.child, postIds.diego].sort());
+    // Not a member: no access to the photo list, a post's photos or a single photo.
+    expect((await call("X", "GET", tripPath("/photos"))).status).toBe(404);
+    expect((await call("X", "GET", tripPath(`/posts/${postIds.diego}/photos`))).status).toBe(404);
+    expect((await call("X", "GET", tripPath(`/photos/${read.photos[0].id}`))).status).toBe(404);
+  }, 30_000);
+
+  let otherTripId = "", otherPhotoKey = "";
+  const listed = async (person: Person) => (expectStatus(await call(person, "GET", "/trips"), 200).json.trips as Array<{ id: string; startAt: string | null; endAt: string | null }>);
+
+  it("lists Trips with dates derived from transports, refreshed after an edit, null without transports, and only for members", async () => {
+    expect(await listed("B")).toMatchObject([{ id: tripId, startAt: OUTBOUND.departureAt, endAt: RETURN.arrivalAt }]);
+    const earlier = "2099-03-01T07:00:00.000Z";
+    expectStatus(await call("A", "PATCH", `${transportsPath}/${outboundId}`, { departureAt: earlier }), 200);
+    expect(await listed("B")).toMatchObject([{ id: tripId, startAt: earlier, endAt: RETURN.arrivalAt }]);
+    const itinerary = expectStatus(await call("B", "GET", tripPath("/itinerary")), 200).json.itinerary;
+    expect(itinerary.days[0]).toMatchObject({ type: "transit_out", startsAt: earlier });
+    // A second Trip without transports has no dates, and its content stays apart from the first one.
+    const second = expectStatus(await call("A", "POST", "/trips", { name: "Sin transportes", primaryDestination: "Salta" }), 201).json.trip;
+    otherTripId = second.id;
+    const mine = await listed("A");
+    expect(mine.map((trip) => trip.id).sort()).toEqual([tripId, otherTripId].sort());
+    expect(mine.find((trip) => trip.id === otherTripId)).toMatchObject({ startAt: null, endAt: null });
+    const reserved = expectStatus(await call("A", "POST", `/trips/${otherTripId}/photo-uploads`, { files: [{ contentType: "image/jpeg", sizeBytes: 1000 }] }), 201);
+    otherPhotoKey = reserved.json.uploads[0].key;
+    h.storage.put(otherPhotoKey);
+    expectStatus(await call("A", "POST", `/trips/${otherTripId}/posts`, { description: "Otro viaje", photos: [{ key: otherPhotoKey }] }), 201);
+    // Authorization: the others only see their own Trips.
+    expect((await listed("B")).map((trip) => trip.id)).toEqual([tripId]);
+    expect(await listed("X")).toEqual([]);
+    expect((await call("B", "GET", `/trips/${otherTripId}`)).status).toBe(404);
+    expect((await call("X", "GET", tripPath("/itinerary"))).status).toBe(404);
+    // CORS on a real response: an allowed origin is echoed, an unknown one is not.
+    const allowed = await call("A", "GET", "/trips", undefined, { origin: "http://localhost:5173" });
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect((await call("A", "GET", "/trips", undefined, { origin: "https://evil.example" })).headers.get("access-control-allow-origin")).toBeNull();
+  }, 30_000);
 });
