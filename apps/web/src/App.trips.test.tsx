@@ -72,8 +72,8 @@ describe("App Trip routes", () => {
     const container = await render(`/trips/${tripId}/members`, true, {
       get: async () => ({ ok: true, value: memberTrip }), deleteTrip, list,
     }, undefined, {
-      list: async () => ({ ok: true, value: { currentUserId: "admin", members: [
-        { id: "membership", userId: "admin", name: "Admin", role: "admin", joinedAt: new Date().toISOString() },
+      list: async () => ({ ok: true, value: { currentUserId: "admin", ownerId: "admin", members: [
+        { id: "membership", userId: "admin", name: "Admin", role: "admin", isOwner: true, joinedAt: new Date().toISOString() },
       ] } }),
     });
     await act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Eliminar viaje")?.click());
@@ -81,6 +81,25 @@ describe("App Trip routes", () => {
     expect(deleteTrip).toHaveBeenCalledWith(tripId);
     expect(list).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Mis viajes");
+  });
+  it("connects leaving the Trip: calls the API, reloads My Trips and keeps no Trip data", async () => {
+    const leave = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [] });
+    const container = await render(`/trips/${tripId}/members`, true, {
+      get: async () => ({ ok: true, value: { ...memberTrip, inviteCode: "VIAJE-X7K2" } }), list,
+    }, undefined, {
+      list: async () => ({ ok: true, value: { currentUserId: "ana", ownerId: "owner", members: [
+        { id: "m1", userId: "owner", name: "Nico", role: "admin", isOwner: true, joinedAt: new Date().toISOString() },
+        { id: "m2", userId: "ana", name: "Ana", role: "participant", isOwner: false, joinedAt: new Date().toISOString() },
+      ] } }), leave,
+    });
+    const press = (label: string) => act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === label)?.click());
+    await press("Salir del viaje");
+    await press("Confirmar salida");
+    expect(leave).toHaveBeenCalledWith(tripId);
+    expect(list).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(container.textContent).not.toContain("Patagonia");
   });
   it("connects destination deletion from the protected journey route", async () => {
     const first = { id: "507f191e810c19729de860e1", tripId, name: "Bariloche", order: 1, createdAt: new Date().toISOString(), hasRecords: false };

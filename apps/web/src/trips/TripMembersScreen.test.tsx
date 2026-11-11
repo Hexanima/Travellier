@@ -15,8 +15,8 @@ const participantId = "507f1f77bcf86cd799439012";
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null,
   primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2",
   expenseMode: "register" };
-const admin = { id: "507f1f77bcf86cd799439013", userId: adminId, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
-const participant = { id: "507f1f77bcf86cd799439014", userId: participantId, name: "Ana", role: "participant", joinedAt: "2026-09-24T13:00:00.000Z" };
+const admin = { id: "507f1f77bcf86cd799439013", userId: adminId, name: "Nico", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" };
+const participant = { id: "507f1f77bcf86cd799439014", userId: participantId, name: "Ana", role: "participant", isOwner: false, joinedAt: "2026-09-24T13:00:00.000Z" };
 const roots: ReturnType<typeof createRoot>[] = [];
 
 afterEach(async () => {
@@ -26,20 +26,30 @@ afterEach(async () => {
 
 const findButton = (container: HTMLElement, label: string) =>
   Array.from(container.querySelectorAll("button")).find((button) => button.textContent === label);
+const startExpel = async (container: HTMLElement) => {
+  await act(async () => findButton(container, "Gestionar")?.click());
+  await act(async () => findButton(container, "Expulsar")?.click());
+};
 
 async function render(options: {
   viewerId?: string;
   get?: ReturnType<typeof vi.fn>;
   list?: ReturnType<typeof vi.fn>;
   expel?: ReturnType<typeof vi.fn>;
+  setRole?: ReturnType<typeof vi.fn>;
+  transferOwnership?: ReturnType<typeof vi.fn>;
+  leave?: ReturnType<typeof vi.fn>;
   copyText?: ReturnType<typeof vi.fn>;
   share?: ReturnType<typeof vi.fn>;
   deleteTrip?: ReturnType<typeof vi.fn>;
   state?: unknown;
 } = {}) {
   const get = options.get ?? vi.fn().mockResolvedValue({ ok: true, value: trip });
-  const list = options.list ?? vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, participant], currentUserId: options.viewerId ?? adminId } });
+  const list = options.list ?? vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, participant], currentUserId: options.viewerId ?? adminId, ownerId: adminId } });
   const expel = options.expel ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
+  const setRole = options.setRole ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
+  const transferOwnership = options.transferOwnership ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
+  const leave = options.leave ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
   const deleteTrip = options.deleteTrip ?? vi.fn().mockResolvedValue({ ok: true, value: undefined });
   const copyText = options.copyText ?? vi.fn().mockResolvedValue(undefined);
   const container = document.createElement("div");
@@ -50,13 +60,13 @@ async function render(options: {
     <MemoryRouter initialEntries={[{ pathname: `/trips/${tripId}/members`, state: options.state }]}>
       <Routes>
         <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={{ get, deleteTrip } as never}
-          members={{ list, expel }} apiBaseUrl="https://api.example.test" sharing={{ copyText, share: options.share }} />} />
+          members={{ list, expel, setRole, transferOwnership, leave }} apiBaseUrl="https://api.example.test" sharing={{ copyText, share: options.share }} />} />
         <Route path="/trips" element={<h1>Mis viajes</h1>} />
         <Route path="/notifications" element={<h1>Avisos</h1>} />
       </Routes>
     </MemoryRouter>,
   ));
-  return { container, get, list, expel, copyText, deleteTrip };
+  return { container, get, list, expel, setRole, transferOwnership, leave, copyText, deleteTrip };
 }
 
 describe("TripMembersScreen", () => {
@@ -92,7 +102,7 @@ describe("TripMembersScreen", () => {
     expect(findButton(container, "Eliminar viaje")).toBeUndefined();
   });
 
-  it("lets an admin confirm group deletion with other members and returns to My Trips", async () => {
+  it("lets the owner confirm group deletion as the owner with other members and returns to My Trips", async () => {
     const { container, deleteTrip } = await render();
     const remove = findButton(container, "Eliminar viaje");
     expect(remove).toBeDefined();
@@ -119,9 +129,9 @@ describe("TripMembersScreen", () => {
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
   });
 
-  it("refreshes admin permissions after a forbidden deletion", async () => {
+  it("refreshes owner permissions after a forbidden deletion", async () => {
     const list = vi.fn().mockResolvedValueOnce({ ok: true, value: { members: [admin, participant], currentUserId: adminId } })
-      .mockResolvedValueOnce({ ok: true, value: { members: [{ ...admin, role: "participant" }, participant], currentUserId: adminId } });
+      .mockResolvedValueOnce({ ok: true, value: { members: [{ ...admin, role: "participant", isOwner: false }, participant], currentUserId: adminId, ownerId: participantId } });
     const { container, deleteTrip } = await render({ list, deleteTrip: vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } }) });
     await act(async () => findButton(container, "Eliminar viaje")?.click());
     await act(async () => findButton(container, "Eliminar definitivamente")?.click());
@@ -150,7 +160,7 @@ describe("TripMembersScreen", () => {
     const confirm = findButton(container, "Eliminar definitivamente");
     await act(async () => { confirm?.click(); confirm?.click(); });
     expect(deleteTrip).toHaveBeenCalledTimes(1);
-    expect(findButton(container, "Expulsar")?.disabled).toBe(true);
+    expect(findButton(container, "Gestionar")?.disabled).toBe(true);
     expect(findButton(container, "Cancelar")?.closest("fieldset")?.disabled).toBe(true);
     await act(async () => complete({ ok: true, value: undefined }));
     expect(container.textContent).toBe("Mis viajes");
@@ -161,21 +171,19 @@ describe("TripMembersScreen", () => {
     expect(container.textContent).toContain("VIAJE-X7K2");
     expect(container.textContent).toContain("Nico");
     expect(container.textContent).toContain("Ana");
-    expect(container.textContent).not.toContain("Administración");
-    expect(findButton(container, "Expulsar")).toBeUndefined();
+    expect(findButton(container, "Gestionar")).toBeUndefined();
   });
 
-  it("requires confirmation and expels only a participant for an admin", async () => {
+  it("requires confirmation and expels a participant", async () => {
     const { container, expel } = await render();
-    expect(container.textContent).toContain("Administración");
-    expect(container.querySelectorAll("button[data-member-action=expel]")).toHaveLength(1);
-    await act(async () => findButton(container, "Expulsar")?.click());
+    expect(container.querySelectorAll("button[data-member-action=manage]")).toHaveLength(1);
+    await startExpel(container);
     expect(expel).not.toHaveBeenCalled();
     expect(container.getAttribute("role")).toBeNull();
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Ana");
     await act(async () => findButton(container, "Cancelar")?.click());
     expect(expel).not.toHaveBeenCalled();
-    await act(async () => findButton(container, "Expulsar")?.click());
+    await startExpel(container);
     await act(async () => findButton(container, "Confirmar expulsión")?.click());
     expect(expel).toHaveBeenCalledWith(tripId, participantId);
     expect(container.querySelector('[aria-label="Integrantes del viaje"]')?.textContent).not.toContain("Ana");
@@ -184,13 +192,13 @@ describe("TripMembersScreen", () => {
   it("hides administration if the server rejects an expulsion after a role change", async () => {
     const list = vi.fn()
       .mockResolvedValueOnce({ ok: true, value: { members: [admin, participant], currentUserId: adminId } })
-      .mockResolvedValueOnce({ ok: true, value: { members: [{ ...admin, role: "participant" }, participant], currentUserId: adminId } });
+      .mockResolvedValueOnce({ ok: true, value: { members: [{ ...admin, role: "participant", isOwner: false }, participant], currentUserId: adminId, ownerId: null } });
     const expel = vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } });
     const { container } = await render({ list, expel });
-    await act(async () => findButton(container, "Expulsar")?.click());
+    await startExpel(container);
     await act(async () => findButton(container, "Confirmar expulsión")?.click());
     expect(list).toHaveBeenCalledTimes(2);
-    expect(container.textContent).not.toContain("Administración");
+    expect(findButton(container, "Gestionar")).toBeUndefined();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("permiso");
   });
 
@@ -217,19 +225,19 @@ describe("TripMembersScreen", () => {
     const { container, list } = await render({ get });
     expect(list).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain("VIAJE-X7K2");
-    expect(findButton(container, "Expulsar")).toBeUndefined();
+    expect(findButton(container, "Gestionar")).toBeUndefined();
   });
 
   it("shows a neutral label for members without a name and never exposes their email", async () => {
     const nameless = { ...participant, name: null, email: "ana@example.test" };
-    const list = vi.fn().mockResolvedValue({ ok: true, value: { members: [{ ...admin, name: null }, nameless], currentUserId: adminId } });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: { members: [{ ...admin, name: null }, nameless], currentUserId: adminId, ownerId: adminId } });
     const { container } = await render({ list });
 
     expect(container.textContent).toContain("Integrante (vos)");
     expect(container.textContent).not.toContain("null");
     expect(container.textContent).not.toContain("ana@example.test");
-    expect(container.querySelector('[aria-label="Expulsar a Integrante"]')).not.toBeNull();
-    await act(async () => findButton(container, "Expulsar")?.click());
+    expect(container.querySelector('[aria-label="Gestionar a Integrante"]')).not.toBeNull();
+    await startExpel(container);
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain("¿Querés expulsar a Integrante de este viaje?");
   });
 });
