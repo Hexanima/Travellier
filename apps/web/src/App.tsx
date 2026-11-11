@@ -305,6 +305,9 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const tripMembers = useMemo<TripMembersApi>(() => ({
     list: activeMembers?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     expel: activeMembers?.expel ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    setRole: activeMembers?.setRole ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    transferOwnership: activeMembers?.transferOwnership ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    leave: activeMembers?.leave ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeMembers])
   const tripJourney = useMemo<TripJourneyApi>(() => ({
     listDestinations: activeJourney?.listDestinations ?? (async () => ({ ok: false, error: { kind: 'server' } })),
