@@ -51,9 +51,15 @@ export const createMongoTripMemberAdministrationRepository = (database: Db): Tri
             if (promoted.matchedCount !== 1) throw new TripMemberAdministrationConflict();
             return ok(undefined);
           },
-          removeMember: async (membershipId, userId, notifications) => {
+          removeMember: async (membershipId, userId, notifications, at) => {
             const deleted = await members.deleteOne({ _id: new MongoObjectId(membershipId), tripId: mongoTripId, userId: new MongoObjectId(userId) }, options);
             if (deleted.deletedCount !== 1) return ok(false);
+            // Only the start decides: an activity starting at `at` or before has started and its participation stays as record.
+            const future = await database.collection("activities").find({ tripId: mongoTripId, scheduledAt: { $gt: at } }, { ...options, projection: { _id: 1 } }).toArray();
+            if (future.length > 0) {
+              await database.collection("activityParticipations").deleteMany(
+                { tripId: mongoTripId, userId: new MongoObjectId(userId), activityId: { $in: future.map((activity) => activity._id) } }, options);
+            }
             // Last write, same transaction: the notice exists only if the membership was really deleted.
             const appended = await createOutboxStore(database, tripId, session).appendNotifications(notifications);
             return appended.ok ? ok(true) : appended;
