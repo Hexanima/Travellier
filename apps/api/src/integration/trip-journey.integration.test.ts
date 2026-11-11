@@ -38,7 +38,7 @@ describe("integrated API journey (T103)", () => {
   const expectStatus = (response: HttpResult, status: number) => { expect(response.status, response.text).toBe(status); return response; };
   const tripPath = (suffix = "") => `/trips/${tripId}${suffix}`;
   const activitiesPath = (suffix = "") => tripPath(`/activities${suffix}`);
-  /** Full database state except the Trip lock counter, which every transaction (even one that rolls back) may bump. */
+  /** Snapshot of only the given collections; callers choose which ones to compare (e.g. omit `trips` to ignore the lock counter). */
   const data = (names: string[]) => h.snapshot(names);
   const withClock = async (run: () => Promise<void>) => {
     vi.useFakeTimers({ toFake: ["Date"] });

@@ -87,7 +87,7 @@ describe("composite publication with injected failures over HTTP (T103)", () => 
     const storageBefore = storageState();
     failOn("postExpenses", "insertOne");
     const failed = await publish(body);
-    expect(failed.status, failed.text).toBeGreaterThanOrEqual(500);
+    expect(failed.status, failed.text).toBe(500);
     vi.restoreAllMocks();
     expect(await state()).toEqual(before);
     expect(await counts()).toEqual({ posts: 0, activities: 0, activityParticipations: 0, postPhotos: 0, postExpenses: 0 });
@@ -109,7 +109,7 @@ describe("composite publication with injected failures over HTTP (T103)", () => 
     const before = await state();
     const order = intercept([{ name: "postExpenses", method: "insertOne" }, { name: "activityParticipations", method: "findOneAndUpdate", failOnce: true }]);
     const failed = await publish(body);
-    expect(failed.status, failed.text).toBeGreaterThanOrEqual(500);
+    expect(failed.status, failed.text).toBe(500);
     // The expense was already written inside the transaction when the participation failed: the rollback must have removed it.
     expect(order).toEqual(["postExpenses.insertOne", "activityParticipations.findOneAndUpdate"]);
     vi.restoreAllMocks();
@@ -183,7 +183,7 @@ describe("composite publication with injected failures over HTTP (T103)", () => 
       const edit = { expense: { currency: "ARS", payments: [] } };
       failOn("postExpenses", "updateOne");
       const failed = await h.http(tokA, "PATCH", path(`/posts/${post.id}`), edit);
-      expect(failed.status, failed.text).toBeGreaterThanOrEqual(500);
+      expect(failed.status, failed.text).toBe(500);
       vi.restoreAllMocks();
       expect(await stored()).toEqual(legacy);
       const retried = expectStatus(await h.http(tokA, "PATCH", path(`/posts/${post.id}`), edit), 200);
