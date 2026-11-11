@@ -5,7 +5,7 @@ import { handleApiRequest } from "../app.js";
 
 const actorId = "507f1f77bcf86cd799439011";
 const tripId = "507f191e810c19729de860ea";
-const trip = { id: tripId, name: "Patagonia", primaryDestination: { name: "Bariloche" } };
+const trip = { id: tripId, name: "Patagonia", ownerId: actorId, createdBy: actorId, primaryDestination: { name: "Bariloche" } };
 
 describe("Trip management routes", () => {
   it("lists members only for the authenticated trip member", async () => {
