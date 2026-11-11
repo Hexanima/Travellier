@@ -1,20 +1,29 @@
 import type { ApiErrorKind, HttpClient } from "../api/index.js";
 
+export type TripMemberRole = "admin" | "participant";
+
 export type TripMemberSummary = {
   id: string;
   userId: string;
   name: string | null;
-  role: "admin" | "participant";
+  role: TripMemberRole;
   joinedAt: string;
+  /** Absent in older answers; the owner is also identified by `ownerId` in the listing. */
+  isOwner?: boolean;
 };
+
+export type TripMemberList = { members: TripMemberSummary[]; currentUserId: string; ownerId?: string | null };
 
 export type TripMembersResult<T> =
   | { ok: true; value: T }
-  | { ok: false; error: { kind: ApiErrorKind } };
+  | { ok: false; error: { kind: ApiErrorKind; code?: string } };
 
 export type TripMembersApi = {
-  list: (tripId: string) => Promise<TripMembersResult<{ members: TripMemberSummary[]; currentUserId: string }>>;
+  list: (tripId: string) => Promise<TripMembersResult<TripMemberList>>;
   expel: (tripId: string, userId: string) => Promise<TripMembersResult<void>>;
+  setRole: (tripId: string, userId: string, role: TripMemberRole) => Promise<TripMembersResult<void>>;
+  transferOwnership: (tripId: string, userId: string) => Promise<TripMembersResult<void>>;
+  leave: (tripId: string) => Promise<TripMembersResult<void>>;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -23,24 +32,38 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isMember = (value: unknown): value is TripMemberSummary =>
   isRecord(value) && typeof value.id === "string" && typeof value.userId === "string" &&
   (typeof value.name === "string" || value.name === null) && (value.role === "admin" || value.role === "participant") &&
-  typeof value.joinedAt === "string";
+  typeof value.joinedAt === "string" && (value.isOwner === undefined || typeof value.isOwner === "boolean");
 
-const isMemberList = (value: unknown): value is { members: TripMemberSummary[]; currentUserId: string } =>
+const isMemberList = (value: unknown): value is TripMemberList =>
   isRecord(value) && typeof value.currentUserId === "string" &&
+  (value.ownerId === undefined || value.ownerId === null || typeof value.ownerId === "string") &&
   Array.isArray(value.members) && value.members.every(isMember);
 
-export const createTripMembersApi = (client: Pick<HttpClient, "get" | "delete">): TripMembersApi => ({
-  list: async (tripId) => {
-    const result = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}/members`);
-    if (!result.ok) return { ok: false, error: { kind: result.error.kind } };
-    return isMemberList(result.value)
-      ? { ok: true, value: result.value }
-      : { ok: false, error: { kind: "server" } };
-  },
-  expel: async (tripId, userId) => {
-    const result = await client.delete<void>(`/trips/${encodeURIComponent(tripId)}/members/${encodeURIComponent(userId)}`);
-    return result.ok
-      ? { ok: true, value: undefined }
-      : { ok: false, error: { kind: result.error.kind } };
-  },
-});
+type Failure = { ok: false; error: { kind: ApiErrorKind; code?: string } };
+type Outcome = { ok: true; value: unknown } | { ok: false; error: { kind: ApiErrorKind; code?: string } };
+
+const done = (result: Outcome): TripMembersResult<void> => {
+  if (result.ok) return { ok: true, value: undefined };
+  const { kind, code } = result.error;
+  const failure: Failure = { ok: false, error: { kind } };
+  if (code && code !== "HttpError") failure.error.code = code;
+  return failure;
+};
+
+export const createTripMembersApi = (client: Pick<HttpClient, "get" | "delete" | "put" | "post">): TripMembersApi => {
+  const base = (tripId: string) => `/trips/${encodeURIComponent(tripId)}`;
+  return {
+    list: async (tripId) => {
+      const result = await client.get<unknown>(`${base(tripId)}/members`);
+      if (!result.ok) return { ok: false, error: { kind: result.error.kind } };
+      return isMemberList(result.value)
+        ? { ok: true, value: result.value }
+        : { ok: false, error: { kind: "server" } };
+    },
+    expel: async (tripId, userId) => done(await client.delete<void>(`${base(tripId)}/members/${encodeURIComponent(userId)}`)),
+    setRole: async (tripId, userId, role) =>
+      done(await client.put<void>(`${base(tripId)}/members/${encodeURIComponent(userId)}/role`, { role })),
+    transferOwnership: async (tripId, userId) => done(await client.post<void>(`${base(tripId)}/transfer-ownership`, { userId })),
+    leave: async (tripId) => done(await client.post<void>(`${base(tripId)}/leave`)),
+  };
+};
