@@ -180,7 +180,7 @@ describe("comment persistence and transactions", () => {
   const deleteTrip = () => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) });
 
   concurrent("makes an expulsion wait for an in-flight comment, which is kept as former-member", async () => {
-    const post = await createPost(); const admin = await addMember("admin");
+    const post = await createPost(); const admin = await addMember("admin"); await f.releaseOwnership();
     const paused = pauseAfterFirst("comments", "insertOne");
     const creating = launch(f.api.createComment!({ ...payload(post.id), text: "Hola" }));
     let expelling!: ReturnType<typeof expel>;
@@ -200,7 +200,7 @@ describe("comment persistence and transactions", () => {
   });
 
   concurrent("makes a comment wait for an in-flight expulsion and then fail without writing", async () => {
-    const post = await createPost(); const admin = await addMember("admin");
+    const post = await createPost(); const admin = await addMember("admin"); await f.releaseOwnership();
     const paused = pauseAfterFirst("trips", "updateOne");
     const expelling = launch(expel(admin));
     let creating!: ReturnType<NonNullable<typeof f.api.createComment>>;
@@ -266,7 +266,7 @@ describe("comment persistence and transactions", () => {
   });
 
   it("keeps an expelled member's comment as former-member and denies further access", async () => {
-    const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin");
+    const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin"); await f.releaseOwnership();
     expect((await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) })).ok).toBe(true);
     expect(await f.api.listComments!(payload(post.id, admin))).toMatchObject({ ok: true, value: [{ id: created.id, authorId: created.authorId, authorIsFormerMember: true }] });
     const before = await snapshot();

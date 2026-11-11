@@ -194,7 +194,7 @@ describe("like persistence and transactions", () => {
 
   for (const target of targets) {
     concurrent(`makes an expulsion wait for an in-flight ${target.label} like, which keeps the former member's userId and counts`, async () => {
-      const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin");
+      const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin"); await f.releaseOwnership();
       const paused = pauseAfterFirst(target.collection, "updateOne");
       const liking = launch(target.run(post.id, created.id));
       let expelling!: ReturnType<typeof expel>;
@@ -214,7 +214,7 @@ describe("like persistence and transactions", () => {
     });
 
     concurrent(`makes a ${target.label} like wait for an in-flight expulsion and then fail without writing`, async () => {
-      const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin");
+      const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin"); await f.releaseOwnership();
       const paused = pauseAfterFirst("trips", "updateOne");
       const expelling = launch(expel(admin));
       let liking!: ReturnType<typeof likePost>;
@@ -272,6 +272,7 @@ describe("like persistence and transactions", () => {
   it("keeps and counts a former member's likes but denies them any further access", async () => {
     const post = await createPost(); const created = await comment(post.id); const admin = await addMember("admin");
     await likePost(post.id); await likeComment(post.id, created.id); await likePost(post.id, admin);
+    await f.releaseOwnership();
     expect((await expel(admin)).ok).toBe(true);
     expect(await f.db.collection("postLikes").countDocuments({ userId: f.actor })).toBe(1);
     expect(await f.db.collection("commentLikes").countDocuments({ userId: f.actor })).toBe(1);
@@ -289,6 +290,7 @@ describe("like persistence and transactions", () => {
 
   it("allows liking a post whose author already left", async () => {
     const admin = await addMember("admin"); const post = await createPost();
+    await f.releaseOwnership();
     expect((await expel(admin)).ok).toBe(true);
     expectState(await likePost(post.id, admin), true, 1);
   });

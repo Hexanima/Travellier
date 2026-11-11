@@ -114,6 +114,7 @@ describe("comment HTTP API", () => {
   it("marks a former member's comment on read", async () => {
     await post({ text: "Hola" });
     const admin = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: admin, role: "admin", joinedAt: new Date() });
+    await f.releaseOwnership();
     await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) });
     expect(body(await f.request("GET", path(), undefined, admin)).comments).toMatchObject([{ authorId: f.actor.toHexString(), authorIsFormerMember: true }]);
     expect((await f.request("GET", path())).statusCode).toBe(404);

@@ -505,7 +505,7 @@ describe("post expense persistence and transactions (T79)", () => {
   const deleteTrip = () => f.api.delete!({ tripId: domainId(f.trip), authenticatedUserId: domainId(f.actor) });
 
   concurrent("makes an expulsion wait for an in-flight save with an expense, which keeps the former member's expense", async () => {
-    const admin = await addMember("admin");
+    const admin = await addMember("admin"); await f.releaseOwnership();
     const paused = pauseAfterFirst("postExpenses", "insertOne");
     const saving = launch(createPost({ expense }));
     let expelling!: ReturnType<typeof expel>;
@@ -524,7 +524,7 @@ describe("post expense persistence and transactions (T79)", () => {
   });
 
   concurrent("makes an expense save wait for an in-flight expulsion and then fail with 404 without writing an expense", async () => {
-    const admin = await addMember("admin");
+    const admin = await addMember("admin"); await f.releaseOwnership();
     const paused = pauseAfterFirst("trips", "updateOne");
     const expelling = launch(expel(admin));
     let saving!: ReturnType<typeof createPost>;

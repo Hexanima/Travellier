@@ -23,3 +23,4 @@ export * from "./push-device-port.js";
 export * from "./trip-notification-port.js";
 export * from "./push-dispatch-port.js";
 export * from "./rate-limit-port.js";
+export * from "./trip-member-administration-port.js";

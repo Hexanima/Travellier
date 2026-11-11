@@ -176,6 +176,7 @@ describe("push dispatch of persisted events", () => {
     expect(pushesTo(f.actor).map((push) => push.data.type)).toEqual(["member.joined"]);
     expect(pushesTo(joiner)).toEqual([]);
     published = [];
+    await f.releaseOwnership();
     expect((await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(other), targetUserId: domainId(f.actor) })).ok).toBe(true);
     await tick();
     expect(published).toHaveLength(1);
@@ -183,7 +184,7 @@ describe("push dispatch of persisted events", () => {
   });
 
   it("an expulsion is not pushed when the user already rejoined", async () => {
-    const admin = await addMember("admin");
+    const admin = await addMember("admin"); await f.releaseOwnership();
     expect((await f.api.expelMember!({ tripId: domainId(f.trip), actorUserId: domainId(admin), targetUserId: domainId(f.actor) })).ok).toBe(true);
     expect(await f.api.joinByCode({ authenticatedUserId: domainId(f.actor), code: f.trip.toHexString() })).toMatchObject({ ok: true, value: { joined: true } });
     published = [];

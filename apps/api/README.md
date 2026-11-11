@@ -104,10 +104,29 @@ Los POST/PATCH de transportes y los cambios de orden de destinos regeneran el it
 ## Titularidad del viaje (T114)
 
 - `trips.ownerId` (ObjectId) es el titular actual; `createdBy` queda como dato histórico y no cambia. `POST /trips` fija `ownerId = createdBy = usuario del JWT`, y el creador es `admin`. `GET /trips`, `GET /trips/:tripId` y `PATCH` de configuración devuelven `ownerId` a integrantes; la vista pública (no integrantes) no lo expone.
-- `GET /trips/:tripId/members` devuelve `{ members, currentUserId, ownerId }`: cada integrante trae `isOwner` (true solo para el titular) y `ownerId` es el `userId` del titular, o `null` si el viaje no tiene un titular válido entre sus integrantes. El titular figura siempre como `admin` (con las operaciones actuales nada cambia roles ni expulsa admins; las pruebas fijan el invariante). T118 consume este contrato.
+- `GET /trips/:tripId/members` devuelve `{ members, currentUserId, ownerId }`: cada integrante trae `isOwner` (true solo para el titular) y `ownerId` es el `userId` del titular, o `null` si el viaje no tiene un titular válido entre sus integrantes. El titular figura siempre como `admin` (T115 impide rebajarlo o expulsarlo; las pruebas fijan el invariante). T118 consume este contrato.
 - `DELETE /trips/:tripId` lo autoriza solo el titular: no integrante, 404; integrante que no es titular (otro admin o participante), 403 `Forbidden` sin ningún efecto (ni cascada, ni `storageDeletionJobs`, ni incremento de `destinationOrderRevision`, porque todo corre en una transacción). No hay código de error propio. Un viaje sin `ownerId` rechaza toda eliminación (403) hasta migrarlo; la autorización no usa `createdBy` como respaldo. Al titular se le mantienen la cascada y los jobs de limpieza de S3.
 - Lectura: un viaje aún sin `ownerId` muestra `createdBy` como titular solo a efectos de lectura del detalle y el listado; no se escribe nada.
 - Migración `0010-trip-owner-from-created-by` (`yarn workspace api migrate:mongodb`): `updateMany` con `$expr` (`ownerId` ausente/null y `createdBy` ObjectId) y `$set: { ownerId: "$createdBy" }`. No toca otros campos ni colecciones, no pisa un `ownerId` existente y se puede repetir. **No corrige** viajes cuyo creador ya no es integrante: quedan con `ownerId = createdBy` y los reporta `yarn workspace api audit:mongodb` (`trip_owner_not_member`). Orden recomendado: desplegar primero y migrar después. Migrar antes es riesgoso: los viajes que cree el código anterior entre la migración y el despliegue quedan sin `ownerId` y, como `0010` ya figura en `_migrations`, no se vuelve a ejecutar; esos viajes no podrían eliminarse nunca (403) y solo los reportaría `audit:mongodb` (`trip_owner_missing`). Con despliegue primero, mientras no se migre la lectura usa `ownerId ?? createdBy` solo para mostrar y la eliminación se rechaza sin daño. Si se migró antes, tras el despliegue hay que repetir un `updateMany` equivalente en mongosh, o comprobar con `audit:mongodb` (`trip_owner_missing`): `db.trips.updateMany({ $expr: { $and: [ { $in: [{ $type: "$ownerId" }, ["missing","null"]] }, { $eq: [{ $type: "$createdBy" }, "objectId"] } ] } }, [{ $set: { ownerId: "$createdBy" } }])`. La decisión del orden y la ejecución corresponden al usuario; no se ejecutó nada sobre bases reales.
+
+## Administración de integrantes (T115)
+
+Rutas con `Authorization: Bearer <accessToken>`; el actor sale siempre del JWT (el cuerpo no puede suplantarlo). Los ids de ruta o de cuerpo inválidos responden 400; un cuerpo que no es un objeto JSON, 400; un valor de negocio inválido, 422. Todas responden 204 sin cuerpo.
+
+| Método | Ruta | Cuerpo | Respuesta |
+|---|---|---|---|
+| PUT | `/trips/:tripId/members/:userId/role` | `{ "role": "admin" \| "participant" }` | 204; otro rol o ausente, 422 |
+| POST | `/trips/:tripId/transfer-ownership` | `{ "userId": "<nuevo titular>" }` | 204 |
+| DELETE | `/trips/:tripId/members/:userId` (expulsión, ya existente) | — | 204 |
+
+Matriz de permisos y errores:
+
+- Cambiar rol y transferir: solo el titular (`trips.ownerId`). Actor no integrante, 404; integrante que no es titular, 403 `Forbidden`; destino no integrante, 404 `TripMemberNotFoundError`. Nadie rebaja al titular a `participant`: 409 `TripOwnerProtectedError`. Transferir al propio titular: 422 (`userId`, `same_owner`).
+- Repetir un cambio de rol ya aplicado (incluido `admin` sobre el titular) es idempotente: 204; confirma la transacción y solo incrementa `destinationOrderRevision` (candado interno). Una transferencia repetida no lo es: el anterior titular ya no lo es y recibe 403.
+- Transferir: `trips.ownerId` pasa al destino, que queda `admin`, y el anterior titular conserva `admin`; todo en una transacción.
+- Expulsar: los admins expulsan participantes; solo el titular expulsa admins; nadie expulsa al titular (ni él mismo). Rechazos con 403 `Forbidden` (también para un actor sin membresía); destino inexistente, 404. El expulsado, admin o participante, recibe el aviso `member.expelled` en la misma transacción. Aún no se limpian sus participaciones futuras en actividades (MEM-04, T116).
+- Un viaje sin `ownerId` rechaza toda operación del titular (403) hasta migrarlo; no se usa `createdBy` como respaldo.
+- Cada operación corre en una transacción que toma el mismo candado del Trip que la eliminación, el itinerario y las actividades (`$inc` de `destinationOrderRevision`), y lee actor, destino y titular dentro de ella. Un rechazo de negocio aborta la transacción (candado incluido) sin escribir nada. No se emiten eventos por cambio de rol ni por transferencia. Sin migraciones ni índices nuevos.
 
 ## API de actividades (T36)
 

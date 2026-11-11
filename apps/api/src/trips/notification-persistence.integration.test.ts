@@ -357,7 +357,7 @@ describe("notification persistence with the originating operation", () => {
     });
 
     it("an expulsion notifies only the expelled user, without actor nor data of the Trip, and nothing to anyone else", async () => {
-      const admin = await addMember("admin"); await addMember();
+      const admin = await addMember("admin"); await addMember(); await f.releaseOwnership();
       expect((await expel(admin, f.actor)).ok).toBe(true);
       const stored = await events();
       expect(stored).toHaveLength(1);
@@ -373,6 +373,7 @@ describe("notification persistence with the originating operation", () => {
       expect(await expel(admin, new ObjectId())).toMatchObject({ ok: false });
       expect(await expel(f.actor, admin)).toMatchObject({ ok: false });
       expect(await events()).toEqual([]);
+      await f.releaseOwnership();
       const before = await f.db.collection("tripMembers").countDocuments();
       const outbox = f.db.collection("outboxEvents"), original = f.db.collection.bind(f.db);
       vi.spyOn(outbox, "bulkWrite").mockRejectedValueOnce(new Error("forced failure"));
@@ -384,7 +385,7 @@ describe("notification persistence with the originating operation", () => {
     });
 
     concurrent("two simultaneous expulsions of the same member leave exactly one notice", async () => {
-      const admin = await addMember("admin");
+      const admin = await addMember("admin"); await f.releaseOwnership();
       const settled = await Promise.all([launch(expel(admin, f.actor)), launch(expel(admin, f.actor))]);
       expect(settled.filter((result) => result.ok)).toHaveLength(1);
       expect(await events({ type: "member.expelled" })).toHaveLength(1);

@@ -41,6 +41,14 @@ export class PostFixture {
       date: new Date("2026-09-25T00:00:00Z"), startsAt: new Date("2026-09-25T10:00:00.123Z"), endsAt: new Date("2026-09-25T18:00:00.789Z") });
     this.api = createTripApi(this.db, { storage: this.storage });
   }
+  /**
+   * The seeded actor is a participant that is also the owner (needed by the deletion tests). That inconsistent state is never expellable,
+   * so the tests that expel the actor call this BEFORE opening any pause/lock window; it uses the raw client so it does not consume
+   * `pauseAfterFirst("trips", "updateOne")` hooks. The owner protection is covered in the member suites.
+   */
+  async releaseOwnership() {
+    await this.client.db(this.db.databaseName).collection("trips").updateOne({ _id: this.trip }, { $unset: { ownerId: "" } });
+  }
   context() { return { tripId: domainId(this.trip), authenticatedUserId: domainId(this.actor) }; }
   input() { return { ...this.context(), description: "Recuerdo" }; }
   path() { return `/trips/${this.trip}/posts`; }
