@@ -20,4 +20,9 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // T104: los helpers de los recorridos conectados montan componentes de prueba junto a sus utilidades.
+    files: ['test-integration/**/*.{ts,tsx}'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
 ])
