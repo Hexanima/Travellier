@@ -52,6 +52,32 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     for (const activityId of activityIds) if (!current.current[activityId] && !removed.current.has(activityId)) void load(activityId);
   }, [activityIds, load]);
 
+  /**
+   * Silent refresh (T121): asks again for the answer and mark of these activities without going through `loading` and without touching one that is saving or
+   * waiting for a confirmation (the person is deciding). A failure keeps what is shown; a removed activity never comes back. Resolves `error` if any read failed.
+   */
+  const reload = useCallback(async (activityIds: readonly string[]): Promise<"ok" | "error"> => {
+    if (!api || !tripId) return "ok";
+    const revision = generation.current;
+    let failed = false;
+    await Promise.all(activityIds.map(async (activityId) => {
+      const before = current.current[activityId];
+      if (removed.current.has(activityId) || before?.kind === "loading" || (before?.kind === "ready" && (before.saving || before.confirming))) return;
+      try {
+        const result = await api.get(tripId, activityId);
+        if (generation.current !== revision || removed.current.has(activityId)) return;
+        if (!result.ok) { failed = true; return; }
+        const now = current.current[activityId];
+        if (now?.kind === "loading" || (now?.kind === "ready" && (now.saving || now.confirming))) return;
+        const fresh = fromResponse(result.value);
+        const same = now?.kind === "ready" && now.status === fresh.status && now.decisionRequired?.changedAt === fresh.decisionRequired?.changedAt &&
+          now.decisionRequired?.reason === fresh.decisionRequired?.reason && !now.error && !now.failedStatus && !now.saved;
+        if (!same) publish(activityId, fresh);
+      } catch { failed = true; }
+    }));
+    return failed ? "error" : "ok";
+  }, [api, tripId, publish]);
+
   /** Sends one write and publishes its outcome; a failure never touches the answer or the mark. */
   const write = useCallback(async (activityId: string, previous: Ready, target: PersonalParticipationStatus, confirmation?: ParticipationConfirmation) => {
     if (!api || !tripId) return;
@@ -105,5 +131,5 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     setStates(rest);
   }, []);
 
-  return { states, change, confirmChange, cancelConfirmation, apply, retry, remove };
+  return { states, change, confirmChange, cancelConfirmation, apply, retry, remove, reload };
 }
