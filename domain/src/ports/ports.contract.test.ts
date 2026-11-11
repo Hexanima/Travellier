@@ -9,6 +9,7 @@ import type {
   ObjectStoragePort,
   PersistencePort,
   PhotoLinkPort,
+  RateLimitPort,
   StorageDeletionJobPort,
 } from "../index.js";
 
@@ -95,6 +96,27 @@ describe("domain ports", () => {
     expect(await jobs.complete(id, "o", lastModified)).toEqual({ ok: true, value: true });
     expect(await jobs.releaseFailed(id, "o", { now: lastModified, nextAttemptAt: lastModified, attempts: 1, status: "pending", lastErrorCode: "x" }))
       .toEqual({ ok: true, value: false });
+  });
+
+  it("shapes the rate limit port with opaque keys and a retry delay", async () => {
+    const now = new Date("2026-11-10T00:00:00.000Z");
+    const counts = new Map<string, number>();
+    const limiter: RateLimitPort = {
+      hit: async ({ bucket, key, limit }) => {
+        const count = (counts.get(bucket + ":" + key) ?? 0) + 1;
+        counts.set(bucket + ":" + key, count);
+        return ok({ allowed: count <= limit, count, retryAfterSeconds: 60 });
+      },
+      reset: async ({ bucket, key }) => {
+        counts.delete(bucket + ":" + key);
+        return ok(undefined);
+      },
+    };
+    const input = { bucket: "auth.login.ip", key: "abc", limit: 1, windowMs: 60_000, now };
+    expect(await limiter.hit(input)).toEqual({ ok: true, value: { allowed: true, count: 1, retryAfterSeconds: 60 } });
+    expect(await limiter.hit(input)).toEqual({ ok: true, value: { allowed: false, count: 2, retryAfterSeconds: 60 } });
+    expect(await limiter.reset({ bucket: input.bucket, key: input.key })).toEqual({ ok: true, value: undefined });
+    expect(await limiter.hit(input)).toMatchObject({ ok: true, value: { allowed: true, count: 1 } });
   });
 
   it("uses Result for notification operations", async () => {
