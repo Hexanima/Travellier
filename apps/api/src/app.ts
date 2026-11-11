@@ -95,6 +95,7 @@ import {
 import { emailVerificationBridgePage, emailVerificationErrorPage } from "./auth/email-verification-page.js";
 import type { AuthRateLimitRoute, AuthRateLimiter } from "./security/auth-rate-limit.js";
 import { redactPath, sanitizeErrorForLog } from "./security/redact.js";
+import { redactingLogger } from "./security/redacting-logger.js";
 import {
   bodyLimitFor,
   contentTypeProblem,
@@ -1418,10 +1419,11 @@ export const defaultCorsOrigins = [
 export const createRequestHandler = (
   dependencies: ApiDependencies = {},
   authenticate?: RequestAuthenticator,
-  logger?: ApiLogger,
+  rawLogger?: ApiLogger,
   allowedOrigins: readonly string[] = defaultCorsOrigins,
   security: SecurityConfig = readSecurityConfig({}),
 ) => {
+  const logger = redactingLogger(rawLogger);
   const applyCors = cors<IncomingMessage>({
     origin: [...allowedOrigins],
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],

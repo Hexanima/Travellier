@@ -1,5 +1,7 @@
 const REDACTED = "[REDACTED]";
-const SENSITIVE_KEY = /pass(word)?|token|secret|authorization|cookie|api[-_]?key|private|credential|refresh/i;
+const SENSITIVE_KEY = /pass(word)?|token|secret|authorization|cookie|api[-_]?key|private|credential|refresh|^(code|invite|invite[-_]?code)$/i;
+/** `scheme://user:password@host` (or `scheme://token@host`): only the userinfo is replaced. */
+const URL_CREDENTIALS = /([a-z][a-z0-9+.-]*:\/\/)[^\s/?#@]+@/gi;
 const MAX_DEPTH = 5;
 const MAX_STRING = 200;
 
@@ -11,7 +13,8 @@ export const redactPath = (url: string | undefined): string =>
 
 const redact = (value: unknown, depth: number, seen: WeakSet<object>): unknown => {
   if (typeof value === "string") {
-    return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}...[+${value.length - MAX_STRING}]` : value;
+    const text = value.replace(URL_CREDENTIALS, `$1${REDACTED}@`);
+    return text.length > MAX_STRING ? `${text.slice(0, MAX_STRING)}...[+${text.length - MAX_STRING}]` : text;
   }
   if (typeof value !== "object" || value === null) return value;
   if (seen.has(value)) return "[Circular]";
@@ -25,7 +28,7 @@ const redact = (value: unknown, depth: number, seen: WeakSet<object>): unknown =
   return result;
 };
 
-/** Copy of `value` that is safe to log: sensitive keys hidden, strings bounded, depth bounded, cycles handled. */
+/** Copy of `value` that is safe to log: sensitive keys hidden, credentials embedded in URLs hidden, strings bounded, depth bounded, cycles handled. */
 export const redactForLog = (value: unknown): unknown => redact(value, 0, new WeakSet());
 
 /** Error summary for logs: name and stack frames only, never `message` (drivers can put connection strings in it). */

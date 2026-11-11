@@ -25,6 +25,7 @@ import { createPushDeviceApi } from "./push/push-device-api.js";
 import { createTripApi } from "./trips/trip-api.js";
 import { createAuthRateLimiter, type AuthRateLimiter } from "./security/auth-rate-limit.js";
 import { redactPath, sanitizeErrorForLog } from "./security/redact.js";
+import { redactingLogger } from "./security/redacting-logger.js";
 import { bodyLimitFor, payloadTooLargeResponse, readSecurityConfig, type SecurityConfig } from "./security/request-limits.js";
 
 export interface ApiGatewayHttpApiEvent {
@@ -120,9 +121,10 @@ export const createLambdaHandler = ({
   createPushDeviceApi: buildPushDeviceApi,
   createRateLimiter: buildRateLimiter,
   handleRequest = handleApiRequest,
-  logger,
+  logger: rawLogger,
   security = readSecurityConfig({}),
 }: LambdaHandlerDependencies) => {
+  const logger = redactingLogger(rawLogger);
   const route = async (
     event: ApiGatewayHttpApiEvent,
     body: string | undefined,
