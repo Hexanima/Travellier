@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
     resolve: {
@@ -14,6 +14,8 @@ export default defineConfig({
         coverage: {
             exclude: ["**/index.ts", "src/errors/generic-errors/**/*"],
         },
+        // T104: los recorridos conectados corren con `yarn test:integration` (levantan mongod, de a un archivo).
+        exclude: [...configDefaults.exclude, "test-integration/**"],
         passWithNoTests: false,
     },
 });

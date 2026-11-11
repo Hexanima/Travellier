@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["vite/client", "node"], "rootDir": "../.." },
+  "include": ["test-integration", "src", "../api/test/e2e-harness.ts"]
+}

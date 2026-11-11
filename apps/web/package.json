@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "test": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
     "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -45,6 +47,7 @@
     "eslint-plugin-react-refresh": "^0.4.22",
     "globals": "^16.4.0",
     "jsdom": "26.1.0",
+    "mongodb": "^7.6.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.45.0",
     "vite": "^7.1.7",
