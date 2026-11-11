@@ -22,3 +22,4 @@ export * from "./trip-balance-query-port.js";
 export * from "./push-device-port.js";
 export * from "./trip-notification-port.js";
 export * from "./push-dispatch-port.js";
+export * from "./rate-limit-port.js";

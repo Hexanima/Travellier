@@ -11,6 +11,12 @@ export const PUSH_DEVICE_MIGRATION_ID = "0007-push-device-indexes";
  */
 export const NOTIFICATION_INBOX_MIGRATION_ID = "0008-notification-inbox-indexes";
 
+/**
+ * `rateLimits` (T102, not defined by the PRD): Auth throttle counters shared by every Lambda instance. Additive TTL index only: it expires
+ * counters after their window; correctness never depends on it because each document id includes the window start.
+ */
+export const RATE_LIMIT_MIGRATION_ID = "0009-rate-limit-ttl-index";
+
 const pendingMigrations: {
   id: string;
   collections: { name: string; indexes: IndexDescription[] }[];
@@ -42,6 +48,10 @@ const pendingMigrations: {
       { key: { userId: 1, createdAt: -1, _id: -1 }, name: "userId_createdAt_id" },
       { key: { tripId: 1 }, name: "tripId" },
     ] }],
+  },
+  {
+    id: RATE_LIMIT_MIGRATION_ID,
+    collections: [{ name: "rateLimits", indexes: [{ key: { expiresAt: 1 }, name: "expiresAt_ttl", expireAfterSeconds: 0 }] }],
   },
 ];
 

@@ -6,6 +6,9 @@ import {
   connectMongoDatabase,
   readMongoDatabaseConfig,
 } from "./adapters/mongodb/connection.js";
+import { createMongoRateLimitRepository } from "./adapters/mongodb/rate-limit-repository.js";
+import { createAuthRateLimiter } from "./security/auth-rate-limit.js";
+import { readSecurityConfig } from "./security/request-limits.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
 import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
@@ -30,6 +33,16 @@ export const createLocalApi = async (
 ) => {
   const connection = await connectMongoDatabase(readMongoDatabaseConfig(environment));
   const jwtSecret = requiredSetting(environment, "JWT_SECRET");
+  const security = readSecurityConfig(environment);
+  const logLine = environment.API_VERBOSE === "false" ? undefined : (entry: unknown) => console.log(JSON.stringify(entry));
+  const rateLimiter = security.rateLimitEnabled
+    ? createAuthRateLimiter({
+      port: createMongoRateLimitRepository(connection.database),
+      secret: jwtSecret,
+      config: security.authRateLimit,
+      onError: (errorName) => logLine?.({ event: "rate-limit-error", errorName }),
+    })
+    : undefined;
   const app = createApp({
     auth: createAuthenticationApi({
       database: connection.database,
@@ -40,10 +53,9 @@ export const createLocalApi = async (
     trips: createTripApi(connection.database, environment.S3_BUCKET_NAME
       ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
     pushDevices: createPushDeviceApi(connection.database),
-  }, createJwtMiddleware({ jwtSecret }), environment.API_VERBOSE === "false"
-    ? undefined
-    : (entry) => console.log(JSON.stringify(entry)),
-  environment.CORS_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean));
+    ...(rateLimiter === undefined ? {} : { rateLimiter }),
+  }, createJwtMiddleware({ jwtSecret }), logLine,
+  environment.CORS_ORIGINS?.split(",").map((origin) => origin.trim()).filter(Boolean), security);
 
   return {
     app,

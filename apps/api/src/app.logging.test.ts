@@ -82,4 +82,48 @@ describe("local HTTP request logging", () => {
     expect(logs[2]).toMatchObject({ event: "response", status: 500, errorCode: "InternalServerError" });
     expect(JSON.stringify(logs)).not.toMatch(/password-secret|query-secret/);
   });
+
+  it("logs a 413 with its request id and error code, without the body", async () => {
+    const baseUrl = await start(createApp({}, undefined, logger));
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "private@example.test", password: "password-secret", filler: "x".repeat(20_000) }),
+    });
+    await response.text();
+
+    expect(response.status).toBe(413);
+    expect(response.headers.get("x-request-id")).toBe(logs[1].requestId);
+    expect(logs[1]).toMatchObject({ event: "response", status: 413, errorCode: "PayloadTooLarge", path: "/auth/login" });
+    expect(JSON.stringify(logs)).not.toMatch(/password-secret|private@example/);
+  });
+
+  it("logs a 429 with its request id and error code, without credentials", async () => {
+    const baseUrl = await start(createApp({
+      auth: { login: async () => { throw new Error("must not run"); } } as never,
+      rateLimiter: { check: async () => ({ allowed: false, retryAfterSeconds: 9 }), succeeded: async () => undefined },
+    }, undefined, logger));
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "private@example.test", password: "password-secret" }),
+    });
+    await response.text();
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("9");
+    expect(logs[1]).toMatchObject({ event: "response", status: 429, errorCode: "TooManyRequests" });
+    expect(logs[1].requestId).toBe(response.headers.get("x-request-id"));
+    expect(JSON.stringify(logs)).not.toMatch(/password-secret|private@example/);
+  });
+
+  it("answers 415 for a non JSON content type and logs only its status and code", async () => {
+    const baseUrl = await start(createApp({}, undefined, logger));
+    const response = await fetch(`${baseUrl}/auth/login`, { method: "POST", headers: { "content-type": "text/plain" }, body: "password-secret" });
+    await response.text();
+
+    expect(response.status).toBe(415);
+    expect(logs[1]).toMatchObject({ status: 415, errorCode: "UnsupportedMediaType" });
+    expect(JSON.stringify(logs)).not.toContain("password-secret");
+  });
 });
