@@ -63,7 +63,8 @@ export function expenseFormData(data){
  return {...data,...(data.paymentRows!==undefined||data.paymentMember0!==undefined?{payments}:{}),...(data.shareMember0!==undefined?{shares}:{})};
 }
 // Planning reference only: never a post expense and never part of the balance. No conversions between currencies.
-// A leg shared by two destinations is stored twice, so it is counted once. Costs without a currency are listed apart and never summed.
+// Dedup exists only because the sample data stores a leg shared by two destinations twice (Roma return = Florencia outbound),
+// with the same times and places; it is counted once. Transports that differ in any of those fields are always summed apart. Costs without a currency are listed apart and never summed.
 export function transportCosts(trip){
  const seen=new Set(),byCurrency=new Map(),unspecified=[];
  for(const tr of trip.transports){

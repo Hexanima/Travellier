@@ -96,3 +96,13 @@ test('the currency field is described by its help text and error, and failures p
  assert.equal(currencyErrorField({type:'save-transport'},'Revisá el costo por persona.'),null);
  assert.equal(currencyErrorField({type:'settings'},r.error),null);
 });
+test('transport costs count a shared leg once and sum transports that differ in time or place separately',()=>{
+ const base=currentTrip(createSimulation()).transports.find(x=>x.id==='roma-return');
+ const copy=(id,patch)=>({...base,id,costPerPerson:10,costCurrency:'USD',...patch});
+ const total=list=>transportCosts({transports:list}).byCurrency.find(x=>x.currency==='USD')?.total;
+ assert.equal(total([copy('a',{}),copy('b',{})]),10);
+ assert.equal(total([copy('a',{}),copy('b',{arrivalAt:'2026-10-17T21:00:00.000Z'})]),20);
+ assert.equal(total([copy('a',{}),copy('b',{departurePlace:'Otra terminal'})]),20);
+ assert.equal(total([copy('a',{}),copy('b',{arrivalPlace:'Otra ciudad'})]),20);
+ assert.equal(total([copy('a',{}),copy('b',{departureAt:'2026-10-15T18:00:00.000Z'})]),20);
+});

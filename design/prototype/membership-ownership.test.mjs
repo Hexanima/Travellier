@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createSimulation,currentTrip,command,viewerRole,tripOwnerId,localInstant} from './public/simulation.mjs';
 import {createState,transition,views} from './public/state.mjs';
 import {catalog} from './public/catalog.mjs';
+import {renderV1} from './public/v1-screens.mjs';
 import {renderScreen,transferFormError} from './public/playable-screens.mjs';
 import {restoreTravelState,encodeTravelState} from './public/prototype-storage.mjs';
 const newViews=['member-manage','role-change','transfer-owner','leave-trip','leave-owner'];
@@ -188,4 +189,7 @@ test('group buttons name the person, and the member count is singular for one',(
  assert.match(html,/4 integrantes · /);
  const solo=createSimulation();currentTrip(solo).members=currentTrip(solo).members.filter(m=>m.id==='nico');
  const one=screen(solo,'group');assert.match(one,/1 integrante · /);assert.ok(!one.includes('1 integrantes'));
+});
+test('the catalog views rewritten by T117 never mention voting',()=>{
+ for(const view of ['trip-settings','delete-trip','group','remove-member',...newViews])for(const role of ['admin','participant']){const html=renderV1({...createState(),view,role});assert.ok(html.length>100,view);assert.ok(!/vot(o|ar|aci)/i.test(html),view+' '+role);}
 });
