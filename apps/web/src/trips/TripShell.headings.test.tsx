@@ -19,10 +19,10 @@ beforeEach(() => { window.scrollTo = vi.fn() as never; Element.prototype.scrollI
 
 const tripId = itineraryId(1);
 const me = itineraryId(600);
-const admin = { id: itineraryId(901), userId: me, name: "Nico", role: "admin", joinedAt: "2026-09-24T12:00:00.000Z" };
+const admin = { id: itineraryId(901), userId: me, name: "Nico", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" };
 const other = { id: itineraryId(902), userId: itineraryId(601), name: "Ana", role: "participant", joinedAt: "2026-09-24T13:00:00.000Z" };
 const trip = { kind: "member", id: tripId, name: "Patagonia", description: null, primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2", expenseMode: "register" };
-const members = { list: vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, other], currentUserId: me } }), expel: vi.fn() };
+const members = { list: vi.fn().mockResolvedValue({ ok: true, value: { members: [admin, other], currentUserId: me, ownerId: me } }), expel: vi.fn() };
 
 async function mount(path: string, element: ReactElement, inShell: boolean) {
   const container = document.createElement("div"); document.body.append(container);
@@ -52,14 +52,12 @@ describe("heading hierarchy inside the Trip shell", () => {
   it("members: the screen is h2 and its sections h3, with no skips; without the shell it stays h1 > h2", async () => {
     const inside = await mount(`/trips/${tripId}/members`, membersElement, true);
     expect(levelOf(inside, "Miembros e invitación")).toBe(2);
-    for (const text of ["Invitar al viaje", "Integrantes", "Administración"]) expect(levelOf(inside, text), text).toBe(3);
-    expect(levelOf(inside, "Eliminar viaje")).toBe(4);
+    for (const text of ["Invitar al viaje", "Integrantes", "Salir del viaje", "Eliminar viaje"]) expect(levelOf(inside, text), text).toBe(3);
     expectNoSkips(inside);
     await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren();
     const outside = await mount(`/trips/${tripId}/members`, membersElement, false);
     expect(levelOf(outside, "Miembros e invitación")).toBe(1);
-    for (const text of ["Invitar al viaje", "Integrantes", "Administración"]) expect(levelOf(outside, text), text).toBe(2);
-    expect(levelOf(outside, "Eliminar viaje")).toBe(3);
+    for (const text of ["Invitar al viaje", "Integrantes", "Salir del viaje", "Eliminar viaje"]) expect(levelOf(outside, text), text).toBe(2);
     expectNoSkips(outside);
   });
   it("itinerary: Itinerario h2, day h3, band h4, item h5, no skips; without the shell h1 > h2 > h3 > h4", async () => {
