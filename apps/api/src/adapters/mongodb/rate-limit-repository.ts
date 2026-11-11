@@ -21,6 +21,18 @@ const guard = async <T>(work: () => Promise<T>): AsyncResult<T> => {
 const isDuplicateKey = (error: unknown): boolean =>
   typeof error === "object" && error !== null && (error as { code?: unknown }).code === DUPLICATE_KEY;
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\/-]/g, "\$&");
+
+/**
+ * Filter for `reset`: every window of one (bucket, key). The anchored, escaped prefix of `_id` (`<bucket>:<keyHash>:<windowStart>`) lets Mongo
+ * walk the `_id` index range instead of scanning the collection; the exact fields keep look-alike prefixes out.
+ */
+export const resetFilter = (bucket: string, key: string) => ({
+  _id: { $regex: `^${escapeRegExp(`${bucket}:${key}:`)}` },
+  bucket,
+  keyHash: key,
+});
+
 /** Fixed-window counter shared by every Lambda instance: one atomic upsert + `$inc` per attempt. */
 export const createMongoRateLimitRepository = (database: Db): RateLimitPort => ({
   hit: ({ bucket, key, limit, windowMs, now }) => guard(async () => {
@@ -45,6 +57,6 @@ export const createMongoRateLimitRepository = (database: Db): RateLimitPort => (
     return { allowed: count <= limit, count, retryAfterSeconds: Math.max(1, Math.ceil((windowEnd - now.getTime()) / 1000)) };
   }),
   reset: ({ bucket, key }) => guard(async () => {
-    await database.collection<RateLimitDocument>("rateLimits").deleteMany({ bucket, keyHash: key });
+    await database.collection<RateLimitDocument>("rateLimits").deleteMany(resetFilter(bucket, key));
   }),
 });

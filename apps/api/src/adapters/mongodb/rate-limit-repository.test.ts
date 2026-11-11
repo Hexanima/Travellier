@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { MongoClient, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
 
-import { createMongoRateLimitRepository } from "./rate-limit-repository.js";
+import { createMongoRateLimitRepository, resetFilter } from "./rate-limit-repository.js";
 
 const WINDOW = 15 * 60_000;
 const NOW = new Date(Math.floor(Date.UTC(2026, 10, 10, 12, 0, 0) / WINDOW) * WINDOW + 60_000);
@@ -60,6 +60,30 @@ describe("MongoDB rate limit repository", () => {
     expect((await limiter().reset({ bucket: "auth.login.ip", key: "k1" })).ok).toBe(true);
     expect((await value(hit())).count).toBe(1);
     expect((await value(hit({ key: "k2" }))).count).toBe(2);
+  });
+
+  it("reset removes every window of that bucket and key but not look-alike buckets or keys", async () => {
+    const hits: [string, string, Date][] = [
+      ["login", "k1", NOW], ["login", "k1", after(WINDOW)], ["login", "k1", after(3 * WINDOW)],
+      ["login-ip", "k1", NOW], ["login:k1", "k", NOW], ["login", "k10", NOW], ["login", "k1x", NOW], ["login", "k", NOW], ["logon", "k1", NOW],
+      ["a.b", "k1", NOW], ["aXb", "k1", NOW], ["a.b", "k1", after(WINDOW)],
+    ];
+    for (const [bucket, key, now] of hits) await hit({ bucket, key, now });
+    expect((await limiter().reset({ bucket: "login", key: "k1" })).ok).toBe(true);
+    expect((await limiter().reset({ bucket: "a.b", key: "k1" })).ok).toBe(true);
+    const left = (await database.collection("rateLimits").find().toArray()).map((document) => [document.bucket, document.keyHash].join("|")).sort();
+    expect(left).toEqual(["aXb|k1", "login-ip|k1", "login:k1|k", "login|k", "login|k1x", "login|k10", "logon|k1"].sort());
+  });
+
+  it("reset filters by an anchored _id prefix so the _id index is used, not a collection scan", async () => {
+    await hit();
+    const explained = await database.command({
+      explain: { delete: "rateLimits", deletes: [{ q: resetFilter("auth.login.ip", "k1"), limit: 0 }] },
+      verbosity: "queryPlanner",
+    });
+    const plan = JSON.stringify(explained.queryPlanner.winningPlan);
+    expect(plan).toContain("IXSCAN");
+    expect(plan).not.toContain("COLLSCAN");
   });
 
   it("counts exactly under concurrency", async () => {
