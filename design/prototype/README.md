@@ -71,7 +71,7 @@ Cómo explorarlo (servidor Node o Live Server, `?mode=app` para ver solo la app;
 
 «Reiniciar recorrido» restaura los datos iniciales, incluidos los costos y monedas de ejemplo (los estados guardados antes de esta entrega no los tienen).
 
-Pruebas: `membership-ownership.test.mjs`, `transport-currency.test.mjs` y `former-members.test.mjs`; recorrido en navegador: `node verify-membership.mjs` (320/390 px). Pantallas nuevas en el catálogo: `member-manage`, `role-change`, `transfer-owner`, `leave-trip` y `leave-owner` (61 entradas en total). La validación con Impeccable la hace la sesión principal después de esta entrega.
+Pruebas: `membership-ownership.test.mjs`, `transport-currency.test.mjs` y `former-members.test.mjs`; recorrido en navegador: `node verify-membership.mjs` (320/390 px). Pantallas nuevas en el catálogo: `member-manage`, `role-change`, `transfer-owner`, `leave-trip` y `leave-owner` (61 entradas en total). Impeccable (detector y revisión de diseño) ya se ejecutó; ver PRD-AUDIT.md.
 
 ## Pruebas
 

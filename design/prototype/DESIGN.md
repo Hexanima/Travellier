@@ -263,7 +263,7 @@ Voto y participación son individuales. El estado local se reinicia al recargar,
 
 - **Insignia de rol** (`.role-badge`): píldora de 12px/18px, radio 12px, fondo `--soft` y texto `--brand`; el **Titular** invierte a fondo `--brand` y texto `--surface`. Acompaña el nombre en la lista de integrantes y en «Gestionar integrante»; el rol nunca depende solo del color porque lleva texto.
 - **Bloque de costos de transporte** (`.transport-costs`): reutiliza la nota informativa (`.inline-note`); cifras con `font-variant-numeric: tabular-nums`, rotulado «Total del viaje» (no depende del destino elegido, se muestra antes del selector), un renglón por moneda y un aviso `.inline-note.error` «Moneda sin indicar» para costos previos, con destino y origen–destino, sin sumar. Siempre incluye «No es un gasto ni entra en el balance».
-- **Ex integrante:** sufijo textual «· ex integrante» en el nombre, solo en gastos y balance. Sin componente nuevo.
+- **Ex integrante:** en el detalle del gasto (pagos y partes) se muestra con la píldora `.role-badge` con el texto «ex integrante» junto al nombre; en los selectores y leyendas del editor de reparto, la lista de gastos y las transferencias del balance se usa el sufijo textual «· ex integrante». Solo en gastos y balance; no hay otro componente nuevo.
 - El resto de las pantallas de T117 reutiliza botones (primario, secundario, peligro), notas, selects, casilla de confirmación y filas ya definidos. Aprobación del usuario pendiente.
 
 ## Do's and Don'ts
