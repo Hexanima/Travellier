@@ -139,6 +139,24 @@ describe("composite publication with injected failures over HTTP (T103)", () => 
     expect(await withoutTripLock()).toEqual(committed);
   }, 30_000);
 
+  it("two simultaneous publications with the same client id leave exactly one of everything and never answer 500", async () => {
+    await newTrip();
+    const body = await composite();
+    const responses = await Promise.all([publish(body), publish(body)]);
+    // Observed T87 contract: the loser of the race is serialized by the Trip lock and answers the stored result, so both get 201 (no 409).
+    expect(responses.map((r) => r.status)).toEqual([201, 201]);
+    expect(responses[1]!.json).toEqual(responses[0]!.json);
+    expect(await counts()).toEqual({ posts: 1, activities: 1, activityParticipations: 1, postPhotos: 2, postExpenses: 1 });
+  }, 30_000);
+
+  it("two simultaneous leaves of the same participant answer one 204 and one 404, and the membership is removed once", async () => {
+    await newTrip();
+    const responses = await Promise.all([h.http(tokB, "POST", path("/leave")), h.http(tokB, "POST", path("/leave"))]);
+    expect(responses.map((r) => r.status).sort()).toEqual([204, 404]);
+    expect(await h.db.collection("tripMembers").countDocuments({ tripId: new ObjectId(tripId), userId: new ObjectId(B) })).toBe(0);
+    expect(await h.db.collection("tripMembers").countDocuments({ tripId: new ObjectId(tripId) })).toBe(1);
+  }, 30_000);
+
   describe("legacy paidBy fixture", () => {
     const seedLegacy = async () => {
       await newTrip();
