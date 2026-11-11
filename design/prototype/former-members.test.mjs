@@ -12,9 +12,9 @@ test('nobody is labelled as a former member while everyone is in the group',()=>
 });
 test('expense detail names the former member in payments and shares and keeps the amounts',()=>{
  const html=screen(expelled(),'post');
- assert.match(html,/Juli · ex integrante · EUR 24,00 \(50%\)/);
- assert.match(html,/Juli · ex integrante · EUR 12,00/);
- assert.match(html,/Nico · EUR 12,00/);assert.ok(!/Nico · ex integrante/.test(html));
+ assert.match(html,/Juli <span class="role-badge">ex integrante<\/span> · EUR 24,00 \(50%\)/);
+ assert.match(html,/Juli <span class="role-badge">ex integrante<\/span> · EUR 12,00/);
+ assert.match(html,/Nico · EUR 12,00/);assert.ok(!/Nico[^<]*ex integrante/.test(html));
 });
 test('the share editor identifies the former member and lets the group redistribute the share',()=>{
  const s=expelled(),draft=structuredClone(currentTrip(s).posts.find(p=>p.id==='museum-post').expense);

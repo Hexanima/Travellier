@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createSimulation,currentTrip,command,localDate} from './public/simulation.mjs';
 import {createState} from './public/state.mjs';
-import {renderScreen} from './public/playable-screens.mjs';
+import {renderScreen,currencyErrorField} from './public/playable-screens.mjs';
 import {transportCosts,tripBalance} from './public/expenses.mjs';
 import {inputTime} from './public/timing.mjs';
 const screen=(sim,view,extra={})=>renderScreen({...createState(),sim,view,date:'2026-10-12',destinationId:'roma',transportDirection:'outbound',transportId:'roma-outbound',steps:1,...extra});
@@ -72,4 +72,27 @@ test('trip transport summary lists each currency and the previous costs apart wi
  assert.ok(!/(ARS|EUR|USD) 18\.805|(ARS|EUR|USD) 19\.255|(ARS|EUR|USD) 805,00 · ARS/.test(html));
  const none=createSimulation();currentTrip(none).transports.forEach(x=>{x.costPerPerson=null;x.costCurrency=null;});
  assert.ok(!screen(none,'transports').includes('Costo de transporte por persona'));
+});
+
+test('the trip-wide cost total is labelled as such and sits before the destination selector',()=>{
+ const html=screen(createSimulation(),'transports');
+ assert.match(html,/<h4>Total del viaje<\/h4>/);assert.match(html,/no depende del destino elegido/);
+ assert.ok(html.indexOf('Total del viaje')<html.indexOf('name="destination"'));
+ assert.match(html,/Venecia · [^<]*→[^<]*450,00/);
+});
+test('a missing currency is an incomplete-data warning, not a muted metadata suffix',()=>{
+ const s=createSimulation();
+ const detail=screen(s,'transport-detail',{destinationId:'venecia',transportDirection:'return',transportId:'venecia-return'});
+ assert.match(detail,/<section class="inline-note error"><h4>Moneda sin indicar<\/h4>/);assert.ok(!/450,00[^<]*Moneda sin indicar/.test(detail));
+ const overview=screen(s,'transports',{destinationId:'venecia'});assert.match(overview,/inline-note error/);
+});
+test('the currency field is described by its help text and error, and failures point to it',()=>{
+ const html=screen(createSimulation(),'transport-edit');
+ assert.match(html,/<select name="costCurrency" aria-describedby="cost-currency-help transport-design-error">/);
+ assert.match(html,/id="cost-currency-help"/);assert.match(html,/id="transport-design-error" role="alert"/);
+ const s=createSimulation(),tr=find(s,'roma-outbound');
+ const r=command(s,{type:'save-transport',data:formData(tr,{cost:'900',costCurrency:''})});
+ assert.equal(currencyErrorField({type:'save-transport'},r.error),'costCurrency');
+ assert.equal(currencyErrorField({type:'save-transport'},'Revisá el costo por persona.'),null);
+ assert.equal(currencyErrorField({type:'settings'},r.error),null);
 });

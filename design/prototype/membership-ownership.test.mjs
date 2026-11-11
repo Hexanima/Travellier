@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createSimulation,currentTrip,command,viewerRole,tripOwnerId,localInstant} from './public/simulation.mjs';
 import {createState,transition,views} from './public/state.mjs';
 import {catalog} from './public/catalog.mjs';
-import {renderScreen} from './public/playable-screens.mjs';
+import {renderScreen,transferFormError} from './public/playable-screens.mjs';
 import {restoreTravelState,encodeTravelState} from './public/prototype-storage.mjs';
 const newViews=['member-manage','role-change','transfer-owner','leave-trip','leave-owner'];
 const member=(s,id)=>currentTrip(s).members.find(m=>m.id===id);
@@ -120,8 +120,8 @@ test('role change and expulsion ask for confirmation naming the person',()=>{
 });
 test('transfer requires an explicit confirmation and explains the previous owner stays admin',()=>{
  const html=screen(createSimulation(),'transfer-owner',{memberId:'martin'});
- assert.match(html,/id="transfer-owner-design"/);assert.match(html,/<option value="martin" selected>/);assert.ok(!html.includes('<option value="nico"'));
- assert.match(html,/type="checkbox" required name="confirmTransfer"/);assert.match(html,/seguís como admin/i);
+ assert.match(html,/id="transfer-owner-design"/);assert.match(html,/<option value="" selected>Elegí una persona<\/option>/);assert.ok(!/<option value="[a-z]+" selected>/.test(html));assert.ok(!html.includes('<option value="nico"'));
+ assert.match(html,/type="checkbox" name="confirmTransfer"/);assert.ok(!/<input type="checkbox" [^>]*required/.test(html));assert.match(html,/<form id="transfer-owner-design" class="v1-form" novalidate>/);assert.match(html,/Entiendo que <span data-owner-name>la persona elegida<\/span> pasa a ser titular/);assert.match(html,/id="transfer-owner-design-error" role="alert" hidden/);assert.match(html,/seguís como admin/i);
  assert.match(screen(asAdmin(),'transfer-owner'),/solo el titular/i);
 });
 test('the owner who tries to leave chooses between transferring and deleting',()=>{
@@ -150,4 +150,42 @@ test('stored trips without an owner fall back to their first admin',()=>{
  const s=createSimulation();const stored=JSON.parse(encodeTravelState(s));for(const t of stored.trips)delete t.ownerId;
  const restored=restoreTravelState(createSimulation(),JSON.stringify(stored));
  assert.equal(tripOwnerId(currentTrip(restored)),'nico');assert.equal(viewerRole(restored),'owner');
+});
+
+const kind=(html,view)=>(html.match(new RegExp('<button[^>]*data-value="'+view+'"[^>]*>','g'))||[])[0]||'';
+test('transfer form validates by itself: person first, then confirmation, with the field to focus',()=>{
+ const cands=currentTrip(createSimulation()).members.filter(m=>m.id!=='nico');
+ assert.deepEqual(transferFormError({newOwner:'',confirmTransfer:'on'},cands).field,'newOwner');
+ assert.deepEqual(transferFormError({newOwner:'nico',confirmTransfer:'on'},cands).field,'newOwner');
+ assert.equal(transferFormError({newOwner:'martin'},cands).field,'confirmTransfer');
+ assert.equal(transferFormError({newOwner:'martin',confirmTransfer:'on'},cands),null);
+});
+test('Eliminar el viaje is never a primary or filled button at the leave entries, including the sole owner',()=>{
+ const solo=createSimulation();currentTrip(solo).members=currentTrip(solo).members.filter(m=>m.id==='nico');
+ for(const [s,view] of [[createSimulation(),'leave-owner'],[createSimulation(),'leave-trip'],[solo,'leave-owner']]){
+  const b=kind(screen(s,view),'delete-trip');assert.match(b,/class="danger-link"/,view);assert.ok(!/primary|danger-button/.test(b),view);
+ }
+ assert.match(kind(screen(createSimulation(),'leave-owner'),'transfer-owner'),/class="primary"/);
+ assert.match(screen(createSimulation(),'delete-trip'),/class="danger-button"/);
+});
+test('owner note sits before the main action and the transfer ends with a direct leave CTA',()=>{
+ const html=screen(createSimulation(),'leave-owner');
+ assert.ok(html.indexOf('Transferir no te saca del viaje')<html.indexOf('data-value="transfer-owner"'));
+ const after=screen(asAdmin(),'leave-trip',{afterTransfer:true});
+ assert.match(after,/Titularidad transferida/);assert.match(after,/>Ahora salir del viaje</);assert.match(after,/data-action="leave-membership"/);
+ const plain=screen(asAdmin(),'leave-trip');assert.ok(!plain.includes('Ahora salir del viaje'));assert.match(plain,/>Salir del viaje</);
+});
+test('delete trip says it cannot be undone and keeps the invitations sentence out of the accounts card',()=>{
+ const html=screen(createSimulation(),'delete-trip');
+ assert.match(html,/Esta acción no se puede deshacer/);
+ const card=html.match(/<h4>No elimina cuentas ni otros viajes<\/h4><p>([^<]*)<\/p>/)[1];assert.ok(!card.includes('invitaciones'));
+ assert.match(html,/<h4>Invitaciones<\/h4><p>Las invitaciones a este viaje dejan de funcionar/);
+ assert.ok(!/type="checkbox"/.test(html));
+});
+test('group buttons name the person, and the member count is singular for one',()=>{
+ const html=screen(createSimulation(),'group');
+ assert.match(html,/aria-label="Gestionar a Ana"/);assert.match(html,/aria-label="Gestionar a Juli"/);assert.equal((html.match(/aria-label="Gestionar a /g)||[]).length,3);
+ assert.match(html,/4 integrantes · /);
+ const solo=createSimulation();currentTrip(solo).members=currentTrip(solo).members.filter(m=>m.id==='nico');
+ const one=screen(solo,'group');assert.match(one,/1 integrante · /);assert.ok(!one.includes('1 integrantes'));
 });
