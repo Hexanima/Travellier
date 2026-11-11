@@ -24,7 +24,7 @@ export function useActivityParticipations(tripId: string | undefined, activityId
   const generation = useRef(0);
   // Activities deleted in this Trip: a late read or write must not bring their state (or a conflict modal) back.
   const removed = useRef(new Set<string>());
-  // Writes per activity: every publication (load, save, apply, removal) bumps it, so a silent read that started before one is known to be older.
+  // Writes per activity: every publication (load, save, apply) bumps it, so a silent read that started before one is known to be older. A removal does not: it is dropped through `removed`.
   const writes = useRef<Record<string, number>>({});
   const bump = (id: string) => { writes.current[id] = (writes.current[id] ?? 0) + 1; };
   const publish = useCallback((id: string, state: ParticipationState) => {
