@@ -8,6 +8,7 @@
     "test": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
     "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
