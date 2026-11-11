@@ -41,25 +41,30 @@ const policySetting = (environment: Environment, prefix: string, fallback: { lim
   windowMs: integerSetting(environment, `${prefix}_WINDOW_SECONDS`, fallback.windowMs / 1000, 1, 86_400) * 1000,
 });
 
+export interface SecurityDefaults {
+  /** Value of AUTH_RATE_LIMIT_ENABLED when it is absent or blank: true locally, false in Lambda (the `rateLimits` TTL index must exist first). */
+  rateLimitEnabled?: boolean;
+}
+
 /** Reads the protection settings of one stage; invalid or out-of-range values throw at startup. */
-export const readSecurityConfig = (environment: Environment): SecurityConfig => {
+export const readSecurityConfig = (environment: Environment, defaults: SecurityDefaults = {}): SecurityConfig => {
   const maxBodyBytes = integerSetting(environment, "MAX_BODY_BYTES", DEFAULT_MAX_BODY_BYTES, MIN_BODY_BYTES, HARD_MAX_BODY_BYTES);
   const maxBodyBytesAuth = integerSetting(environment, "MAX_BODY_BYTES_AUTH", Math.min(DEFAULT_MAX_BODY_BYTES_AUTH, maxBodyBytes), MIN_BODY_BYTES, HARD_MAX_BODY_BYTES);
   if (maxBodyBytesAuth > maxBodyBytes) throw invalid("MAX_BODY_BYTES_AUTH");
   const failMode = environment.AUTH_RATE_LIMIT_FAIL_MODE?.trim() || defaultAuthRateLimitConfig.failMode;
   if (failMode !== "open" && failMode !== "closed") throw invalid("AUTH_RATE_LIMIT_FAIL_MODE");
-  const defaults = defaultAuthRateLimitConfig;
+  const limitDefaults = defaultAuthRateLimitConfig;
   return {
     maxBodyBytes,
     maxBodyBytesAuth,
-    rateLimitEnabled: booleanSetting(environment, "AUTH_RATE_LIMIT_ENABLED", true),
+    rateLimitEnabled: booleanSetting(environment, "AUTH_RATE_LIMIT_ENABLED", defaults.rateLimitEnabled ?? true),
     authRateLimit: {
       login: {
-        ip: policySetting(environment, "AUTH_RATE_LIMIT_LOGIN_IP", defaults.login.ip),
-        account: policySetting(environment, "AUTH_RATE_LIMIT_LOGIN_ACCOUNT", defaults.login.account),
+        ip: policySetting(environment, "AUTH_RATE_LIMIT_LOGIN_IP", limitDefaults.login.ip),
+        account: policySetting(environment, "AUTH_RATE_LIMIT_LOGIN_ACCOUNT", limitDefaults.login.account),
       },
-      register: { ip: policySetting(environment, "AUTH_RATE_LIMIT_REGISTER_IP", defaults.register.ip) },
-      refresh: { ip: policySetting(environment, "AUTH_RATE_LIMIT_REFRESH_IP", defaults.refresh.ip) },
+      register: { ip: policySetting(environment, "AUTH_RATE_LIMIT_REGISTER_IP", limitDefaults.register.ip) },
+      refresh: { ip: policySetting(environment, "AUTH_RATE_LIMIT_REFRESH_IP", limitDefaults.refresh.ip) },
       failMode: failMode as AuthRateLimitFailMode,
     },
   };

@@ -271,15 +271,15 @@ const createRuntimePushDeviceApi = async (configuration: LambdaRuntimeConfig): P
   return pushDeviceApi;
 };
 
-// Invalid settings throw at cold start without echoing their values.
-const security = readSecurityConfig(process.env);
+// Invalid settings throw at cold start without echoing their values. Rate limiting needs the `rateLimits` TTL index (migration 0009),
+// so in Lambda it stays off until AUTH_RATE_LIMIT_ENABLED is explicitly "true" (single source: SecurityConfig.rateLimitEnabled).
+const security = readSecurityConfig(process.env, { rateLimitEnabled: false });
 const logger: ApiLogger | undefined = process.env.API_VERBOSE === "false"
   ? undefined
   : (entry) => console.log(JSON.stringify(entry));
 
-// Rate limiting needs the `rateLimits` TTL index (migration 0009): it stays off until AUTH_RATE_LIMIT_ENABLED is explicitly "true".
 const createRuntimeRateLimiter = async (configuration: LambdaRuntimeConfig): Promise<AuthRateLimiter | undefined> => {
-  if (process.env.AUTH_RATE_LIMIT_ENABLED !== "true") return undefined;
+  if (!security.rateLimitEnabled) return undefined;
   rateLimiter ??= loadDatabase(configuration).then(({ database }) => createAuthRateLimiter({
     port: createMongoRateLimitRepository(database),
     secret: configuration.jwtSecret,

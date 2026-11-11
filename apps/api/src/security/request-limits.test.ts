@@ -38,11 +38,43 @@ describe("readSecurityConfig", () => {
     ["MAX_BODY_BYTES", "abc"], ["MAX_BODY_BYTES", "0"], ["MAX_BODY_BYTES", "-5"], ["MAX_BODY_BYTES", "1048577"], ["MAX_BODY_BYTES", "1.5"],
     ["MAX_BODY_BYTES_AUTH", "10"], ["AUTH_RATE_LIMIT_ENABLED", "yes"], ["AUTH_RATE_LIMIT_FAIL_MODE", "maybe"],
     ["AUTH_RATE_LIMIT_LOGIN_ACCOUNT_MAX", "0"], ["AUTH_RATE_LIMIT_LOGIN_IP_WINDOW_SECONDS", "999999"],
-  ])("rejects %s=%s naming the variable but not the value", (name, value) => {
+    // Long sentinel values that must never be echoed.
+    ["MAX_BODY_BYTES", "SENTINEL-SECRET-VALUE-123"], ["AUTH_RATE_LIMIT_ENABLED", "SENTINEL-SECRET-VALUE-123"],
+    ["AUTH_RATE_LIMIT_FAIL_MODE", "SENTINEL-SECRET-VALUE-123"], ["AUTH_RATE_LIMIT_LOGIN_IP_MAX", "SENTINEL-SECRET-VALUE-123"],
+  ])("rejects %s=%s with exactly the variable name and no value", (name, value) => {
+    expect(() => readSecurityConfig({ [name]: value })).toThrow(new Error(`Invalid configuration: ${name}`));
     let message = "";
     try { readSecurityConfig({ [name]: value }); } catch (error) { message = (error as Error).message; }
-    expect(message).toContain(name);
-    expect(message).not.toContain(`${value}`.length > 3 ? value : "\u0000");
+    expect(message).toBe(`Invalid configuration: ${name}`);
+    expect(message).not.toContain(value);
+  });
+
+  describe("AUTH_RATE_LIMIT_ENABLED", () => {
+    it.each([
+      [" true", true], ["TRUE", undefined], ["true ", true], ["false", false], [" false ", false],
+    ])("%j", (value, expected) => {
+      if (expected === undefined) {
+        expect(() => readSecurityConfig({ AUTH_RATE_LIMIT_ENABLED: value })).toThrow("Invalid configuration: AUTH_RATE_LIMIT_ENABLED");
+        return;
+      }
+      for (const fallback of [true, false]) {
+        expect(readSecurityConfig({ AUTH_RATE_LIMIT_ENABLED: value }, { rateLimitEnabled: fallback }).rateLimitEnabled).toBe(expected);
+      }
+    });
+
+    it("uses the environment default when absent or blank: true locally, false in Lambda", () => {
+      expect(readSecurityConfig({}).rateLimitEnabled).toBe(true);
+      expect(readSecurityConfig({}, { rateLimitEnabled: true }).rateLimitEnabled).toBe(true);
+      expect(readSecurityConfig({}, { rateLimitEnabled: false }).rateLimitEnabled).toBe(false);
+      expect(readSecurityConfig({ AUTH_RATE_LIMIT_ENABLED: "  " }, { rateLimitEnabled: false }).rateLimitEnabled).toBe(false);
+    });
+
+    it.each(["yes", "1", "SENTINEL-SECRET-VALUE-123"])("rejects %j in both environments", (value) => {
+      for (const fallback of [true, false]) {
+        expect(() => readSecurityConfig({ AUTH_RATE_LIMIT_ENABLED: value }, { rateLimitEnabled: fallback }))
+          .toThrow(new Error("Invalid configuration: AUTH_RATE_LIMIT_ENABLED"));
+      }
+    });
   });
 
   it("rejects an auth limit above the general limit", () => {
