@@ -1,14 +1,14 @@
 import { buildTripNotifications } from "../../entities/trip-notification.js";
 import { TripMemberNotFoundError } from "../../errors/trip-member-not-found-error.js";
 import { UnauthorizedError } from "../../errors/unauthorized-error.js";
-import type { TripMemberManagementPort } from "../../ports/trip-member-management-port.js";
+import type { TripMemberAdministrationPort } from "../../ports/trip-member-administration-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
 
-export interface ExpelTripParticipantDependencies<TError extends TaggedError = TaggedError> {
-  members: TripMemberManagementPort<TError>;
+export interface ExpelTripParticipantDependencies {
+  administration: TripMemberAdministrationPort;
   now: () => Date;
 }
 
@@ -18,30 +18,35 @@ export interface ExpelTripParticipantPayload {
   targetUserId: ObjectId;
 }
 
+/**
+ * Admins expel participants; only the owner expels admins; nobody expels the owner.
+ * Actor, target and owner are read inside the Trip transaction, so a concurrent role change or transfer cannot be bypassed.
+ */
 export const expelTripParticipant: UseCase<
   ExpelTripParticipantDependencies,
   ExpelTripParticipantPayload,
   void,
   TaggedError
 > = {
-  execute: async ({ members, now }, { tripId, actorUserId, targetUserId }) => {
-    const actor = await members.findByTripAndUser(tripId, actorUserId);
+  execute: ({ administration, now }, { tripId, actorUserId, targetUserId }) => administration.withTransaction(tripId, async (scope) => {
+    const actor = await scope.findMember(actorUserId);
     if (!actor.ok) return actor;
-    if (actor.value?.role !== "admin" || actor.value.tripId !== tripId || actor.value.userId !== actorUserId) {
-      return err(new UnauthorizedError());
-    }
+    if (actor.value?.role !== "admin") return err(new UnauthorizedError());
 
-    const target = await members.findByTripAndUser(tripId, targetUserId);
+    const target = await scope.findMember(targetUserId);
     if (!target.ok) return target;
     if (target.value === undefined) return err(new TripMemberNotFoundError());
-    if (target.value.role !== "participant" || target.value.tripId !== tripId || target.value.userId !== targetUserId) {
-      return err(new UnauthorizedError());
+    if (target.value.role === "admin") {
+      const ownerId = await scope.findOwnerId();
+      if (!ownerId.ok) return ownerId;
+      // The owner is protected; any other admin can only be expelled by the owner (a Trip without owner blocks both).
+      if (ownerId.value === undefined || ownerId.value === targetUserId || ownerId.value !== actorUserId) return err(new UnauthorizedError());
     }
     // The expelled user is the only recipient: no actor, no data of the Trip, nothing for the rest of the members.
     const notices = buildTripNotifications({ type: "member.expelled", tripId, operationRef: target.value.id, actorId: null,
       recipients: [targetUserId], payload: { tripId }, createdAt: now() });
-    const removed = await members.removeParticipant(target.value.id, tripId, targetUserId, notices);
+    const removed = await scope.removeMember(target.value.id, targetUserId, notices);
     if (!removed.ok) return removed;
     return removed.value ? ok(undefined) : err(new TripMemberNotFoundError());
-  },
+  }),
 };

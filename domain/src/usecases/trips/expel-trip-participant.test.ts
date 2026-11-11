@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { err, expelTripParticipant, ok, UnknownError } from "../../index.js";
+import type { Result, TripMemberAdministrationPort, TripMemberAdministrationScope, TripRole } from "../../index.js";
 import { createObjectId } from "../../value-objects/object-id.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
-import type { TripMember } from "../../entities/trip-member.js";
 
 const id = (value: string) => {
   const result = createObjectId(value);
@@ -12,249 +12,121 @@ const id = (value: string) => {
 };
 
 const tripId = id("507f191e810c19729de860ea");
-const otherTripId = id("507f191e810c19729de860eb");
-const adminUserId = id("507f1f77bcf86cd799439011");
-const participantUserId = id("507f1f77bcf86cd799439012");
-const joinedAt = new Date("2026-09-24T12:00:00.000Z");
-
-const admin: TripMember = {
-  id: id("507f1f77bcf86cd799439013"),
-  tripId,
-  userId: adminUserId,
-  role: "admin",
-  joinedAt,
-};
-const participant: TripMember = {
-  id: id("507f1f77bcf86cd799439014"),
-  tripId,
-  userId: participantUserId,
-  role: "participant",
-  joinedAt,
-};
-
+const owner = id("507f1f77bcf86cd799439011");
+const admin = id("507f1f77bcf86cd799439012");
+const participant = id("507f1f77bcf86cd799439013");
+const otherParticipant = id("507f1f77bcf86cd799439014");
+const stranger = id("507f1f77bcf86cd799439015");
+const membershipIds = new Map<ObjectId, ObjectId>([
+  [owner, id("507f1f77bcf86cd799439021")], [admin, id("507f1f77bcf86cd799439022")],
+  [participant, id("507f1f77bcf86cd799439023")], [otherParticipant, id("507f1f77bcf86cd799439024")],
+]);
 const now = () => new Date("2026-10-04T12:00:00.789Z");
+
 /** The only notice of an expulsion: for the expelled user alone, with no actor and no data of the Trip. */
-const expulsionNotice = [{ eventKey: `member.expelled:${participant.id}:${participantUserId}`, type: "member.expelled", tripId, userId: participantUserId,
-  actorId: null, operationKey: `member.expelled:${participant.id}`, payload: { tripId }, createdAt: now() }];
+const expulsionNotice = (userId: ObjectId) => {
+  const membershipId = membershipIds.get(userId);
+  return [{ eventKey: `member.expelled:${membershipId}:${userId}`, type: "member.expelled", tripId, userId, actorId: null,
+    operationKey: `member.expelled:${membershipId}`, payload: { tripId }, createdAt: now() }];
+};
+
+const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean } = {}) => {
+  const roles = new Map<ObjectId, TripRole>([[owner, "admin"], [admin, "admin"], [participant, "participant"], [otherParticipant, "participant"]]);
+  const calls = { findOwnerId: 0 };
+  const removeMember = vi.fn(async (_membershipId: ObjectId, userId: ObjectId, _notifications: unknown): Promise<Result<boolean>> =>
+    ok(options.removed === false ? false : roles.delete(userId)));
+  const scope: TripMemberAdministrationScope = {
+    findMember: async (userId) => {
+      const role = roles.get(userId);
+      const membershipId = membershipIds.get(userId);
+      return ok(role === undefined || membershipId === undefined ? undefined : { id: membershipId, role });
+    },
+    findOwnerId: async () => { calls.findOwnerId += 1; return ok(options.ownerId === null ? undefined : options.ownerId ?? owner); },
+    setRole: vi.fn(), transferOwnership: vi.fn(), removeMember,
+  };
+  const port: TripMemberAdministrationPort = { withTransaction: (_tripId, work) => work(scope) };
+  return { port, roles, calls, removeMember };
+};
+
+const expel = (port: TripMemberAdministrationPort, actorUserId: ObjectId, targetUserId: ObjectId) =>
+  expelTripParticipant.execute({ administration: port, now }, { tripId, actorUserId, targetUserId });
 
 describe("expelTripParticipant", () => {
-  it("allows an admin to expel a participant of the same trip", async () => {
-    const memberships = new Map<ObjectId, TripMember>([
-      [adminUserId, admin],
-      [participantUserId, participant],
-    ]);
-    const findByTripAndUser = vi.fn(async (requestedTripId: ObjectId, userId: ObjectId) =>
-      ok(requestedTripId === tripId ? memberships.get(userId) : undefined));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(findByTripAndUser).toHaveBeenNthCalledWith(1, tripId, adminUserId);
-    expect(findByTripAndUser).toHaveBeenNthCalledWith(2, tripId, participantUserId);
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
-    expect(result).toEqual({ ok: true, value: undefined });
+  it.each([["an admin", admin], ["the owner", owner]])("lets %s expel a participant with a notice for the expelled user only", async (_label, actor) => {
+    const { port, removeMember, calls, roles } = createFake();
+    expect(await expel(port, actor, participant)).toEqual({ ok: true, value: undefined });
+    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, expulsionNotice(participant));
+    expect(JSON.stringify(removeMember.mock.calls[0]?.[2])).not.toContain(actor);
+    expect(roles.has(participant)).toBe(false);
+    expect(calls.findOwnerId).toBe(0);
   });
 
-  it.each([
-    ["trip", { tripId: id(tripId.toUpperCase()) }],
-    ["admin", { actorUserId: id(adminUserId.toUpperCase()) }],
-    ["participant", { targetUserId: id(participantUserId.toUpperCase()) }],
-  ])("accepts an uppercase %s ID for the same membership", async (_label, overrides) => {
-    const findByTripAndUser = vi.fn()
-      .mockResolvedValueOnce(ok(admin))
-      .mockResolvedValueOnce(ok(participant));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId, ...overrides },
-    );
-
-    expect(result).toEqual({ ok: true, value: undefined });
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
+  it("lets the owner expel an admin with the same notice", async () => {
+    const { port, removeMember, roles } = createFake();
+    expect(await expel(port, owner, admin)).toEqual({ ok: true, value: undefined });
+    expect(removeMember).toHaveBeenCalledWith(membershipIds.get(admin), admin, expulsionNotice(admin));
+    expect(roles.has(admin)).toBe(false);
   });
 
-  it("rejects a participant without reading or removing the target", async () => {
-    const findByTripAndUser = vi.fn(async () => ok(participant));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: participantUserId, targetUserId: adminUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(findByTripAndUser).toHaveBeenCalledTimes(1);
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("does not let a non-owner admin expel another admin", async () => {
+    const { port, removeMember, roles } = createFake();
+    roles.set(participant, "admin");
+    expect(await expel(port, admin, participant)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
+    expect(roles.size).toBe(4);
   });
 
-  it("rejects a user with no membership in the trip", async () => {
-    const findByTripAndUser = vi.fn(async () => ok(undefined));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(findByTripAndUser).toHaveBeenCalledTimes(1);
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("nobody expels the owner, not even the owner", async () => {
+    const { port, removeMember } = createFake();
+    expect(await expel(port, admin, owner)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(await expel(port, participant, owner)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(await expel(port, owner, owner)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it("does not expel another admin", async () => {
-    const findByTripAndUser = vi.fn(async () => ok(admin));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("does not let an admin expel itself", async () => {
+    const { port, removeMember } = createFake();
+    expect(await expel(port, admin, admin)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it("rejects an admin membership from another trip", async () => {
-    const findByTripAndUser = vi.fn(async () => ok({ ...admin, tripId: otherTripId }));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(findByTripAndUser).toHaveBeenCalledTimes(1);
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("rejects a Trip without owner for admin targets without writing", async () => {
+    const { port, removeMember } = createFake({ ownerId: null });
+    expect(await expel(port, owner, admin)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it("rejects a membership belonging to a different actor", async () => {
-    const findByTripAndUser = vi.fn(async () => ok({ ...admin, userId: participantUserId }));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(findByTripAndUser).toHaveBeenCalledTimes(1);
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it.each([["a participant", participant], ["a non-member", stranger]])("rejects %s as actor without removing the target", async (_label, actor) => {
+    const { port, removeMember } = createFake();
+    expect(await expel(port, actor, otherParticipant)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it("does not expel a participant from another trip", async () => {
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
-      ok(userId === adminUserId ? admin : { ...participant, tripId: otherTripId }));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("reports a missing target without removing anything", async () => {
+    const { port, removeMember } = createFake();
+    expect(await expel(port, admin, stranger)).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
+    expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it("does not expel a membership belonging to a different target user", async () => {
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
-      ok(userId === adminUserId ? admin : { ...participant, userId: adminUserId }));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("reports a membership removed concurrently as missing", async () => {
+    const { port } = createFake({ removed: false });
+    expect(await expel(port, admin, participant)).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
   });
 
-  it("reports a missing target member without removing anything", async () => {
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
-      ok(userId === adminUserId ? admin : undefined));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
-    expect(removeParticipant).not.toHaveBeenCalled();
+  it("reads the owner only when the target is an admin", async () => {
+    const participantCase = createFake();
+    await expel(participantCase.port, admin, participant);
+    expect(participantCase.calls.findOwnerId).toBe(0);
+    const adminCase = createFake();
+    await expel(adminCase.port, owner, admin);
+    expect(adminCase.calls.findOwnerId).toBe(1);
   });
 
-  it("propagates an actor lookup failure without removing anything", async () => {
-    const databaseError = new UnknownError("database failure");
-    const findByTripAndUser = vi.fn(async () => err(databaseError));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toEqual(err(databaseError));
-    expect(findByTripAndUser).toHaveBeenCalledTimes(1);
-    expect(removeParticipant).not.toHaveBeenCalled();
-  });
-
-  it("propagates a target lookup failure without removing anything", async () => {
-    const databaseError = new UnknownError("database failure");
-    const findByTripAndUser = vi.fn()
-      .mockResolvedValueOnce(ok(admin))
-      .mockResolvedValueOnce(err(databaseError));
-    const removeParticipant = vi.fn(async () => ok(true));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toEqual(err(databaseError));
-    expect(removeParticipant).not.toHaveBeenCalled();
-  });
-
-  it("propagates a removal failure", async () => {
-    const databaseError = new UnknownError("database failure");
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
-      ok(userId === adminUserId ? admin : participant));
-    const removeParticipant = vi.fn(async () => err(databaseError));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toEqual(err(databaseError));
-    expect(removeParticipant).toHaveBeenCalledWith(participant.id, tripId, participantUserId, expulsionNotice);
-  });
-
-  it("hands the persistence a single notice for the expelled user only, built from the membership and the operation time", async () => {
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) => ok(userId === adminUserId ? admin : participant));
-    const removeParticipant = vi.fn(async () => ok(true));
-    await expelTripParticipant.execute({ members: { findByTripAndUser, removeParticipant }, now }, { tripId, actorUserId: adminUserId, targetUserId: participantUserId });
-    const [, , , notices] = removeParticipant.mock.calls[0] as unknown as [unknown, unknown, unknown, typeof expulsionNotice];
-    expect(notices).toEqual(expulsionNotice);
-    expect(notices).toHaveLength(1);
-    expect(notices.some((notice) => notice.userId === adminUserId)).toBe(false);
-    expect(JSON.stringify(notices)).not.toContain(adminUserId);
-  });
-
-  it("reports a participant removed concurrently as missing", async () => {
-    const findByTripAndUser = vi.fn(async (_tripId: ObjectId, userId: ObjectId) =>
-      ok(userId === adminUserId ? admin : participant));
-    const removeParticipant = vi.fn(async () => ok(false));
-
-    const result = await expelTripParticipant.execute(
-      { members: { findByTripAndUser, removeParticipant }, now },
-      { tripId, actorUserId: adminUserId, targetUserId: participantUserId },
-    );
-
-    expect(result).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
+  it("propagates port and removal failures", async () => {
+    const failure = new UnknownError("database failure");
+    expect(await expel({ withTransaction: async () => err(failure) }, admin, participant)).toEqual(err(failure));
+    const { port, removeMember } = createFake();
+    removeMember.mockResolvedValueOnce(err(failure));
+    expect(await expel(port, admin, participant)).toEqual(err(failure));
   });
 });
