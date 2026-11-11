@@ -54,7 +54,11 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
     try {
       const result = await balance.get(tripId);
       if (mine !== generation.current) return;
-      if (!result.ok) { fail(result.error); return; }
+      if (!result.ok) {
+        // An automatic refresh (the screen already had data) that finds the Trip gone or the access revoked leaves for Mis viajes, with no data left on screen (T121).
+        if (silent && ["not-found", "forbidden"].includes(result.error.kind)) { navigate("/trips", { replace: true, state: { tripGone: true } }); return; }
+        fail(result.error); return;
+      }
       const value = result.value;
       // Register mode shows no debts, so it needs neither names nor memories.
       const [people, titles] = value.expenseMode === "register" ? [unknownPeople, undefined] : await Promise.all([

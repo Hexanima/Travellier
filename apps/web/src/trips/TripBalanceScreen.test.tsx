@@ -30,6 +30,7 @@ const ok = <T,>(value: T) => ({ ok: true as const, value });
 function EditStub() { const location = useLocation(); const navigate = useNavigate();
   return <div><p data-testid="edit">EDITOR {location.pathname} {JSON.stringify(location.state)}</p><button type="button" onClick={() => navigate(-1)}>Guardar</button></div>; }
 function ItineraryStub() { return <p>ITINERARIO</p>; }
+function TripsStub() { const location = useLocation(); return <p data-testid="trips">MIS VIAJES {JSON.stringify(location.state)}</p>; }
 type Mocks = { get?: ReturnType<typeof vi.fn>; list?: ReturnType<typeof vi.fn>; members?: ReturnType<typeof vi.fn> };
 async function render(mocks: Mocks = {}, entryState?: unknown) {
   const get = mocks.get ?? vi.fn().mockResolvedValue(ok(balance()));
@@ -42,6 +43,7 @@ async function render(mocks: Mocks = {}, entryState?: unknown) {
     <Route path="/trips/:tripId/memories/:postId/edit" element={<EditStub />} />
     <Route path="/trips/:tripId/itinerary" element={<ItineraryStub />} />
     <Route path="/login" element={<p>LOGIN</p>} />
+    <Route path="/trips" element={<TripsStub />} />
   </Routes></MemoryRouter>));
   return { container, get, list, membersList };
 }
@@ -333,6 +335,13 @@ describe("TripBalanceScreen: refresh", () => {
     expect(container.querySelector('[role="status"]')).toBeNull();
     expect(alerts(container)).toHaveLength(1);
     expect(alerts(container)[0]!.textContent).toBe("No pudimos actualizar el balance. Lo que ves puede estar desactualizado.");
+  });
+  it.each(["forbidden", "not-found"])("an automatic refresh that loses access (%s) goes to Mis viajes with the generic mark and no balance on screen", async (kind) => {
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind } });
+    const { container } = await render({ get });
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(container.querySelector('[data-testid="trips"]')?.textContent).toBe('MIS VIAJES {"tripGone":true}');
+    expect(container.textContent).not.toContain("Pesos (ARS)");
   });
   it("the manual refresh does show the status while it runs", async () => {
     const second = deferred<unknown>();
