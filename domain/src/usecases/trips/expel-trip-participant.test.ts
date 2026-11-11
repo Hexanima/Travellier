@@ -33,8 +33,8 @@ const expulsionNotice = (userId: ObjectId) => {
 const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean } = {}) => {
   const roles = new Map<ObjectId, TripRole>([[owner, "admin"], [admin, "admin"], [participant, "participant"], [otherParticipant, "participant"]]);
   const calls = { findOwnerId: 0 };
-  const removeMember = vi.fn(async (_membershipId: ObjectId, userId: ObjectId, _notifications: unknown): Promise<Result<boolean>> =>
-    ok(options.removed === false ? false : roles.delete(userId)));
+  const removeMember = vi.fn(async (...args: [membershipId: ObjectId, userId: ObjectId, notifications: unknown]): Promise<Result<boolean>> =>
+    ok(options.removed === false ? false : roles.delete(args[1])));
   const scope: TripMemberAdministrationScope = {
     findMember: async (userId) => {
       const role = roles.get(userId);
