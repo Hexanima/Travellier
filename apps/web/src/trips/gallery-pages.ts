@@ -41,11 +41,20 @@ export const currentCursor = (pages: readonly GalleryPageData[]): string | null 
  * Silent refresh of the first page (T121). A signed url is never swapped for a known photo (the image would reload every cycle; expired urls have their own
  * refresh): only the ids matter. Photos the answer has and the first page does not go first (the answer is newest first); the first page keeps the rest, the
  * following pages and its `nextCursor` (the next page still starts where the old first page ended). The exception is a single complete page (no cursor in
- * the answer either): there the answer is the truth and removed photos leave. Same array when the ids did not change.
+ * the answer either): there the answer is the truth and removed photos leave. If the answer is a full page that shares no id with the first page (more new
+ * photos than a page) the pages restart from the answer and its cursor, so no gap is left. Same array when the ids did not change.
  */
 export const mergeFirstPage = (pages: readonly GalleryPageData[], fresh: GalleryPageData): GalleryPageData[] => {
   const first = pages[0];
   if (!first || first.cursor !== null) return pages as GalleryPageData[];
+  // More new photos than a page: the answer shares nothing with the old first page, so keeping its `nextCursor` would leave a gap. Restart from the
+  // answer and its cursor (the rest is loaded again by scrolling); photos already loaded keep their snapshot and url.
+  const overlaps = fresh.photos.some((photo) => first.photos.some((old) => old.id === photo.id));
+  if (!overlaps && fresh.nextCursor !== null && first.photos.length > 0 && fresh.photos.length > 0) {
+    const loaded = new Map(pages.flatMap((page) => page.photos.map((photo) => [photo.id, photo] as const)));
+    const photos = fresh.photos.map((photo) => loaded.get(photo.id) ?? photo);
+    return [{ ...fresh, photos, expiresAtMs: Math.min(Number.POSITIVE_INFINITY, ...photos.map((photo) => photo.expiresAtMs)) }];
+  }
   const known = new Map(first.photos.map((photo) => [photo.id, photo]));
   const later = new Set(pages.slice(1).flatMap((page) => page.photos.map((photo) => photo.id)));
   const answer = fresh.photos.filter((photo) => !later.has(photo.id)).map((photo) => known.get(photo.id) ?? photo);
