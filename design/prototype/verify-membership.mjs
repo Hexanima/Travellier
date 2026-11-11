@@ -19,18 +19,21 @@ try{
   await page.setViewportSize({width,height:844});
   // Owner removes admin with a confirmation; the owner badge stays.
   await reset();await open('group');assert.match(await text(),/Titular/);assert.equal(await phone.locator('.role-badge').count(),4);await fit();
+  assert.equal(await phone.locator('[data-value="member-manage"]').first().getAttribute('aria-label'),'Gestionar a Ana');
   await phone.locator('[data-value="member-manage"]').first().click();assert.match(await text(),/Gestionar a Ana/);assert.ok(await button('Transferir titularidad').isVisible());await fit();
   await button('Quitar admin').click();assert.match(await text(),/¿Quitar admin a Ana\?/);await fit();
   await button('Confirmar: quitar admin a Ana').click();assert.match(await text(),/Con quién viajamos/);assert.equal(await phone.locator('.role-badge',{hasText:'Participante'}).count(),3);
   // Owner cannot just leave: transfers first (separate step), then leaves.
   await button('Salir del viaje').click();assert.match(await text(),/Sos el titular/);await fit();
   await button('Transferir la titularidad').click();assert.match(await text(),/Transferir la titularidad/);
-  await phone.locator('[name="newOwner"]').selectOption('martin');
-  await phone.locator('form button[type="submit"]').click();
-  assert.equal(await phone.locator('[name="confirmTransfer"]').count(),1,'required checkbox blocks submission');
-  await phone.locator('[name="confirmTransfer"]').check();await phone.locator('form button[type="submit"]').click();
-  assert.match(await text(),/¿Salir de Italia, sin apuro\?/);await fit();
-  await button('Salir del viaje').click();assert.match(await text(),/Saliste de Italia, sin apuro/);assert.equal(await phone.locator('.trip-card,.other-trip',{hasText:'Italia'}).count(),0);assert.match(await text(),/Escapada a Bariloche/);
+  const select=phone.locator('[name="newOwner"]'),check=phone.locator('[name="confirmTransfer"]'),submit=phone.locator('form button[type="submit"]'),formError=phone.locator('#transfer-owner-design-error');
+  assert.equal(await select.inputValue(),'','sin preselección');assert.equal(await phone.locator('[data-owner-name]').innerText(),'la persona elegida');
+  await submit.click();assert.equal(await formError.getAttribute('role'),'alert');assert.equal(await formError.isVisible(),true);assert.match(await formError.innerText(),/Elegí a la persona que será titular/);assert.equal(await select.getAttribute('aria-invalid'),'true');assert.equal(await select.evaluate(el=>el===document.activeElement),true,'foco en el selector');await fit();
+  await select.selectOption('martin');assert.equal(await phone.locator('[data-owner-name]').innerText(),'Martín');
+  await submit.click();assert.match(await formError.innerText(),/Confirmá que entendés/);assert.equal(await check.getAttribute('aria-invalid'),'true');assert.equal(await check.evaluate(el=>el===document.activeElement),true,'foco en la casilla');await fit();
+  await check.check();await submit.click();
+  assert.match(await text(),/Titularidad transferida/);assert.ok(await button('Ahora salir del viaje').isVisible());assert.equal(await button('Salir del viaje').count(),0);await fit();
+  await button('Ahora salir del viaje').click();assert.match(await text(),/Saliste de Italia, sin apuro/);assert.equal(await phone.locator('.trip-card,.other-trip',{hasText:'Italia'}).count(),0);assert.match(await text(),/Escapada a Bariloche/);
   // Expelling keeps the person in expenses and balance, labelled as a former member.
   await reset();await open('group');await phone.locator('[data-value="member-manage"][data-record="juli"]').click();await button('Expulsar').click();assert.match(await text(),/¿Expulsar a Juli\?/);await fit();
   await button('Confirmar expulsión de Juli').click();assert.equal(await phone.locator('.member-row',{hasText:'Juli'}).count(),0);
@@ -38,6 +41,7 @@ try{
   // Transport cost: currency field, summary by currency and the previous record without currency.
   await reset();await open('transports');assert.match(await text(),/Costo de transporte por persona/);assert.match(await text(),/Moneda sin indicar/);assert.match(await text(),/No es un gasto ni entra en el balance/);await fit();
   await page.goto(base+'/?mode=app&screen=transport-edit');assert.equal(await phone.locator('[name="costCurrency"]').count(),1);await fit();
+  await phone.locator('[name="cost"]').fill('120');await phone.locator('[name="costCurrency"]').selectOption('');await phone.locator('#transport-design button[type="submit"]').click();const cc=phone.locator('[name="costCurrency"]');assert.equal(await cc.getAttribute('aria-invalid'),'true');assert.equal(await cc.evaluate(el=>el===document.activeElement),true,'foco en moneda');assert.match(await phone.locator('#transport-design-error').innerText(),/moneda/i);await fit();
   // Participant preview hides role management.
   await reset();await page.setViewportSize({width:1280,height:900});await page.goto(base+'/?screen=group');await page.selectOption('#role-select','participant');assert.equal(await phone.locator('[data-value="member-manage"]').count(),0);assert.ok(await button('Salir del viaje').isVisible());
  }
