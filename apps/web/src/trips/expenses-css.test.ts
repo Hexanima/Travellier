@@ -144,7 +144,7 @@ describe("bloque de gasto del compositor y listado de gastos", () => {
     expect(body).not.toMatch(/(^|[\s;])(background|color)\s*:/);
   });
   it("cada gasto fuera del itinerario va separado por un divisor", () => {
-    expect(ruleBody(".itinerary-outside-expenses .itinerary-outside-expenses__item")).toContain("border-top: 1px solid var(--ui-color-border)");
+    expect(ruleBody("section.itinerary-outside-expenses .itinerary-outside-expenses__item")).toContain("border-top: 1px solid var(--ui-color-border)");
   });
 });
 
@@ -182,5 +182,25 @@ describe("invariantes de expenses.css", () => {
   });
   it("no usa content: con texto de estado", () => {
     expect(css).not.toMatch(/content:\s*["'][^"']/);
+  });
+});
+
+describe("imports de expenses.css y especificidad", () => {
+  const sourceOf = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  it("TripItineraryScreen importa expenses.css despues de itinerary.css", () => {
+    const source = sourceOf("./TripItineraryScreen.tsx");
+    const itinerary = source.indexOf('import "./itinerary.css";');
+    const expenses = source.indexOf('import "./expenses.css";');
+    expect(itinerary).toBeGreaterThan(-1);
+    expect(expenses).toBeGreaterThan(itinerary);
+  });
+  it("cada componente que usa clases de expenses.css lo importa", () => {
+    for (const file of ["./ExpenseForm.tsx", "./ExpenseSplitForm.tsx", "./PostComposer.tsx", "./TripBalanceScreen.tsx", "./TripItineraryScreen.tsx"]) {
+      expect(sourceOf(file), file).toContain('import "./expenses.css";');
+    }
+  });
+  it("la regla del item fuera del itinerario supera la especificidad (0,2,0) de .itinerary-posts > .itinerary-nested-post", () => {
+    expect(ruleBody("section.itinerary-outside-expenses .itinerary-outside-expenses__item")).toContain("display: grid");
+    expect(css).not.toMatch(/^\.itinerary-outside-expenses \.itinerary-outside-expenses__item/m);
   });
 });

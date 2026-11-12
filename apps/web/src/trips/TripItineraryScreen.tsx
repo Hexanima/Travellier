@@ -33,6 +33,7 @@ import { TransportCostSummary } from "./TransportCostSummary.js";
 import { DestinationPicker } from "./DestinationPicker.js";
 import { destinationChoices, destinationForDate } from "./trip-itinerary-destinations.js";
 import "./itinerary.css";
+import "./expenses.css";
 
 /** `members` enables Recuerdos and Fotos in the activity detail (they need a `GalleryProvider` above). */
 type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; participations?: TripParticipationApi; members?: Pick<TripMembersApi, "list">; timeZone?: string;

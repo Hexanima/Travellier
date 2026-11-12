@@ -47,6 +47,6 @@
 
 /* Gastos del viaje y gastos fuera del itinerario */
 .itinerary-trip-expenses .ui-button { display: inline-flex; justify-self: start; justify-content: flex-start; max-width: 100%; text-align: left; }
-.itinerary-outside-expenses .itinerary-outside-expenses__item { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--ui-color-border); overflow-wrap: anywhere; }
-.itinerary-outside-expenses .itinerary-outside-expenses__item p { margin: 0; }
-.itinerary-outside-expenses .itinerary-outside-expenses__item .itinerary-post-expense { display: grid; gap: 4px; }
+section.itinerary-outside-expenses .itinerary-outside-expenses__item { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--ui-color-border); overflow-wrap: anywhere; }
+section.itinerary-outside-expenses .itinerary-outside-expenses__item p { margin: 0; }
+section.itinerary-outside-expenses .itinerary-outside-expenses__item .itinerary-post-expense { display: grid; gap: 4px; }
