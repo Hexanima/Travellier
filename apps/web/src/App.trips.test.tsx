@@ -32,6 +32,15 @@ const memberTrip = {
   expenseMode: "register",
 };
 
+const adminMembers = { list: async () => ({ ok: true, value: { currentUserId: "admin", ownerId: "admin", members: [
+  { id: "membership", userId: "admin", name: "Admin", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
+] } }) };
+const changeSelect = (container: HTMLElement, name: string, value: string) => act(async () => {
+  const select = container.querySelector(`[name="${name}"]`) as HTMLSelectElement;
+  select.value = value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
 async function render(path: string, session: boolean, trips: Record<string, unknown>, journey?: Record<string, unknown>, members?: Record<string, unknown>) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -58,12 +67,13 @@ describe("App Trip routes", () => {
     expect(legacy.querySelector('[name="visibility"]')).not.toBeNull();
     const active = { ...memberTrip };
     const updateConfiguration = vi.fn().mockResolvedValue({ ok: true, value: active });
-    const container = await render(`/trips/${tripId}/config`, true, { get: async () => ({ ok: true, value: active }), updateConfiguration });
+    const container = await render(`/trips/${tripId}/config`, true, { get: async () => ({ ok: true, value: active }), updateConfiguration }, undefined, adminMembers);
     expect(container.querySelector('[name="visibility"]')).not.toBeNull();
     expect(container.querySelector('[name="expenseMode"]')).not.toBeNull();
     expect(container.querySelector('[name="votingEnabled"]')).toBeNull();
+    await changeSelect(container, "visibility", "public");
     await act(async () => container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    expect(updateConfiguration).toHaveBeenCalledWith(tripId, { visibility: "private", expenseMode: "register" });
+    expect(updateConfiguration).toHaveBeenCalledWith(tripId, { visibility: "public" });
     expect(container.textContent).toContain("Configuración guardada");
   });
   it("connects admin group deletion and reloads My Trips", async () => {
@@ -319,7 +329,7 @@ describe("App Trip routes", () => {
       return { ok: true, value: { ...stored } };
     });
     const trips = { get, updateConfiguration };
-    const first = await render(`/trips/${tripId}/config`, true, trips);
+    const first = await render(`/trips/${tripId}/config`, true, trips, undefined, adminMembers);
 
     expect(first.querySelector('[name="visibility"]')).toHaveProperty("value", "private");
     expect(first.querySelector('[name="votingEnabled"]')).toBeNull();
@@ -333,9 +343,9 @@ describe("App Trip routes", () => {
     });
     await act(async () => first.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 
-    expect(updateConfiguration).toHaveBeenCalledWith(tripId, { visibility: "public", expenseMode: "balance" });
+    expect(updateConfiguration).toHaveBeenCalledExactlyOnceWith(tripId, { visibility: "public", expenseMode: "balance" });
     expect(first.textContent).toContain("Configuración guardada");
-    const second = await render(`/trips/${tripId}/config`, true, trips);
+    const second = await render(`/trips/${tripId}/config`, true, trips, undefined, adminMembers);
     expect(second.querySelector('[name="visibility"]')).toHaveProperty("value", "public");
     expect(second.querySelector('[name="votingEnabled"]')).toBeNull();
     expect(second.querySelector('[name="expenseMode"]')).toHaveProperty("value", "balance");
@@ -359,7 +369,7 @@ describe("App Trip routes", () => {
   it("keeps edited settings after a failed save and offers retry", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: memberTrip });
     const updateConfiguration = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
-    const container = await render(`/trips/${tripId}/config`, true, { get, updateConfiguration });
+    const container = await render(`/trips/${tripId}/config`, true, { get, updateConfiguration }, undefined, adminMembers);
     await act(async () => {
       const select = container.querySelector('[name="expenseMode"]') as HTMLSelectElement;
       select.value = "balance";
@@ -375,16 +385,18 @@ describe("App Trip routes", () => {
   it("hides configuration controls if membership is lost before saving", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: memberTrip });
     const updateConfiguration = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
-    const container = await render(`/trips/${tripId}/config`, true, { get, updateConfiguration });
+    const container = await render(`/trips/${tripId}/config`, true, { get, updateConfiguration }, undefined, adminMembers);
+    await changeSelect(container, "visibility", "public");
     await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 
+    expect(updateConfiguration).toHaveBeenCalledOnce();
     expect(container.querySelector("form")).toBeNull();
     expect(container.textContent).toContain("No encontramos este viaje");
   });
 
   it("explains the effect of changing the expense mode before saving", async () => {
     const get = vi.fn().mockResolvedValue({ ok: true, value: memberTrip });
-    const container = await render(`/trips/${tripId}/config`, true, { get });
+    const container = await render(`/trips/${tripId}/config`, true, { get }, undefined, adminMembers);
     await act(async () => {
       const expenses = container.querySelector('[name="expenseMode"]') as HTMLSelectElement;
       expenses.value = "balance";

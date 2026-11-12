@@ -66,6 +66,12 @@ describe("balance: tarjetas por moneda, saldos y compensaciones", () => {
     expect(link).toContain("min-height: 44px");
     expect(link).toContain("display: inline-flex");
   });
+  it("el enlace «Configurar modo de gastos» del balance llega a 44px", () => {
+    const body = ruleBody(".trip-balance .balance-refresh .trips-settings-link");
+    expect(body).toContain("display: inline-flex");
+    expect(body).toContain("align-items: center");
+    expect(body).toContain("min-height: 44px");
+  });
   it("«Actualizar balance» queda alineado al inicio", () => {
     const body = ruleBody(".trip-balance .balance-refresh");
     expect(body).toContain("justify-items: start");

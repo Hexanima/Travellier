@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
 import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
@@ -110,5 +110,34 @@ describe("App balance route", () => {
     expect(container.textContent).toContain("Pesos (ARS)");
     expect(container.textContent).toContain("1 gasto incluido");
     expect(container.textContent).not.toContain("Gastos por completar");
+  });
+  it("an admin goes from the balance to the configuration, changes the mode, saves, goes back and sees the new mode", async () => {
+    const registerBalance: TripBalance = { tripId, expenseMode: "register", currencies: [], excludedExpenses: [], includedExpenseCount: 0 };
+    const get = vi.fn().mockResolvedValueOnce({ ok: true, value: registerBalance }).mockResolvedValue({ ok: true, value: completeBalance });
+    const tripDetail = { kind: "member", id: tripId, name: "Patagonia", description: null, primaryDestination: { name: "Bariloche" }, visibility: "private", expenseMode: "register" };
+    const updateConfiguration = vi.fn().mockResolvedValue({ ok: true, value: { ...tripDetail, expenseMode: "balance" } });
+    const members = { list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, ownerId: me, members: [
+      { id: itineraryId(100), userId: me, name: "Ana", role: "admin", isOwner: true, joinedAt: "2026-01-01T00:00:00.000Z" }] } }) };
+    let back: () => void = () => undefined;
+    function BackHandle() { const navigate = useNavigate(); back = () => navigate(-1); return null; }
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={[`/trips/${tripId}/balance`]}><BackHandle />
+      <App auth={auth} sessionStorage={storage(true)} balance={{ get }} members={members as never} trips={{ get: vi.fn().mockResolvedValue({ ok: true, value: tripDetail }), updateConfiguration } as never} /></MemoryRouter>));
+    expect(container.textContent).toContain("modo registro");
+    await click(link(container, "Configurar modo de gastos"));
+    expect(container.querySelector("h1")?.textContent).toBe("Configuración del viaje");
+    await act(async () => {
+      const select = container.querySelector('[name="expenseMode"]') as HTMLSelectElement;
+      select.value = "balance";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(updateConfiguration).toHaveBeenCalledExactlyOnceWith(tripId, { expenseMode: "balance" });
+    await act(async () => back());
+    expect(container.querySelector("h1")?.textContent).toBe("Balance");
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Pesos (ARS)");
+    expect(container.textContent).not.toContain("modo registro");
   });
 });

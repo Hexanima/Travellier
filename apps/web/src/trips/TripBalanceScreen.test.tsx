@@ -95,7 +95,7 @@ describe("TripBalanceScreen: states", () => {
 });
 
 describe("TripBalanceScreen: register mode", () => {
-  it("shows no debts, explains it and keeps the way to the expenses; it asks for no members nor memories", async () => {
+  it("shows no debts, explains it and keeps the way to the expenses; it asks for the role only, no memories", async () => {
     const { container, list, membersList } = await render({ get: vi.fn().mockResolvedValue(ok(register)) });
     expect(container.textContent).toContain("Este viaje está en modo registro: no se calculan deudas ni compensaciones. Los gastos siguen registrados en cada recuerdo.");
     expect(link(container, "Ver gastos del viaje")?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
@@ -103,7 +103,7 @@ describe("TripBalanceScreen: register mode", () => {
     expect(container.querySelector("h2")).toBeNull();
     expect(container.textContent).not.toContain("Saldos por persona y moneda");
     expect(container.textContent).not.toMatch(/Gastos por completar|Compensaciones|Tiene a favor|Debe /);
-    expect(list).not.toHaveBeenCalled(); expect(membersList).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled(); expect(membersList).toHaveBeenCalledExactlyOnceWith(tripId);
   });
   it("renders no balance even if the data carried some", async () => {
     const odd = { ...register, currencies: [ars()], excludedExpenses: [pending(1, ["missing_shares"])], includedExpenseCount: 2 };
@@ -461,3 +461,53 @@ describe("TripBalanceScreen: presentation hooks", () => {
 });
 
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as typeof window.scrollTo; });
+
+const asRole = (role: "admin" | "participant") => vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [
+  { id: itineraryId(100), userId: me, name: "Ana", role, joinedAt: "2026-01-01T00:00:00.000Z" }] } });
+const configLink = (container: ParentNode) => link(container, "Configurar modo de gastos");
+
+describe("TripBalanceScreen: access to the expense-mode configuration", () => {
+  it.each([["balance", ok(balance())], ["register", ok(register)]] as const)("an admin sees the way to the configuration in %s mode", async (_mode, answer) => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(answer), members: asRole("admin") });
+    const settings = configLink(container);
+    expect(settings?.getAttribute("href")).toBe(`/trips/${tripId}/config`);
+    expect(settings?.className).toContain("trips-settings-link");
+    expect(settings?.closest(".balance-refresh")).not.toBeNull();
+  });
+  it.each([["balance", ok(balance())], ["register", ok(register)]] as const)("a participant sees no way to the configuration in %s mode", async (_mode, answer) => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(answer), members: asRole("participant") });
+    expect(configLink(container)).toBeUndefined();
+  });
+  it.each([["balance", ok(balance())], ["register", ok(register)]] as const)("an unknown role (members fail) shows no link and does not break the %s balance", async (mode, answer) => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(answer), members: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } }) });
+    expect(configLink(container)).toBeUndefined();
+    expect(alerts(container)).toHaveLength(0);
+    expect(container.textContent).toContain(mode === "balance" ? "Pesos (ARS)" : "modo registro");
+  });
+  it("the refresh passes to the new mode and evaluates role and link again", async () => {
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValue(ok(register));
+    const membersList = vi.fn().mockResolvedValueOnce((await asRole("admin")()))
+      .mockResolvedValue(await asRole("participant")());
+    const { container } = await render({ get, members: membersList });
+    expect(configLink(container)).toBeDefined();
+    expect(container.textContent).toContain("Pesos (ARS)");
+    await click(button(container, "Actualizar balance"));
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(membersList).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("modo registro");
+    expect(configLink(container)).toBeUndefined();
+  });
+  it("the automatic refresh also evaluates the new mode and the role", async () => {
+    const get = vi.fn().mockResolvedValueOnce(ok(register)).mockResolvedValue(ok(balance()));
+    const membersList = vi.fn().mockResolvedValueOnce(await asRole("participant")()).mockResolvedValue(await asRole("admin")());
+    const { container } = await render({ get, members: membersList });
+    expect(configLink(container)).toBeUndefined();
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(container.textContent).toContain("Pesos (ARS)");
+    expect(configLink(container)).toBeDefined();
+  });
+  it("never uses the forbidden wording", async () => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(register)), members: asRole("admin") });
+    expect(container.textContent).not.toMatch(forbidden);
+  });
+});

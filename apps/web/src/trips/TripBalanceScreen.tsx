@@ -5,7 +5,7 @@ import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText
 import type { ExpenseCurrency } from "./expense-draft.js";
 import { formatCents } from "./expense-format.js";
 import { openEditFrom } from "./open-post.js";
-import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
+import { loadPeople, type PhotoPeople } from "./photo-people.js";
 import { balanceAnchor } from "./post-origin.js";
 import type { TripBalance, TripBalanceApi } from "./trip-balance-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
@@ -61,10 +61,10 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
         fail(result.error); return;
       }
       const value = result.value;
-      // Register mode shows no debts, so it needs neither names nor memories.
-      const [people, titles] = value.expenseMode === "register" ? [unknownPeople, undefined] : await Promise.all([
+      // Register mode shows no debts: it asks for the role only (to offer the configuration), not for memories.
+      const [people, titles] = await Promise.all([
         loadPeople(members, tripId),
-        value.excludedExpenses.length === 0 ? Promise.resolve(undefined) : posts.list(tripId).then((list) => list.ok
+        value.expenseMode === "register" || value.excludedExpenses.length === 0 ? Promise.resolve(undefined) : posts.list(tripId).then((list) => list.ok
           ? new Map(list.value.map((post): [string, string] => [post.id, excerpt(post.description)])) : undefined).catch(() => undefined),
       ]);
       if (mine !== generation.current) return;
@@ -104,7 +104,9 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       {state.kind === "ready" ? <>
         {refreshing ? <LoadingState label="Actualizando balance…" /> : null}
         {refreshError ? <Feedback variant="error">No pudimos actualizar el balance. Lo que ves puede estar desactualizado.</Feedback> : null}
-        <div className="activity-detail balance-refresh"><Button variant="secondary" onClick={() => { void load(); }}>Actualizar balance</Button></div>
+        <div className="activity-detail balance-refresh"><Button variant="secondary" onClick={() => { void load(); }}>Actualizar balance</Button>
+          {state.people.role === "admin" ? <Link className="trips-settings-link" to={`/trips/${tripId}/config`}>Configurar modo de gastos</Link> : null}
+        </div>
         {state.balance.expenseMode === "register"
           ? <section className="trips-empty">
             <p>Este viaje está en modo registro: no se calculan deudas ni compensaciones. Los gastos siguen registrados en cada recuerdo.</p>
