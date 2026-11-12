@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, SelectField, TextAreaField, TextField } from "../components/index.js";
 import { diffExpense, expenseCurrencies, expenseDraftFromSaved, validateExpense, type AmountError, type ExpenseDraft, type SavedExpense } from "./expense-draft.js";
+import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { commentLength } from "./comment-text.js";
 import { EXPENSE_BREAKDOWN_MAX } from "./post-text-limits.js";
 import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
@@ -18,6 +19,7 @@ const amountMessages: Record<AmountError, string> = {
   required: "Ingresá el importe.",
   invalid: "Ingresá un importe válido mayor a cero, por ejemplo 12,50.",
   precision: "El importe admite hasta 2 decimales. No lo redondeamos por vos.",
+  exceeds_max: `El importe no puede superar ${MAX_AMOUNT_TEXT}. No lo redondeamos por vos.`,
 };
 const currencyMessage = "Elegí la moneda.";
 const breakdownMessage = `El desglose supera el máximo de ${EXPENSE_BREAKDOWN_MAX} caracteres.`;
@@ -111,7 +113,7 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
   const shown = (name: string) => error?.field === name ? error.message : undefined;
   return <form ref={formRef} className="activity-form" onSubmit={accept} noValidate>
     <TextField label="Importe" name="amount" type="text" inputMode="decimal" autoComplete="off" value={values.amount} required error={shown("amount")}
-      helpText="Hasta 2 decimales, por ejemplo 12,50." onChange={(event) => update("amount", event.target.value)} />
+      helpText={`Hasta 2 decimales, por ejemplo 12,50. Máximo ${MAX_AMOUNT_TEXT}.`} onChange={(event) => update("amount", event.target.value)} />
     <SelectField label="Moneda" name="currency" value={values.currency} required error={shown("currency")} onChange={(event) => update("currency", event.target.value)}>
       <option value="">Elegí la moneda</option>
       {expenseCurrencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}

@@ -111,7 +111,19 @@ describe("createTripJourneyApi", () => {
       costPerPerson: transport.costPerPerson, details: transport.details } as const;
 
     expect(await api.createTransport(tripId, destinationId, input)).toEqual({ ok: false, error: { kind: "validation",
-      fields: [{ field: "arrivalAt", message: "Arrival cannot precede departure." }] } });
+      fields: [{ field: "arrivalAt", code: "before_departure", message: "Arrival cannot precede departure." }] } });
     expect(await api.createTransport(tripId, destinationId, input)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+});
+
+describe("validation codes", () => {
+  it("keeps the code of each field error", async () => {
+    const post = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [
+      { field: "costPerPerson", code: "exceeds_max", message: "Too big." },
+    ] } });
+    const api = createTripJourneyApi({ get: vi.fn(), post, patch: vi.fn() } as never);
+    const result = await api.createTransport(tripId, destinationId, { direction: transport.direction, type: transport.type, departurePlace: "A",
+      departureAt: transport.departureAt, arrivalPlace: "B", arrivalAt: transport.arrivalAt, costPerPerson: 1, details: transport.details } as never);
+    expect(result).toEqual({ ok: false, error: { kind: "validation", fields: [{ field: "costPerPerson", code: "exceeds_max", message: "Too big." }] } });
   });
 });

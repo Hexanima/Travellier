@@ -428,3 +428,15 @@ describe("ExpenseSplitForm: presentation hooks", () => {
   });
 });
 
+describe("ExpenseSplitForm amount limit", () => {
+  it("a fixed value above the limit blocks with the limit notice and keeps the typed text", async () => {
+    const { container } = await open();
+    await choose(unitOf(rows(container, "shares")[0]!), "amount");
+    await type(valueOf(rows(container, "shares")[0]!), "1000000000000");
+    await click(button(container, "Aceptar"));
+    expect(container.textContent).toContain("El importe no puede superar 999.999.999.999,99. No lo redondeamos por vos.");
+    expect(valueOf(rows(container, "shares")[0]!).getAttribute("aria-invalid")).toBe("true");
+    expect((valueOf(rows(container, "shares")[0]!) as HTMLInputElement).value).toBe("1000000000000");
+    expect(container.querySelector("[data-section]")).not.toBeNull();
+  });
+});

@@ -44,6 +44,52 @@ describe("prepareTransportInput", () => {
       .toMatchObject({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
   });
 
+  describe("stored cost outside the input rules", () => {
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("loads %s without rounding or emptying it", (cost) => {
+      const loaded = formValuesFromTransport({ ...precise, costPerPerson: cost, costCurrency: "ARS" });
+      expect(loaded.costPerPerson).toBe(String(cost));
+    });
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("edits another field with %s without touching the cost", (cost) => {
+      const saved = { ...precise, costPerPerson: cost, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { departurePlace: "C", costPerPerson: cost, costCurrency: "ARS" } });
+    });
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("sends null cost when %s is kept but the type has no cost", (cost) => {
+      const saved = { ...precise, costPerPerson: cost, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      for (const type of ["car", "other", "bus_local"] as const) {
+        const result = prepareTransportInput({ ...loaded, type, steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "14:00" }] },
+          saved.direction, undefined, undefined, saved);
+        expect(result).toMatchObject({ ok: true, value: { type, costPerPerson: null, costCurrency: null } });
+      }
+    });
+    it("requires the currency client-side when an untouched out-of-rule cost has none", () => {
+      const saved = { ...precise, costPerPerson: 0, costCurrency: null };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, costCurrency: "" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
+    });
+    it("validates the cost when the person edits it", () => {
+      const saved = { ...precise, costPerPerson: 12.345, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,345" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costPerPerson: expect.any(String) } });
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "0" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costPerPerson: expect.any(String) } });
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,50" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { costPerPerson: 12.5 } });
+    });
+    it("keeps valid stored costs loading and sending as before", () => {
+      const saved = { ...precise, costPerPerson: 150, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(loaded.costPerPerson).toBe("150");
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,50" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { costPerPerson: 12.5, costCurrency: "ARS" } });
+      expect(formValuesFromTransport({ ...saved, costPerPerson: 12.5 }).costPerPerson).toBe("12,50");
+    });
+  });
+
   it("preserves the original timestamps when editing another field", () => {
     const loaded = formValuesFromTransport(precise);
     expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, precise.direction, undefined, undefined, precise))
@@ -229,5 +275,42 @@ describe("prepareTransportInput", () => {
   it.each(["flight", "bus_long"] as const)("sends null to clear the optional detail of %s", (type) => {
     expect(prepareTransportInput({ ...values, type, flightNumber: " ", company: " " }, "outbound"))
       .toMatchObject({ ok: true, value: { details: type === "flight" ? { flightNumber: null } : { company: null } } });
+  });
+});
+
+describe("cost validation", () => {
+  const types = ["flight", "bus_long"] as const;
+  const errorOf = (cost: string, type: "flight" | "bus_long" = "flight") =>
+    prepareTransportInput({ ...values, type, costPerPerson: cost }, "outbound");
+  it.each(types)("rejects zero and negative costs for %s", (type) => {
+    for (const cost of ["0", "0,00", "-5"]) {
+      expect(errorOf(cost, type)).toEqual({ ok: false, errors: { costPerPerson: "Ingresá un costo mayor a cero, por ejemplo 12,50." } });
+    }
+  });
+  it("rejects a cost above the limit without rounding", () => {
+    expect(errorOf("1000000000000")).toEqual({ ok: false, errors: { costPerPerson: "El costo no puede superar 999.999.999.999,99. No lo redondeamos por vos." } });
+  });
+  it("rejects more than two decimals", () => {
+    expect(errorOf("12,345")).toEqual({ ok: false, errors: { costPerPerson: "El costo admite hasta 2 decimales. No lo redondeamos por vos." } });
+  });
+  it("accepts the exact limit and the minimum, sending exact numbers", () => {
+    expect(errorOf("999999999999,99")).toMatchObject({ ok: true, value: { costPerPerson: 999999999999.99 } });
+    expect(errorOf("0,01")).toMatchObject({ ok: true, value: { costPerPerson: 0.01 } });
+    expect(errorOf("12.5")).toMatchObject({ ok: true, value: { costPerPerson: 12.5 } });
+  });
+  it("an empty cost has no error and non numeric ones do", () => {
+    expect(errorOf("")).toMatchObject({ ok: true, value: { costPerPerson: null } });
+    expect(errorOf("abc")).toMatchObject({ ok: false, errors: { costPerPerson: "Ingresá un costo mayor a cero, por ejemplo 12,50." } });
+  });
+  it("ignores the cost of types without one", () => {
+    expect(prepareTransportInput({ ...values, type: "car", costPerPerson: "-5" }, "outbound")).toMatchObject({ ok: true, value: { costPerPerson: null } });
+  });
+  it("still asks for the currency when the cost is valid", () => {
+    expect(prepareTransportInput({ ...values, costPerPerson: "5", costCurrency: "" }, "outbound")).toEqual({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
+  });
+  it("loads the saved cost as plain text, with a decimal comma and no exponent", () => {
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 12.5 }).costPerPerson).toBe("12,50");
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 150 }).costPerPerson).toBe("150");
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 999_999_999_999.99 }).costPerPerson).toBe("999999999999,99");
   });
 });

@@ -1,5 +1,6 @@
 import { resolveExpense, toCents, validateExpenseRules, type ExpenseIncompleteReason, type ExpensePayment, type ExpenseShare } from "app-domain";
 import { parseAmount, validateExpense, type ExpenseCurrency, type ExpenseDraft } from "./expense-draft.js";
+import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { formatCents } from "./expense-format.js";
 import type { PhotoPeople } from "./photo-people.js";
 import type { ExpensePaymentRow, ExpenseShareRow, SavedExpenseView } from "./trip-post-api.js";
@@ -26,16 +27,16 @@ export const newRowKey = (): string => `n${++counter}`;
 
 // ---- value parsing (exact, no floating point) ----
 
-export type RowValue = { ok: true; value: number } | { ok: false; code: "required" | "invalid" | "precision" | "range" };
+export type RowValue = { ok: true; value: number } | { ok: false; code: "required" | "invalid" | "precision" | "exceeds_max" | "range" };
 /** Amounts and percentages share the text rules of the expense amount; a percentage is at most 100 and zero is only for rows already saved. */
 export const parseRowValue = (unit: "amount" | "percent", text: string, allowZero: boolean): RowValue => {
   const parsed = parseAmount(text, { allowZero });
-  if (!parsed.ok) return { ok: false, code: parsed.code };
+  if (!parsed.ok) return { ok: false, code: unit === "percent" && parsed.code === "exceeds_max" ? "range" : parsed.code };
   if (unit === "percent" && parsed.cents > 10000) return { ok: false, code: "range" };
   return { ok: true, value: parsed.amount };
 };
 const valueMessages = { required: "Ingresá el valor.", invalid: "Ingresá un número válido mayor a cero, por ejemplo 12,50.",
-  precision: "Admite hasta 2 decimales.", range: "El porcentaje no puede superar 100." } as const;
+  precision: "Admite hasta 2 decimales.", exceeds_max: `El importe no puede superar ${MAX_AMOUNT_TEXT}. No lo redondeamos por vos.`, range: "El porcentaje no puede superar 100." } as const;
 const duplicateMessage = "Esta persona ya tiene una parte. Quitá la fila repetida.";
 const isSaved = (key: string) => key.startsWith("saved-");
 
@@ -240,7 +241,7 @@ export const sentSplitKeys = (split: SplitDraft): { payments: string[]; shares: 
   ({ payments: (split.payments ?? []).map((row) => row.key), shares: (split.shares ?? []).map((row) => row.key) });
 
 const serverRowMessages: Record<string, string> = { duplicate_user: duplicateMessage, not_member: "Esta persona ya no integra el viaje: no se puede agregar.",
-  invalid_user: "Esta persona no es válida.", invalid_unit: "Elegí una opción válida.", invalid_value: "Revisá el valor.", unexpected_value: "Esta opción no lleva valor." };
+  exceeds_max: valueMessages.exceeds_max, invalid_user: "Esta persona no es válida.", invalid_unit: "Elegí una opción válida.", invalid_value: "Revisá el valor.", unexpected_value: "Esta opción no lleva valor." };
 const excessListMessage = "Los valores exceden el total. Ajustalos.";
 /** Maps the 422 fields about payments and shares to rows (through the keys sent) and lists; `handled` is false when none of them could be placed. */
 export const mapSplitFieldErrors = (fields: readonly { field: string; code?: string; message?: string }[], keys: { payments: readonly string[]; shares: readonly string[] }):

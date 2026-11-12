@@ -1,5 +1,7 @@
 import { validateUrbanTransportSteps } from "app-domain";
 import type { JourneyTransport, TransportCurrency, TransportDirection, TransportInput, TransportType, UrbanTransportStep } from "./trip-journey-api.js";
+import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
+import { amountText, parseAmount, type AmountError } from "./expense-draft.js";
 import { currentTimeZone, localStepInstant, parseLocalDateTime, toLocalDateTime } from "./transport-local-time.js";
 
 const isCurrency = (value: string): value is TransportCurrency => value === "ARS" || value === "EUR" || value === "USD";
@@ -24,11 +26,26 @@ export type TransportFormValues = {
   editedDates?: Partial<Record<"departureAt" | "arrivalAt", boolean>>;
 };
 
+export const costMessages: Record<AmountError, string> = {
+  required: "Ingresá el costo.",
+  invalid: "Ingresá un costo mayor a cero, por ejemplo 12,50.",
+  precision: "El costo admite hasta 2 decimales. No lo redondeamos por vos.",
+  exceeds_max: `El costo no puede superar ${MAX_AMOUNT_TEXT}. No lo redondeamos por vos.`,
+};
+
 export type FormValidation = { ok: true; value: TransportInput } | { ok: false; errors: Record<string, string> };
 
 export type DestinationNeighbors = {
   previousArrivalAt?: string; previousDepartureAt?: string;
   nextArrivalAt?: string; nextDepartureAt?: string;
+};
+
+/** The stored cost as text: the formatted one when it reproduces the value exactly, otherwise the original number (never rounded or emptied). */
+const storedCostText = (cost: number): { text: string; faithful: boolean } => {
+  const formatted = amountText(cost);
+  const parsed = formatted === "" ? undefined : parseAmount(formatted);
+  if (parsed?.ok && parsed.amount === cost) return { text: formatted, faithful: true };
+  return { text: String(cost), faithful: false };
 };
 
 export const formValuesFromTransport = (transport: JourneyTransport, timeZone = currentTimeZone()): TransportFormValues => ({
@@ -38,7 +55,7 @@ export const formValuesFromTransport = (transport: JourneyTransport, timeZone = 
   departureAt: toLocalDateTime(transport.departureAt, timeZone),
   arrivalPlace: transport.arrivalPlace,
   arrivalAt: toLocalDateTime(transport.arrivalAt, timeZone),
-  costPerPerson: transport.costPerPerson === null ? "" : String(transport.costPerPerson),
+  costPerPerson: transport.costPerPerson === null ? "" : storedCostText(transport.costPerPerson).text,
   // A previous cost without a currency is never preselected: the person must choose it.
   costCurrency: transport.costCurrency ?? "",
   flightNumber: transport.type === "flight" ? transport.details.flightNumber ?? "" : "",
@@ -59,7 +76,7 @@ const resolveDateTime = (value: string, timeZone: string, original?: string, edi
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
   complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">,
   neighbors?: DestinationNeighbors,
-  original?: Pick<JourneyTransport, "departureAt" | "arrivalAt">): FormValidation => {
+  original?: Pick<JourneyTransport, "departureAt" | "arrivalAt"> & Partial<Pick<JourneyTransport, "costPerPerson">>): FormValidation => {
   const errors: Record<string, string> = {};
   const departurePlace = values.departurePlace.trim();
   const arrivalPlace = values.arrivalPlace.trim();
@@ -97,10 +114,20 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   }
 
   let costPerPerson: number | null = null;
-  if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
-    costPerPerson = Number(values.costPerPerson);
-    if (!Number.isFinite(costPerPerson)) errors.costPerPerson = "Ingresá un costo válido.";
-    else if (!isCurrency(values.costCurrency)) errors.costCurrency = "Elegí la moneda del costo.";
+  // A stored cost outside the input rules that the person did not touch travels as stored and is not validated.
+  const stored = original?.costPerPerson;
+  const hasCost = values.type === "flight" || values.type === "bus_long";
+  const untouchedStored = hasCost && typeof stored === "number" && !storedCostText(stored).faithful && values.costPerPerson === String(stored);
+  if (untouchedStored) {
+    costPerPerson = stored;
+    if (!isCurrency(values.costCurrency)) errors.costCurrency = "Elegí la moneda del costo.";
+  } else if (hasCost && values.costPerPerson.trim() !== "") {
+    const parsed = parseAmount(values.costPerPerson);
+    if (!parsed.ok) errors.costPerPerson = costMessages[parsed.code];
+    else {
+      costPerPerson = parsed.amount;
+      if (!isCurrency(values.costCurrency)) errors.costCurrency = "Elegí la moneda del costo.";
+    }
   }
   const costCurrency: TransportCurrency | null = costPerPerson !== null && isCurrency(values.costCurrency) ? values.costCurrency : null;
 

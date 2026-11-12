@@ -18,15 +18,15 @@ describe("parseAmount", () => {
   it.each(["0", "0,00", "-1", "abc", "1.234,50", "1,2,3", "12,", ",5", "1e3", "+5"])("rejects %s as invalid", (raw) => {
     expect(parseAmount(raw)).toEqual({ ok: false, code: "invalid" });
   });
-  it("rejects an amount that is not a safe number", () => {
-    expect(parseAmount("99999999999999999999")).toEqual({ ok: false, code: "invalid" });
+  it("rejects an amount that is not a safe number (the limit applies first)", () => {
+    expect(parseAmount("99999999999999999999")).toEqual({ ok: false, code: "exceeds_max" });
   });
   it.each(["70368744177664,01", "70368744177664.01", "70368744177664,04", "70368744177665,01", "90071992547409,91", "90071992547409,99", "900719925474099,99", "99999999999999999999,99"])(
-    "rejects %s: the number that travels would not represent exactly the typed text", (raw) => {
-      expect(parseAmount(raw)).toEqual({ ok: false, code: "invalid" });
+    "rejects %s above the limit, without rounding it", (raw) => {
+      expect(parseAmount(raw)).toEqual({ ok: false, code: "exceeds_max" });
     });
-  it.each([["70368744177663,99", 7036874417766399], ["70368744177664,00", 7036874417766400], ["70368744177664,50", 7036874417766450], ["9007199254740,99", 900719925474099],
-    ["1000000000000,01", 100000000000001]])("accepts %s, exactly representable", (raw, cents) => {
+  it.each([["999999999999,99", 99999999999999], ["999999999999,98", 99999999999998], ["70368744177,64", 7036874417764], ["9007199254,74", 900719925474],
+    ["1000000000,01", 100000000001]])("accepts %s, exactly representable", (raw, cents) => {
     const parsed = parseAmount(raw);
     expect(parsed.ok && parsed.cents).toBe(cents);
     expect(parsed.ok && parsed.amount).toBe(Number(raw.replace(",", ".")));
@@ -87,5 +87,15 @@ describe("diffExpense", () => {
   });
   it("sends nothing for a draft that is not valid", () => {
     expect(diffExpense(draft({ amount: "abc" }), saved)).toEqual({});
+  });
+});
+
+describe("amount limit", () => {
+  it("accepts the exact limit and rejects anything above it", () => {
+    expect(parseAmount("999999999999,99")).toEqual({ ok: true, cents: 99_999_999_999_999, amount: 999_999_999_999.99 });
+    expect(parseAmount("1000000000000")).toEqual({ ok: false, code: "exceeds_max" });
+  });
+  it("validateExpense reports exceeds_max on the amount", () => {
+    expect(validateExpense(draft({ amount: "1000000000000" }))).toEqual({ ok: false, errors: { amount: "exceeds_max" } });
   });
 });

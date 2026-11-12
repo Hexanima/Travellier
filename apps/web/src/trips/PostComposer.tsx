@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
+import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./expense-draft.js";
 import { mapSplitFieldErrors, sentSplitKeys, type ListErrors, type RowErrors } from "./expense-split.js";
@@ -55,6 +56,7 @@ const descriptionLimitMessage = `El texto supera el máximo de ${POST_DESCRIPTIO
 const expenseFieldMessage = (field: string, code: string): string | undefined => {
   if (splitFieldPattern.test(field) && code === "exceeds_total") return exceedsMessage;
   if (field === "expense.breakdown" && code === "too_long") return breakdownLimitMessage;
+  if (field === "expense.totalAmount" && code === "exceeds_max") return `El importe no puede superar ${MAX_AMOUNT_TEXT}. No lo redondeamos por vos.`;
   if (field === "expense.totalAmount" && (code === "invalid" || code === "required")) return "Revisá el importe del gasto.";
   if (field === "expense.currency" && (code === "invalid" || code === "required")) return "Elegí la moneda del gasto.";
   return field.startsWith("expense.") ? "No pudimos guardar el gasto. Revisá sus datos." : undefined;
