@@ -499,3 +499,33 @@ describe("PostDetailScreen navigation", () => {
     expect(document.activeElement).toBe(container.querySelector("h1"));
   });
 });
+
+describe("PostDetailScreen authorship (T125)", () => {
+  const author = itineraryId(20), someone = itineraryId(21);
+  const people = (currentUserId: string) => extras({ members: vi.fn().mockResolvedValue(ok2({ currentUserId, members: [{ userId: author, name: "Ana" }, { userId: someone, name: "Beto" }] })) });
+  const get = () => vi.fn().mockResolvedValue(ok(detail(5)));
+  it("offers «Editar» to the author", async () => {
+    const { container } = await open(get(), 5, undefined, people(author));
+    expect(byText(container, "a", "Editar")?.getAttribute("href")).toBe(`${href(5)}/edit`);
+    expect(byText(container, "a", "Editar gasto")).toBeUndefined();
+    expect(byText(container, "a", "Continuar recuerdo")).toBeTruthy();
+  });
+  it("offers «Editar gasto» (same route, focused on the expense) and «Continuar recuerdo» to another member", async () => {
+    const { container } = await open(get(), 5, undefined, people(someone));
+    expect(byText(container, "a", "Editar")).toBeUndefined();
+    await click(byText(container, "a", "Editar gasto"));
+    expect(last().pathname).toBe(`${href(5)}/edit`);
+    expect((last().state as { focus?: string; origin?: unknown }).focus).toBe("expense");
+    expect((last().state as { origin?: unknown }).origin).toBeTruthy();
+  });
+  it("offers «Editar gasto» and «Continuar recuerdo» for a memory whose author is a former member", async () => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { authorId: itineraryId(23) } }))), 5, undefined, people(author));
+    expect(byText(container, "a", "Editar")).toBeUndefined();
+    expect(byText(container, "a", "Editar gasto")).toBeTruthy();
+    expect(byText(container, "a", "Continuar recuerdo")).toBeTruthy();
+  });
+  it("offers «Editar» when the member list cannot be read", async () => {
+    const { container } = await open(get(), 5, undefined, extras({ members: vi.fn().mockResolvedValue({ ok: false, error: { kind: "server" } }) }));
+    expect(byText(container, "a", "Editar")?.getAttribute("href")).toBe(`${href(5)}/edit`);
+  });
+});
