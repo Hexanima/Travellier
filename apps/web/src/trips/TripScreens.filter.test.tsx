@@ -18,6 +18,8 @@ const mk = (id: string, name: string, startAt: string | null, endAt: string | nu
 const future = mk("507f191e810c19729de86001", "Futuro", "2026-12-01T10:00:00.000Z", "2026-12-09T10:00:00.000Z");
 const past = mk("507f191e810c19729de86002", "Terminado", "2026-09-01T10:00:00.000Z", "2026-09-09T10:00:00.000Z");
 const undated = mk("507f191e810c19729de86003", "Sin fechas", null, null);
+const outboundOnly = mk("507f191e810c19729de86004", "Solo ida", "2026-09-01T10:00:00.000Z", null);
+const orphan: TripListItem = { id: "507f191e810c19729de86005", name: "Sin destino", description: null, primaryDestination: null, startAt: null, endAt: null };
 const roots: ReturnType<typeof createRoot>[] = [];
 
 afterEach(async () => {
@@ -45,6 +47,19 @@ const select = async (container: HTMLElement, label: string) => { await act(asyn
 const names = (container: HTMLElement) => [...container.querySelectorAll(".trips-item h2")].map((el) => el.textContent);
 
 describe("Trips list tabs", () => {
+  it("keeps an outbound-only Trip with a past start in Activos and a complete past Trip in Finalizados", async () => {
+    const container = await renderTrips(ok([outboundOnly, past]));
+    expect(names(container)).toEqual(["Solo ida"]);
+    await select(container, "Finalizados");
+    expect(names(container)).toEqual(["Terminado"]);
+  });
+
+  it("shows a Trip without primary destination and dates in Activos without breaking", async () => {
+    const container = await renderTrips(ok([orphan, past]));
+    expect(names(container)).toEqual(["Sin destino"]);
+    expect(container.querySelector(".trips-item .trips-destination")).toBeNull();
+  });
+
   it("opens on Activos and does not show the finished Trip", async () => {
     const list = ok([future, past, undated]);
     const container = await renderTrips(list);

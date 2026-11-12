@@ -25,6 +25,7 @@ import {
   type GetTripPayload,
   type ListUserTripsPayload,
   type UpdateTripConfigurationPayload,
+  type TripListItem,
   type TripView,
   type TripDetail,
   type TripItinerary,
@@ -209,7 +210,7 @@ export interface TripApi extends TripInvitationApi {
   delete?: (payload: DeleteTripPayload) => AsyncResult<void>;
   getItinerary?: (payload: GetTripItineraryPayload) => AsyncResult<TripItinerary>;
   getBalance?: (payload: GetTripBalancePayload) => AsyncResult<TripBalance>;
-  list?: (payload: ListUserTripsPayload) => AsyncResult<TripView[]>;
+  list?: (payload: ListUserTripsPayload) => AsyncResult<TripListItem[]>;
   listPublic?: (payload: ListPublicTripsPayload) => AsyncResult<PublicTripPreview[]>;
   joinPublic?: (payload: JoinPublicTripPayload) => AsyncResult<JoinTripByCodeResult>;
   updateConfiguration?: (payload: UpdateTripConfigurationPayload) => AsyncResult<TripView>;

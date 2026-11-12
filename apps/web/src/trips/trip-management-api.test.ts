@@ -56,6 +56,18 @@ describe("createTripManagementApi", () => {
     expect(await api.list()).toEqual({ ok: true, value: [dated, undated] });
   });
 
+  it("accepts a listed Trip without primary destination and without dates, but not in detail or creation", async () => {
+    const orphan = { ...trip, primaryDestination: null, startAt: null, endAt: null };
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [orphan] } });
+    const post = vi.fn().mockResolvedValue({ ok: true, value: { trip: orphan } });
+    const api = createTripManagementApi({ get, post } as never);
+
+    expect(await api.list()).toEqual({ ok: true, value: [orphan] });
+    expect(await api.create({ name: "Patagonia", primaryDestination: "Bariloche" })).toEqual({ ok: false, error: { kind: "server" } });
+    get.mockResolvedValue({ ok: true, value: { trip: { ...orphan, visibility: "private", inviteCode: "VIAJE-X7K2", expenseMode: "register" } } });
+    expect(await api.get(trip.id)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+
   it("normalizes missing or invalid startAt/endAt of the Trip list to null without failing the list", async () => {
     const listWith = async (extra: Record<string, unknown>) => {
       const get = vi.fn().mockResolvedValue({ ok: true, value: { trips: [{ ...trip, ...extra }] } });

@@ -110,6 +110,13 @@ describe("Trip management routes", () => {
     ]);
   });
 
+  it("serializes a listed trip without primary destination as null with null dates", async () => {
+    const list = vi.fn().mockResolvedValue(ok([{ ...trip, primaryDestination: null, startAt: null, endAt: null }]));
+    const response = await handleApiRequest({ method: "GET", url: "/trips", authenticatedUserId: actorId as never }, { trips: { list } } as never);
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).trips).toMatchObject([{ primaryDestination: null, startAt: null, endAt: null }]);
+  });
+
   it("keeps the current 500 format when listing fails", async () => {
     const list = vi.fn().mockResolvedValue({ ok: false, error: new UnknownError("db down") });
     const response = await handleApiRequest({ method: "GET", url: "/trips", authenticatedUserId: actorId as never }, { trips: { list } } as never);

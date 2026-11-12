@@ -39,6 +39,17 @@ describe("classifyTrips", () => {
     expect(result.active[0]?.name).toBe("future");
     expect(result.finished).toHaveLength(1);
   });
+  it("an outbound-only trip with a past start (endAt null) stays active, a complete past trip is finished", () => {
+    const outboundOnly = item("outbound-only", "2026-09-01T10:00:00.000Z", null);
+    const complete = item("complete", "2026-09-01T10:00:00.000Z", "2026-09-09T10:00:00.000Z");
+    const result = classifyTrips([outboundOnly, complete], now);
+    expect(result.active.map((trip) => trip.id)).toEqual(["outbound-only"]);
+    expect(result.finished.map((trip) => trip.id)).toEqual(["complete"]);
+  });
+  it("a trip without primary destination and without dates is active", () => {
+    const orphan: TripListItem = { id: "orphan", name: "orphan", description: null, primaryDestination: null, startAt: null, endAt: null };
+    expect(classifyTrips([orphan], now).active.map((trip) => trip.id)).toEqual(["orphan"]);
+  });
   it("compares UTC instants around midnight, not local days", () => {
     // Around midnight UTC: a local-day comparison would differ between Buenos Aires and UTC. The real time-zone change is covered in TripScreens.clock.test.tsx.
     const edge = item("edge", null, "2026-10-10T00:30:00.000Z");

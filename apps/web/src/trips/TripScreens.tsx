@@ -147,7 +147,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                 <ListItem key={trip.id} className="trips-item">
                   <div>
                     <h2>{trip.name}</h2>
-                    <p className="trips-destination">{trip.primaryDestination.name}</p>
+                    {trip.primaryDestination === null ? null : <p className="trips-destination">{trip.primaryDestination.name}</p>}
                     {/* Provisional: the final presentation of the dates comes with the approved design. */}
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
