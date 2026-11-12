@@ -38,6 +38,35 @@ describe("notification opener: opening", () => {
     expect(t.onOpen).toHaveBeenCalledTimes(6);
   });
 
+  it("a simulated push of a departure, role change or ownership transfer opens the members of the Trip with the notices origin", async () => {
+    const t = setup();
+    await t.opener.start();
+    t.action(data("member.left", { memberId: itineraryId(20) }, 1));
+    t.action(data("member.role_changed", {}, 2));
+    t.action(data("trip.ownership_transferred", {}, 3));
+    expect(t.navigate.mock.calls).toEqual([1, 2, 3].map(() => [`/trips/${trip}/members`, { state: origin }]));
+    expect(t.onOpen).toHaveBeenCalledTimes(3);
+  });
+
+  it("resumes the new notices once the session activates", async () => {
+    const t = setup("restoring");
+    await t.opener.start();
+    t.action(data("member.role_changed", {}, 4));
+    expect(t.navigate).not.toHaveBeenCalled();
+    t.opener.setSession("active");
+    expect(t.navigate.mock.calls).toEqual([[`/trips/${trip}/members`, { state: origin }]]);
+  });
+
+  it("drops the new notices with an invalid tripId and ignores unknown types", async () => {
+    const t = setup();
+    await t.opener.start();
+    for (const type of ["member.left", "member.role_changed", "trip.ownership_transferred"]) t.action({ ...data(type, {}, 5), tripId: "../x" });
+    t.action(data("member.promoted", {}, 6));
+    t.action(data("", {}, 7));
+    expect(t.navigate).not.toHaveBeenCalled();
+    expect(t.onOpen).not.toHaveBeenCalled();
+  });
+
   it("an expulsion goes to the notices center and never opens the Trip", async () => {
     const t = setup();
     await t.opener.start();

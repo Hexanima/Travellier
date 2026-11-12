@@ -19,6 +19,7 @@ export type NotificationsScreenProps = {
 
 const openLabels: Partial<Record<TripNotification["type"], string>> = {
   "post.created": "Abrir recuerdo", "comment.created": "Abrir recuerdo", "activity.created": "Abrir actividad", "activity.updated": "Abrir actividad", "member.joined": "Ver integrantes",
+  "member.left": "Ver integrantes", "member.role_changed": "Ver integrantes", "trip.ownership_transferred": "Ver integrantes",
 };
 // Everything opened from the center remembers it, so «Volver» leads back here.
 const fromNotices = { origin: noticesOrigin };
