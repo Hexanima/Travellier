@@ -40,6 +40,14 @@ export type DestinationNeighbors = {
   nextArrivalAt?: string; nextDepartureAt?: string;
 };
 
+/** The stored cost as text: the formatted one when it reproduces the value exactly, otherwise the original number (never rounded or emptied). */
+const storedCostText = (cost: number): { text: string; faithful: boolean } => {
+  const formatted = amountText(cost);
+  const parsed = formatted === "" ? undefined : parseAmount(formatted);
+  if (parsed?.ok && parsed.amount === cost) return { text: formatted, faithful: true };
+  return { text: String(cost), faithful: false };
+};
+
 export const formValuesFromTransport = (transport: JourneyTransport, timeZone = currentTimeZone()): TransportFormValues => ({
   timeZone,
   type: transport.type,
@@ -47,7 +55,7 @@ export const formValuesFromTransport = (transport: JourneyTransport, timeZone = 
   departureAt: toLocalDateTime(transport.departureAt, timeZone),
   arrivalPlace: transport.arrivalPlace,
   arrivalAt: toLocalDateTime(transport.arrivalAt, timeZone),
-  costPerPerson: transport.costPerPerson === null ? "" : amountText(transport.costPerPerson),
+  costPerPerson: transport.costPerPerson === null ? "" : storedCostText(transport.costPerPerson).text,
   // A previous cost without a currency is never preselected: the person must choose it.
   costCurrency: transport.costCurrency ?? "",
   flightNumber: transport.type === "flight" ? transport.details.flightNumber ?? "" : "",
@@ -68,7 +76,7 @@ const resolveDateTime = (value: string, timeZone: string, original?: string, edi
 export const prepareTransportInput = (values: TransportFormValues, direction: TransportDirection,
   complementary?: Pick<JourneyTransport, "direction" | "departureAt" | "arrivalAt">,
   neighbors?: DestinationNeighbors,
-  original?: Pick<JourneyTransport, "departureAt" | "arrivalAt">): FormValidation => {
+  original?: Pick<JourneyTransport, "departureAt" | "arrivalAt"> & Partial<Pick<JourneyTransport, "costPerPerson">>): FormValidation => {
   const errors: Record<string, string> = {};
   const departurePlace = values.departurePlace.trim();
   const arrivalPlace = values.arrivalPlace.trim();
@@ -106,7 +114,12 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   }
 
   let costPerPerson: number | null = null;
-  if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
+  // A stored cost outside the input rules that the person did not touch travels as stored and is not validated.
+  const stored = original?.costPerPerson;
+  const untouchedStored = typeof stored === "number" && !storedCostText(stored).faithful && values.costPerPerson === String(stored);
+  if (untouchedStored) {
+    costPerPerson = stored;
+  } else if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
     const parsed = parseAmount(values.costPerPerson);
     if (!parsed.ok) errors.costPerPerson = costMessages[parsed.code];
     else {

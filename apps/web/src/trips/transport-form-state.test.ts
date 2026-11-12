@@ -44,6 +44,37 @@ describe("prepareTransportInput", () => {
       .toMatchObject({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
   });
 
+  describe("stored cost outside the input rules", () => {
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("loads %s without rounding or emptying it", (cost) => {
+      const loaded = formValuesFromTransport({ ...precise, costPerPerson: cost, costCurrency: "ARS" });
+      expect(loaded.costPerPerson).toBe(String(cost));
+    });
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("edits another field with %s without touching the cost", (cost) => {
+      const saved = { ...precise, costPerPerson: cost, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { departurePlace: "C", costPerPerson: cost, costCurrency: "ARS" } });
+    });
+    it("validates the cost when the person edits it", () => {
+      const saved = { ...precise, costPerPerson: 12.345, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,345" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costPerPerson: expect.any(String) } });
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "0" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costPerPerson: expect.any(String) } });
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,50" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { costPerPerson: 12.5 } });
+    });
+    it("keeps valid stored costs loading and sending as before", () => {
+      const saved = { ...precise, costPerPerson: 150, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      expect(loaded.costPerPerson).toBe("150");
+      expect(prepareTransportInput({ ...loaded, costPerPerson: "12,50" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: true, value: { costPerPerson: 12.5, costCurrency: "ARS" } });
+      expect(formValuesFromTransport({ ...saved, costPerPerson: 12.5 }).costPerPerson).toBe("12,50");
+    });
+  });
+
   it("preserves the original timestamps when editing another field", () => {
     const loaded = formValuesFromTransport(precise);
     expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, precise.direction, undefined, undefined, precise))
@@ -265,6 +296,6 @@ describe("cost validation", () => {
   it("loads the saved cost as plain text, with a decimal comma and no exponent", () => {
     expect(formValuesFromTransport({ ...precise, costPerPerson: 12.5 }).costPerPerson).toBe("12,50");
     expect(formValuesFromTransport({ ...precise, costPerPerson: 150 }).costPerPerson).toBe("150");
-    expect(formValuesFromTransport({ ...precise, costPerPerson: 1e21 }).costPerPerson).not.toMatch(/e/i);
+    expect(formValuesFromTransport({ ...precise, costPerPerson: 999_999_999_999.99 }).costPerPerson).toBe("999999999999,99");
   });
 });
