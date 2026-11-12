@@ -48,3 +48,26 @@ describe("photo upload reservation adapter", () => {
     expect(await createTripPhotoApi(client).reserve(tripId, files)).toEqual({ ok: false, error: { kind: "network" } });
   });
 });
+
+describe("published photos count adapter", () => {
+  const record = (n: number) => ({ id: itineraryId(n), url: `https://bucket.s3.test/p${n}?sig=secret`, order: n });
+  it("reads the post's photos path and returns only the amount", async () => {
+    const { api, fetch } = setup({ photos: [record(1), record(2), record(3)] }, 200);
+    const result = await api.countForPost(tripId, itineraryId(9));
+    expect(fetch.mock.calls[0][0]).toBe(`https://api.test/trips/${tripId}/posts/${itineraryId(9)}/photos`);
+    expect(fetch.mock.calls[0][1].method).toBe("GET");
+    expect(result).toEqual({ ok: true, value: 3 });
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+  it("counts none and one", async () => {
+    expect(await setup({ photos: [] }, 200).api.countForPost(tripId, itineraryId(9))).toEqual({ ok: true, value: 0 });
+    expect(await setup({ photos: [record(1)] }, 200).api.countForPost(tripId, itineraryId(9))).toEqual({ ok: true, value: 1 });
+  });
+  it("rejects a malformed body or an invalid id as a server failure", async () => {
+    for (const body of [{}, { photos: "x" }, { photos: [record(1), "x"] }, { photos: [{ ...record(1), id: "nope" }] }, { photos: [{ url: "x" }] }, null])
+      expect(await setup(body, 200).api.countForPost(tripId, itineraryId(9)), JSON.stringify(body)).toEqual({ ok: false, error: { kind: "server" } });
+  });
+  it("maps HTTP errors", async () => {
+    expect(await setup({ error: { code: "PostNotFoundError", message: "x" } }, 404).api.countForPost(tripId, itineraryId(9))).toEqual({ ok: false, error: { kind: "not-found" } });
+  });
+});

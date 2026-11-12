@@ -505,3 +505,90 @@ describe("PostComposer photos: busy and unmount", () => {
     expect(create).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PostComposer photos: minimum content", () => {
+  const withPost = (extra: Partial<PostResponse>) => vi.fn().mockResolvedValue({ ok: true, value: { post: saved(extra), parent: null, children: [], rootActivityId: null } });
+  const counting = (mocks: Mocks, impl: (...args: unknown[]) => unknown) => { const countForPost = vi.fn(impl); Object.assign(mocks.api, { countForPost }); return countForPost; };
+  const missing = "Escribí un texto, agregá una ubicación o elegí una foto.";
+  it("creates with only a photo: sends the key and no description", async () => {
+    const mocks = makeDeps();
+    const { container, create } = await render(newPath, mocks);
+    await choose(container, mocks, 1); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { photos: [{ key: key(1) }] });
+  });
+  it("creating with nothing shows the single content message and does not call the API", async () => {
+    const mocks = makeDeps();
+    const { container, create } = await render(newPath, mocks);
+    await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toEqual([missing]);
+    expect(document.activeElement).toBe(container.querySelector('[name="description"]'));
+    expect(mocks.api.reserve).not.toHaveBeenCalled();
+  });
+  it("editing: removing the text counts the published photos and sends the clear", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => ({ ok: true, value: 2 }));
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", ""); await submit(container);
+    expect(count).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null });
+    expect(alerts(container)).toHaveLength(0);
+  });
+  it("editing without published photos blocks, keeps the draft and sends nothing; typing again saves", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => ({ ok: true, value: 0 }));
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", ""); await submit(container);
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toEqual([missing]);
+    expect(document.activeElement).toBe(container.querySelector('[name="description"]'));
+    expect(value(container, "description")).toBe("");
+    await field(container, "description", "Nuevo"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Nuevo" });
+  });
+  it("a failed or rejected count does not block: the server decides and its 422 description/required shows on the field", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => { throw new Error("down"); });
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "description", code: "required", message: "x" }] } });
+    const { container } = await render(editPath, mocks, { update });
+    await field(container, "description", ""); await submit(container);
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null });
+    expect(alerts(container).map((item) => item.textContent)).toEqual([missing]);
+    expect(document.activeElement).toBe(container.querySelector('[name="description"]'));
+  });
+  it("a count that answers with an error result also continues", async () => {
+    const mocks = makeDeps(); counting(mocks, async () => ({ ok: false, error: { kind: "network" } }));
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", ""); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null });
+  });
+  it("removing the text while keeping the location does not query the photos", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => ({ ok: true, value: 0 }));
+    const { container, update } = await render(editPath, mocks, { get: withPost({ mapsUrl: "https://maps.example/x" }) });
+    await field(container, "description", ""); await submit(container);
+    expect(count).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null });
+  });
+  it("saving without touching text or location neither queries nor blocks", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => ({ ok: true, value: 0 }));
+    const { container, update } = await render(editPath, mocks, { get: withPost({ description: null, mapsUrl: null }) });
+    await submit(container);
+    expect(count).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("No hay cambios para guardar.");
+    expect(alerts(container)).toHaveLength(0);
+  });
+  it("a new photo makes the edit valid without querying", async () => {
+    const mocks = makeDeps(), count = counting(mocks, async () => ({ ok: true, value: 0 }));
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", ""); await choose(container, mocks, 1); await submit(container);
+    expect(count).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null, photos: [{ key: key(1) }] });
+  });
+  it("a second tap during the query does not query or send twice", async () => {
+    const mocks = makeDeps(), gate = deferred<unknown>(), count = counting(mocks, () => gate.promise);
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", ""); await submit(container); await submit(container);
+    expect(count).toHaveBeenCalledTimes(1);
+    await act(async () => gate.resolve({ ok: true, value: 1 }));
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+});

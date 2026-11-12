@@ -85,7 +85,10 @@ export const isDraftDirty = (draft: PostDraft, base: PostDraft): boolean =>
   !sameSplit(draft.extras.split, base.extras.split);
 const sameNewActivity = (a: NewActivityDraft | null, b: NewActivityDraft | null) => a === b ||
   (a !== null && b !== null && a.title === b.title && a.date === b.date && a.time === b.time && a.durationHours === b.durationHours && a.durationMinutes === b.durationMinutes);
-/** Provisional client rule: text, a location or a photo is required to publish (see docs/REVISION_PENDIENTE.md, T65 and T74). The link does not count (T66). */
+/**
+ * Backend rule (T122): text, a location or a photo is required. This counts only the draft (text, location, photos chosen now): the photos already
+ * published are not in the draft, so the composer reads them when an edit would otherwise be empty. The link does not count.
+ */
 export const hasContent = (draft: PostDraft): boolean => draft.values.description.trim() !== "" || draft.values.mapsUrl.trim() !== "" || draft.extras.photos.length > 0;
 const clean = (value: string) => value.trim() === "" ? null : value.trim();
 const desired = (draft: PostDraft) => ({ parentPostId: draft.extras.link?.kind === "post" ? draft.extras.link.id : null,
