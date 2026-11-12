@@ -63,7 +63,7 @@
 .location-preview__text { display: grid; flex: 1 1 8rem; min-width: 0; }
 .location-preview__place { overflow-wrap: anywhere; font-weight: 700; }
 .location-preview__error { flex-basis: 100%; margin: 0; }
-.location-preview__open[aria-disabled="true"] { opacity: .6; cursor: progress; }
+.location-preview__open[aria-disabled="true"] { cursor: progress; }
 .activity-dialog .ui-modal-backdrop { z-index: 10; }
 .participation-conflict-layer .ui-modal-backdrop { z-index: 20; }
 .activity-confirm-layer .ui-modal-backdrop { z-index: 20; }

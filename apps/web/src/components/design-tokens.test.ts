@@ -95,6 +95,25 @@ describe("control geometry and states", () => {
     expect(components).toMatch(/\.ui-list__item,\s*\.ui-list__state\s*\{[^}]*var\(--ui-radius-card\)/);
   });
 
+  it("uses the label typography (14px/600/20px) on buttons", () => {
+    const body = ruleBody(components, ".ui-button");
+    expect(body).toMatch(/font-size: 0\.875rem/);
+    expect(body).toMatch(/font-weight: 600/);
+    expect(body).toMatch(/line-height: 20px/);
+  });
+
+  it("keeps enabled colors while loading for both disabled and aria-disabled buttons", () => {
+    const busy = ':is(:disabled, [aria-disabled="true"])';
+    const primary = ruleBody(components, `.ui-button[aria-busy="true"]${busy}`);
+    expect(primary).toContain("background: var(--ui-color-brand)");
+    expect(primary).toContain("color: var(--ui-color-accent-contrast)");
+    expect(primary).toContain("cursor: progress");
+    const secondary = ruleBody(components, `.ui-button--secondary[aria-busy="true"]${busy}`);
+    expect(secondary).toContain("background: var(--ui-color-surface)");
+    expect(secondary).toContain("color: var(--ui-color-brand)");
+    expect(ruleBody(components, `.ui-button[data-error="true"][aria-busy="true"]${busy}`)).toContain("var(--ui-color-danger)");
+  });
+
   it("styles disabled, aria-disabled and aria-busy states", () => {
     expect(components).toContain(".ui-button:disabled");
     expect(components).toContain('.ui-button[aria-disabled="true"]');
@@ -120,6 +139,10 @@ describe("itinerary overrides, focus and type scale", () => {
     const start = css.indexOf(selector);
     return start < 0 ? "" : css.slice(css.indexOf("{", start) + 1).split("}")[0] ?? "";
   };
+
+  it("does not lower the contrast of the loading Maps button with opacity", () => {
+    expect(rule(itinerary, '.location-preview__open[aria-disabled="true"]')).not.toContain("opacity");
+  });
 
   it("keeps disabled itinerary buttons distinguishable with disabled-surface and muted", () => {
     for (const selector of [
