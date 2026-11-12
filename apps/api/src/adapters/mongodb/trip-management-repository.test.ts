@@ -145,13 +145,14 @@ describe("Mongo Trip management repository", () => {
     expect(publicList.ok && publicList.value[0]).not.toHaveProperty("ownerId");
   });
 
-  it("reads a not yet migrated trip with createdBy as the displayed owner without writing", async () => {
+  it("fails explicitly, without fallback to createdBy or writes, when a stored trip has no ownerId", async () => {
     const repository = createMongoTripManagementRepository(database);
     const creator = new ObjectId();
     const input = record("VIAJE-OWN2", creator);
     await repository.createWithAdminAndDestination(input);
     await database.collection("trips").updateOne({ _id: new ObjectId(input.trip.id) }, { $unset: { ownerId: "" } });
-    expect(await repository.findByIdForViewer(input.trip.id, domainId(creator))).toMatchObject({ ok: true, value: { ownerId: input.trip.createdBy } });
+    expect(await repository.findByIdForViewer(input.trip.id, domainId(creator))).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+    expect(await repository.listForMember(domainId(creator))).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
     expect(await database.collection("trips").findOne({ _id: new ObjectId(input.trip.id) })).not.toHaveProperty("ownerId");
   });
 

@@ -1,5 +1,6 @@
 import { buildTripNotifications } from "../../entities/trip-notification.js";
 import { TripMemberNotFoundError } from "../../errors/trip-member-not-found-error.js";
+import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import type { TripMemberAdministrationPort } from "../../ports/trip-member-administration-port.js";
 import type { TaggedError } from "../../types/error.js";
@@ -31,7 +32,9 @@ export const expelTripParticipant: UseCase<
   execute: ({ administration, now }, { tripId, actorUserId, targetUserId }) => administration.withTransaction(tripId, async (scope) => {
     const actor = await scope.findMember(actorUserId);
     if (!actor.ok) return actor;
-    if (actor.value?.role !== "admin") return err(new UnauthorizedError());
+    // A non-member (stranger or former member) gets the same answer as a missing Trip, before any role or target check.
+    if (actor.value === undefined) return err(new TripNotFoundError());
+    if (actor.value.role !== "admin") return err(new UnauthorizedError());
 
     const target = await scope.findMember(targetUserId);
     if (!target.ok) return target;

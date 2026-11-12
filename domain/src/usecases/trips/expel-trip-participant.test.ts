@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { err, expelTripParticipant, ok, UnknownError } from "../../index.js";
+import { err, expelTripParticipant, ok, TripNotFoundError, UnknownError } from "../../index.js";
 import type { Result, TripMemberAdministrationPort, TripMemberAdministrationScope, TripRole } from "../../index.js";
 import { createObjectId } from "../../value-objects/object-id.js";
 import type { ObjectId } from "../../value-objects/object-id.js";
@@ -100,9 +100,32 @@ describe("expelTripParticipant", () => {
     expect(removeMember).not.toHaveBeenCalled();
   });
 
-  it.each([["a participant", participant], ["a non-member", stranger]])("rejects %s as actor without removing the target", async (_label, actor) => {
+  it("rejects a participant as actor without removing the target", async () => {
     const { port, removeMember } = createFake();
-    expect(await expel(port, actor, otherParticipant)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(await expel(port, participant, otherParticipant)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(removeMember).not.toHaveBeenCalled();
+  });
+
+  it.each([["a stranger", stranger], ["a former member", participant]])("hides the Trip from %s as actor: not found, nothing removed or notified", async (label, actor) => {
+    const { port, removeMember, roles } = createFake();
+    if (label === "a former member") roles.delete(actor);
+    const result = await expel(port, actor, otherParticipant);
+    expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    expect(removeMember).not.toHaveBeenCalled();
+    expect(roles.has(otherParticipant)).toBe(true);
+  });
+
+  it("answers a non-member exactly like a missing Trip (same tag and message)", async () => {
+    const { port } = createFake();
+    const missing = await expel({ withTransaction: async () => err(new TripNotFoundError()) }, admin, participant);
+    const outsider = await expel(port, stranger, participant);
+    expect(outsider).toMatchObject({ ok: false });
+    expect(!outsider.ok && !missing.ok && [outsider.error.tag, outsider.error.message]).toEqual(!missing.ok && [missing.error.tag, missing.error.message]);
+  });
+
+  it("checks the actor role before the target: a participant with a missing target gets unauthorized", async () => {
+    const { port, removeMember } = createFake();
+    expect(await expel(port, participant, stranger)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
     expect(removeMember).not.toHaveBeenCalled();
   });
 

@@ -251,7 +251,7 @@ describe("Trip admins, ownership transfer and expulsion (T115)", () => {
     expect((await expel("A", tripId, "A")).status).toBe(403);
     expect((await expel("B", tripId, "B")).status).toBe(403);
     expect((await expel("C", tripId, "D")).status).toBe(403);
-    expect((await expel("X", tripId, "C")).status).toBe(403);
+    expect((await expel("X", tripId, "C")).status).toBe(404);
     expect(await fullSnapshot(tripId)).toEqual(before);
 
     expect((await expel("B", tripId, "C")).status).toBe(204);

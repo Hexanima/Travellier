@@ -437,9 +437,8 @@ describe("integrated API journey (T103)", () => {
   it("lets the owner expel a participant with the same cleanup, and the transport currency totals stay intact", async () => {
     expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
     const before = await contentState();
-    // A non-member cannot expel anyone, and a participant cannot expel the owner (the admin-versus-owner case is in the admin management test).
-    // Observed: a non-member gets 403 Forbidden here (not 404 as on reads).
-    expect((await call("X", "DELETE", tripPath(`/members/${ids.D}`))).status).toBe(403);
+    // A non-member gets 404 (the Trip is hidden, T137) and a participant cannot expel the owner (the admin-versus-owner case is in the admin management test).
+    expect((await call("X", "DELETE", tripPath(`/members/${ids.D}`))).status).toBe(404);
     expect((await call("D", "DELETE", tripPath(`/members/${ids.B}`))).status).toBe(403);
     expect(await held("D")).toEqual(sorted(activityIds.museo, activityIds.paseo));
     await withClock(async () => { expectStatus(await call("B", "DELETE", tripPath(`/members/${ids.D}`)), 204); });
