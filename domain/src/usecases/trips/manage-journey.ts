@@ -142,7 +142,7 @@ const updateTransportInJourney: UseCase<JourneyDependencies, UpdateJourneyTransp
       costCurrency: payload.costCurrency !== undefined ? payload.costCurrency :
         payload.costPerPerson === null ? null : current.costCurrency ?? null,
       details: details as Transport["details"],
-    }, payload.transportId));
+    }, payload.transportId), { storedCostUnchanged: payload.costPerPerson === undefined || payload.costPerPerson === current.costPerPerson });
     if (!candidate.ok) return candidate;
     const saved = await dependencies.journeys.replaceTransport(candidate.value);
     if (!saved.ok) return saved;

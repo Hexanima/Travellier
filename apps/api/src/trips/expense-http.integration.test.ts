@@ -286,4 +286,62 @@ describe("post expense HTTP API (T79)", () => {
       expect(patched.body).toBe(JSON.stringify({ post: { ...post, description: "Editado" } }));
     });
   });
+
+  describe("amount limits (T133)", () => {
+    const MAX = 999999999999.99;
+    const row = (userId: string, unit: string, value: number | null = null) => ({ userId, unit, value });
+
+    it("POST and PATCH accept a total at the limit", async () => {
+      const created = await f.request("POST", f.path(), { description: "Cena", expense: { totalAmount: MAX, currency: "USD" } });
+      expect(created.statusCode, created.body).toBe(201);
+      const post = await seedPost();
+      const patched = await f.request("PATCH", `${f.path()}/${post.id}`, { expense: { totalAmount: MAX, currency: "EUR" } });
+      expect(patched.statusCode, patched.body).toBe(200);
+      expect(body(patched).expense.totalAmount).toBe(MAX);
+    });
+
+    it("POST over the limit answers 422 with the field and creates neither the post nor the expense", async () => {
+      const response = await f.request("POST", f.path(), { description: "Cena", expense: { totalAmount: 1000000000000, currency: "ARS" } });
+      expect(outcome(response)).toEqual([422, "ValidationError"]);
+      expect(fields(response)).toEqual(["expense.totalAmount/exceeds_max"]);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+      expect(await expenses()).toEqual([]);
+    });
+
+    it("PATCH over the limit answers 422 and writes nothing", async () => {
+      const post = await seedPost();
+      const response = await f.request("PATCH", `${f.path()}/${post.id}`, { expense: { totalAmount: 1000000000000, currency: "ARS" } });
+      expect(outcome(response)).toEqual([422, "ValidationError"]);
+      expect(fields(response)).toEqual(["expense.totalAmount/exceeds_max"]);
+      expect(await expenses()).toEqual([]);
+    });
+
+    it("a fixed row over the limit answers 422 with the row field and the PATCH keeps the stored payments", async () => {
+      const [ana, beto] = [await member(), await member()];
+      const post = await seedPost(), url = `${f.path()}/${post.id}`;
+      expect((await f.request("PATCH", url, { expense: { ...expense, payments: [row(ana, "percent", 100)] } })).statusCode).toBe(200);
+      const before = await expenses();
+      const response = await f.request("PATCH", url, { expense: { payments: [row(ana, "amount", 1000000000000)], shares: [row(beto, "amount", 1e13)] } });
+      expect(outcome(response)).toEqual([422, "ValidationError"]);
+      expect(fields(response)).toEqual(["expense.payments[0].value/exceeds_max", "expense.shares[0].value/exceeds_max"]);
+      expect(await expenses()).toEqual(before);
+    });
+
+    it("reads an expense stored above the limit and includes it in the balance", async () => {
+      await f.db.collection("tripMembers").updateOne({ tripId: f.trip, userId: f.actor }, { $set: { role: "admin" } });
+      await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { name: "Viaje", description: null, ownerId: f.actor, createdBy: f.actor, createdAt: new Date() } });
+      expect((await f.request("PATCH", `/trips/${f.trip}/config`, { expenseMode: "balance" })).statusCode).toBe(200);
+      const other = await member();
+      const created = await f.request("POST", f.path(), { description: "Cena", expense: { totalAmount: 100, currency: "ARS",
+        payments: [row(f.actor.toHexString(), "percent", 100)], shares: [row(f.actor.toHexString(), "remainder"), row(other, "remainder")] } });
+      expect(created.statusCode, created.body).toBe(201);
+      await f.db.collection("postExpenses").updateOne({}, { $set: { totalAmount: 1e13 } });
+      const read = await f.request("GET", `${f.path()}/${body(created).post.id}`);
+      expect(read.statusCode, read.body).toBe(200);
+      const balance = await f.request("GET", `/trips/${f.trip}/balance`);
+      expect(balance.statusCode, balance.body).toBe(200);
+      expect(body(balance).balance.includedExpenseCount).toBe(1);
+      expect(body(balance).balance.currencies[0].settlements).toEqual([{ fromUserId: other, toUserId: f.actor.toHexString(), cents: 500000000000000 }]);
+    });
+  });
 });

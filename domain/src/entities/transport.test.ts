@@ -163,3 +163,29 @@ describe("readTransport costs", () => {
       .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency", code: "invalid_currency" }] } });
   });
 });
+
+describe("cost limits (T133)", () => {
+  const priced = (costPerPerson: unknown) => ({ ...local, costPerPerson, costCurrency: "USD" });
+  it.each([0.01, 999999999999.99, 1])("accepts the cost %s", (cost) => {
+    expect(createTransport(priced(cost) as CreateTransportInput).ok).toBe(true);
+  });
+  it("keeps no cost as null", () => {
+    expect(createTransport(local)).toEqual({ ok: true, value: local });
+  });
+  it.each([0, -1, -0.01, 1.001, Number.NaN, Number.POSITIVE_INFINITY, "10"])("rejects the cost %j as invalid", (cost) => {
+    issue(priced(cost), "costPerPerson", "invalid");
+  });
+  it("rejects a cost over the limit", () => {
+    issue(priced(1000000000000), "costPerPerson", "exceeds_max");
+    issue(priced(999999999999.995), "costPerPerson", "exceeds_max");
+  });
+  it("does not revalidate an unchanged stored cost", () => {
+    expect(createTransport(priced(-5) as CreateTransportInput, { storedCostUnchanged: true }).ok).toBe(true);
+  });
+  it.each([0, -3, 1e13, 1.001])("reads a stored cost of %s", (cost) => {
+    expect(readTransport(priced(cost) as CreateTransportInput).ok).toBe(true);
+  });
+  it("still requires a currency with a cost", () => {
+    issue({ ...local, costPerPerson: 10, costCurrency: null }, "costCurrency", "required");
+  });
+});

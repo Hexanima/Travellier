@@ -197,3 +197,38 @@ describe("transport cost currency", () => {
       .toMatchObject({ ok: false, error: { issues: [{ field: "costCurrency" }] } });
   });
 });
+
+describe("transport cost limits (T133)", () => {
+  const context = { authenticatedUserId: actorId, tripId, destinationId, transportId: transport.id };
+  const setup = (stored: Transport = transport) => {
+    const insertTransport = vi.fn(async (value: Transport) => ok(value));
+    const replaceTransport = vi.fn(async (value: Transport) => ok(value));
+    const deps = { members: { findByTripAndUser: async () => ok(member) }, journeys: journeyStub({
+      findDestination: async () => ok(destination), findTransport: async () => ok(stored), insertTransport, replaceTransport,
+    }), createId: () => transport.id } as never;
+    return { deps, insertTransport, replaceTransport };
+  };
+  it.each([0, -1, 1000000000000, 1.001])("rejects creating with the cost %s without inserting", async (cost) => {
+    const { deps, insertTransport } = setup();
+    const result = await createJourneyTransport.execute(deps, { ...transport, authenticatedUserId: actorId, costPerPerson: cost, costCurrency: "USD" });
+    expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "costPerPerson" }] } });
+    expect(insertTransport).not.toHaveBeenCalled();
+  });
+  it.each([0, -1, 1000000000000, 1.001])("rejects editing to the cost %s without replacing", async (cost) => {
+    const { deps, replaceTransport } = setup({ ...transport, costPerPerson: 10, costCurrency: "USD" });
+    const result = await updateJourneyTransport.execute(deps, { ...context, costPerPerson: cost } as never);
+    expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "costPerPerson" }] } });
+    expect(replaceTransport).not.toHaveBeenCalled();
+  });
+  it("edits other fields of a stored transport whose cost is outside the rule", async () => {
+    const { deps, replaceTransport } = setup({ ...transport, costPerPerson: -5, costCurrency: "USD" });
+    const result = await updateJourneyTransport.execute(deps, { ...context, arrivalPlace: "Otro" } as never);
+    expect(result.ok).toBe(true);
+    expect(replaceTransport).toHaveBeenCalledWith(expect.objectContaining({ arrivalPlace: "Otro", costPerPerson: -5 }));
+  });
+  it("still clears the cost and currency with null", async () => {
+    const { deps } = setup({ ...transport, costPerPerson: -5, costCurrency: "USD" });
+    expect(await updateJourneyTransport.execute(deps, { ...context, costPerPerson: null } as never))
+      .toEqual(ok({ ...transport, costPerPerson: null, costCurrency: null }));
+  });
+});

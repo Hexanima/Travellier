@@ -48,3 +48,20 @@ describe("transportCostTotals", () => {
     expect(transportCostTotals([t(amount, "USD")])).toEqual({ byCurrency: [], withoutCurrency: { transportCount: 1 } });
   });
 });
+
+describe("transportCostTotals limits (T133)", () => {
+  it("counts apart a cost whose sum would exceed the safe integer range", () => {
+    const totals = transportCostTotals([t(90071992547409.9, "ARS"), t(90071992547409.9, "ARS"), t(1, "EUR")]);
+    expect(totals.byCurrency).toEqual([
+      { currency: "ARS", totalCents: 9007199254740990, transportCount: 1 },
+      { currency: "EUR", totalCents: 100, transportCount: 1 },
+    ]);
+    expect(totals.withoutCurrency).toEqual({ transportCount: 1 });
+  });
+  it("counts apart stored negative or over-precise costs without throwing", () => {
+    expect(transportCostTotals([t(-5, "ARS"), t(Number.NaN, "ARS"), t(2, "ARS")])).toEqual({
+      byCurrency: [{ currency: "ARS", totalCents: 200, transportCount: 1 }],
+      withoutCurrency: { transportCount: 2 },
+    });
+  });
+});

@@ -48,20 +48,20 @@ describe("parsePostExpenseInput", () => {
     expect(issuesOf(parsePostExpenseInput({ shares: [{ userId: ana, unit: "excluded", value: null }, { userId: beto, unit: "amount", value: 1, paidBy: ana }] })))
       .toEqual(["expense.shares[1].paidBy:unsupported"]);
   });
-  it.each([0, -1, Number.NaN, Infinity, 10.005, "10", null, Number.MAX_SAFE_INTEGER + 1])("rejects totalAmount %j", (totalAmount) => {
+  it.each([0, -1, Number.NaN, Infinity, 10.005, "10", null])("rejects totalAmount %j", (totalAmount) => {
     expect(issuesOf(parsePostExpenseInput({ totalAmount }))).toEqual(["expense.totalAmount:invalid"]);
   });
-  it.each([0.1 + 0.2, 1e-7, 1e21, 1.5e-3, Number.MIN_VALUE])("rejects the edge totalAmount %j", (totalAmount) => {
+  it.each([0.1 + 0.2, 1e-7, 1.5e-3, Number.MIN_VALUE])("rejects the edge totalAmount %j", (totalAmount) => {
     expect(parsePostExpenseInput({ totalAmount })).toMatchObject({ ok: false, error: { issues: [{ field: "expense.totalAmount", code: "invalid" }] } });
   });
-  it.each([[1e2, 100], [0.01, 0.01], [123456789012.34, 123456789012.34], [70368744177663.98, 70368744177663.98], [70368744177663.99, 70368744177663.99]])(
+  it.each([[1e2, 100], [0.01, 0.01], [123456789012.34, 123456789012.34], [999999999999.99, 999999999999.99]])(
     "accepts the edge totalAmount %j without rounding it", (totalAmount, expected) => {
       const parsed = parsePostExpenseInput({ totalAmount });
       expect(parsed).toEqual({ ok: true, value: { totalAmount: expected } });
       expect(Object.is((parsed as { value: { totalAmount: number } }).value.totalAmount, expected)).toBe(true);
       expect(String(expected)).toBe(String(totalAmount));
     });
-  it.each([[70368744177663.98, 7036874417766398], [70368744177663.99, 7036874417766399], [123456789012.34, 12345678901234]])(
+  it.each([[999999999999.98, 99999999999998], [999999999999.99, 99999999999999], [123456789012.34, 12345678901234]])(
     "keeps the exact cents of %j (below 2^46 every 2-decimal amount is its own double)", (amount, cents) => {
       expect(toCents(amount)).toEqual({ ok: true, value: cents });
       const applied = apply(undefined, { totalAmount: amount, currency: "ARS" });
@@ -74,11 +74,11 @@ describe("parsePostExpenseInput", () => {
     expect(90071992547409.91 === 90071992547409.9).toBe(true);
     expect(String(90071992547409.91)).toBe("90071992547409.9");
     expect(toCents(90071992547409.91)).toEqual({ ok: true, value: 9007199254740990 });
-    expect(parsePostExpenseInput({ totalAmount: 90071992547409.91 })).toEqual({ ok: true, value: { totalAmount: 90071992547409.9 } });
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 90071992547409.91 }))).toEqual(["expense.totalAmount:exceeds_max"]);
   });
   it("rejects the amounts whose cents exceed Number.MAX_SAFE_INTEGER", () => {
-    expect(issuesOf(parsePostExpenseInput({ totalAmount: 90071992547409.92 }))).toEqual(["expense.totalAmount:invalid"]);
-    expect(issuesOf(parsePostExpenseInput({ totalAmount: Number.MAX_SAFE_INTEGER / 100 }))).toEqual([]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 90071992547409.92 }))).toEqual(["expense.totalAmount:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: Number.MAX_SAFE_INTEGER / 100 }))).toEqual(["expense.totalAmount:exceeds_max"]);
     expect(toCents(Number.MAX_SAFE_INTEGER).ok).toBe(false);
   });
   it.each(["BRL", "ars", 1, null])("rejects currency %j", (currency) => {
@@ -272,5 +272,36 @@ describe("breakdown limit (T122)", () => {
     const text = "x".repeat(2000);
     expect(parsePostExpenseInput({ breakdown: text })).toEqual({ ok: true, value: { breakdown: text } });
     expect(parsePostExpenseInput({ breakdown: null })).toEqual({ ok: true, value: { breakdown: null } });
+  });
+});
+
+describe("amount limits (T133)", () => {
+  const MAX = 999999999999.99;
+  it("accepts a total at the limit and rejects one cent more with exceeds_max", () => {
+    expect(parsePostExpenseInput({ totalAmount: MAX }).ok).toBe(true);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 1000000000000 }))).toEqual(["expense.totalAmount:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 999999999999.995 }))).toEqual(["expense.totalAmount:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: 1e21 }))).toEqual(["expense.totalAmount:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: Number.MAX_SAFE_INTEGER + 1 }))).toEqual(["expense.totalAmount:exceeds_max"]);
+  });
+  it.each([0, -1, 1.001, "100", Number.NaN, Number.POSITIVE_INFINITY])("rejects the total %j as invalid", (value) => {
+    expect(issuesOf(parsePostExpenseInput({ totalAmount: value }))).toEqual(["expense.totalAmount:invalid"]);
+  });
+  it("limits fixed rows by amount with the row path, accepts 0 and ignores percentages", () => {
+    expect(parsePostExpenseInput({ payments: [pay(ana, "amount", MAX)], shares: [share(ana, "amount", 0)] }).ok).toBe(true);
+    expect(issuesOf(parsePostExpenseInput({ payments: [pay(ana, "amount", 1000000000000)] }))).toEqual(["expense.payments[0].value:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ shares: [share(ana, "amount", 1), share(beto, "amount", 1e13)] }))).toEqual(["expense.shares[1].value:exceeds_max"]);
+    expect(issuesOf(parsePostExpenseInput({ shares: [share(ana, "amount", 1.001)] }))).toEqual(["expense.shares[0].value:invalid"]);
+    expect(parsePostExpenseInput({ payments: [pay(ana, "percent", 100)], shares: [share(ana, "percent", 33.333)] }).ok).toBe(true);
+  });
+  it("sums rows and total at the limit without overflow", () => {
+    const plan = apply(undefined, { totalAmount: MAX, currency: "ARS", payments: [pay(ana, "amount", MAX)], shares: [share(ana, "amount", 500000000000), share(beto, "amount", 499999999999.99)] });
+    expect(plan.ok).toBe(true);
+  });
+  it("leaves reads and unrelated patches over a stored total above the limit untouched", () => {
+    const big: PostExpense = { ...stored, totalAmount: 1e13, payments: [pay(ana, "amount", 1e13)], shares: [share(ana, "amount", 1e13)] };
+    expect(describePostExpense(big, [ana]).completeness.status).toBe("complete");
+    expect(apply(big, { breakdown: "nota" }).ok).toBe(true);
+    expect(apply(big, { payments: [pay(beto, "percent", 100)] }).ok).toBe(true);
   });
 });
