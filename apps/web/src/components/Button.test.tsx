@@ -18,4 +18,16 @@ describe("Button", () => {
     expect(markup).toContain("data-error=\"true\"");
     expect(markup).toContain("Reintentar");
   });
+
+  it("keeps the primary look by default and adds the secondary variant only when requested", () => {
+    expect(renderToStaticMarkup(<Button>Guardar</Button>)).not.toContain("ui-button--secondary");
+    expect(renderToStaticMarkup(<Button variant="secondary">Cancelar</Button>)).toContain("ui-button ui-button--secondary");
+  });
+
+  it("stays disabled without busy state when only disabled", () => {
+    const markup = renderToStaticMarkup(<Button disabled>Guardar</Button>);
+
+    expect(markup).toContain("disabled=\"\"");
+    expect(markup).not.toContain("aria-busy");
+  });
 });

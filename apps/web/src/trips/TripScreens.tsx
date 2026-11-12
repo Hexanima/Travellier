@@ -106,7 +106,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
             <h1 id="trips-title">Mis viajes</h1>
             <p>Organizá tus próximos viajes en un solo lugar.</p>
           </div>
-          <Link className="trips-create-link" to="/trips/new">Crear viaje</Link>
+          <Link className="ui-button trips-create-link" to="/trips/new">Crear viaje</Link>
         </header>
         {tripGone ? <Feedback variant="info">Ya no tenés acceso a ese viaje.</Feedback> : null}
         <nav className="trips-entry-actions" aria-label="Unirse a un viaje">

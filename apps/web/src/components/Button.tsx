@@ -5,6 +5,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   error?: boolean;
   loading?: boolean;
   loadingLabel?: string;
+  variant?: "primary" | "secondary";
 }
 
 export function Button({
@@ -15,13 +16,14 @@ export function Button({
   loading = false,
   loadingLabel = "Guardando…",
   type = "button",
+  variant = "primary",
   ...props
 }: ButtonProps) {
   return (
     <button
       {...props}
       type={type}
-      className={["ui-button", className].filter(Boolean).join(" ")}
+      className={["ui-button", variant === "secondary" && "ui-button--secondary", className].filter(Boolean).join(" ")}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       data-error={error || undefined}
