@@ -5,7 +5,7 @@ import { resolveActivityDayId } from "../../entities/activity-schedule.js";
 import { applyPostExpense, describePostExpense, parsePostExpenseInput, type PostExpense, type PostExpenseView, type PostExpensePlan } from "../../entities/post-expense.js";
 import type { PostPhotoRef } from "../../entities/post-photo.js";
 import { isSameRequest } from "../../entities/post-save-request.js";
-import { createPost, MAX_POST_CHAIN_DEPTH, relinkPost, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
+import { createPost, hasPostContent, MAX_POST_CHAIN_DEPTH, relinkPost, requirePostContent, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
 import { PostRequestConflictError } from "../../errors/post-request-conflict-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
@@ -197,6 +197,17 @@ const registerPostExpense = async (scope: TripPostScope, plan: PlannedExpense): 
   return written.ok ? ok(describePostExpense(plan.expense, plan.memberIds)) : written;
 };
 
+/**
+ * A memory keeps at least text, a location or a photo. Photos already published count; they are only read when the post has neither
+ * text nor location, so a save with content never pays for the extra read. Writes nothing.
+ */
+const requireSavedContent = async (scope: TripPostScope, post: Pick<Post, "id" | "description" | "mapsUrl">, newPhotos: number): AsyncResult<undefined> => {
+  if (hasPostContent({ description: post.description, mapsUrl: post.mapsUrl, photoCount: newPhotos })) return ok(undefined);
+  const published = await scope.listPhotos(post.id);
+  if (!published.ok) return published;
+  return requirePostContent({ description: post.description, mapsUrl: post.mapsUrl, photoCount: newPhotos + published.value.length });
+};
+
 const requestConflict = () => err(new PostRequestConflictError());
 /** The requester's own post of this Trip exists with other content than the retry: safe to say it was already saved. */
 const alreadySaved = (postId: ObjectId) => err(new PostRequestConflictError({ reason: "already_saved", postId }));
@@ -327,6 +338,8 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     if (!resolved.ok) return resolved;
     const post = createPost(input, resolved.value);
     if (!post.ok) return post;
+    const content = requirePostContent({ description: post.value.description, mapsUrl: post.value.mapsUrl, photoCount: keys?.length ?? 0 });
+    if (!content.ok) return content;
     const photoPlan = keys === undefined || activity ? undefined : await planPostPhotos(scope, { tripId: payload.tripId, postId,
       uploaderId: payload.authenticatedUserId, keys, createId, uploadedAt: createdAt });
     if (photoPlan && !photoPlan.ok) return photoPlan;
@@ -407,6 +420,10 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     if (!resolved.ok) return resolved;
     const post = relinkPost(merged, {}, resolved.value);
     if (!post.ok) return post;
+    if (supplied.includes("description") || supplied.includes("mapsUrl")) {
+      const content = await requireSavedContent(scope, post.value, keys?.length ?? 0);
+      if (!content.ok) return content;
+    }
     const expensePlan = await planPostExpense(scope, { tripId: payload.tripId, postId: payload.postId, expense: payload.expense, createId, createdAt });
     if (!expensePlan.ok) return expensePlan;
     const reviewed = await planAuthorAgenda(scope, payload, activity);
@@ -518,6 +535,10 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
       if (ancestors.value.truncated) {
         return err(new ValidationError([{ field: "parentPostId", code: "too_deep", message: "Post chain exceeds the supported depth." }]));
       }
+    }
+    if (supplied.includes("description") || supplied.includes("mapsUrl")) {
+      const content = await requireSavedContent(scope, post.value, keys?.length ?? 0);
+      if (!content.ok) return content;
     }
     const photoPlan = keys === undefined ? undefined : await planPostPhotos(scope, { tripId: payload.tripId, postId: payload.postId,
       uploaderId: payload.authenticatedUserId, keys, createId: createId!, uploadedAt: now!() });

@@ -29,6 +29,8 @@ export interface PostExpenseView extends PostExpense {
   formerMemberIds: ObjectId[];
 }
 
+/** Maximum breakdown length in Unicode code points, measured on the raw text. */
+export const MAX_EXPENSE_BREAKDOWN_LENGTH = 2000;
 const FIELDS: readonly PostExpenseField[] = ["totalAmount", "currency", "breakdown", "payments", "shares"];
 const ROW_KEYS: Record<"payments" | "shares", readonly string[]> = { payments: ["userId", "unit", "value"], shares: ["userId", "unit", "value"] };
 const issue = (field: string, code: string, message: string): ValidationIssue => ({ field: `expense.${field}`, code, message });
@@ -61,7 +63,9 @@ export const parsePostExpenseInput = (raw: unknown): Result<PostExpenseInput, Va
     else issues.push(issue("currency", "invalid", "Expense currency must be ARS, EUR or USD."));
   }
   if (record.breakdown !== undefined) {
-    if (record.breakdown === null || typeof record.breakdown === "string") input.breakdown = record.breakdown;
+    if (typeof record.breakdown === "string" && [...record.breakdown].length > MAX_EXPENSE_BREAKDOWN_LENGTH) {
+      issues.push(issue("breakdown", "too_long", `Expense breakdown must have at most ${MAX_EXPENSE_BREAKDOWN_LENGTH} characters.`));
+    } else if (record.breakdown === null || typeof record.breakdown === "string") input.breakdown = record.breakdown;
     else issues.push(issue("breakdown", "invalid", "Expense breakdown must be text or null."));
   }
   for (const name of ["payments", "shares"] as const) {

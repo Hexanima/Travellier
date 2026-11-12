@@ -263,3 +263,14 @@ describe("describePostExpense", () => {
     expect(Object.keys(described)).toEqual(expect.arrayContaining(["completeness", "formerMemberIds"]));
   });
 });
+
+describe("breakdown limit (T122)", () => {
+  it("accepts 2000 code points, rejects 2001 and never trims or cuts", () => {
+    expect(issuesOf(parsePostExpenseInput({ breakdown: "😀".repeat(2000) }))).toEqual([]);
+    expect(issuesOf(parsePostExpenseInput({ breakdown: "😀".repeat(2001) }))).toEqual(["expense.breakdown:too_long"]);
+    expect(issuesOf(parsePostExpenseInput({ breakdown: "a".repeat(2000) + " " }))).toEqual(["expense.breakdown:too_long"]);
+    const text = "x".repeat(2000);
+    expect(parsePostExpenseInput({ breakdown: text })).toEqual({ ok: true, value: { breakdown: text } });
+    expect(parsePostExpenseInput({ breakdown: null })).toEqual({ ok: true, value: { breakdown: null } });
+  });
+});

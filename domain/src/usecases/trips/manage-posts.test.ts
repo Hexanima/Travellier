@@ -81,7 +81,7 @@ describe("Trip post use cases", () => {
   const dependencies = () => ({ posts, createId: () => id(sequence++), now: () => createdAt });
   const create = (fields = {}) => {
     expect(domain.createTripPost).toBeDefined();
-    return domain.createTripPost.execute(dependencies(), { ...context, dayId, ...fields });
+    return domain.createTripPost.execute(dependencies(), { ...context, dayId, description: "Recuerdo", ...fields });
   };
   const update = (fields = {}) => {
     expect(domain.updateTripPost).toBeDefined();
@@ -92,7 +92,7 @@ describe("Trip post use cases", () => {
     const selected = { activityId: mask & 1 ? links.activityId : null, parentPostId: mask & 2 ? links.parentPostId : null,
       transportId: mask & 4 ? links.transportId : null };
     expect(await create({ ...selected, authorId: id(99), id: id(99), createdAt: new Date(0), tripId }))
-      .toMatchObject({ ok: true, value: { post: { id: id(20), tripId, authorId: actor, createdAt, description: null, mapsUrl: null, ...selected } } });
+      .toMatchObject({ ok: true, value: { post: { id: id(20), tripId, authorId: actor, createdAt, description: "Recuerdo", mapsUrl: null, ...selected } } });
     expect(records).toHaveLength(1);
     expect(records[0]).not.toHaveProperty("dayId");
     expect(records[0]!.createdAt.getMilliseconds()).toBe(789);
@@ -450,14 +450,14 @@ describe("Trip post use cases", () => {
     });
 
     it("derives the slice from the start when dayId is omitted and still validates an explicit one", async () => {
-      expect(await domain.createTripPost.execute(dependencies(), { ...context, newActivity })).toMatchObject({ ok: true, value: { activity: { dayId } } });
+      expect(await domain.createTripPost.execute(dependencies(), { ...context, description: "Recuerdo", newActivity })).toMatchObject({ ok: true, value: { activity: { dayId } } });
       expect(await create({ dayId: id(97), newActivity })).toMatchObject({ ok: false, error: { issues: [{ field: "dayId", code: "not_found" }] } });
       days = [day, { ...day, id: id(30), tripId: id(99) }];
       expect(await create({ dayId: id(30), newActivity })).toMatchObject({ ok: false, error: { issues: [{ field: "dayId", code: "mismatch" }] } });
     });
 
     it("rejects an instant outside the windows or matching several slices when dayId is omitted", async () => {
-      const bare = (fields: object) => domain.createTripPost.execute(dependencies(), { ...context, ...fields });
+      const bare = (fields: object) => domain.createTripPost.execute(dependencies(), { ...context, description: "Recuerdo", ...fields });
       expect(await bare({ newActivity: { ...newActivity, scheduledAt: new Date("2026-09-30T12:00:00Z") } }))
         .toMatchObject({ ok: false, error: { issues: [{ field: "scheduledAt", code: "outside_window" }] } });
       days = [day, { ...day, id: id(30), destinationId: id(31) }];
@@ -853,7 +853,7 @@ describe("Trip post use cases", () => {
 
         it("writes the expense after the post, and answers exactly as before without an expense", async () => {
           const insert = vi.spyOn(scope, "insert"), insertExpense = vi.spyOn(scope, "insertExpense"), find = vi.spyOn(scope, "findExpense");
-          expect(await createWith({ expense })).toMatchObject({ ok: true });
+          expect(await createWith({ description: "Gasto", expense })).toMatchObject({ ok: true });
           expect(insert.mock.invocationCallOrder[0]).toBeLessThan(insertExpense.mock.invocationCallOrder[0]!);
           insert.mockClear(); insertExpense.mockClear(); find.mockClear(); expenseRecords = []; records = [seedPost()];
           const plain = await createWith({ description: "Sin gasto" });
@@ -877,11 +877,11 @@ describe("Trip post use cases", () => {
         it("does not write the expense when the agenda needs confirmation and saves it with the confirmation", async () => {
           seedAgenda();
           const before = full(), spies = writers();
-          const first = await createWith({ newActivity: withDuration, expense });
+          const first = await createWith({ description: "Gasto", newActivity: withDuration, expense });
           expect(first).toMatchObject({ ok: true, value: { outcome: "confirmation_required" } });
           expect(calls(spies)).toBe(0); expect(full()).toEqual(before);
           sequence = 20;
-          expect(await createWith({ newActivity: withDuration, expense, ...confirmationFrom(first) }))
+          expect(await createWith({ description: "Gasto", newActivity: withDuration, expense, ...confirmationFrom(first) }))
             .toMatchObject({ ok: true, value: { outcome: "created", expense: { totalAmount: 1500.5 } } });
           expect(expenseRecords).toHaveLength(1);
           records = [seedPost()]; expenseRecords = []; sequence = 20;
@@ -936,8 +936,8 @@ describe("Trip post use cases", () => {
         });
 
         it("rejects an expense without total or currency when the post has none", async () => {
-          expect(failures(await createWith({ expense: { currency: "ARS" } }))).toEqual(["expense.totalAmount/required"]);
-          expect(failures(await createWith({ expense: { totalAmount: 5 } }))).toEqual(["expense.currency/required"]);
+          expect(failures(await createWith({ description: "Gasto", expense: { currency: "ARS" } }))).toEqual(["expense.totalAmount/required"]);
+          expect(failures(await createWith({ description: "Gasto", expense: { totalAmount: 5 } }))).toEqual(["expense.currency/required"]);
           expect(full()).toEqual(empty);
         });
 
@@ -1020,7 +1020,7 @@ describe("Trip post use cases", () => {
         const calls = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
 
         it("persists the agreed rows and answers them with completeness and no former members, without persisting the completeness", async () => {
-          const result = await createWith({ expense: agreed });
+          const result = await createWith({ description: "Gasto", expense: agreed });
           expect(result).toMatchObject({ ok: true, value: { expense: { payments: agreed.payments, shares: agreed.shares,
             completeness: { status: "complete", reasons: [] }, formerMemberIds: [] } } });
           expect(expenseRecords).toEqual([{ id: id(21), tripId, postId: id(20), totalAmount: 100, currency: "ARS", breakdown: null,
@@ -1031,7 +1031,7 @@ describe("Trip post use cases", () => {
 
         it("asks the membership once for the distinct users referenced, in the same transaction scope", async () => {
           const listMembers = vi.spyOn(scope, "listMemberUserIds");
-          expect(await createWith({ expense: { ...agreed, payments: [{ userId: ana.toUpperCase(), unit: "percent", value: 100 }] } }))
+          expect(await createWith({ description: "Gasto", expense: { ...agreed, payments: [{ userId: ana.toUpperCase(), unit: "percent", value: 100 }] } }))
             .toMatchObject({ ok: true });
           expect(listMembers).toHaveBeenCalledTimes(1);
           expect([...listMembers.mock.calls[0]![0]].sort()).toEqual([ana, beto]);
@@ -1082,7 +1082,7 @@ describe("Trip post use cases", () => {
         });
 
         it("a draft is never persisted by the server: an expense without shares writes no shares and proposes no payer", async () => {
-          expect(await createWith({ expense: { totalAmount: 100, currency: "ARS" } })).toMatchObject({ ok: true,
+          expect(await createWith({ description: "Gasto", expense: { totalAmount: 100, currency: "ARS" } })).toMatchObject({ ok: true,
             value: { expense: { payments: [], shares: [], completeness: { status: "incomplete", reasons: ["missing_payments", "missing_shares"] } } } });
           expect(expenseRecords[0]).toMatchObject({ payments: [], shares: [] });
           records = [seedPost()]; expenseRecords = [stored({ payments: agreed.payments })];
@@ -1117,6 +1117,116 @@ describe("Trip post use cases", () => {
           expect(listMembers).not.toHaveBeenCalled();
         });
       });
+      describe("minimum content of a memory (T122)", () => {
+        const writerNames = ["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation", "appendNotifications"] as const;
+        const writes = () => { const spies = writerNames.map((method) => vi.spyOn(scope, method)); return () => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0); };
+        const everything = () => structuredClone({ ...state(), expenseRecords, notifications });
+        const required = { ok: false, error: { tag: "ValidationError", issues: [{ field: "description", code: "required" }] } };
+        const expense = { totalAmount: 10, currency: "ARS" };
+        const bare = (fields: Partial<Post> = {}) => seedPost({ description: null, mapsUrl: null, ...fields });
+
+        it.each<[string, Record<string, unknown>]>([
+          ["nothing", {}], ["blank text", { description: "  \n " }], ["only an expense", { expense }],
+          ["only a parent link", { parentPostId: links.parentPostId }], ["only an activity link", { activityId: links.activityId }],
+          ["only a transport link", { transportId: links.transportId }], ["a new activity", { newActivity: withDuration }],
+          ["a new activity, an expense and no content", { newActivity: withDuration, expense }],
+        ])("createTripPost rejects %s with 422 and no writes", async (_, fields) => {
+          const written = writes(), before = everything();
+          expect(await createWith(fields)).toMatchObject(required);
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+
+        it("createTripPost creates with only a photo, only a location or only text", async () => {
+          uploaded(1);
+          expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: true, value: { post: { description: null, mapsUrl: null }, photos: [{ order: 1 }] } });
+          expect(await createWith({ mapsUrl: "https://maps.example/x" })).toMatchObject({ ok: true });
+          expect(await createWith({ description: "Texto" })).toMatchObject({ ok: true });
+          expect(records).toHaveLength(3);
+        });
+
+        it("createTripPost with a new activity, a photo and an expense stores everything; without content it stores nothing", async () => {
+          uploaded(1);
+          expect(await createWith({ newActivity: withDuration, photos: refs(1), expense })).toMatchObject({ ok: true, value: { outcome: "created" } });
+          const written = writes(), before = everything();
+          expect(await createWith({ newActivity: withDuration, expense })).toMatchObject(required);
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+
+        it("measures the limits in code points and answers the field without cutting or writing", async () => {
+          const written = writes(), before = everything();
+          expect(await createWith({ description: "😀".repeat(5001) })).toMatchObject({ ok: false, error: { issues: [{ field: "description", code: "too_long" }] } });
+          expect(await createWith({ description: "Texto", expense: { ...expense, breakdown: "😀".repeat(2001) } }))
+            .toMatchObject({ ok: false, error: { issues: [{ field: "expense.breakdown", code: "too_long" }] } });
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+          expect(await createWith({ description: "😀".repeat(5000), expense: { ...expense, breakdown: "😀".repeat(2000) } })).toMatchObject({ ok: true });
+          expect(records[0]!.description).toBe("😀".repeat(5000));
+        });
+
+        it("updateTripPost rejects clearing the last content with 422 and no writes", async () => {
+          for (const fields of [{ description: null }, { description: "" }, { description: "  " }, { description: null, expense }]) {
+            records = [seedPost({ mapsUrl: null })];
+            const written = writes(), before = everything();
+            expect(await updateWith(fields)).toMatchObject(required);
+            expect(written()).toBe(0);
+            expect(everything()).toEqual(before);
+            vi.restoreAllMocks();
+          }
+          records = [seedPost({ description: null })]; const before = everything();
+          expect(await updateWith({ mapsUrl: null })).toMatchObject(required);
+          expect(everything()).toEqual(before);
+        });
+
+        it("updateTripPost lets the text go when published photos, a location or new photos remain", async () => {
+          records = [seedPost({ mapsUrl: null })]; photoRecords = [stored(1, 1)];
+          expect(await updateWith({ description: null })).toMatchObject({ ok: true, value: { description: null } });
+          expect(photoRecords).toHaveLength(1);
+          records = [seedPost({ mapsUrl: null })]; photoRecords = [];
+          expect(await updateWith({ description: null, mapsUrl: "https://maps.example/x" })).toMatchObject({ ok: true, value: { description: null, mapsUrl: "https://maps.example/x" } });
+          records = [seedPost({ mapsUrl: null })]; uploaded(2);
+          expect(await updateWith({ description: "", photos: refs(2) })).toMatchObject({ ok: true, value: { photos: [{ order: 1 }] } });
+          expect(photoRecords).toHaveLength(1);
+        });
+
+        it("updateTripPost leaves unrelated edits and expense-only edits alone, even on an old post without content", async () => {
+          records = [seedPost()];
+          expect(await updateWith({ expense })).toMatchObject({ ok: true, value: { expense: { totalAmount: 10 } } });
+          records = [bare()];
+          expect(await updateWith({ transportId: links.transportId })).toMatchObject({ ok: true });
+          expect(await updateWith({ expense: { breakdown: null } })).toMatchObject({ ok: true });
+        });
+
+        it("updateTripPost rejects an excess without writing", async () => {
+          records = [seedPost()]; const written = writes(), before = everything();
+          expect(await updateWith({ description: "😀".repeat(5001) })).toMatchObject({ ok: false, error: { issues: [{ field: "description", code: "too_long" }] } });
+          expect(await updateWith({ expense: { ...expense, breakdown: "😀".repeat(2001) } }))
+            .toMatchObject({ ok: false, error: { issues: [{ field: "expense.breakdown", code: "too_long" }] } });
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+
+        it("linkTripPostToNewActivity rejects clearing the last content without any write and keeps published photos", async () => {
+          records = [seedPost({ mapsUrl: null })]; const written = writes(), before = everything();
+          expect(await linkWith({ description: null })).toMatchObject(required);
+          expect(await linkWith({ description: null, expense })).toMatchObject(required);
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+          vi.restoreAllMocks();
+          photoRecords = [stored(1, 1)];
+          expect(await linkWith({ description: null })).toMatchObject({ ok: true, value: { outcome: "linked", post: { description: null } } });
+          expect(activities).toHaveLength(1); expect(participations).toHaveLength(1);
+        });
+
+        it("linkTripPostToNewActivity rejects an excess without writing", async () => {
+          records = [seedPost()]; const written = writes(), before = everything();
+          expect(await linkWith({ description: "😀".repeat(5001) })).toMatchObject({ ok: false, error: { issues: [{ field: "description", code: "too_long" }] } });
+          expect(written()).toBe(0);
+          expect(everything()).toEqual(before);
+        });
+      });
+
       describe("idempotent retry of the joint save (T87)", () => {
         const clientId = id(500), otherTripId = id(99);
         const agreed = { totalAmount: 100, currency: "ARS", payments: [{ userId: id(41), unit: "percent", value: 100 }],
@@ -1146,6 +1256,15 @@ describe("Trip post use cases", () => {
           expect(calls(spies)).toBe(0);
           expect(everything()).toEqual(before);
           expect(records).toHaveLength(1); expect(activities).toHaveLength(1); expect(participations).toHaveLength(1);
+        });
+
+        it("a retry of a post saved with only a photo answers the saved result without 422 or writes", async () => {
+          const first = await createWith({ postId: clientId, photos: refs(1) });
+          expect(first).toMatchObject({ ok: true, value: { post: { id: clientId, description: null }, photos: [{ order: 1 }] } });
+          const before = everything(), spies = writers();
+          expect(await createWith({ postId: clientId, photos: refs(1) })).toEqual(first);
+          expect(calls(spies)).toBe(0);
+          expect(everything()).toEqual(before);
         });
 
         it("a retry of a plain post (no activity, photos or expense) answers the saved post", async () => {
