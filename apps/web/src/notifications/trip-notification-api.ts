@@ -16,6 +16,9 @@ export type TripNotification = Common & (
     newInterval: { startsAt: string; durationMinutes: number | null; endsAt: string | null }; incompatibleActivities: IncompatibleActivity[] } }
   | { type: "member.joined"; payload: { memberId: string; userId: string } }
   | { type: "member.expelled"; payload: { tripId: string } }
+  | { type: "member.left"; payload: { memberId: string; userId: string } }
+  | { type: "member.role_changed"; payload: { userId: string; role: "admin" | "participant" } }
+  | { type: "trip.ownership_transferred"; payload: { previousOwnerId: string } }
   | { type: "comment.created"; payload: { commentId: string; postId: string; actorId: string } }
 );
 export type TripNotificationType = TripNotification["type"];
@@ -74,6 +77,12 @@ const parsePayload = (type: string, tripId: string, payload: unknown): Payload |
       return exact(payload, ["memberId", "userId"]) && isId(payload.memberId) && isId(payload.userId) ? { memberId: payload.memberId, userId: payload.userId } : undefined;
     case "member.expelled":
       return exact(payload, ["tripId"]) && payload.tripId === tripId ? { tripId } : undefined;
+    case "member.left":
+      return exact(payload, ["memberId", "userId"]) && isId(payload.memberId) && isId(payload.userId) ? { memberId: payload.memberId, userId: payload.userId } : undefined;
+    case "member.role_changed":
+      return exact(payload, ["userId", "role"]) && isId(payload.userId) && (payload.role === "admin" || payload.role === "participant") ? { userId: payload.userId, role: payload.role } : undefined;
+    case "trip.ownership_transferred":
+      return exact(payload, ["previousOwnerId"]) && isId(payload.previousOwnerId) ? { previousOwnerId: payload.previousOwnerId } : undefined;
     case "comment.created":
       return exact(payload, ["commentId", "postId", "actorId"]) && isId(payload.commentId) && isId(payload.postId) && isId(payload.actorId)
         ? { commentId: payload.commentId, postId: payload.postId, actorId: payload.actorId } : undefined;
@@ -82,13 +91,22 @@ const parsePayload = (type: string, tripId: string, payload: unknown): Payload |
   }
 };
 
-/** Strict and rebuilt field by field: anything off is a server failure and nothing of the payload is echoed. */
-const parseNotification = (value: unknown): TripNotification | undefined => {
+const knownTypes: readonly string[] = ["post.created", "activity.created", "activity.updated", "activity.participant_unlinked", "member.joined", "member.expelled", "member.left",
+  "member.role_changed", "trip.ownership_transferred", "comment.created"];
+type OmitReason = "unknown_type" | "invalid_shape" | "duplicate_id";
+/** Registers an omitted notice with a fixed reason. A type is only logged when it is on the allowlist: never ids, payloads or personal data. */
+const warnOmitted = (reason: OmitReason, type?: string) => {
+  console.warn("Notice omitted", reason, ...(type !== undefined && knownTypes.includes(type) ? [type] : []));
+};
+
+/** Strict and rebuilt field by field: anything off is omitted by the caller and nothing of the payload is echoed. */
+const parseNotification = (value: unknown): TripNotification | "unknown_type" | "invalid_shape" => {
   if (!isRecord(value) || !exact(value, ["id", "type", "tripId", "actorId", "payload", "createdAt"]) || !isId(value.id) || typeof value.type !== "string" ||
-    !isId(value.tripId) || !idOrNull(value.actorId) || !isTimestamp(value.createdAt)) return undefined;
-  if (value.type === "member.expelled" && value.actorId !== null) return undefined;
+    !isId(value.tripId) || !idOrNull(value.actorId) || !isTimestamp(value.createdAt)) return "invalid_shape";
+  if (!knownTypes.includes(value.type)) return "unknown_type";
+  if (value.type === "member.expelled" && value.actorId !== null) return "invalid_shape";
   const payload = parsePayload(value.type, value.tripId, value.payload);
-  if (!payload) return undefined;
+  if (!payload) return "invalid_shape";
   return { id: value.id, type: value.type, tripId: value.tripId, actorId: value.actorId, createdAt: value.createdAt, payload } as TripNotification;
 };
 
@@ -103,8 +121,16 @@ export const createTripNotificationApi = (client: Pick<HttpClient, "get">): Trip
     const body = result.value;
     if (!isRecord(body) || !Array.isArray(body.notifications) || body.notifications.length > maxPage) return serverFailure;
     if (body.nextCursor !== null && (typeof body.nextCursor !== "string" || body.nextCursor === "")) return serverFailure;
-    const notifications = body.notifications.map(parseNotification);
-    if (!notifications.every((item) => item !== undefined) || new Set(notifications.map((item) => item.id)).size !== notifications.length) return serverFailure;
+    // A notice the app cannot read is omitted and registered: it never hides the others. The first of a repeated id is kept.
+    const notifications: TripNotification[] = [];
+    const seen = new Set<string>();
+    for (const raw of body.notifications) {
+      const parsed = parseNotification(raw);
+      if (typeof parsed === "string") { warnOmitted(parsed); continue; }
+      if (seen.has(parsed.id)) { warnOmitted("duplicate_id", parsed.type); continue; }
+      seen.add(parsed.id);
+      notifications.push(parsed);
+    }
     return { ok: true, value: { notifications, nextCursor: body.nextCursor } };
   },
 });

@@ -8,7 +8,7 @@ export type DestinationInput = { type: string; tripId: string; payloadTripId?: s
  * The exact in-app route of a notice, always inside the Trip of the notice; a Trip is never inferred from another id.
  * `null` means there is nothing to open: an invalid or missing id, an unknown type or the expulsion (the user is no longer a member).
  * Routes are built only from validated 24-hex ids, so `../`, queries or fragments cannot reach the path.
- * `member.joined` opens the Trip members screen (`/trips/:tripId/members`); `comment.created` opens the post without anchoring the comment.
+ * `member.joined`, `member.left`, `member.role_changed` and `trip.ownership_transferred` open the Trip members screen (`/trips/:tripId/members`); `comment.created` opens the post without anchoring the comment.
  */
 export const notificationDestination = ({ type, tripId, payloadTripId, postId, activityId }: DestinationInput): string | null => {
   if (!isId(tripId) || (payloadTripId !== undefined && payloadTripId !== tripId)) return null;
@@ -21,6 +21,9 @@ export const notificationDestination = ({ type, tripId, payloadTripId, postId, a
     case "activity.participant_unlinked":
       return isId(activityId) ? `/trips/${tripId}/itinerary?activity=${activityId}` : null;
     case "member.joined":
+    case "member.left":
+    case "member.role_changed":
+    case "trip.ownership_transferred":
       return `/trips/${tripId}/members`;
     default:
       return null; // member.expelled and anything unknown
@@ -37,6 +40,9 @@ export const destinationOfNotification = (notification: TripNotification): strin
     case "activity.participant_unlinked":
       return notificationDestination({ type: notification.type, tripId: notification.tripId, activityId: notification.payload.activityId });
     case "member.joined":
+    case "member.left":
+    case "member.role_changed":
+    case "trip.ownership_transferred":
       return notificationDestination({ type: notification.type, tripId: notification.tripId });
     default:
       return null;

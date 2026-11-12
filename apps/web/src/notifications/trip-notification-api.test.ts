@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHttpClient } from "../api/index.js";
 import { itineraryId } from "../trips/itinerary-test-fixture.js";
 import { createTripNotificationApi } from "./trip-notification-api.js";
@@ -20,6 +20,10 @@ const valid = {
   }),
   "member.joined": base(7, "member.joined", { memberId: itineraryId(20), userId: itineraryId(21) }),
   "member.expelled": base(8, "member.expelled", { tripId }, { actorId: null }),
+  "member.left": base(10, "member.left", { memberId: itineraryId(20), userId: itineraryId(21) }),
+  "member.role_changed.admin": base(11, "member.role_changed", { userId: itineraryId(21), role: "admin" }),
+  "member.role_changed.participant": base(12, "member.role_changed", { userId: itineraryId(21), role: "participant" }),
+  "trip.ownership_transferred": base(13, "trip.ownership_transferred", { previousOwnerId: itineraryId(50) }),
   "comment.created": base(9, "comment.created", { commentId: itineraryId(30), postId: itineraryId(10), actorId: itineraryId(50) }),
 };
 type Key = keyof typeof valid;
@@ -33,7 +37,11 @@ const failure = (kind: string, extra: Record<string, unknown> = {}) => ({ ok: fa
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const payloadOf = (item: unknown) => (item as { payload: Record<string, unknown> }).payload;
 const mutate = (key: Key, mutation: (item: Record<string, unknown>) => void) => { const item = clone(valid[key]) as unknown as Record<string, unknown>; mutation(item); return item; };
-const rejected = async (item: unknown, label = JSON.stringify(item)) => expect(await setup(page(item)).api.list({}), label).toEqual(failure("server"));
+/** An invalid or unknown notice is omitted (the page still loads) and registered with a fixed reason. */
+const rejected = async (item: unknown, label = JSON.stringify(item)) => expect(await setup(page(item)).api.list({}), label).toEqual({ ok: true, value: { notifications: [], nextCursor: null } });
+let warn: ReturnType<typeof vi.spyOn>;
+beforeEach(() => { warn = vi.spyOn(console, "warn").mockImplementation(() => undefined); });
+afterEach(() => { warn.mockRestore(); });
 
 describe("trip notification adapter", () => {
   it("builds the query with limit and encoded cursor and omits what is undefined", async () => {
@@ -47,7 +55,7 @@ describe("trip notification adapter", () => {
     expect(fetch.mock.calls[2][0]).toBe("https://api.test/notifications?limit=60");
   });
 
-  it("parses the seven types, keeping the server order", async () => {
+  it("parses the ten types, keeping the server order", async () => {
     const items = Object.values(valid).map((item, index) => ({ ...clone(item), id: itineraryId(2000 + index) }));
     const result = await setup({ notifications: items, nextCursor: "next" }).api.list({});
     expect(result).toEqual({ ok: true, value: { notifications: items, nextCursor: "next" } });
@@ -59,7 +67,7 @@ describe("trip notification adapter", () => {
     expect(result.ok && result.value.notifications[0]).toEqual(item);
   });
 
-  it("rejects a type outside the seven known as a server failure", async () => {
+  it("omits a type outside the ten known", async () => {
     for (const type of ["activity.deleted", "post.updated", "", "POST.CREATED", 5, null]) await rejected({ ...clone(valid["post.created"]), type }, String(type));
   });
 
@@ -125,11 +133,71 @@ describe("trip notification adapter", () => {
     for (const item of items) await rejected(item);
   });
 
-  it("rejects pages with more than 60 items, repeated ids and invalid nextCursor", async () => {
+  it("parses the new member and ownership notices field by field", async () => {
+    const keys: Key[] = ["member.left", "member.role_changed.admin", "member.role_changed.participant", "trip.ownership_transferred"];
+    const result = await setup(page(...keys.map((key) => clone(valid[key])))).api.list({});
+    expect(result).toEqual({ ok: true, value: { notifications: keys.map((key) => valid[key]), nextCursor: null } });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("omits new notices with an extra field, a bad id or an invalid role", async () => {
+    const bad = [
+      mutate("member.left", (i) => { payloadOf(i).extra = 1; }), mutate("member.left", (i) => { payloadOf(i).userId = "x"; }), mutate("member.left", (i) => { delete payloadOf(i).memberId; }),
+      mutate("member.role_changed.admin", (i) => { payloadOf(i).role = "owner"; }), mutate("member.role_changed.admin", (i) => { payloadOf(i).role = null; }),
+      mutate("member.role_changed.admin", (i) => { payloadOf(i).userId = "x"; }), mutate("member.role_changed.admin", (i) => { payloadOf(i).tripId = tripId; }),
+      mutate("trip.ownership_transferred", (i) => { payloadOf(i).previousOwnerId = "x"; }), mutate("trip.ownership_transferred", (i) => { payloadOf(i).other = 1; }),
+      mutate("trip.ownership_transferred", (i) => { payloadOf(i).previousOwnerId = null; }),
+    ];
+    for (const item of bad) await rejected(item);
+  });
+
+  it("accepts a null actorId on the new notices", async () => {
+    const items = (["member.left", "member.role_changed.admin", "trip.ownership_transferred"] as Key[]).map((key, index) => ({ ...clone(valid[key]), id: itineraryId(4000 + index), actorId: null }));
+    const result = await setup(page(...items)).api.list({});
+    expect(result.ok && result.value.notifications).toHaveLength(3);
+  });
+
+  it("keeps the valid notices of a mixed page in order and the nextCursor, omitting unknown and invalid ones", async () => {
+    const first = { ...clone(valid["post.created"]), id: itineraryId(5001) };
+    const unknown = { ...clone(valid["post.created"]), id: itineraryId(5002), type: "activity.deleted" };
+    const invalid = mutate("member.left", (i) => { i.id = itineraryId(5003); payloadOf(i).userId = "x"; });
+    const last = { ...clone(valid["member.left"]), id: itineraryId(5004) };
+    const result = await setup({ notifications: [first, unknown, invalid, last], nextCursor: "more" }).api.list({});
+    expect(result).toEqual({ ok: true, value: { notifications: [first, last], nextCursor: "more" } });
+  });
+
+  it("returns an empty list with the nextCursor when every notice of the page is omitted", async () => {
+    const result = await setup({ notifications: [{ ...clone(valid["post.created"]), type: "x" }, "junk", null], nextCursor: "more" }).api.list({});
+    expect(result).toEqual({ ok: true, value: { notifications: [], nextCursor: "more" } });
+  });
+
+  it("registers one fixed-reason warning per omitted notice, never ids, payload or personal data", async () => {
+    const unknown = { ...clone(valid["post.created"]), id: itineraryId(6001), type: "activity.deleted", payload: { title: "SECRETO-TITULO" } };
+    const invalid = mutate("member.left", (i) => { i.id = itineraryId(6002); payloadOf(i).userId = "SECRETO-USER"; });
+    await setup(page(unknown, invalid, "SECRETO-RAW")).api.list({});
+    expect(warn).toHaveBeenCalledTimes(3);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("unknown_type");
+    expect(logged).toContain("invalid_shape");
+    for (const secret of ["SECRETO", itineraryId(6001), itineraryId(6002), tripId, itineraryId(21), itineraryId(50)]) expect(logged).not.toContain(secret);
+  });
+
+  it("truncates or drops the type in the log when it is not a short string", async () => {
+    await setup(page({ ...clone(valid["post.created"]), type: "x".repeat(500) })).api.list({});
+    expect(JSON.stringify(warn.mock.calls).length).toBeLessThan(300);
+  });
+
+  it("keeps the first of repeated ids and registers the repeated one", async () => {
+    const result = await setup(page(valid["post.created"], valid["post.created"], valid["comment.created"])).api.list({});
+    expect(result).toEqual({ ok: true, value: { notifications: [valid["post.created"], valid["comment.created"]], nextCursor: null } });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(valid["post.created"].id);
+  });
+
+  it("rejects pages with more than 60 items and invalid nextCursor", async () => {
     const many = Array.from({ length: 61 }, (_, index) => ({ ...clone(valid["post.created"]), id: itineraryId(3000 + index) }));
     expect(await setup(page(...many)).api.list({})).toEqual(failure("server"));
     expect((await setup(page(...many.slice(0, 60))).api.list({})).ok).toBe(true);
-    expect(await setup(page(valid["post.created"], valid["post.created"])).api.list({})).toEqual(failure("server"));
     for (const nextCursor of ["", 5, undefined, {}]) expect(await setup({ notifications: [], nextCursor }).api.list({}), String(nextCursor)).toEqual(failure("server"));
     for (const body of [null, [], "x", { nextCursor: null }, { notifications: {}, nextCursor: null }]) expect(await setup(body).api.list({}), JSON.stringify(body)).toEqual(failure("server"));
   });

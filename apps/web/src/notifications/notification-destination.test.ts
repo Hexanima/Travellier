@@ -14,6 +14,14 @@ describe("notification destination (data of a push or of the inbox)", () => {
     expect(notificationDestination({ type: "member.joined", tripId: trip })).toBe(`/trips/${trip}/members`);
   });
 
+  it("opens the members of the Trip for a departure, a role change and an ownership transfer", () => {
+    for (const type of ["member.left", "member.role_changed", "trip.ownership_transferred"]) {
+      expect(notificationDestination({ type, tripId: trip }), type).toBe(`/trips/${trip}/members`);
+      expect(notificationDestination({ type, tripId: "xyz" }), type).toBeNull();
+      expect(notificationDestination({ type, tripId: trip, payloadTripId: itineraryId(2) }), type).toBeNull();
+    }
+  });
+
   it("never opens the Trip of an expulsion", () => {
     expect(notificationDestination({ type: "member.expelled", tripId: trip })).toBeNull();
     expect(notificationDestination({ type: "member.expelled", tripId: trip, postId: post, activityId: activity })).toBeNull();
@@ -46,6 +54,10 @@ describe("destination of an inbox item", () => {
     expect(destinationOfNotification(item("comment.created", { commentId: itineraryId(6), postId: post, actorId: itineraryId(5) }))).toBe(`/trips/${trip}/memories/${post}`);
     expect(destinationOfNotification(item("activity.updated", { activityId: activity, actorId: itineraryId(5), changedFields: ["title"] }))).toBe(`/trips/${trip}/itinerary?activity=${activity}`);
     expect(destinationOfNotification(item("member.joined", { memberId: itineraryId(7), userId: itineraryId(8) }))).toBe(`/trips/${trip}/members`);
+    expect(destinationOfNotification(item("member.left", { memberId: itineraryId(7), userId: itineraryId(8) }))).toBe(`/trips/${trip}/members`);
+    expect(destinationOfNotification(item("member.role_changed", { userId: itineraryId(8), role: "admin" }))).toBe(`/trips/${trip}/members`);
+    expect(destinationOfNotification(item("trip.ownership_transferred", { previousOwnerId: itineraryId(8) }))).toBe(`/trips/${trip}/members`);
+    expect(destinationOfNotification(item("member.role_changed", { userId: itineraryId(8), role: "admin" }, "bad"))).toBeNull();
     expect(destinationOfNotification(item("member.expelled", { tripId: trip }))).toBeNull();
   });
 });
