@@ -28,9 +28,10 @@ function Stub({ name }: { name: string }) { const location = useLocation(); retu
 const ok2 = <T,>(value: T) => ({ ok: true as const, value });
 const summaryOk = { post: { count: 0, likedByMe: false }, comments: {} };
 /** Interaction APIs: by default an empty thread with nothing liked; tests replace the pieces they exercise. */
-const extras = (over: { comments?: Partial<Record<"list" | "create" | "update", ReturnType<typeof vi.fn>>>; likes?: Partial<Record<"summary" | "setPostLike" | "setCommentLike", ReturnType<typeof vi.fn>>>;
+const extras = (over: { comments?: Partial<Record<"list" | "create" | "update" | "remove", ReturnType<typeof vi.fn>>>; remove?: ReturnType<typeof vi.fn>; likes?: Partial<Record<"summary" | "setPostLike" | "setCommentLike", ReturnType<typeof vi.fn>>>;
   members?: ReturnType<typeof vi.fn> } = {}) => ({
-  comments: { list: vi.fn().mockResolvedValue(ok2([])), create: vi.fn(), update: vi.fn(), ...over.comments },
+  remove: over.remove ?? vi.fn(),
+  comments: { list: vi.fn().mockResolvedValue(ok2([])), create: vi.fn(), update: vi.fn(), remove: vi.fn(), ...over.comments },
   likes: { summary: vi.fn().mockResolvedValue(ok2(summaryOk)), setPostLike: vi.fn(), setCommentLike: vi.fn(), ...over.likes },
   members: { list: over.members ?? vi.fn().mockResolvedValue(ok2({ currentUserId: itineraryId(20), members: [] })) } });
 type Extras = ReturnType<typeof extras>;
@@ -38,7 +39,7 @@ const tree = (get: ReturnType<typeof vi.fn>, api: Extras) => <Routes>
   <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
     <Route index element={<Stub name="DIARIO" />} />
     <Route path="new" element={<Stub name="NUEVO" />} />
-    <Route path=":postId" element={<PostDetailScreen posts={{ get }} members={api.members as never} comments={api.comments as never} likes={api.likes as never} timeZone={zone} />} />
+    <Route path=":postId" element={<PostDetailScreen posts={{ get, remove: api.remove as never }} members={api.members as never} comments={api.comments as never} likes={api.likes as never} timeZone={zone} />} />
   </Route>
   <Route path="/trips/:tripId/itinerary" element={<Stub name="ITINERARIO" />} />
   <Route path="/login" element={<Stub name="LOGIN" />} />
@@ -527,5 +528,142 @@ describe("PostDetailScreen authorship (T125)", () => {
   it("offers «Editar» when the member list cannot be read", async () => {
     const { container } = await open(get(), 5, undefined, extras({ members: vi.fn().mockResolvedValue({ ok: false, error: { kind: "server" } }) }));
     expect(byText(container, "a", "Editar")?.getAttribute("href")).toBe(`${href(5)}/edit`);
+  });
+});
+
+describe("PostDetailScreen delete (T128)", () => {
+  const author = itineraryId(20), someone = itineraryId(21), admin = itineraryId(22);
+  const roster = [{ userId: author, name: "Ana", role: "participant" }, { userId: someone, name: "Beto", role: "participant" }, { userId: admin, name: "Cris", role: "admin" }];
+  const people = (currentUserId: string, members = roster) => vi.fn().mockResolvedValue(ok2({ currentUserId, members }));
+  const get = () => vi.fn().mockResolvedValue(ok(detail(5)));
+  const deleteButton = (container: HTMLElement) => byText(container, "button", "Eliminar recuerdo");
+  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+  const confirm = () => byText(dialog() as HTMLElement, "button", "Eliminar");
+  const failure = (kind: string) => ({ ok: false as const, error: { kind } });
+  const withRemove = (remove: ReturnType<typeof vi.fn>, id = author, members = roster) => extras({ remove, members: people(id, members) });
+  it("offers «Eliminar recuerdo» to the author and to an admin, not to another participant", async () => {
+    expect(deleteButton((await open(get(), 5, undefined, extras({ members: people(author) }))).container)).toBeTruthy();
+    expect(deleteButton((await open(get(), 5, undefined, extras({ members: people(admin) }))).container)).toBeTruthy();
+    expect(deleteButton((await open(get(), 5, undefined, extras({ members: people(someone) }))).container)).toBeUndefined();
+  });
+  it("is inside the memory actions with the button style", async () => {
+    const { container } = await open(get(), 5, undefined, extras({ members: people(author) }));
+    expect(deleteButton(container)?.closest(".memory-actions")).toBeTruthy();
+    expect(deleteButton(container)?.className).toContain("ui-button");
+  });
+  it("hides it from a non admin when the author is a former member, and shows it to an admin", async () => {
+    const former = vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { authorId: itineraryId(23) } })));
+    expect(deleteButton((await open(former, 5, undefined, extras({ members: people(author) }))).container)).toBeUndefined();
+    expect(deleteButton((await open(former, 5, undefined, extras({ members: people(admin) }))).container)).toBeTruthy();
+  });
+  it("offers it when the member list cannot be read", async () => {
+    const { container } = await open(get(), 5, undefined, extras({ members: vi.fn().mockResolvedValue(failure("server")) }));
+    expect(deleteButton(container)).toBeTruthy();
+  });
+  it("confirms with the safe action focused and explains what is deleted", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn()));
+    await click(deleteButton(container));
+    expect(dialog()?.textContent).toContain("Eliminar recuerdo");
+    expect(dialog()?.textContent).toContain("Se eliminan el recuerdo, sus fotos, su gasto, sus comentarios y me gusta. Sus continuaciones pasan al recuerdo anterior. No se puede deshacer.");
+    expect(document.activeElement).toBe(byText(dialog() as HTMLElement, "button", "Cancelar"));
+  });
+  it("cancelling does not delete and returns the focus to the button", async () => {
+    const remove = vi.fn();
+    const { container } = await open(get(), 5, undefined, withRemove(remove));
+    await click(deleteButton(container));
+    await click(byText(dialog() as HTMLElement, "button", "Cancelar"));
+    expect(dialog()).toBeNull();
+    expect(remove).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(deleteButton(container));
+  });
+  it("deletes once (a double click is ignored) and goes back one level when there is history", async () => {
+    const pending = deferred<unknown>();
+    const remove = vi.fn().mockReturnValue(pending.promise);
+    const { container } = await render(get(), [{ pathname: base }, { pathname: href(5), state: { origin: { path: base, label: "diario" } } }], 1, withRemove(remove));
+    await click(deleteButton(container));
+    await act(async () => { for (let i = 0; i < 2; i += 1) confirm()?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })); });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledWith(tripId, itineraryId(5));
+    await act(async () => pending.resolve({ ok: true, value: undefined }));
+    expect(last().pathname).toBe(base);
+    expect(container.textContent).toContain("DIARIO");
+  });
+  it("without history goes to the origin restoring its place", async () => {
+    const anchor = `data-itinerary-post=${itineraryId(5)}`;
+    const origin = { path: `/trips/${tripId}/itinerary`, search: "?x=1", label: "itinerario", anchor, scrollY: 250 };
+    const remove = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const { container } = await open(get(), 5, { origin }, withRemove(remove));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(last().pathname).toBe(`/trips/${tripId}/itinerary`);
+    expect(last().state).toEqual({ restore: { anchor, scrollY: 250 } });
+  });
+  it("without origin or history goes to the diary", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockResolvedValue({ ok: true, value: undefined })));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(last().pathname).toBe(base);
+  });
+  it("shows the memory as unavailable when it was already deleted (404)", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockResolvedValue(failure("not-found"))));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()).toBeNull();
+    expect(container.textContent).toContain("Este recuerdo ya no está disponible");
+    expect(byText(container, "a", "Volver al diario")).toBeTruthy();
+  });
+  it("on 403 explains it, re-reads the role and closes the dialog when it no longer applies", async () => {
+    let demoted = false;
+    const members = vi.fn().mockImplementation(async () => ok2({ currentUserId: admin, members: roster.map((m) => m.userId === admin && demoted ? { ...m, role: "participant" } : m) }));
+    const remove = vi.fn().mockImplementation(async () => { demoted = true; return failure("forbidden"); });
+    const { container } = await open(get(), 5, undefined, extras({ remove, members }));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()).toBeNull();
+    expect(container.textContent).toContain("Ya no tenés permiso para eliminar este recuerdo.");
+    expect(deleteButton(container)).toBeUndefined();
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("on 403 keeps the dialog open with the message when the permission still seems valid", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockResolvedValue(failure("forbidden"))));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("Ya no tenés permiso para eliminar este recuerdo.");
+  });
+  it("on 401 asks to sign in again", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockResolvedValue(failure("unauthorized"))));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("Tu sesión venció. Volvé a iniciar sesión.");
+    expect(byText(dialog() as HTMLElement, "a", "Iniciar sesión")?.getAttribute("href")).toBe("/login");
+  });
+  it.each(["network", "server"])("on a %s failure keeps the dialog open and allows retrying, tolerating a later 404", async (kind) => {
+    const remove = vi.fn().mockResolvedValueOnce(failure(kind)).mockResolvedValueOnce(failure("not-found"));
+    const { container } = await open(get(), 5, undefined, withRemove(remove));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("No pudimos eliminar el recuerdo.");
+    expect(last().pathname).toBe(href(5));
+    await click(confirm());
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(dialog()).toBeNull();
+    expect(container.textContent).toContain("Este recuerdo ya no está disponible");
+  });
+  it("treats a thrown error like a network failure", async () => {
+    const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockRejectedValue(new Error("x"))));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("No pudimos eliminar el recuerdo.");
+  });
+  it("deleting a continuation goes back to its parent when it was opened from it", async () => {
+    const remove = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const getChain = vi.fn().mockImplementation(async (_trip: string, id: string) => id === itineraryId(5)
+      ? ok(detail(5, { children: [summary(7)] })) : ok(detail(7, { postExtra: { parentPostId: itineraryId(5) }, parent: summary(5) })));
+    const { container } = await render(getChain, [{ pathname: `/trips/${tripId}/itinerary` }, { pathname: href(5), state: { origin: { path: `/trips/${tripId}/itinerary`, label: "itinerario" } } }], 1, withRemove(remove));
+    await click(container.querySelector(`a[href="${href(7)}"]`));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(remove).toHaveBeenCalledWith(tripId, itineraryId(7));
+    expect(last().pathname).toBe(href(5));
   });
 });
