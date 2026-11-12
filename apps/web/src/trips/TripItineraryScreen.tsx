@@ -348,7 +348,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         {pickerOpen ? <DestinationPicker choices={choices} current={currentDestination?.id} timeZone={timeZone}
           onSelect={chooseDestination} onClose={() => setPickerOpen(false)} /> : null}
       </> : null}
-      {state.kind === "ready" && days.length > 0 ? <nav aria-label="Días del viaje">
+      {state.kind === "ready" && days.length > 0 ? <nav className="itinerary-days-nav" aria-label="Días del viaje">
         <ul className="itinerary-day-strip">
           {days.map((day) => <li key={day.date}><button type="button" className="ui-button itinerary-day-chip" data-day={day.date} aria-current={day.date === selectedDate ? "date" : undefined}
             ref={(element) => { if (element) chipRefs.current.set(day.date, element); else chipRefs.current.delete(day.date); }} onClick={() => pickDay(day.date)}>

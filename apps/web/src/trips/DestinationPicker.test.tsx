@@ -76,4 +76,11 @@ describe("DestinationPicker", () => {
     await act(async () => stops()[0]!.click());
     expect(onSelect).toHaveBeenCalledWith("a");
   });
+  it("renders the dialog inside the .destination-picker-layer (bottom sheet on mobile) and keeps incomplete stops as disabled buttons", async () => {
+    const { container, dialog, stops } = await mount();
+    expect(dialog.closest(".destination-picker-layer")).not.toBeNull();
+    expect(container.querySelector(".destination-picker-layer")).not.toBeNull();
+    expect(stops().map((b) => b.disabled)).toEqual([false, true, true, true, true]);
+    expect(stops().every((b) => b.tagName === "BUTTON" && b.type === "button")).toBe(true);
+  });
 });

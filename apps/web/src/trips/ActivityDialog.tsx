@@ -96,7 +96,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
           <br />Duración: {formatDuration(state.value.durationMinutes!)}<br /></> : null}<span className="activity-context">Horarios en {timeZone}</span></p>
         {state.value.description ? <p className="activity-description">{state.value.description}</p> : null}
         <LocationPreview value={state.value.mapsUrl} context="activity" />
-        {context ? <Button onClick={() => setState({ kind: "edit", value: state.value })}>Editar actividad</Button>
+        {context ? <Button variant="secondary" onClick={() => setState({ kind: "edit", value: state.value })}>Editar actividad</Button>
           : <Feedback variant="error">El día de esta actividad cambió. Cerrá el detalle y volvé a cargar el itinerario.</Feedback>}
         <Button error disabled={busy} onClick={(event) => { removeTrigger.current = event.currentTarget; setRemoval("confirming"); setRemovalError(undefined); }}>Eliminar actividad</Button>
         {memories}
@@ -109,7 +109,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
     <div className="activity-detail">
       <p>¿Querés eliminar «{existing.title}»? Se quitarán las participaciones de esta actividad. Los recuerdos asociados se conservan. Esta acción no se puede deshacer.</p>
       <div className="activity-confirm-actions">
-        <button ref={cancelRef} className="ui-button" type="button" onClick={cancelRemoval}>Cancelar</button>
+        <button ref={cancelRef} className="ui-button ui-button--secondary" type="button" onClick={cancelRemoval}>Cancelar</button>
         <Button error loading={removal === "deleting"} loadingLabel="Eliminando…" onClick={() => { void confirmRemoval(); }}>Eliminar definitivamente</Button>
       </div>
     </div>

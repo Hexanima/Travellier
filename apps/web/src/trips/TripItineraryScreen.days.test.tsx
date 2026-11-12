@@ -56,6 +56,7 @@ describe("itinerary: one day at a time with a date strip", () => {
     expect(chips(container).map((item) => item.getAttribute("data-day"))).toEqual(["2026-09-25", "2026-09-26", "2026-09-27", "2026-09-28"]);
     expect(current(container)).toEqual(["2026-09-25"]);
     expect(container.querySelector("nav[aria-label='Días del viaje']")).not.toBeNull();
+    expect(container.querySelector("nav[aria-label='Días del viaje']")!.classList.contains("itinerary-days-nav")).toBe(true);
     expect(where.search).toBe("");
     expect(container.textContent).toContain("Paseo por el centro");
     expect(container.textContent).not.toContain("Visita al museo");

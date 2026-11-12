@@ -18,7 +18,7 @@ export function DestinationPicker({ choices, current, timeZone, onSelect, onClos
   const format = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const when = (label: string, instant: string | null) => instant === null ? null
     : <span className="destination-picker__when">{label} <time dateTime={instant}>{format.format(new Date(instant))}</time></span>;
-  return <Modal isOpen title="Destinos del viaje" closeOnEscape onClose={onClose}>
+  return <div className="destination-picker-layer"><Modal isOpen title="Destinos del viaje" closeOnEscape onClose={onClose}>
     <ol className="destination-picker">
       {choices.map((choice) => <li key={choice.id}>
         <button type="button" className="ui-button destination-picker__stop" disabled={choice.status !== "complete"}
@@ -31,5 +31,5 @@ export function DestinationPicker({ choices, current, timeZone, onSelect, onClos
         </button>
       </li>)}
     </ol>
-  </Modal>;
+  </Modal></div>;
 }
