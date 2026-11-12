@@ -161,14 +161,35 @@
 .calendar-sync p { margin: 0; line-height: 1.5; }
 .calendar-sync [role="group"] { display: grid; justify-items: start; gap: 8px; }
 /* Structure of the Trip tabs (T98); colors, sizes and final composition belong to the visual tasks (T105+). */
-.trip-shell-header h1 { margin: 0; }
-.ui-tablist { display: flex; gap: 8px; overflow-x: auto; }
-.ui-tab { flex: none; }
-.ui-tab[aria-selected="true"] { font-weight: 700; text-decoration: underline; }
+.trip-shell-header h1 { margin: 0; font-size: 1.5rem; line-height: 2rem; }
+@media (max-width: 359px) {
+  .trip-shell-header h1 { font-size: 1rem; }
+}
+/* Trip tabs (approved presentation): equal-share control buttons; the selection is brand on accent-contrast. */
+.trip-shell .ui-tablist { display: flex; gap: 8px; overflow-x: auto; }
+.trip-shell .ui-tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 12px 8px;
+  border: 0;
+  border-radius: var(--ui-radius-control);
+  background: transparent;
+  color: var(--ui-color-muted);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  cursor: pointer;
+}
+.trip-shell .ui-tab[aria-selected="true"] { background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); }
+.trip-shell .ui-tab[aria-selected="false"]:hover { background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.trip-shell .ui-tab:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.trip-shell .ui-tabpanel .ui-tablist .ui-tab { border: 1px solid var(--ui-color-border); }
 .ui-tabpanel { display: grid; gap: 12px; min-width: 0; }
 .itinerary-day-strip { display: flex; gap: 8px; overflow-x: auto; padding: 0; margin: 0; list-style: none; }
 .itinerary-day-chip { flex: none; }
-.itinerary-day-chip[aria-current="date"] { font-weight: 700; text-decoration: underline; }
+.itinerary-day-chip[aria-current="date"] { background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); }
 .itinerary-destination-banner.ui-button { width: 100%; justify-content: flex-start; text-align: left; }
 .destination-picker { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .destination-picker__stop.ui-button { display: block; width: 100%; padding-block: var(--ui-space-2); text-align: left; }

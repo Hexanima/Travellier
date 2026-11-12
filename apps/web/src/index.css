@@ -24,6 +24,7 @@
 body {
   min-width: 320px;
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background: var(--ui-color-paper);
   color: var(--ui-color-text);
@@ -42,4 +43,5 @@ a {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }

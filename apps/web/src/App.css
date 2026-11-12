@@ -1,12 +1,14 @@
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 32px;
+  padding: max(32px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left));
   background: var(--ui-color-paper);
   color: var(--ui-color-text);
 }
@@ -93,7 +95,7 @@ dd {
 
 .trips-shell {
   display: block;
-  padding: max(24px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
+  padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
 }
 
 .trips-panel,
@@ -172,7 +174,7 @@ dd {
 .trips-empty p { margin: 0 0 16px; }
 .trips-state { display: grid; justify-items: start; gap: 12px; }
 .trips-secondary { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
-.trips-back { display: inline-block; margin-bottom: 28px; }
+.trips-back { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 12px; }
 
 .trip-public-preview {
   display: grid;
