@@ -57,7 +57,7 @@ describe("Mis viajes: fechas derivadas de los transportes", () => {
   });
 
   it("keeps the end empty with only an outbound transport and sets it once the return exists", async () => {
-    const created = json(await request(actor, "POST", "/trips", { name: "Fechas", primaryDestination: "Córdoba" })).trip;
+    const created = json(await request(actor, "POST", "/trips", { name: "Fechas", primaryDestination: "CÃ³rdoba" })).trip;
     const base = `/trips/${created.id}/destinations/${created.primaryDestination.id}/transports`;
     expect((await request(actor, "POST", base, transport("outbound", "2026-10-01T08:00:00.000Z", "2026-10-01T11:00:00.000Z"))).statusCode).toBe(201);
     expect(json(await request(actor, "GET", "/trips")).trips).toMatchObject([{ id: created.id, startAt: "2026-10-01T08:00:00.000Z", endAt: null }]);
@@ -66,7 +66,7 @@ describe("Mis viajes: fechas derivadas de los transportes", () => {
   });
 
   it("keeps the end empty when a second destination has no return", async () => {
-    const created = json(await request(actor, "POST", "/trips", { name: "Fechas", primaryDestination: "Córdoba" })).trip;
+    const created = json(await request(actor, "POST", "/trips", { name: "Fechas", primaryDestination: "CÃ³rdoba" })).trip;
     const base = `/trips/${created.id}/destinations/${created.primaryDestination.id}/transports`;
     await request(actor, "POST", base, transport("outbound", "2026-10-01T08:00:00.000Z", "2026-10-01T11:00:00.000Z"));
     await request(actor, "POST", base, transport("return", "2026-10-09T15:00:00.000Z", "2026-10-09T18:00:00.000Z"));
@@ -75,7 +75,7 @@ describe("Mis viajes: fechas derivadas de los transportes", () => {
   });
 
   it("answers 200 with null dates and destination for a trip without a primary destination", async () => {
-    const created = json(await request(actor, "POST", "/trips", { name: "Sin destino", primaryDestination: "Córdoba" })).trip;
+    const created = json(await request(actor, "POST", "/trips", { name: "Sin destino", primaryDestination: "CÃ³rdoba" })).trip;
     await database().collection("destinations").deleteMany({ tripId: new ObjectId(created.id) });
     const response = await request(actor, "GET", "/trips");
     expect(response.statusCode).toBe(200);

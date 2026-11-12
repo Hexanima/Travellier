@@ -77,7 +77,7 @@ const toBaseView = (trip: TripDocument): Trip => ({
   visibility: trip.visibility,
   inviteCode: trip.inviteCode,
   expenseMode: trip.expenseMode,
-  // Solo lectura: un viaje sin migrar muestra createdBy; la autorización de baja no usa este respaldo.
+  // Solo lectura: un viaje sin migrar muestra createdBy; la autorizaciÃ³n de baja no usa este respaldo.
   ownerId: domainId(trip.ownerId ?? trip.createdBy),
   createdBy: domainId(trip.createdBy),
   createdAt: trip.createdAt,
