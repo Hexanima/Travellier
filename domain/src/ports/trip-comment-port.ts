@@ -25,6 +25,8 @@ export interface TripCommentScope extends TripCommentReadScope, NotificationScop
   insert: (comment: Comment) => AsyncResult<void>;
   /** Changes only the text of an existing comment of this post and Trip. */
   replaceText: (comment: Comment) => AsyncResult<void>;
+  /** Removes a comment of this post and Trip together with its likes; no document matched fails with `CommentNotFoundError`. */
+  deleteComment: (commentId: ObjectId, postId: ObjectId) => AsyncResult<void>;
 }
 
 export interface TripCommentPort {

@@ -584,3 +584,36 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     });
   },
 };
+
+/**
+ * The author or an admin deletes a memory (T126). One transaction under the Trip lock: the photo keys are queued for storage cleanup, the
+ * photos, expense, comments and likes go away, and the direct children (content, photos, expense and comments kept) move under the
+ * deleted post's parent, or become independent when it was a root. Any failure rolls everything back.
+ */
+export const deleteTripPost: UseCase<{ posts: TripPostPort; now: () => Date }, PostDetailPayload, void, TaggedError> = {
+  execute: ({ posts, now }, payload) => posts.withTransaction<void>(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const post = await find(scope, payload);
+    if (!post.ok) return post;
+    if (post.value.authorId !== payload.authenticatedUserId) {
+      const role = await scope.findMemberRole(payload.authenticatedUserId);
+      if (!role.ok) return role;
+      if (role.value !== "admin") return err(new UnauthorizedError());
+    }
+    const photos = await scope.listPhotos(payload.postId);
+    if (!photos.ok) return photos;
+    const keys = [...new Set(photos.value.map((photo) => photo.s3Key).filter((key) => key !== ""))];
+    if (keys.length > 0) {
+      const queued = await scope.enqueueStorageDeletion(keys, now());
+      if (!queued.ok) return queued;
+    }
+    for (const write of [() => scope.deletePhotos(payload.postId), () => scope.deleteExpense(payload.postId),
+      () => scope.deletePostEngagement(payload.postId), () => scope.relinkChildren(payload.postId, post.value.parentPostId),
+      () => scope.deletePost(payload.postId)]) {
+      const done = await write();
+      if (!done.ok) return done;
+    }
+    return ok(undefined);
+  }),
+};

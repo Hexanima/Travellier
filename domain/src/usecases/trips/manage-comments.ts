@@ -79,6 +79,24 @@ export const updateTripPostComment: UseCase<Dependencies, UpdateTripPostCommentP
   }),
 };
 
+/** The author or an admin deletes it (T126), also the comment of a former member; the comment's likes go with it. */
+export const deleteTripPostComment: UseCase<Dependencies, Omit<UpdateTripPostCommentPayload, "text">, void, TaggedError> = {
+  execute: ({ comments }, payload) => comments.withTransaction<void>(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const post = await findPost(scope, payload);
+    if (!post.ok) return post;
+    const found = await scope.findComment(payload.commentId, payload.postId);
+    if (!found.ok) return found;
+    if (found.value === undefined || found.value.id !== payload.commentId || found.value.tripId !== payload.tripId
+      || found.value.postId !== payload.postId) return err(new CommentNotFoundError());
+    const role = await scope.findMemberRole(payload.authenticatedUserId);
+    if (!role.ok) return role;
+    if (found.value.authorId !== payload.authenticatedUserId && role.value !== "admin") return err(new UnauthorizedError());
+    return scope.deleteComment(payload.commentId, payload.postId);
+  }),
+};
+
 export const listTripPostComments: UseCase<Dependencies, TripCommentPayload, CommentView[], TaggedError> = {
   execute: ({ comments }, payload) => comments.withReadSnapshot(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);

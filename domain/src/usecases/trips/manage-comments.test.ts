@@ -14,11 +14,11 @@ const seed = (fields: Partial<Comment> = {}): Comment => ({ id: id(10), tripId, 
 
 describe("Trip comment use cases", () => {
   let role: TripRole | undefined, tripExists: boolean, posts: Record<string, { id: ObjectId; tripId: ObjectId }>;
-  let records: Comment[], members: ObjectId[], sequence: number, writes: number, transactionError: boolean;
+  let deleted: ObjectId[], records: Comment[], members: ObjectId[], sequence: number, writes: number, transactionError: boolean;
   let notifications: TripNotificationDraft[], appendError: boolean;
   let scope: TripCommentScope, comments: TripCommentPort;
   beforeEach(() => {
-    role = "participant"; tripExists = true; records = []; members = [actor, id(9)]; sequence = 20; writes = 0; transactionError = false;
+    role = "participant"; tripExists = true; deleted = []; records = []; members = [actor, id(9)]; sequence = 20; writes = 0; transactionError = false;
     notifications = []; appendError = false;
     posts = { [postId]: { id: postId, tripId }, [otherPostId]: { id: otherPostId, tripId }, [id(6)]: { id: id(6), tripId: otherTripId } };
     scope = {
@@ -34,14 +34,19 @@ describe("Trip comment use cases", () => {
         notifications.push(...drafts); return domain.ok(undefined);
       },
       insert: async (comment) => { writes++; records.push(comment); return domain.ok(undefined); },
+      deleteComment: async (cid, pid) => {
+        writes++;
+        if (!records.some((c) => c.id === cid && c.postId === pid)) return domain.err(new domain.CommentNotFoundError());
+        records = records.filter((c) => c.id !== cid); deleted.push(cid); return domain.ok(undefined);
+      },
       replaceText: async (comment) => { writes++; records = records.map((c) => c.id === comment.id ? { ...c, text: comment.text } : c); return domain.ok(undefined); },
     };
     comments = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone(records), notificationsBefore = [...notifications];
+        const before = structuredClone(records), notificationsBefore = [...notifications], deletedBefore = [...deleted];
         const result = await work(scope);
-        if (!result.ok || transactionError) { records = before; notifications = notificationsBefore; return result.ok ? domain.err(new domain.UnknownError("boom")) : result; }
+        if (!result.ok || transactionError) { records = before; deleted = deletedBefore; notifications = notificationsBefore; return result.ok ? domain.err(new domain.UnknownError("boom")) : result; }
         return result;
       },
     };
@@ -201,5 +206,62 @@ describe("Trip comment use cases", () => {
       seed({ id: id(11), createdAt: t("2026-10-01T00:00:00Z"), authorId: actor }), seed({ id: id(14), postId: otherPostId })];
     const result = await list();
     expect(result.ok && result.value.map((c) => [c.id, c.authorIsFormerMember])).toEqual([[id(11), false], [id(12), true], [id(13), false]]);
+  });
+
+  describe("deleteTripPostComment (T126)", () => {
+    const remove = (fields = {}) => {
+      expect(domain.deleteTripPostComment).toBeDefined();
+      return domain.deleteTripPostComment.execute({ comments }, { ...base, commentId: id(10), ...fields });
+    };
+    const forbidden = { ok: false, error: { tag: "UnauthorizedError" } };
+
+    it("the author deletes their comment", async () => {
+      records = [seed({ authorId: actor }), seed({ id: id(11), authorId: actor })];
+      expect(await remove()).toEqual(domain.ok(undefined));
+      expect(records.map((c) => c.id)).toEqual([id(11)]); expect(deleted).toEqual([id(10)]);
+    });
+
+    it("an admin deletes the comment of another member and of a former member", async () => {
+      role = "admin";
+      for (const authorId of [id(9), id(50)]) {
+        records = [seed({ authorId })];
+        expect(await remove()).toEqual(domain.ok(undefined));
+        expect(records).toEqual([]);
+      }
+    });
+
+    it("a participant who is not the author gets 403 without writing", async () => {
+      records = [seed()];
+      expect(await remove()).toMatchObject(forbidden);
+      expect(writes).toBe(0); expect(records).toEqual([seed()]);
+    });
+
+    it("repeating the deletion answers CommentNotFoundError", async () => {
+      records = [seed({ authorId: actor })];
+      expect(await remove()).toEqual(domain.ok(undefined));
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "CommentNotFoundError" } });
+    });
+
+    it("a non member or a missing Trip gets TripNotFoundError without writing", async () => {
+      records = [seed({ authorId: actor })]; role = undefined;
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      role = "admin"; tripExists = false;
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(writes).toBe(0); expect(records).toHaveLength(1);
+    });
+
+    it("a missing post or one of another Trip gets PostNotFoundError, a comment of another post CommentNotFoundError", async () => {
+      records = [seed({ authorId: actor, postId: otherPostId })];
+      expect(await remove({ postId: id(6) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(await remove({ postId: id(77) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "CommentNotFoundError" } });
+      expect(writes).toBe(0); expect(records).toHaveLength(1);
+    });
+
+    it("a failed transaction leaves the comment", async () => {
+      records = [seed({ authorId: actor })]; transactionError = true;
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+      expect(records).toHaveLength(1); expect(deleted).toEqual([]);
+    });
   });
 });
