@@ -8,6 +8,8 @@
 
 **Cambios aprobados · 2026-11-08:** el usuario define la actualización periódica de datos (§1), la salida de integrantes, la titularidad del Trip y la gestión de admins (§3.2), las fotos privadas con lectura autorizada (§3.7, §5), la conservación de gastos de ex integrantes y el costo de transportes con moneda en el resumen (§3.3, §3.8), y retira el tipo `arrival` de `itineraryDays` (§4). Estas decisiones no actualizan las tareas ni acreditan implementación.
 
+**Cambios aprobados · 2026-11-12:** al resolver `docs/REVISION_PENDIENTE.md`, el usuario define contenido mínimo, límites, edición por autor y eliminación de recuerdos y comentarios (§3.6), conversión de fotos (§3.7), validación de importes, modo de gastos solo para admins y quitar el gasto (§3.2, §3.3, §3.8), fin del viaje sin vuelta y listado (§3.2), día inicial y botón Atrás (§3.4), tarjeta de lugar sin mapa embebido (§3.6), avisos nuevos y retención (§7) y la exportación de transportes al calendario (§7). Estas decisiones no acreditan implementación.
+
 **Referencia de diseño aprobada:** [prototipo navegable](../../../design/prototype/README.md), conservado en `design/prototype/public/`. El usuario aprobó su identidad azul y los flujos explorables el 2026-10-11. La [evaluación contra este PRD](../../../design/prototype/PRD-AUDIT.md) distingue cobertura, diferencias observadas y servicios simulados; la aprobación visual no acredita cumplimiento total ni implementación productiva. Se mantiene este PRD y el original, sin nuevas copias de versión.
 
 ## Tabla de contenidos
@@ -120,11 +122,12 @@ JS intenta abrir → com.travellier.app://invite/:code
 | Rol | Permisos |
 |---|---|
 | Titular | Admin que además nombra y quita admins, expulsa admins, transfiere la titularidad y elimina el Trip/grupo. Hay uno por Trip y siempre es admin |
-| Admin | Todo + puede expulsar participantes |
-| Participante | Crear/editar actividades, posts, comentarios y gestionar su propia participación — igual que admin salvo expulsión |
+| Admin | Todo + puede expulsar participantes, eliminar cualquier recuerdo o comentario (moderación) y cambiar el modo de gastos |
+| Participante | Crear/editar actividades; crear recuerdos y comentarios y editar o eliminar los propios; editar gastos y reparto; gestionar su propia participación — igual que admin salvo expulsión, moderación y modo de gastos |
 
 - El creador del Trip es su titular y admin. El titular actual se guarda en `trips.ownerId`; `createdBy` conserva quién lo creó.
 - Puede haber múltiples admins.
+- Quien no es integrante actual recibe la misma respuesta que ante un Trip inexistente en todas las operaciones del Trip, incluidas las de administración, para no revelar si el viaje existe.
 
 #### Titularidad, administradores y salida del Trip
 
@@ -141,12 +144,18 @@ JS intenta abrir → com.travellier.app://invite/:code
 - Solo el titular puede eliminar el Trip, previa confirmación explícita. Los integrantes y los registros existentes no bloquean esta operación.
 - La baja elimina en cascada los datos del Trip en MongoDB: membresías, destinos, transportes, itinerario, actividades, participaciones, posts, referencias de fotos, gastos, likes y comentarios. No elimina cuentas de usuarios ni afecta otros Trips.
 - Los permisos, la baja y la cascada se ejecutan en una sola transacción, serializada con las mutaciones del viaje y las nuevas membresías. Las invitaciones dejan de ser válidas y no pueden crear membresías huérfanas.
-- Si hay referencias de fotos, sus claves S3 se conservan en trabajos durables `storageDeletionJobs` dentro de esa transacción. La limpieza física de S3 se completará con la integración de fotos (fase 6); todavía no hay un procesador de estos trabajos. Esto no bloquea la baja del grupo.
+- Si hay referencias de fotos, sus claves S3 se conservan en trabajos durables `storageDeletionJobs` dentro de esa transacción. Un worker procesa esos trabajos con reintentos y borra los objetos de S3; también barre las subidas abandonadas. Esto no bloquea la baja del grupo.
 - El mínimo de un destino se aplica a Trips existentes, no a la eliminación del Trip completo.
 
 #### Configuración del Trip
 
-- **Modo de gastos:** solo registro / con balance entre participantes (default: solo registro).
+- **Modo de gastos:** solo registro / con balance entre participantes (default: solo registro). Solo los admins (incluido el titular) lo cambian, desde la configuración del viaje.
+
+#### Listado de viajes
+
+- **Mis viajes** separa **Activos** y **Finalizados** según el fin derivado del viaje (`endAt`), el instante más tardío de sus transportes.
+- Si no hay transportes, o si algún destino no tiene transporte de vuelta, `endAt` queda vacío y el viaje es Activo. Un viaje es Finalizado cuando `endAt` es anterior a ahora.
+- Un viaje con datos incompletos (por ejemplo sin destino primario) se lista sin fechas, sin error.
 
 ---
 
@@ -181,6 +190,8 @@ El transporte se configura en dos segmentos independientes: **ida** y **vuelta**
 
 **Auto / otro**
 - Punto de salida, hora de salida, destino, hora estimada de llegada.
+
+Cualquier tipo de transporte que registre costo por persona lo hace con su moneda (ARS, EUR o USD). Si se carga, el costo debe ser mayor que 0 y no superar 999.999.999.999,99; sin costo el campo queda vacío.
 
 #### Multi-destino
 
@@ -266,6 +277,8 @@ Cada día muestra:
 - **Itinerario / Diario / Grupo** son pestañas del mismo Trip, con cabecera y selección consistentes, no páginas de listado independientes. Diario conserva sus pestañas **Posts / Fotos** al cambiar entre ambas.
 - Los detalles y formularios se abren fuera de las pestañas. Volver restaura el origen, destino, día, pestaña y posición de lectura; volver desde las pestañas raíz sale a Mis viajes.
 - Cambiar de día en el itinerario conserva el scroll del contenido y de la tira de fechas. Elegir nuevamente el mismo día no reinicia la vista.
+- Al abrir el itinerario se muestra el día de hoy si pertenece al viaje; si no, su primer día.
+- El botón Atrás del dispositivo cierra el diálogo o la hoja abierta y, si no hay ninguno, vuelve al origen; desde una pestaña raíz del Trip vuelve a Mis viajes. Un formulario con cambios pide confirmación antes de descartarse. Un link de la app sin pantalla propia (por ejemplo el de verificación de correo) lleva a Mis viajes o al inicio de sesión.
 - El banner del destino abre **Destinos del viaje**, en orden secuencial, con fechas y horarios locales de llegada/salida derivados de los transportes. Elegir una parada lleva a su primer día dentro del itinerario y deja visible esa fecha en la tira.
 - Si dos destinos comparten una fecha, se conserva el destino elegido mientras esa fecha pertenezca a ambos. Cerrar el selector no cambia el día ni la posición. Los destinos sin transportes completos indican qué falta y no ofrecen un salto basado en fechas inventadas.
 - La identidad visual aprobada usa azul profundo, blancos y superficies azul suave; no se combina con la propuesta marrón descartada. La app usa el espacio disponible del dispositivo. El modo estudio y sus textos explicativos pertenecen al prototipo, no a la app.
@@ -391,12 +404,19 @@ Un **Post** es el registro de un momento del viaje. Puede estar planificado (aso
 #### Campos
 
 - Autor.
-- Descripción / texto libre.
+- Descripción / texto libre, hasta 5000 caracteres.
 - Fotos (una o varias, subidas a S3).
 - Ubicación con link de Google Maps (opcional).
 - Fecha y hora de publicación (`createdAt`), asignadas automáticamente al publicar y conservadas al editar; no se elige un día del itinerario.
 - Gastos (opcional — ver sección 3.8).
 - Vinculaciones (ver abajo).
+
+#### Contenido mínimo, edición y eliminación
+
+- Un recuerdo necesita al menos texto, ubicación o una foto. El gasto y el vínculo no cuentan como contenido. Se rechaza crear un recuerdo vacío o dejarlo vacío al editarlo.
+- Solo el autor edita el texto, la ubicación, las fotos y los vínculos de su recuerdo, y puede quitar fotos ya publicadas. El gasto y su reparto los edita cualquier integrante actual (ver §3.8).
+- El autor puede eliminar su recuerdo y cualquier admin puede eliminar cualquiera, con confirmación. Eliminar un recuerdo borra sus fotos (con limpieza en S3), su gasto, sus comentarios y sus likes. Sus continuaciones pasan a colgar del padre del recuerdo eliminado, o quedan independientes si no tenía, y conservan su contenido.
+- Un recuerdo o comentario de un ex integrante no lo edita nadie; un admin puede eliminarlo.
 
 #### Vinculaciones
 
@@ -421,13 +441,13 @@ Si la actividad todavía no existe, el compositor permite crear una **actividad 
 #### Mapa in-app
 
 Cuando un post o actividad tiene un link de Google Maps, la app muestra:
-- **Vista previa embebida** — mapa estático o WebView con el punto marcado, visible dentro de la app sin salir de ella.
-- **Botón "Abrir en Maps"** — abre Google Maps o la app de mapas nativa del dispositivo para navegación e indicaciones.
+- **Tarjeta de lugar** — muestra el lugar que surge del link, o el sitio, sin mapa embebido ni pedidos a terceros, para no enviar ubicaciones fuera de la app ni depender de un proveedor de mapas.
+- **Botón "Abrir en Maps"** — abre Google Maps o la app de mapas nativa del dispositivo, mediante la apertura nativa de Capacitor, para navegación e indicaciones.
 
 #### Interacciones
 
 - **Likes** por cualquier miembro.
-- **Comentarios** de texto por cualquier miembro.
+- **Comentarios** de texto por cualquier miembro, de 1 a 2000 caracteres. Solo su autor los edita; el autor o un admin los elimina, junto con sus likes.
 - **Likes en comentarios** — cada comentario puede ser likeado por cualquier miembro, de forma independiente al like del post.
 
 #### Vista en el itinerario
@@ -447,7 +467,8 @@ El diario es la vista completa de publicaciones; el itinerario es una proyecció
 - El bucket es privado: las fotos no son accesibles por su URL directa.
 - Antes de publicar, el servidor reserva las claves de carga para ese usuario y Trip y firma las URLs de subida. El cliente sube directo a S3 y las referencias se confirman al guardar el post, verificando que los archivos existan. No se publica un post vacío para poder subir fotos ni se aceptan claves arbitrarias del cliente.
 - Para mostrar una foto, el backend verifica que quien la solicita sea integrante actual del Trip indicado por `postPhotos.tripId` y entrega una URL firmada de lectura con vencimiento corto. No se crea una entidad adicional para esto.
-- Las cargas abandonadas o fallidas no se publican y se limpian posteriormente.
+- Las cargas abandonadas o fallidas no se publican y se limpian posteriormente. Al confirmar, se rechazan subidas de más de 23 horas para no competir con esa limpieza.
+- Se aceptan JPEG, PNG y WEBP de hasta 10 MiB, con hasta 10 fotos por recuerdo. La app convierte a JPEG las fotos HEIC/HEIF (habituales en iPhone) y reduce las que superan el límite antes de subirlas.
 - Las fotos siempre están en el contexto de un post — no existe un álbum independiente.
 - La "galería grupal" es la vista agregada de todas las fotos de todos los posts del Trip.
 - En la vista de fotos del diario, las filas tienen altura común y cada elemento se alinea arriba, aunque sus títulos ocupen distintas líneas. Las fotos mantienen acceso al post de origen y el orden descendente de publicación del diario.
@@ -456,13 +477,13 @@ El diario es la vista completa de publicaciones; el itinerario es una proyecció
 
 ### 3.8 Costos y gastos
 
-Los gastos son parte de los **posts** — no un módulo separado. Al crear o editar un post, se puede agregar información de gasto.
+Los gastos son parte de los **posts** — no un módulo separado. Al crear o editar un post, se puede agregar información de gasto. Cualquier integrante actual puede editar o quitar el gasto de un recuerdo, aunque no sea su autor; quitarlo lo retira del registro y del balance.
 
 #### Campos de gasto en un post
 
-- Monto total del gasto.
+- Monto total del gasto, mayor que 0 y hasta 999.999.999.999,99, con a lo sumo dos decimales.
 - Moneda del gasto: ARS, EUR o USD.
-- Desglose libre (ej: "agua 5000, entrada 8000, almuerzo 20000") — opcional.
+- Desglose libre (ej: "agua 5000, entrada 8000, almuerzo 20000") — opcional, hasta 2000 caracteres.
 - Pagos realizados — opcionales, configurables en modo balance. Un mismo gasto puede tener varios pagos, por una o varias personas, indicando monto fijo o porcentaje del total.
 - Reparto acordado — configurable en modo balance, separado de los pagos realizados. Cada persona puede asumir un monto fijo, un porcentaje, una parte igual del resto o no participar de ese gasto.
 
@@ -909,8 +930,13 @@ Integradas con el ciclo de vida del Trip. Eventos que disparan notificación a l
 - Actividad editada, indicando los cambios relevantes de horario, duración, ubicación o contenido.
 - Participante desvinculado automáticamente por un conflicto tras editar inicio o duración: notificación dirigida al afectado, indicando la actividad editada, su nuevo horario y los otros planes incompatibles, e invitando a volver a decidir. Solo se envía tras guardar el cambio. El estado `pending` y el indicador personal «Modificado» se conservan y consultan dentro de la app, independientemente de entrega, lectura o permiso de push.
 - Nuevo miembro se unió al Trip.
+- Un integrante salió del Trip (a los demás integrantes).
 - Miembro expulsado (solo al afectado).
+- Cambio de rol: nombrado o retirado como admin (solo al afectado).
+- Transferencia de titularidad (solo al nuevo titular).
 - Nuevo comentario en un post.
+
+Los textos del push y del centro de avisos de la app son los mismos. Los avisos se conservan 90 días y luego se eliminan. Un aviso que la app no reconoce se omite sin impedir mostrar los demás.
 
 Implementación: AWS SNS o un servicio de push (Firebase Cloud Messaging) invocado desde Lambda al ocurrir cada evento.
 
@@ -918,9 +944,9 @@ Implementación: AWS SNS o un servicio de push (Firebase Cloud Messaging) invoca
 
 Desde el Trip, el usuario puede exportar los días de actividad a su calendario nativo del dispositivo (Google Calendar / Apple Calendar) vía el plugin de Capacitor `@capacitor/calendar` o generando un archivo `.ics` descargable.
 
-Se exportan: nombre del Trip, días de actividad con sus horarios y actividades con hora y lugar. Si hay duración estimada, el evento incluye el fin derivado; sin duración no se inventa uno. Los eventos nativos vinculados se actualizan cuando cambia el horario, la duración o los datos del plan, sin duplicarlos. Se conserva la referencia al evento nativo; al eliminar una actividad, se retira su evento vinculado. Si no hay permisos o falla la actualización, no se informa como sincronizado.
+Se exportan: nombre del Trip, días de actividad con sus horarios, todas las actividades del Trip con hora y lugar (no solo las marcadas «Voy») y los transportes como eventos de salida a llegada. Si hay duración estimada, el evento incluye el fin derivado; sin duración no se inventa uno. Los eventos nativos vinculados se actualizan cuando cambia el horario, la duración o los datos del plan, sin duplicarlos. Se conserva la referencia al evento nativo; al eliminar una actividad, se retira su evento vinculado. Si no hay permisos o falla la actualización, no se informa como sincronizado.
 
-Un archivo `.ics` ya descargado es estático y no puede modificarse en el calendario desde la app. En ese caso se genera una exportación nueva con identificadores estables de evento para importar de nuevo; no se promete actualización automática de la copia anterior. La importación y su tratamiento de duplicados dependen del calendario receptor.
+El archivo `.ics` se guarda o comparte desde el dispositivo. Un archivo `.ics` ya descargado es estático y no puede modificarse en el calendario desde la app. En ese caso se genera una exportación nueva con identificadores estables de evento para importar de nuevo; no se promete actualización automática de la copia anterior. La importación y su tratamiento de duplicados dependen del calendario receptor.
 
 ---
 
@@ -981,6 +1007,14 @@ Un archivo `.ics` ya descargado es estático y no puede modificarse en el calend
 | MEM-03 | Los gastos, pagos y partes de un ex integrante se conservan identificados como tales y siguen en el registro y el balance; el reparto puede editarse para redistribuirlos. |
 | MEM-04 | Al salir o ser expulsado se conservan sus participaciones en actividades ya iniciadas y se eliminan las de actividades futuras. |
 | FOTO-03 | Las fotos se guardan en un bucket privado; solo integrantes actuales del Trip obtienen una URL firmada de lectura con vencimiento. |
+| POST-05 | Un recuerdo exige texto, ubicación o foto; texto de hasta 5000 caracteres, comentarios de 1 a 2000 y desglose de gasto de hasta 2000. |
+| POST-06 | Solo el autor edita su recuerdo o comentario; el autor o un admin los elimina. Eliminar un recuerdo borra fotos, gasto, comentarios y likes, y sus continuaciones pasan a su padre. |
+| FOTO-04 | La app convierte HEIC/HEIF a JPEG y reduce las fotos de más de 10 MiB antes de subirlas. |
+| EXP-03 | Solo los admins cambian el modo de gastos. Cualquier integrante actual edita o quita el gasto de un recuerdo. |
+| EXP-04 | Importes de gastos, pagos fijos y costos de transporte: mayores que 0 (pagos fijos de filas guardadas pueden valer 0), hasta 999.999.999.999,99 y dos decimales. |
+| NOT-02 | Se avisa la salida de un integrante a los demás, el cambio de rol al afectado y la transferencia al nuevo titular; los avisos duran 90 días. |
+| LIS-01 | Sin transportes o sin vuelta en algún destino, el viaje es Activo; Finalizado solo si su fin derivado ya pasó. |
+| NAV-05 | El itinerario abre en hoy si pertenece al viaje; el Atrás nativo cierra diálogos y respeta el origen sin perder formularios en silencio. |
 | SYNC-01 | Los datos se actualizan al volver a la app o pantalla, al deslizar para refrescar y periódicamente mientras una pantalla del Trip está abierta; sin consultas en segundo plano. |
 
 Estos criterios describen el producto acordado, no pruebas ejecutadas ni tareas completadas. No implican que el prototipo o el código productivo ya cumplan este PRD.

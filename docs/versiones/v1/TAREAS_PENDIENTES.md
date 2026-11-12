@@ -1105,7 +1105,7 @@ Fecha: 2026-10-11. Fuente de producto: [PRD aprobado](PRD.md). Fuente de diseño
 - Guardar capturas/resultados reproducibles; corregir diferencias visuales acotadas y reportar aparte cambios funcionales imprevistos.
 
 **Estimación:** L (8hs).
-**Dependencias:** T107, T108, T109, T110, T111, T112.
+**Dependencias:** T107, T108, T109, T110, T111, T112, T123, T125, T128, T129, T132, T134, T136, T138, T139, T143, T144, T145, T146.
 
 ## 11. Ajustes aprobados el 2026-11-08
 
@@ -1231,6 +1231,400 @@ Tareas derivadas de los cambios al PRD del 2026-11-08: titularidad y gestión de
 **Estimación:** M (4hs).
 **Dependencias:** T98, T09.
 
+## 12. Correcciones aprobadas el 2026-11-12
+
+Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del 2026-11-12. Los IDs continúan la numeración y no indican orden de ejecución: las dependencias lo definen.
+
+### T122 — Exigir el contenido mínimo de los recuerdos
+
+**Capa:** Backend.
+
+**Descripción:** Rechazar crear o dejar vacío un recuerdo sin texto, ubicación ni foto, y aplicar los límites de texto del PRD. Validarlo en el servidor evita depender de la regla provisoria del cliente.
+
+**Criterios de aceptación:**
+
+- POST y PATCH de recuerdos responden 422 si no queda texto (tras trim), ubicación ni foto confirmada; gasto y vínculo no cuentan, y un PATCH que quita el último contenido se rechaza sin escrituras.
+- Texto del recuerdo hasta 5000 code points y desglose del gasto hasta 2000; un exceso responde 422 con el campo, sin recortar.
+- Probar creación solo con foto, edición que borra el texto conservando fotos publicadas, reintento idempotente de T87 y publicación compuesta sin escrituras parciales.
+
+**Estimación:** M (4hs).
+**Dependencias:** T87, T79.
+
+### T123 — Adaptar el contenido mínimo en el compositor
+
+**Capa:** Frontend.
+
+**Descripción:** Alinear la validación del compositor con la regla del backend, contando también las fotos ya publicadas al editar. Así la app no bloquea ediciones válidas ni deja pasar recuerdos vacíos.
+
+**Criterios de aceptación:**
+
+- Al editar, las fotos ya publicadas cuentan como contenido; crear exige texto, ubicación o foto.
+- Avisar los límites de 5000 y 2000 caracteres sin recortar y mapear los 422 del backend al campo, conservando el borrador.
+- Probar crear solo con foto, editar quitando el texto con fotos publicadas y los límites.
+
+**Estimación:** S (3hs).
+**Dependencias:** T122, T88.
+
+### T124 — Restringir la edición al autor
+
+**Capa:** Backend.
+
+**Descripción:** Permitir editar el contenido de un recuerdo o comentario solo a su autor, manteniendo abiertos a todo integrante el gasto, su reparto y las actividades. Esto protege lo que publicó cada persona sin trabar el registro de gastos del grupo.
+
+**Criterios de aceptación:**
+
+- Solo el autor edita descripción, ubicación, fotos y vínculos de su recuerdo y el texto de su comentario; otro integrante recibe 403 sin escrituras, también en un PATCH que mezcla gasto y contenido.
+- Cualquier integrante actual sigue editando gasto, pagos y reparto (PATCH solo con `expense`) y las actividades; el contenido de un ex integrante no lo edita nadie.
+- Probar autor, otro integrante, admin y ex integrante, y que los reintentos de T87 sigan funcionando para el autor.
+
+**Estimación:** M (4hs).
+**Dependencias:** T87, T69.
+
+### T125 — Mostrar la edición según la autoría
+
+**Capa:** Frontend.
+
+**Descripción:** Ofrecer «Editar» en recuerdos y comentarios solo a su autor y mantener accesible el gasto para todos. Evita acciones que el backend va a rechazar.
+
+**Criterios de aceptación:**
+
+- «Editar» de recuerdo y de comentario aparece solo al autor; gasto, pagos y reparto siguen accesibles a cualquier integrante.
+- Un 403 por autoría muestra un mensaje y conserva el borrador.
+- Probar autor, otro integrante y ex integrante.
+
+**Estimación:** S (3hs).
+**Dependencias:** T124.
+
+### T126 — Eliminar recuerdos y comentarios
+
+**Capa:** Backend.
+
+**Descripción:** Agregar la baja de recuerdos y comentarios por su autor o un admin, con la limpieza que define el PRD. Hacerlo en una transacción con el bloqueo del Trip evita cadenas rotas o datos huérfanos.
+
+**Criterios de aceptación:**
+
+- DELETE de recuerdo (autor o admin) borra sus postPhotos encolando el borrado en storageDeletionJobs, su gasto, sus comentarios y sus likes; sus continuaciones pasan a colgar del padre del eliminado o quedan independientes, conservando su contenido.
+- DELETE de comentario (autor o admin) borra sus likes; repetir la baja responde 404; un no integrante recibe 404.
+- Probar cadenas ramificadas, balance tras borrar un gasto, fotos encoladas y concurrencia con edición, comentarios y publicación de continuaciones.
+
+**Estimación:** L (8hs).
+**Dependencias:** T124, T73.
+
+### T127 — Quitar fotos y gasto al editar
+
+**Capa:** Backend.
+
+**Descripción:** Permitir al autor quitar fotos ya publicadas y a cualquier integrante quitar el gasto de un recuerdo. Completa la edición sin obligar a borrar el recuerdo entero.
+
+**Criterios de aceptación:**
+
+- PATCH permite al autor quitar fotos por clave, encolando su borrado en S3 y reordenando las restantes, respetando el contenido mínimo.
+- `expense: null` quita el gasto (cualquier integrante actual) y lo retira del registro y del balance.
+- Probar reintentos idempotentes de T87 con fotos quitadas, contenido mínimo y balance tras quitar el gasto.
+
+**Estimación:** M (5hs).
+**Dependencias:** T126.
+
+### T128 — Conectar la eliminación y las quitas
+
+**Capa:** Frontend.
+
+**Descripción:** Agregar en la app eliminar recuerdos y comentarios, y quitar fotos y gasto al editar. Reutilizar los diálogos de confirmación existentes mantiene el diseño aprobado.
+
+**Criterios de aceptación:**
+
+- Eliminar recuerdo (detalle) y comentario con confirmación, visibles para el autor o un admin; tras eliminar se vuelve al origen y se refresca.
+- El compositor permite quitar fotos publicadas y quitar el gasto.
+- Manejar errores y permisos cambiados; probar cadenas y estados, usando componentes de DESIGN.md.
+
+**Estimación:** L (6hs).
+**Dependencias:** T126, T127, T125.
+
+### T129 — Convertir fotos HEIC y reducir las pesadas
+
+**Capa:** Frontend/nativo.
+
+**Descripción:** Convertir a JPEG las fotos HEIC/HEIF y reducir las que superan 10 MiB antes de reservarlas. Sin esto, muchas fotos de iPhone no se pueden subir.
+
+**Criterios de aceptación:**
+
+- HEIC/HEIF se convierten a JPEG y las fotos de más de 10 MiB se reducen (lado mayor y calidad) hasta entrar en el límite.
+- Si una conversión falla, se informa esa foto y no se publica el recuerdo sin ella en silencio.
+- Probar con puertos simulados; la verificación en dispositivo queda para T113.
+
+**Estimación:** M (5hs).
+**Dependencias:** T74.
+
+### T130 — Derivar el fin del viaje con la vuelta faltante
+
+**Capa:** Backend.
+
+**Descripción:** Dejar vacío el fin del viaje cuando falta la vuelta en algún destino o no hay transportes, y listar sin error los viajes con datos incompletos. Evita que un viaje pase a Finalizados antes de tiempo.
+
+**Criterios de aceptación:**
+
+- `endAt` queda null si no hay transportes o si algún destino no tiene transporte de vuelta.
+- Un viaje sin destino primario se lista sin fechas, sin error 500.
+- Probar el listado y el filtro de T101 con configuraciones completas e incompletas.
+
+**Estimación:** S (3hs).
+**Dependencias:** T100.
+
+### T131 — Restringir el modo de gastos a admins
+
+**Capa:** Backend.
+
+**Descripción:** Permitir cambiar el modo de gastos solo a admins, incluido el titular. Cambiarlo afecta a todo el grupo y no debería hacerlo cualquier integrante.
+
+**Criterios de aceptación:**
+
+- Cambiar `expenseMode` exige rol admin; un participante recibe 403 sin escrituras.
+- Cambiar de modo conserva pagos y reparto.
+- Probar titular, admin y participante.
+
+**Estimación:** S (2hs).
+**Dependencias:** T82.
+
+### T132 — Ofrecer el modo de gastos en la configuración
+
+**Capa:** Frontend.
+
+**Descripción:** Mostrar el selector de modo de gastos en la configuración del viaje para admins y en lectura para el resto. Hoy no hay ningún lugar desde donde cambiarlo.
+
+**Criterios de aceptación:**
+
+- La configuración del viaje muestra el modo; solo admins pueden cambiarlo.
+- El balance ofrece a los admins un acceso a esa configuración.
+- Probar roles y el refresco del balance tras cambiar de modo.
+
+**Estimación:** S (3hs).
+**Dependencias:** T131, T85.
+
+### T133 — Validar importes y costos
+
+**Capa:** Backend.
+
+**Descripción:** Aplicar a gastos, pagos fijos y costos de transporte los límites de importe del PRD. Evita costos negativos y montos no representables.
+
+**Criterios de aceptación:**
+
+- `costPerPerson` debe ser mayor que 0 y hasta 999.999.999.999,99 con dos decimales; sin costo queda null.
+- `totalAmount` y los montos fijos nuevos respetan el mismo tope; un exceso responde 422 con el campo, sin escrituras.
+- Probar los bordes y que los registros ya guardados se lean igual.
+
+**Estimación:** M (3hs).
+**Dependencias:** T119, T80.
+
+### T134 — Validar importes en los formularios
+
+**Capa:** Frontend.
+
+**Descripción:** Reflejar en los formularios de transporte, gasto y reparto los mismos límites del backend. Así el error aparece antes de enviar.
+
+**Criterios de aceptación:**
+
+- El formulario de transporte rechaza costos menores o iguales a 0 y los que superan el tope.
+- Gasto y pagos fijos avisan el tope sin redondear y conservan el borrador.
+- Probar los bordes.
+
+**Estimación:** S (2hs).
+**Dependencias:** T133, T120, T84.
+
+### T135 — Emitir avisos de salida, rol y transferencia
+
+**Capa:** Backend.
+
+**Descripción:** Agregar los avisos nuevos del PRD, unificar los textos del push con los del centro de avisos y retener los avisos 90 días. Completa los eventos que hoy no informan nada.
+
+**Criterios de aceptación:**
+
+- `member.left` a los demás integrantes, cambio de rol al afectado y transferencia al nuevo titular, emitidos en la misma transacción de cada operación y despachados por push.
+- Los textos del push de todos los tipos coinciden con los del centro de avisos (T93).
+- Los avisos se eliminan a los 90 días mediante un índice TTL, sin afectar trabajos de despacho vigentes; probar destinatarios y deduplicación.
+
+**Estimación:** L (7hs).
+**Dependencias:** T116, T115, T92.
+
+### T136 — Mostrar los avisos nuevos
+
+**Capa:** Frontend.
+
+**Descripción:** Agregar al centro de avisos los tres tipos nuevos y omitir los avisos que la app no reconoce. Un aviso inválido no debe impedir ver los demás.
+
+**Criterios de aceptación:**
+
+- Textos y destinos de salida, cambio de rol y transferencia dentro del Trip correspondiente.
+- Un aviso inválido o de tipo desconocido se omite y se registra sin romper la página.
+- Probar el parser, la navegación y la apertura desde push simulado.
+
+**Estimación:** M (4hs).
+**Dependencias:** T135, T93.
+
+### T137 — Ocultar la existencia del viaje a no integrantes
+
+**Capa:** Backend.
+
+**Descripción:** Responder 404 a quien no es integrante en todas las operaciones del Trip y exponer solo el titular real. Evita revelar si un viaje existe y mostrar titulares incoherentes.
+
+**Criterios de aceptación:**
+
+- Un no integrante recibe 404 en todas las rutas del Trip, incluida la expulsión.
+- Detalle y listado exponen el `ownerId` real, sin usar `createdBy` de respaldo.
+- Probar las rutas de administración con integrante, ex integrante y ajeno.
+
+**Estimación:** S (3hs).
+**Dependencias:** T115, T114.
+
+### T138 — Actualizar el plan anterior al cambiar de plan
+
+**Capa:** Frontend.
+
+**Descripción:** Corregir que, tras confirmar un cambio de plan, la pantalla siga mostrando «Voy» en el plan anterior hasta el próximo refresco (bug A de T104).
+
+**Criterios de aceptación:**
+
+- Confirmar el cambio actualiza en pantalla todas las actividades incompatibles a «No voy» sin esperar el refresco.
+- Quitar el `it.fails` correspondiente de T104 y dejar la prueba en verde.
+- Probar cancelación y error sin cambios locales.
+
+**Estimación:** S (3hs).
+**Dependencias:** T62.
+
+### T139 — Conservar los borradores al pasar por el diario
+
+**Capa:** Frontend.
+
+**Descripción:** Evitar que se pierdan los borradores de recuerdo y comentario al ir del compositor o del detalle al diario y volver (bug B de T104).
+
+**Criterios de aceptación:**
+
+- Los borradores sobreviven a la navegación entre compositor, detalle y diario dentro del Trip.
+- Quitar el `it.fails` correspondiente de T104 y dejar la prueba en verde.
+- Los borradores se descartan al salir del Trip o al publicar.
+
+**Estimación:** M (4hs).
+**Dependencias:** T98.
+
+### T140 — Permitir el origen de Android en CORS
+
+**Capa:** Infraestructura.
+
+**Descripción:** Agregar el origen `https://localhost` que usa Capacitor ≥6 en Android, o fijar `androidScheme`, de forma consistente entre API y bucket. Sin esto, la app en Android no puede llamar a la API ni subir fotos.
+
+**Criterios de aceptación:**
+
+- API Gateway y el CORS del bucket aceptan el origen real de la app en Android e iOS.
+- Actualizar `scripts/infrastructure-contract.test.mjs` y la configuración de Capacitor si corresponde.
+- Sin desplegar.
+
+**Estimación:** S (2hs).
+**Dependencias:** T45.
+
+### T141 — Completar los permisos de fotos
+
+**Capa:** Infraestructura/backend.
+
+**Descripción:** Dar a la API y al worker de limpieza los permisos de S3 que exige el protocolo de fotos, y rechazar confirmaciones de subidas viejas. Sin estos permisos las fotos fallan al desplegar.
+
+**Criterios de aceptación:**
+
+- La API tiene `s3:GetObject` y `s3:ListBucket` con prefijo `trips/*`; el worker de limpieza tiene `ListBucket`; los contratos de infraestructura lo reflejan.
+- `ObjectHead` incluye `lastModified` y la confirmación rechaza subidas de más de 23 horas.
+- Sin desplegar; probar con el bucket simulado.
+
+**Estimación:** M (4hs).
+**Dependencias:** T72, T73.
+
+### T142 — Integrar SNS y los workers
+
+**Capa:** Infraestructura/backend.
+
+**Descripción:** Completar la composición productiva del push con el SDK de SNS y definir las funciones de eventos y limpieza en `serverless.yml`. Deja todo listo para desplegar sin cargar credenciales reales.
+
+**Criterios de aceptación:**
+
+- Agregar `@aws-sdk/client-sns` con fábrica productiva, `requestTimeout` por llamada y reactivación de endpoints deshabilitados (`SetEndpointAttributes`).
+- Definir las funciones `events` y `storage-deletion` con roles, permisos, variables y timeout menor al lease; reglas EventBridge parametrizadas.
+- Actualizar los contratos de infraestructura; sin desplegar ni credenciales reales.
+
+**Estimación:** L (8hs).
+**Dependencias:** T92, T73, T140.
+
+### T143 — Guardar y compartir el calendario
+
+**Capa:** Frontend/nativo.
+
+**Descripción:** Guardar el `.ics` en el dispositivo y abrir la hoja de compartir. La descarga por Blob no guarda archivos dentro del WebView.
+
+**Criterios de aceptación:**
+
+- Agregar `@capacitor/filesystem` y `@capacitor/share` para guardar y compartir el `.ics`.
+- Informar éxito solo cuando el archivo se guardó o se compartió; error reintentable si falla.
+- Probar con puertos simulados; dispositivo en T113.
+
+**Estimación:** M (4hs).
+**Dependencias:** T95.
+
+### T144 — Abrir Maps con la app nativa
+
+**Capa:** Frontend/nativo.
+
+**Descripción:** Abrir el link de Maps validado con la apertura nativa de Capacitor en lugar de `window.open`. Asegura que se abra la app de mapas del dispositivo.
+
+**Criterios de aceptación:**
+
+- Agregar `@capacitor/app-launcher` (o equivalente) y abrir solo links validados por `parseMapsLink`.
+- Si no se puede abrir, mostrar el error existente sin perder el borrador.
+- Probar con puertos simulados; dispositivo en T113.
+
+**Estimación:** S (3hs).
+**Dependencias:** T94.
+
+### T145 — Manejar el Atrás nativo y la navegación inicial
+
+**Capa:** Frontend/nativo.
+
+**Descripción:** Definir el botón Atrás del dispositivo, el destino de links sin pantalla y el día inicial del itinerario. Resuelve los casos pendientes de T98.
+
+**Criterios de aceptación:**
+
+- Atrás cierra el diálogo u hoja abierta (también los de estado local), pide confirmación ante un formulario con cambios, desde una raíz del Trip vuelve a Mis viajes y sin historial va a Mis viajes.
+- `/verify` y otros links sin pantalla llevan a Mis viajes o al inicio de sesión; el itinerario abre en hoy si pertenece al viaje y si no en su primer día.
+- Probar con el puerto de ciclo de vida simulado; dispositivo en T113.
+
+**Estimación:** L (6hs).
+**Dependencias:** T98, T99.
+
+### T146 — Ajustar el documento y la red del cliente
+
+**Capa:** Frontend.
+
+**Descripción:** Completar el documento HTML, el modo de teclado de Capacitor y un timeout del cliente HTTP. Evita pantallas en inglés para lectores, teclados que tapan campos y botones colgados.
+
+**Criterios de aceptación:**
+
+- `index.html` con `lang="es"` y título «Travellier»; modo de resize del teclado configurado.
+- Timeout HTTP de 30 s con error reintentable, reutilizando el id de reintento de T88.
+- Probar el timeout con reloj simulado.
+
+**Estimación:** S (3hs).
+**Dependencias:** T105.
+
+### T147 — Integrar las pruebas de integración en CI
+
+**Capa:** CI.
+
+**Descripción:** Correr en CI las pruebas de integración y estabilizar los jobs intermitentes. Deja la evidencia automática que hoy solo corre localmente.
+
+**Criterios de aceptación:**
+
+- Job de `test:integration` con zona horaria fija y un worker, sin saturar memoria.
+- Estabilizar el job del emulador Android (arranque en frío, espera de `sys.boot_completed`, descarte de diálogos, reintento acotado) y el test inestable de participación.
+- Documentar los comandos en el README.
+
+**Estimación:** M (5hs).
+**Dependencias:** T103, T104, T138, T139.
+
 ## Resumen
 
 | Fase | Tareas | Horas |
@@ -1246,8 +1640,10 @@ Tareas derivadas de los cambios al PRD del 2026-11-08: titularidad y gestión de
 | Protección y pruebas funcionales | 3 | 22 |
 | Aplicación visual final | 9 | 54 |
 | Ajustes aprobados el 2026-11-08 | 8 | 39 |
-| **Total del plan** | **78** | **439** |
+| Correcciones aprobadas el 2026-11-12 | 26 | 107 |
+| **Total del plan** | **104** | **546** |
 
+- **Estado al 2026-11-12:** T44–T112 y T114–T121 terminadas; T113 pendiente (requiere dispositivos). Se agregan 26 tareas (T122–T147, 107 h estimadas). Quedan 27 tareas y 115 h estimadas. T113 pasa a depender de las nuevas tareas de cliente.
 - **Estado al 2026-11-08:** T44–T47 terminadas (18 h estimadas). Quedan 74 tareas y 421 h estimadas: 66 del plan original (382 h) y 8 agregadas el 2026-11-08 (T114–T121, 39 h). Las cifras siguientes describen el plan original del 2026-10-11.
 - **Único plan pendiente: 70 tareas (T44–T113), 400 horas.** Sustituye las 18 tareas pendientes anteriores; no se ejecutan además de este listado.
 - **Funcionalidad, infraestructura y pruebas previas al diseño: 61 tareas, 346 horas.** La fase visual depende de T104 y suma 9 tareas, 54 horas; navegación, selección de destinos y Activos/Finalizados quedan conectados y probados antes.

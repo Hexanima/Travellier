@@ -2,6 +2,29 @@
 
 Registro del proceso automático de tareas (`/avanzar-tareas`). Cada entrada indica tarea, fecha, motivo, qué falta y si bloquea la tarea. El usuario revisa y resuelve estos puntos; no se dan por resueltos sin su confirmación.
 
+## Resolución del 2026-11-12
+
+El usuario delegó la respuesta de las entradas de la tabla. Quedan resueltas como se indica; las reglas de producto se incorporaron al PRD y a `AGENTS.md` y las correcciones son las tareas T122–T147. Solo queda abierto lo que requiere credenciales, despliegue o dispositivos (FCM/APNs, despliegue en AWS y pruebas en Android/iOS, junto con T113). Todavía no hay ningún entorno desplegado, por lo que no se ejecutan migraciones de corrección de datos.
+
+**Aceptadas tal como están:** T48, T49, T50, T51, T52, T53, T56, T59, T61, T62, T66, T67, T70, T76, T77, T78, T81, T82, T83, T84, T86, T89, T90, T96, T97, T99, T102 (umbrales y límites de cuerpo), T107, T108, T109, T110, T111, T119 y T121.
+
+**Decisiones puntuales:**
+
+- **Contenido y límites (T54 #5, T65, T74, T79 #3, T69 #1):** un recuerdo exige texto, ubicación o foto; texto hasta 5000, desglose hasta 2000, comentarios 1–2000 (T122, T123).
+- **Edición y eliminación (T55 #5, T65 #7, T69 #2–#4, T71 #2, T72 #3, T79 #2):** solo el autor edita su recuerdo o comentario; gasto y reparto, cualquier integrante; el autor o un admin eliminan; las continuaciones pasan al padre del eliminado; se pueden quitar fotos y gasto; sin marca «editado» (T124–T128).
+- **Fotos (T72 #1 y #7, T73 #3 y #6, T74 #4):** límites aceptados; la app convierte HEIC/HEIF; se aprueban los permisos de S3 de API y worker; se rechazan confirmaciones de más de 23 h (T129, T141). T73 #11: el PRD ya describe el worker.
+- **Importes (T79 #12, T119 #6, T120 #9):** mayores que 0 y hasta 999.999.999.999,99 (T133, T134).
+- **Viajes y listado (T100 #1 y #3, T101 #1):** fin vacío sin vuelta; viaje sin destino primario sin fechas (T130).
+- **Gastos (T85 #2, T104 #2):** modo de gastos solo admins, desde la configuración (T131, T132). T80 #1: sin registro de ex integrantes en v1. T85 #12: se mantiene «le debe». T87 #6: PATCH con actividad nueva sin id es reemplazo explícito. T88 #6: timeout HTTP de 30 s (T146).
+- **Titularidad e integrantes (T114, T115, T116, T118 #8):** sin migración correctiva (no hay datos); detalle con `ownerId` real; no integrante recibe 404 en todo (T137). T116 #5: se agrega `member.left`.
+- **Avisos (T91 #6, T92 #1 y #9, T93 #11, T112 #3, T115 #6):** retención de 90 días; textos de push iguales al centro; avisos de salida, rol y transferencia; avisos inválidos se omiten; SDK de SNS y workers (T135, T136, T142).
+- **Integraciones (T94, T95, T112 #1):** tarjeta de lugar sin mapa embebido; Maps con apertura nativa (T144); `.ics` con todas las actividades y transportes, guardado y compartido en el dispositivo (T143); sin «copiar enlace».
+- **Navegación (T60 #4, T98 #1 y #13, T105 #5, T106 #2):** Atrás nativo, `/verify` a Mis viajes o login, día inicial hoy, `index.html` en español y teclado configurado (T145, T146).
+- **Otras:** T57 #3–#6, T58, T63, T64, T68, T75, T117 (incluido «Ex integrante» como autor), T103, T104 #3–#5 y T106 #1, #3–#7 aceptadas; T64 #7, T68 #5 y T97 #1 ya resueltas por T96, T121 y T120.
+- **Bugs y CI (T104 A y B, filas CI):** T138, T139 y T147.
+
+## Registro
+
 | Tarea | Fecha | Motivo | Qué falta | Bloquea |
 | --- | --- | --- | --- | --- |
 | T48 | 2026-11-08 | Decisiones adoptadas sin regla explícita del PRD: (1) el nombre ausente se representa como `name: null` en la API y en Mongo, igual que `avatarS3Key`; (2) `POST /auth/register` acepta `name` opcional (el cliente actual lo sigue enviando hasta T60): si viene debe ser string (si no, `InvalidRequest`) y vacío o solo espacios se guarda como `null`; (3) sin fallback ni exposición del email: `GET /trips/:id/members` devuelve `name: null` para integrantes sin nombre; (4) `updateAuthenticatedProfile` sigue rechazando nombre vacío (no se agrega borrar el nombre). | Confirmación del usuario de las cuatro decisiones. T60 debe adaptar los guards del cliente (`isAuthenticatedProfile`, `isMember`) a `name: null` y definir qué se muestra para un perfil o integrante sin nombre. | No |
