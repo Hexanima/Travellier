@@ -88,6 +88,17 @@ describe("activity removal from the itinerary", () => {
     expect(document.activeElement).toBe(control(confirm, "Cancelar"));
     expect(remove).not.toHaveBeenCalled();
   });
+  it("presents Cancelar and Editar actividad as secondary while the destructive actions keep data-error", async () => {
+    const { container } = await render();
+    const detail = await openDetail(container);
+    expect(control(detail, "Editar actividad").classList.contains("ui-button--secondary")).toBe(true);
+    expect(control(detail, "Eliminar actividad").getAttribute("data-error")).toBe("true");
+    await click(detail, "Eliminar actividad");
+    const confirm = dialogs(container)[1]!;
+    expect(control(confirm, "Cancelar").classList.contains("ui-button--secondary")).toBe(true);
+    expect(control(confirm, "Eliminar definitivamente").getAttribute("data-error")).toBe("true");
+    expect(control(confirm, "Eliminar definitivamente").classList.contains("ui-button--secondary")).toBe(false);
+  });
   it("is not offered in the agenda, only in the detail", async () => {
     const { container } = await render();
     expect(Array.from(container.querySelectorAll("button")).map((b) => b.textContent)).not.toContain("Eliminar actividad");

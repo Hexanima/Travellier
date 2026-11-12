@@ -84,4 +84,9 @@ describe("ParticipationConflictModal", () => {
     container.querySelectorAll("button").forEach((b) => b.click());
     expect(onCancel).not.toHaveBeenCalled(); expect(onConfirm).not.toHaveBeenCalled();
   });
+  it("presents «Conservar mi participación actual» as secondary and «Cambiar de plan» as the primary action", async () => {
+    const { container } = await mount();
+    expect(button(container, "Conservar mi participación actual").classList.contains("ui-button--secondary")).toBe(true);
+    expect(button(container, "Cambiar de plan").classList.contains("ui-button--secondary")).toBe(false);
+  });
 });

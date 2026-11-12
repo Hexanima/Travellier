@@ -115,6 +115,8 @@ describe("ActivityForm", () => {
     expect(create).not.toHaveBeenCalled();
     const chooseStart = Array.from(container.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Usar inicio de franja");
     expect(chooseStart).toBeDefined();
+    expect(chooseStart!.classList.contains("ui-button--secondary")).toBe(true);
+    expect(container.querySelector('button[type="submit"]')!.classList.contains("ui-button--secondary")).toBe(false);
     await act(async () => chooseStart!.click());
     const exact = container.querySelector<HTMLTimeElement>(`time[datetime="${context.selection.startsAt}"]`);
     expect(exact?.textContent).toContain("10:00:00,123");
