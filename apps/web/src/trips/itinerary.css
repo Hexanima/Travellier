@@ -121,8 +121,10 @@
 .post-link-options { display: grid; gap: 4px; }
 .post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .memory-tabs { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
-.memory-tab.ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
-.memory-tab.ui-button[aria-selected="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); }
+.memory-tab.ui-button { min-height: 44px; border-color: var(--ui-color-border); background: var(--ui-color-surface); color: var(--ui-color-muted); }
+.memory-tab.ui-button[aria-selected="true"] { border-color: var(--ui-color-soft); background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.memory-tab.ui-button:not([aria-selected="true"]):hover:not(:disabled) { background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.memory-tab.ui-button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-participation-actions .ui-button:disabled:not([aria-pressed="true"]):not([aria-busy="true"]), .activity-participation-actions .ui-button[aria-disabled="true"]:not([aria-pressed="true"]):not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
 .activity-participation-actions .ui-button[aria-pressed="true"]:disabled { cursor: not-allowed; }
 .activity-participation-modified .activity-modified:disabled:not([aria-busy="true"]), .activity-participation-modified .activity-modified[aria-disabled="true"]:not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
@@ -146,20 +148,49 @@
 .post-photo img, .post-photo-placeholder { width: 64px; height: 64px; object-fit: cover; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); grid-row: span 2; }
 .post-photo-actions { grid-column: 2; }
 
-/* Structural only: the final look belongs to the visual phase. */
-.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: 8px; align-items: start; margin: 0; padding: 0; list-style: none; }
-.photo-grid__item { display: grid; gap: 4px; align-content: start; min-width: 0; }
-.photo-grid__open { display: block; padding: 0; border: 0; background: none; cursor: pointer; }
-.photo-grid__open img, .photo-grid__failed { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
-.photo-grid__caption { margin: 0; overflow-wrap: anywhere; }
+.memory-feed { display: grid; gap: 12px; min-width: 0; padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+.memory-fab { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(24px, env(safe-area-inset-bottom)); z-index: 5; display: grid; place-items: center; width: 56px; height: 56px; padding: 0; border-radius: var(--ui-radius-pill); background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); text-decoration: none; box-shadow: 0 6px 18px color-mix(in srgb, var(--ui-color-brand) 25%, transparent); }
+.memory-fab svg { width: 26px; height: 26px; pointer-events: none; }
+.memory-fab:hover { background: var(--ui-color-brand-pressed); }
+.memory-fab:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.memory-fab__label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); grid-auto-rows: 1fr; gap: 12px; align-items: start; margin: 0; padding: 0; list-style: none; }
+.photo-grid__item { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.photo-grid__open { display: block; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); cursor: pointer; }
+.photo-grid__open:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.photo-grid__open img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); }
+.photo-grid__failed { display: grid; justify-items: center; align-content: center; gap: 8px; padding: 8px; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); color: var(--ui-color-muted); font-size: .875rem; line-height: 1.25rem; text-align: center; width: 100%; aspect-ratio: 1 / 1; min-width: 0; }
+.photo-viewer__failed { display: grid; justify-items: center; align-content: center; gap: 8px; padding: 8px; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); color: var(--ui-color-muted); font-size: .875rem; line-height: 1.25rem; text-align: center; min-height: 160px; }
+.photo-grid__failed p, .photo-viewer__failed p { margin: 0; }
+.photo-grid__failed button { min-height: 44px; min-width: 44px; padding: 0 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); color: var(--ui-color-brand); font-weight: 600; cursor: pointer; }
+.photo-viewer__failed button { min-height: 44px; min-width: 44px; padding: 0 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); color: var(--ui-color-brand); font-weight: 600; cursor: pointer; }
+.photo-viewer__nav button { min-height: 44px; min-width: 44px; padding: 0 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); color: var(--ui-color-brand); font-weight: 600; cursor: pointer; }
+.photo-grid__failed button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.photo-viewer__failed button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.photo-viewer__nav button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.photo-viewer__nav button:disabled, .photo-viewer__nav button[aria-disabled="true"] { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
+.photo-grid__caption { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ui-color-muted); font-size: .75rem; line-height: 1.125rem; }
 .photo-viewer { display: grid; gap: 8px; }
-.photo-viewer img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; object-fit: contain; }
-.photo-viewer__nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.photo-viewer img { display: block; max-width: 100%; max-height: calc(70dvh - env(safe-area-inset-bottom)); margin: 0 auto; object-fit: contain; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); }
+.photo-viewer__nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .activity-memories { display: grid; gap: 8px; }
 .activity-memories [role="tablist"] { display: flex; gap: 8px; }
+.activity-memories__tab { flex: 1; min-width: 0; min-height: 44px; padding: 12px 8px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); color: var(--ui-color-muted); font-size: .875rem; font-weight: 600; line-height: 1.25rem; cursor: pointer; }
+.activity-memories__tab[aria-selected="true"] { border-color: var(--ui-color-soft); background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.activity-memories__tab[aria-selected="false"]:hover { background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.activity-memories__tab:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-memories__list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .activity-memories__list li { display: grid; gap: 4px; min-width: 0; }
-.activity-memories__list img { display: block; width: 4rem; aspect-ratio: 1 / 1; object-fit: cover; }
+.activity-memories__list a { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 44px; overflow-wrap: anywhere; }
+.activity-memories__list img { display: block; flex: none; width: 64px; height: 64px; object-fit: cover; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); }
+.activity-memories__failed { display: grid; flex: none; place-items: center; width: 64px; height: 64px; padding: 4px; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); color: var(--ui-color-muted); font-size: .75rem; line-height: 1rem; text-align: center; overflow-wrap: anywhere; }
+.memory-parent { display: grid; align-content: center; gap: 4px; min-height: 80px; min-width: 0; padding: 12px; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.memory-parent__excerpt { display: block; min-width: 0; min-height: 44px; box-sizing: border-box; padding-block: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-color-brand); font-weight: 600; text-decoration: none; }
+.memory-parent__excerpt:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.memory-parent .itinerary-secondary { margin: 0; color: var(--ui-color-muted); }
+.post-composer #post-link-summary { display: block; width: 100%; text-align: left; }
+.memories-list .itinerary-post-description { min-width: 0; overflow-wrap: anywhere; }
+.memories-list .itinerary-post-description a { min-width: 0; max-width: 100%; }
 /* Provisional structure of the .ics export (no final tokens): T98 places it. */
 .ics-export { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
 .ics-export-notice, .ics-export-empty { margin: 0; color: var(--ui-color-muted); line-height: 1.5; }
@@ -225,4 +256,8 @@
 @media (min-width: 600px) {
   .destination-picker-layer .ui-modal-backdrop { align-items: center; padding: 16px; }
   .destination-picker-layer .ui-modal { width: min(100%, 520px); padding: 24px; border-radius: var(--ui-radius-card); max-block-size: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom))); }
+}
+@media (max-width: 359px) {
+  .memory-fab { right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); }
+  .activity-memories__list img, .activity-memories__failed { width: 56px; height: 56px; }
 }

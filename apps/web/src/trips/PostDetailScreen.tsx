@@ -150,7 +150,10 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
     </section>
     {parent || post.parentPostId ? <section className="activity-detail" aria-labelledby="memory-previous-title">
       <h2 id="memory-previous-title">Recuerdo anterior</h2>
-      {parent ? <List className="itinerary-posts memories-list" aria-label="Recuerdo anterior">{summaryItem(parent)}</List>
+      {parent ? <div className="memory-parent">
+        <Link className="memory-parent__excerpt" to={`/trips/${tripId}/memories/${parent.id}`} state={{ origin }}>{excerpt(parent.description, 140) ?? noText}</Link>
+        <p className="itinerary-secondary">Publicado <time dateTime={parent.createdAt}>{format(parent.createdAt)}</time></p>
+      </div>
         : <p className="itinerary-secondary">El recuerdo anterior ya no está disponible.</p>}
     </section> : null}
     <div className="memory-tabs" role="tablist" aria-label="Continuaciones y comentarios">

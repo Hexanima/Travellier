@@ -58,4 +58,27 @@ describe("PhotoGrid", () => {
     expect(failed.onRetry).toHaveBeenCalledTimes(1);
     expect(container.querySelectorAll("img")).toHaveLength(1);
   });
+  it("keeps the order and data-photo of a single photo, of many and of mixed caption lengths", async () => {
+    const single = await mount([item(1)]);
+    expect(Array.from(single.querySelectorAll("ul.photo-grid > li")).map((entry) => entry.getAttribute("data-photo"))).toEqual([itineraryId(1)]);
+    const long = `${"Una autora con un nombre larguísimo ".repeat(6)}10 nov 2026`;
+    const many = await mount([item(9, { caption: long }), item(8, { caption: undefined }), item(7, { caption: "Ana" }), ...[6, 5, 4, 3, 2, 1].map((n) => item(n))]);
+    const entries = Array.from(many.querySelectorAll("ul.photo-grid > li"));
+    expect(entries.map((entry) => entry.getAttribute("data-photo"))).toEqual([9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => itineraryId(n)));
+    expect(entries[0]!.querySelector(".photo-grid__caption")?.textContent).toBe(long);
+    expect(entries[1]!.querySelector(".photo-grid__caption")).toBeNull();
+    expect(entries.every((entry) => entry.classList.contains("photo-grid__item"))).toBe(true);
+  });
+  it("a failed photo keeps its slot and does not change the other ones", async () => {
+    const container = await mount([item(3), item(2, { failed: true }), item(1)]);
+    const entries = Array.from(container.querySelectorAll("ul.photo-grid > li"));
+    expect(entries.map((entry) => entry.getAttribute("data-photo"))).toEqual([3, 2, 1].map((n) => itineraryId(n)));
+    expect(entries.map((entry) => entry.querySelector("img") !== null)).toEqual([true, false, true]);
+    expect(entries[1]!.querySelector(".photo-grid__failed button")?.textContent).toBe("Reintentar");
+  });
+  it("renders no items for an empty list", async () => {
+    const container = await mount([]);
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(container.querySelector("img")).toBeNull();
+  });
 });
