@@ -20,7 +20,7 @@ const [me, beto, caro, dani] = [itineraryId(30), itineraryId(31), itineraryId(32
 const newPath = `/trips/${tripId}/memories/new`, editPath = `/trips/${tripId}/memories/${postId}/edit`;
 const filled: ExpenseDraft = { amount: "100", currency: "ARS", breakdown: "" };
 const seeded = (expense: ExpenseDraft | null = filled, split: SplitDraft = { payments: null, shares: null }): PostDraft =>
-  ({ values: { description: "Texto tipeado", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense, split } });
+  ({ values: { description: "Texto tipeado", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense, split, removePhotoIds: [], removeExpense: false } });
 let seed: PostDraft = seeded();
 const members = (ids: string[] = [me, beto, caro]) => ({ ok: true, value: { currentUserId: me,
   members: ids.map((userId, index) => ({ id: itineraryId(100 + index), userId, name: ["Ana", "Beto", "Caro", "Dani"][index] ?? null, role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" })) } });

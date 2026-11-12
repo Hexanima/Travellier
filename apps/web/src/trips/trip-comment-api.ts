@@ -9,6 +9,8 @@ export type TripCommentApi = {
   /** Not idempotent on the server: the caller must not resend after an unconfirmed failure without checking the list. */
   create: (tripId: string, postId: string, text: string) => Promise<TripResult<CommentResponse>>;
   update: (tripId: string, postId: string, commentId: string, text: string) => Promise<TripResult<CommentResponse>>;
+  /** 204 without a body; a missing comment answers not-found with `CommentNotFoundError`. */
+  remove: (tripId: string, postId: string, commentId: string) => Promise<TripResult<void>>;
 };
 
 const path = (tripId: string, postId: string) => `/trips/${encodeURIComponent(tripId)}/posts/${encodeURIComponent(postId)}/comments`;
@@ -27,7 +29,7 @@ const single = (result: Raw, tripId: string, postId: string, commentId?: string)
   return parsed ? { ok: true, value: parsed } : serverFailure;
 };
 
-export const createTripCommentApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripCommentApi => ({
+export const createTripCommentApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripCommentApi => ({
   list: async (tripId, postId) => {
     const result: Raw = await client.get<unknown>(path(tripId, postId));
     if (!result.ok) return interactionFailure(result.error);
@@ -40,4 +42,8 @@ export const createTripCommentApi = (client: Pick<HttpClient, "get" | "post" | "
   create: async (tripId, postId, text) => single(await client.post<unknown>(path(tripId, postId), { text }), tripId, postId),
   update: async (tripId, postId, commentId, text) =>
     single(await client.patch<unknown>(`${path(tripId, postId)}/${encodeURIComponent(commentId)}`, { text }), tripId, postId, commentId),
+  remove: async (tripId, postId, commentId) => {
+    const result = await client.delete<void>(`${path(tripId, postId)}/${encodeURIComponent(commentId)}`);
+    return result.ok ? { ok: true, value: undefined } : interactionFailure(result.error);
+  },
 });

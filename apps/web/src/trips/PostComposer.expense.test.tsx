@@ -200,14 +200,14 @@ describe("PostComposer expense (edit)", () => {
     await submit(container);
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado" });
   });
-  it("shows the saved expense once loaded, offers Editar gasto and says it cannot be removed", async () => {
+  it("shows the saved expense once loaded, offers Editar gasto and Quitar gasto, and no longer says it cannot be removed", async () => {
     const { container } = await render(editPath(withExpenseId));
     const section = container.querySelector('section[aria-label="Gasto"]')!;
     expect(section.textContent).toContain("Gasto: ARS 25,50 · Almuerzo");
     expect(expenseButton(container).textContent).toBe("Editar gasto");
     expect(expenseButton(container).getAttribute("aria-disabled")).toBeNull();
-    expect(button(container, "Quitar gasto")).toBeUndefined();
-    expect(section.textContent).toContain("El gasto guardado no se puede quitar");
+    expect(button(container, "Quitar gasto")).toBeTruthy();
+    expect(section.textContent).not.toContain("no se puede quitar");
   });
   it("a memory without expense offers Agregar gasto", async () => {
     const { container } = await render(editPath(withoutExpenseId));
@@ -549,5 +549,90 @@ describe("expense dates presentation", () => {
     const { container } = await render(editPath(withExpenseId));
     const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('section[aria-label="Gasto"] button'));
     for (const name of ["expense", "split"]) expect(buttons.find((item) => item.name === name)?.classList.contains("ui-button--secondary"), name).toBe(true);
+  });
+});
+
+describe("PostComposer removing the saved expense (T128)", () => {
+  const summary = (container: HTMLElement) => container.querySelector("#post-expense-summary")?.textContent;
+  const removedText = "Gasto: se quitará al guardar. Dejará de figurar en el registro y en el balance.";
+  it("offers Quitar gasto only once the saved expense is loaded and only when there is one", async () => {
+    const pending = deferred<unknown>();
+    const loading = await render(editPath(withExpenseId), { itineraryGet: vi.fn().mockReturnValue(pending.promise) });
+    expect(button(loading.container, "Quitar gasto")).toBeUndefined();
+    const without = await render(editPath(withoutExpenseId));
+    expect(button(without.container, "Quitar gasto")).toBeUndefined();
+  });
+  it("marks the removal: the summary says it, Conservar gasto undoes it and the edit buttons are hidden meanwhile", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    await click(button(container, "Quitar gasto"));
+    expect(summary(container)).toBe(removedText);
+    expect(button(container, "Conservar gasto")).toBeTruthy();
+    expect(button(container, "Quitar gasto")).toBeUndefined();
+    expect(button(container, "Editar gasto")).toBeUndefined();
+    expect(button(container, "Pagos y reparto")).toBeUndefined();
+    expect(document.activeElement).toBe(button(container, "Conservar gasto"));
+    await click(button(container, "Conservar gasto"));
+    expect(summary(container)).toContain("Gasto: ARS 25,50");
+    expect(button(container, "Editar gasto")).toBeTruthy();
+    expect(button(container, "Pagos y reparto")).toBeTruthy();
+    expect(document.activeElement).toBe(button(container, "Quitar gasto"));
+  });
+  it("conserving it leaves nothing to save", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await click(button(container, "Quitar gasto")); await click(button(container, "Conservar gasto"));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("No hay cambios para guardar.");
+  });
+  it("saving sends expense: null and goes to the listing with the updated notice", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: null });
+    expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("updated");
+  });
+  it("sends the removal together with a text change in one PATCH", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await type(container, "description", "Editado");
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { description: "Editado", expense: null });
+  });
+  it("removing after editing the amount drops those changes", async () => {
+    const { container, update } = await render(editPath(withExpenseId));
+    await click(expenseButton(container));
+    await type(container, "amount", "30"); await click(button(container, "Aceptar"));
+    await click(button(container, "Quitar gasto"));
+    await click(button(container, "Conservar gasto"));
+    expect(summary(container)).toContain("Gasto: ARS 25,50");
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, withExpenseId, { expense: null });
+  });
+  it("a marked removal counts as a change: Cancelar asks before discarding", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    await click(button(container, "Quitar gasto"));
+    await click(button(container, "Cancelar"));
+    expect(document.body.textContent).toContain("Descartar cambios");
+  });
+  it("a network failure keeps the mark and allows saving again", async () => {
+    const update = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValue({ ok: true, value: saved(withExpenseId) });
+    const { container } = await render(editPath(withExpenseId), { update });
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(container.textContent).toContain("No pudimos guardar el recuerdo");
+    expect(summary(container)).toBe(removedText);
+    await submit(container);
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenLastCalledWith(tripId, withExpenseId, { expense: null });
+  });
+  it("creating still removes an unsaved expense with Quitar gasto and never sends expense: null", async () => {
+    const { container, create } = await render(newPath);
+    await type(container, "description", "Hola");
+    await addExpense(container, "10", "USD");
+    await click(button(container, "Quitar gasto"));
+    expect(button(container, "Conservar gasto")).toBeUndefined();
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "Hola" });
   });
 });

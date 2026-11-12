@@ -18,7 +18,9 @@ export type ExpenseInput = { totalAmount?: number; currency?: "ARS" | "EUR" | "U
   payments?: ExpensePaymentRow[]; shares?: ExpenseShareRow[] };
 /** `newActivity` creates the activity together with the post; the server derives its day, so `dayId` is never sent. */
 export type PostInput = { id?: string; description?: string | null; mapsUrl?: string | null; parentPostId?: string | null; activityId?: string | null; transportId?: string | null;
-  newActivity?: NewActivityInput; photos?: { key: string }[]; expense?: ExpenseInput };
+  newActivity?: NewActivityInput; photos?: { key: string }[];
+  /** `null` removes the saved expense; only the author may send `removePhotos` (ids of published photos). */
+  expense?: ExpenseInput | null; removePhotos?: { id: string }[] };
 /** What the server stored for the expense (the currency is null only in legacy data); payments and shares are read from the post detail. */
 export type SavedExpenseResponse = { postId: string; totalAmount: number; currency: "ARS" | "EUR" | "USD" | null; breakdown: string | null };
 /**
@@ -40,6 +42,8 @@ export type TripPostApi = {
   get: (tripId: string, postId: string) => Promise<TripResult<PostDetail>>;
   create: (tripId: string, input: PostInput, confirmation?: ParticipationConfirmation) => Promise<TripResult<SavedPost>>;
   update: (tripId: string, postId: string, input: PostInput, confirmation?: ParticipationConfirmation) => Promise<TripResult<SavedPost>>;
+  /** Deletes the memory (204 without a body). */
+  remove: (tripId: string, postId: string) => Promise<TripResult<void>>;
 };
 
 const path = (tripId: string) => `/trips/${encodeURIComponent(tripId)}/posts`;
@@ -133,16 +137,23 @@ const newActivityBody = (value: NewActivityInput, withId: boolean): NewActivityI
 /** Allow list of a row: only `userId`, `unit` and `value` (a row key such as the editor's `key`, or `paidBy`, never travels). */
 const rowBody = (row: { userId: string; unit: string; value?: number | null }) => ({ userId: row.userId, unit: row.unit,
   ...(row.value !== undefined ? { value: row.value } : {}) });
-/** Allow list: `paidBy` never travels; `null` is never a valid expense, a list key only travels as a list and an empty object carries nothing. */
+/** Allow list: `paidBy` never travels; `null` removes the expense, a list key only travels as a list and an empty object carries nothing. */
 const expenseBody = (value: ExpenseInput | null | undefined): Pick<PostInput, "expense"> => {
-  if (typeof value !== "object" || value === null) return {};
+  if (value === null) return { expense: null };
+  if (typeof value !== "object") return {};
   const expense: ExpenseInput = { ...(value.totalAmount !== undefined ? { totalAmount: value.totalAmount } : {}),
     ...(value.currency !== undefined ? { currency: value.currency } : {}), ...(value.breakdown !== undefined ? { breakdown: value.breakdown } : {}),
     ...(Array.isArray(value.payments) ? { payments: value.payments.map(rowBody) as ExpensePaymentRow[] } : {}),
     ...(Array.isArray(value.shares) ? { shares: value.shares.map(rowBody) as ExpenseShareRow[] } : {}) };
   return Object.keys(expense).length > 0 ? { expense } : {};
 };
-const carriesExpense = (input: PostInput) => expenseBody(input.expense).expense !== undefined;
+/** Only an object expense is echoed back by the server: `expense: null` removes it and the response omits it. */
+const carriesExpense = (input: PostInput) => typeof expenseBody(input.expense).expense === "object" && expenseBody(input.expense).expense !== null;
+/** Only the ids of valid photos travel and an empty list carries nothing. */
+const removePhotosBody = (value: PostInput["removePhotos"]): Pick<PostInput, "removePhotos"> => {
+  const ids = (value ?? []).filter((item) => id(item?.id)).map(({ id: photoId }) => ({ id: photoId }));
+  return ids.length > 0 ? { removePhotos: ids } : {};
+};
 /** The confirmation of a previous 409 travels at the root of the body, never inside `newActivity`. */
 const body = (input: PostInput, confirmation: ParticipationConfirmation | undefined, kind: "create" | "update"): PostInput => ({
   // A post id only travels on create and an activity id only on update (a POST ignores it, a PATCH has no post to name); a malformed id is never sent.
@@ -155,9 +166,10 @@ const body = (input: PostInput, confirmation: ParticipationConfirmation | undefi
   ...(input.newActivity !== undefined ? { newActivity: newActivityBody(input.newActivity, kind === "update") } : {}),
   ...(input.photos !== undefined ? { photos: input.photos.map(({ key }) => ({ key })) } : {}),
   ...expenseBody(input.expense),
+  ...(kind === "update" ? removePhotosBody(input.removePhotos) : {}),
   ...(confirmation ? { confirmedConflicts: confirmation.confirmedConflicts, confirmedActivity: confirmation.confirmedActivity } : {}),
 });
-export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "patch">): TripPostApi => ({
+export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripPostApi => ({
   list: async (tripId) => {
     const result: Raw = await client.get<unknown>(path(tripId));
     if (!result.ok) return failure(result.error);
@@ -185,4 +197,8 @@ export const createTripPostApi = (client: Pick<HttpClient, "get" | "post" | "pat
   create: async (tripId, input, confirmation) => single(await client.post<unknown>(path(tripId), body(input, confirmation, "create")), tripId, undefined, input.newActivity !== undefined, carriesExpense(input)),
   update: async (tripId, postId, input, confirmation) => single(await client.patch<unknown>(`${path(tripId)}/${encodeURIComponent(postId)}`, body(input, confirmation, "update")),
     tripId, postId, input.newActivity !== undefined, carriesExpense(input)),
+  remove: async (tripId, postId) => {
+    const result = await client.delete<void>(`${path(tripId)}/${encodeURIComponent(postId)}`);
+    return result.ok ? { ok: true, value: undefined } : failure(result.error);
+  },
 });

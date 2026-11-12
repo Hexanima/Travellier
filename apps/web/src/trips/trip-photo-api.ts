@@ -1,5 +1,5 @@
 import type { ApiClientError, HttpClient } from "../api/index.js";
-import { interactionFailure, isRecord, serverFailure } from "./api-failure.js";
+import { interactionFailure, isId, isRecord, serverFailure } from "./api-failure.js";
 import type { TripResult } from "./trip-management-api.js";
 
 export type PhotoFileDescriptor = { contentType: string; sizeBytes: number };
@@ -10,7 +10,10 @@ export type TripPhotoApi = {
   reserve: (tripId: string, files: readonly PhotoFileDescriptor[]) => Promise<TripResult<UploadTarget[]>>;
   /** How many photos a post already has published. Only the amount is kept: the signed read urls are never stored. */
   countForPost: (tripId: string, postId: string) => Promise<TripResult<number>>;
+  /** The published photos of a post, by `order`. `url` (signed, short-lived) is for in-memory display only and is never stored in a draft. */
+  listForPost: (tripId: string, postId: string) => Promise<TripResult<PublishedPhoto[]>>;
 };
+export type PublishedPhoto = { id: string; order: number; url?: string };
 
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
 const httpsUrl = (value: unknown): value is string => {
@@ -27,6 +30,17 @@ const parseTarget = (value: unknown, tripId: string): UploadTarget | undefined =
   return Number.isFinite(expiresAt) ? { key: value.key, uploadUrl: value.uploadUrl, headers: { ...value.headers }, expiresAt } : undefined;
 };
 
+const listPhotos = async (client: Pick<HttpClient, "get">, tripId: string, postId: string): Promise<TripResult<PublishedPhoto[]>> => {
+  const result: Raw = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}/posts/${encodeURIComponent(postId)}/photos`);
+  if (!result.ok) return interactionFailure(result.error);
+  if (!isRecord(result.value) || !Array.isArray(result.value.photos)) return serverFailure;
+  const photos: PublishedPhoto[] = [];
+  for (const item of result.value.photos) {
+    if (!isRecord(item) || !isId(item.id) || typeof item.order !== "number" || !Number.isFinite(item.order)) return serverFailure;
+    photos.push({ id: item.id, order: item.order, ...(httpsUrl(item.url) ? { url: item.url } : {}) });
+  }
+  return { ok: true, value: photos.sort((a, b) => a.order - b.order) };
+};
 export const createTripPhotoApi = (client: Pick<HttpClient, "post" | "get">): TripPhotoApi => ({
   reserve: async (tripId, files) => {
     const result: Raw = await client.post<unknown>(`/trips/${encodeURIComponent(tripId)}/photo-uploads`,
@@ -37,10 +51,8 @@ export const createTripPhotoApi = (client: Pick<HttpClient, "post" | "get">): Tr
     return targets.every((item) => item !== undefined) && new Set(targets.map((item) => item.key)).size === targets.length ? { ok: true, value: targets } : serverFailure;
   },
   countForPost: async (tripId, postId) => {
-    const result: Raw = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}/posts/${encodeURIComponent(postId)}/photos`);
-    if (!result.ok) return interactionFailure(result.error);
-    if (!isRecord(result.value) || !Array.isArray(result.value.photos)) return serverFailure;
-    return result.value.photos.every((item) => isRecord(item) && typeof item.id === "string" && /^[0-9a-f]{24}$/.test(item.id))
-      ? { ok: true, value: result.value.photos.length } : serverFailure;
+    const result = await listPhotos(client, tripId, postId);
+    return result.ok ? { ok: true, value: result.value.length } : result;
   },
+  listForPost: (tripId, postId) => listPhotos(client, tripId, postId),
 });

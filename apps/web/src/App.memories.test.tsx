@@ -494,3 +494,74 @@ describe("App memories authorship (T125)", () => {
     expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
   });
 });
+
+describe("App memories delete (T128)", () => {
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+  const detail = (extra: Record<string, unknown> = {}) => ({ post: saved(), parent: null, children: [], rootActivityId: null, ...extra });
+  const byText = (container: HTMLElement, selector: string, text: string) => Array.from(container.querySelectorAll(selector)).find((item) => item.textContent === text) ?? null;
+  const confirmDelete = async (container: HTMLElement) => {
+    await click(byText(container, "button", "Eliminar recuerdo"));
+    await click(byText(document.body, "button", "Eliminar"));
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  };
+  it("deleting from the detail opened from the diary returns to the diary, refreshed without the memory", async () => {
+    const list = vi.fn().mockResolvedValueOnce({ ok: true, value: [saved()] }).mockResolvedValue({ ok: true, value: [] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const remove = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), posts: { list, get, remove } });
+    await click(container.querySelector(`li[data-memory="${postId}"] a`));
+    await confirmDelete(container);
+    expect(remove).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(container.querySelector(`li[data-memory="${postId}"]`)).toBeNull();
+  });
+  it("deleting from the detail opened from the itinerary returns to the itinerary", async () => {
+    const value = itineraryFixture();
+    const itineraryGet = vi.fn().mockResolvedValue({ ok: true, value });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail({ post: saved({ id: value.posts[0].id }) }) });
+    const remove = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const container = await render(`/trips/${tripId}/itinerary`, { auth, sessionStorage: storage(true), itinerary: { get: itineraryGet }, posts: { get, remove } });
+    await click(container.querySelector(`[data-itinerary-post="${value.posts[0].id}"] a`));
+    expect(container.querySelector("h1")?.textContent).toBe("Recuerdo");
+    await confirmDelete(container);
+    expect(remove).toHaveBeenCalledExactlyOnceWith(tripId, value.posts[0].id);
+    expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
+    expect(itineraryGet.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+  it("deleting a memory opened by direct link from the photos goes back to the photos", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const remove = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const gallery = { list: vi.fn().mockResolvedValue({ ok: true, value: { photos: [], nextCursor: null } }) };
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const entry = { pathname: `/trips/${tripId}/memories/${postId}`, state: { origin: { path: `/trips/${tripId}/memories/photos`, label: "fotos" } } };
+    await act(async () => root.render(<MemoryRouter initialEntries={[entry]}><App auth={auth} sessionStorage={storage(true)} gallery={gallery} posts={{ get, remove }} /></MemoryRouter>));
+    await confirmDelete(container);
+    expect(gallery.list).toHaveBeenCalled();
+    expect(container.querySelector("h1")?.textContent).not.toBe("Recuerdo");
+  });
+  it("entering from a notice whose memory was deleted shows it as no longer available", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get } });
+    expect(container.textContent).toContain("Este recuerdo ya no está disponible");
+    expect(byText(container, "button", "Eliminar recuerdo")).toBeNull();
+  });
+  it("a delete that finds the memory already deleted shows it as no longer available", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const remove = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
+    const container = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), posts: { get, remove } });
+    await confirmDelete(container);
+    expect(container.textContent).toContain("Este recuerdo ya no está disponible");
+  });
+  it("a member who is neither the author nor an admin has no delete button; an admin does", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: true, value: detail() });
+    const roster = (role: "admin" | "participant") => ({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: itineraryId(21), members: [
+      { id: itineraryId(60), userId: itineraryId(20), name: "Ana", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" },
+      { id: itineraryId(61), userId: itineraryId(21), name: "Beto", role, joinedAt: "2026-01-01T00:00:00.000Z" }] } }) });
+    const participant = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), members: roster("participant"), posts: { get } });
+    expect(byText(participant, "button", "Eliminar recuerdo")).toBeNull();
+    const admin = await render(`/trips/${tripId}/memories/${postId}`, { auth, sessionStorage: storage(true), members: roster("admin"), posts: { get } });
+    expect(byText(admin, "button", "Eliminar recuerdo")).not.toBeNull();
+  });
+});

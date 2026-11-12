@@ -3,11 +3,11 @@ import { addPhotos, markPhoto, movePhoto, removePhoto, type PhotoDraftItem } fro
 import { MAX_PHOTOS } from "./photo-limits.js";
 import type { SplitDraft } from "./expense-split.js";
 import type { SavedExpenseView } from "./trip-post-api.js";
-import { clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setSplit, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
+import { setRemoveExpense, toggleRemovePhoto, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setSplit, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
 const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
-  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity, photos: [], expense: null, split: { payments: null, shares: null } } });
+  ({ values: { description, mapsUrl }, extras: { link, transportId, newActivity, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false } });
 const post = (id = P): PostLink => ({ kind: "post", id });
 const activity = (id = A): PostLink => ({ kind: "activity", id });
 const saved = (extra: Partial<{ parentPostId: string | null; activityId: string | null; transportId: string | null }> = {}) =>
@@ -82,7 +82,7 @@ describe("post draft", () => {
   it("normalizes legacy data with parent and transport: the parent wins, the draft has no transport and the PATCH clears it", () => {
     const legacy = saved({ parentPostId: P, transportId: T });
     const fromSaved = draftFromPost(legacy);
-    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(fromSaved.extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
     expect(prepareUpdate(fromSaved, legacy)).toEqual({ transportId: null });
   });
   it("normalizes legacy data with parent, activity and transport: the PATCH clears both", () => {
@@ -90,23 +90,23 @@ describe("post draft", () => {
     expect(prepareUpdate(draftFromPost(legacy), legacy)).toEqual({ activityId: null, transportId: null });
   });
   it("builds the link and transport from the saved post", () => {
-    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(draftFromPost(saved({ parentPostId: P })).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(draftFromPost(saved({ activityId: A })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(draftFromPost(saved({ transportId: T })).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(draftFromPost(saved({ activityId: A, transportId: T })).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
   });
   it("setLink: a post drops the transport and the activity, an activity keeps the transport, null removes the link", () => {
-    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(draft("x", "", activity(), T), post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setLink(draft("x", "", post(), null), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setLink(draft("x", "", null, T), activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setLink(draft("x", "", activity(), T), null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
   });
   it("setLink and setTransport keep the values and do not mutate the input", () => {
     const original = draft("x", "y", activity(), T);
     const next = setLink(original, post());
     expect(next.values).toEqual({ description: "x", mapsUrl: "y" });
-    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(original.extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setTransport(original, null).extras).toEqual({ link: { kind: "activity", id: A }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
     expect(setTransport(draft("x"), T).extras.transportId).toBe(T);
   });
   it("is dirty only when it differs from the base", () => {
@@ -138,17 +138,17 @@ describe("post draft with a new activity", () => {
     const next = setNewActivity(original, N);
     expect(next).toEqual(draft("x", "y", null, T, N));
     expect(original.extras.link).toEqual({ kind: "activity", id: A });
-    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setNewActivity(draft("x", "", post()), N).extras).toEqual({ link: null, transportId: null, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
     expect(setNewActivity(next, null).extras.newActivity).toBeNull();
   });
   it("choosing any link, or no link, discards the new activity and keeps the transport (except under a post)", () => {
     const withNew = draft("x", "", null, T, N);
-    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
-    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setLink(withNew, post()).extras).toEqual({ link: { kind: "post", id: P }, transportId: null, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setLink(withNew, activity()).extras).toEqual({ link: { kind: "activity", id: A }, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
+    expect(setLink(withNew, null).extras).toEqual({ link: null, transportId: T, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
   });
   it("setTransport keeps the new activity", () => {
-    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null } });
+    expect(setTransport(draft("x", "", null, null, N), T).extras).toEqual({ link: null, transportId: T, newActivity: N, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false });
   });
   it("is dirty when the new activity appears, disappears or changes in any field", () => {
     expect(isDraftDirty(draft("Hola", "", null, null, N), draft("Hola"))).toBe(true);
@@ -383,5 +383,55 @@ describe("post draft payments and shares (T84)", () => {
     const legacy = { totalAmount: 100, currency: null, breakdown: null };
     const input = prepareUpdate(setSplit(setExpense(draft("Hola"), expense), split()), saved({}), undefined, legacy, view({ currency: null }));
     expect(input.expense).toMatchObject({ currency: "ARS", payments: [{ userId: ana, unit: "amount", value: 40 }] });
+  });
+});
+
+describe("post draft: removals of published photos and the expense (T128)", () => {
+  const Q = "0000000000000000000000d1", R = "0000000000000000000000d2";
+  const stored = { totalAmount: 25.5, currency: "ARS" as const, breakdown: null };
+  const expense = { amount: "25,50", currency: "ARS" as const, breakdown: "" };
+  const withExpense = (value: typeof expense | null, base: PostDraft = draft("Hola")) => setExpense(base, value);
+  it("starts without removals, also when built from a saved post", () => {
+    expect(emptyDraft().extras.removePhotoIds).toEqual([]);
+    expect(emptyDraft().extras.removeExpense).toBe(false);
+    expect(draftFromPost(saved()).extras.removePhotoIds).toEqual([]);
+    expect(draftFromPost(saved()).extras.removeExpense).toBe(false);
+  });
+  it("toggles the removal of a photo and keeps the others", () => {
+    const one = toggleRemovePhoto(draft("Hola"), Q);
+    expect(one.extras.removePhotoIds).toEqual([Q]);
+    expect(toggleRemovePhoto(one, R).extras.removePhotoIds).toEqual([Q, R]);
+    expect(toggleRemovePhoto(toggleRemovePhoto(one, R), Q).extras.removePhotoIds).toEqual([R]);
+  });
+  it("activating the removal of the expense clears a typed expense and its split; deactivating keeps them empty", () => {
+    const typed = withExpense(expense);
+    const removed = setRemoveExpense(typed, true);
+    expect(removed.extras.removeExpense).toBe(true);
+    expect(removed.extras.expense).toBeNull();
+    expect(removed.extras.split).toEqual({ payments: null, shares: null });
+    expect(setRemoveExpense(removed, false).extras.removeExpense).toBe(false);
+  });
+  it("counts both removals as changes", () => {
+    expect(isDraftDirty(toggleRemovePhoto(draft("Hola"), Q), draft("Hola"))).toBe(true);
+    expect(isDraftDirty(setRemoveExpense(draft("Hola"), true), draft("Hola"))).toBe(true);
+    expect(isDraftDirty(toggleRemovePhoto(draft("Hola"), Q), toggleRemovePhoto(draft("Hola"), Q))).toBe(false);
+  });
+  it("prepareUpdate sends removePhotos and expense: null", () => {
+    const original = saved({});
+    const input = prepareUpdate(setRemoveExpense(toggleRemovePhoto(toggleRemovePhoto(draft("Hola"), Q), R), true), original, undefined, stored);
+    expect(input).toEqual({ removePhotos: [{ id: Q }, { id: R }], expense: null });
+  });
+  it("sends expense: null only when an expense is saved", () => {
+    const original = saved({});
+    expect(prepareUpdate(setRemoveExpense(draft("Hola"), true), original)).toEqual({});
+    expect(prepareUpdate(setRemoveExpense(draft("Hola"), true), original, undefined, stored)).toEqual({ expense: null });
+    expect(prepareExpenseOnlyUpdate(setRemoveExpense(draft("Hola"), true), stored)).toEqual({ expense: null });
+    expect(prepareExpenseOnlyUpdate(setRemoveExpense(draft("Hola"), true), undefined)).toEqual({});
+  });
+  it("an expense-only update never carries removePhotos", () => {
+    expect(prepareExpenseOnlyUpdate(setRemoveExpense(toggleRemovePhoto(draft("Hola"), Q), true), stored)).toEqual({ expense: null });
+  });
+  it("create never carries removals", () => {
+    expect(prepareCreate(setRemoveExpense(toggleRemovePhoto(draft("Hola"), Q), true))).toEqual({ description: "Hola" });
   });
 });

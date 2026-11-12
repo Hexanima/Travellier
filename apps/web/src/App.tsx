@@ -254,6 +254,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     list: activeComments?.list ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activeComments?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     update: activeComments?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    remove: activeComments?.remove ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activeComments])
   const tripLikes = useMemo<TripLikeApi>(() => ({
     summary: activeLikes?.summary ?? (async () => ({ ok: false, error: { kind: 'server' } })),
@@ -268,6 +269,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     get: activePosts?.get ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     create: activePosts?.create ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
+    remove: activePosts?.remove ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activePosts])
   const linkPort = useMemo(() => externalLink ?? createCapacitorCapabilities().externalLink, [externalLink])
   const appLifecycle = Capacitor.isNativePlatform() ? capacitorAppLifecycle : undefined
@@ -277,7 +279,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     if (!reserve) return undefined
     const device = defaultDevicePhotos.current
     return {
-      api: { reserve },
+      api: { reserve, ...(activePhotos.countForPost ? { countForPost: activePhotos.countForPost } : {}), ...(activePhotos.listForPost ? { listForPost: activePhotos.listForPost } : {}) },
       source: devicePhotos?.source ?? (device.source ??= createCapacitorCapabilities().photos),
       reader: devicePhotos?.reader ?? (device.reader ??= createPhotoFileReader({ fetch: (url) => globalThis.fetch(url), convertFileSrc: (reference) => Capacitor.convertFileSrc(reference) })),
       transfer: devicePhotos?.transfer ?? (device.transfer ??= createDirectUpload({ createXhr: () => new XMLHttpRequest() })),

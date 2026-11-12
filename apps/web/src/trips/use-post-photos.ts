@@ -10,7 +10,7 @@ import type { TripFailure } from "./trip-management-api.js";
 import type { TripPhotoApi } from "./trip-photo-api.js";
 
 /** Everything the composer needs to handle photos; when absent the composer shows no photo section. */
-export type PostPhotoDeps = { api: Pick<TripPhotoApi, "reserve"> & Partial<Pick<TripPhotoApi, "countForPost">>; source: PhotoSourcePort; reader: PhotoFileReader; transfer: DirectUpload; now?: () => number };
+export type PostPhotoDeps = { api: Pick<TripPhotoApi, "reserve"> & Partial<Pick<TripPhotoApi, "countForPost" | "listForPost">>; source: PhotoSourcePort; reader: PhotoFileReader; transfer: DirectUpload; now?: () => number };
 export type SelectOutcome = "added" | "cancelled" | "failed" | "busy";
 /** `failed`: some photo did not upload (nothing is published); `error`: the reservation failed as a whole. */
 export type UploadOutcome = { kind: "ready" } | { kind: "failed"; failed: number } | { kind: "error"; error: TripFailure; failed: number } | { kind: "aborted" };

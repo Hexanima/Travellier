@@ -127,3 +127,29 @@ describe("PostComposer content for the author (T125)", () => {
     expect(container.querySelector("form")).toBeNull();
   });
 });
+
+describe.each([["another member", someone], ["a former member", stranger]])("PostComposer removing the expense as %s (T128)", (_name, user) => {
+  const removedText = "Gasto: se quitará al guardar. Dejará de figurar en el registro y en el balance.";
+  it("offers Quitar gasto and sends only expense: null", async () => {
+    const { container, update } = await render(user);
+    expect(container.textContent).not.toContain("no se puede quitar");
+    await click(button(container, "Quitar gasto"));
+    expect(container.querySelector("#post-expense-summary")?.textContent).toBe(removedText);
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { expense: null });
+  });
+  it("Conservar gasto undoes it", async () => {
+    const { container, update } = await render(user);
+    await click(button(container, "Quitar gasto")); await click(button(container, "Conservar gasto"));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+  });
+});
+describe("PostComposer removing the expense as the author (T128)", () => {
+  it("offers Quitar gasto to the author too", async () => {
+    const { container, update } = await render(author);
+    await click(button(container, "Quitar gasto"));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { expense: null });
+  });
+});

@@ -100,3 +100,31 @@ describe("comment HTTP adapter: update", () => {
     expect(sent(fetch).url).toBe(`${base}/x%2Fy`);
   });
 });
+
+describe("comment HTTP adapter: remove", () => {
+  const url = `${base}/${itineraryId(5)}`;
+  const noContent = () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
+    return { fetch, api: createTripCommentApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized: vi.fn() })) };
+  };
+  it("deletes without a body and answers ok on 204", async () => {
+    const { api, fetch } = noContent();
+    expect(await api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: true, value: undefined });
+    expect(sent(fetch)).toEqual({ url, method: "DELETE", body: undefined });
+  });
+  it("encodes the ids", async () => {
+    const { api, fetch } = noContent();
+    await api.remove(tripId, postId, "x y");
+    expect(fetch.mock.calls[0][0]).toBe(`${base}/x%20y`);
+  });
+  it("keeps the code of a missing comment", async () => {
+    expect(await setup(failure("CommentNotFoundError", 404), 404).api.remove(tripId, postId, itineraryId(5)))
+      .toEqual({ ok: false, error: { kind: "not-found", code: "CommentNotFoundError" } });
+  });
+  it("maps 403 and a network failure", async () => {
+    expect(await setup(failure("Forbidden", 403), 403).api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: false, error: { kind: "forbidden" } });
+    const fetch = vi.fn().mockRejectedValue(new TypeError("net"));
+    const api = createTripCommentApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized: vi.fn() }));
+    expect(await api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network" } });
+  });
+});
