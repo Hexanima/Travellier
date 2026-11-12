@@ -35,6 +35,9 @@ const claimOf = (type: TripNotificationType, over: Partial<PushDispatchClaim> = 
     "member.joined": { memberId: actor, userId: actor },
     "member.expelled": { tripId: trip },
     "comment.created": { commentId: activity, postId: activity, actorId: actor },
+    "member.left": { memberId: actor, userId: actor },
+    "member.role_changed": { userId: user, role: "admin" },
+    "trip.ownership_transferred": { previousOwnerId: actor },
   };
   return { ...base, type, payload: payloads[type], ...over } as PushDispatchClaim;
 };
@@ -115,7 +118,8 @@ const summaryOf = async (deps: DispatchPushNotificationsDeps) => {
 };
 
 describe("dispatchPushNotifications", () => {
-  it.each(["post.created", "activity.created", "activity.updated", "member.joined", "comment.created", "activity.participant_unlinked"] as TripNotificationType[])(
+  it.each(["post.created", "activity.created", "activity.updated", "member.joined", "comment.created", "activity.participant_unlinked",
+    "member.left", "member.role_changed", "trip.ownership_transferred"] as TripNotificationType[])(
     "delivers %s to a current member and completes it as sent", async (type) => {
       const t = setup([pending(claimOf(type))]);
       const summary = await summaryOf(t.deps);
@@ -140,6 +144,15 @@ describe("dispatchPushNotifications", () => {
     expect(t.rows[0]).toMatchObject({ status: "skipped", outcome: "rejoined" });
     expect(summary.skipped.rejoined).toBe(1);
   });
+
+  it.each(["member.left", "member.role_changed", "trip.ownership_transferred"] as TripNotificationType[])(
+    "omits %s as not_member when the recipient is no longer a member and sends nothing", async (type) => {
+      const t = setup([pending(claimOf(type))], { members: false });
+      const summary = await summaryOf(t.deps);
+      expect(t.sent).toHaveLength(0);
+      expect(t.rows[0]).toMatchObject({ status: "skipped", outcome: "not_member" });
+      expect(summary.skipped.not_member).toBe(1);
+    });
 
   it("omits the event when the membership was revoked between persistence and dispatch", async () => {
     const t = setup([pending(claimOf("activity.updated"))], { members: false });

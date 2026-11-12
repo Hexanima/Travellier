@@ -42,6 +42,7 @@ const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; own
       return ok(role === undefined || membershipId === undefined ? undefined : { id: membershipId, role });
     },
     findOwnerId: async () => { calls.findOwnerId += 1; return ok(options.ownerId === null ? undefined : options.ownerId ?? owner); },
+    listMemberIds: async () => ok([...roles.keys()]),
     setRole: vi.fn(), transferOwnership: vi.fn(), removeMember,
   };
   const port: TripMemberAdministrationPort = { withTransaction: (_tripId, work) => work(scope) };
@@ -57,6 +58,9 @@ describe("expelTripParticipant", () => {
     expect(await expel(port, actor, participant)).toEqual({ ok: true, value: undefined });
     expect(removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, expulsionNotice(participant), now());
     expect(JSON.stringify(removeMember.mock.calls[0]?.[2])).not.toContain(actor);
+    // The expulsion never emits member.left (that is for voluntary leaving only) nor notices for the other members.
+    expect((removeMember.mock.calls[0]?.[2] as { type: string; userId: ObjectId }[]).map(({ type, userId }) => [type, userId]))
+      .toEqual([["member.expelled", participant]]);
     expect(roles.has(participant)).toBe(false);
     expect(calls.findOwnerId).toBe(1);
   });

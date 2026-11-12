@@ -31,3 +31,4 @@ export * from "./push-device.js";
 export * from "./trip-notification.js";
 export * from "./user-notification-cursor.js";
 export * from "./push-dispatch.js";
+export * from "./notice-text.js";

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createObjectId, type ObjectId } from "../value-objects/object-id.js";
 import {
+  NOTIFICATION_RETENTION_DAYS,
   activityUpdatedFields,
   buildTripNotifications,
   notificationEventKey,
@@ -54,6 +55,31 @@ describe("buildTripNotifications", () => {
       payload: { tripId }, createdAt });
     expect(draft).toMatchObject({ actorId: null, userId: other, payload: { tripId } });
   });
+});
+
+describe("notices of leaving, role changes and ownership transfers (T135)", () => {
+  it("member.left goes to each remaining member with the membership as operation and whoever left as actor", () => {
+    const drafts = buildTripNotifications({ type: "member.left", tripId, operationRef: id(20), actorId: actor, recipients: [other, third],
+      payload: { memberId: id(20), userId: actor }, createdAt });
+    expect(drafts.map((draft) => draft.eventKey)).toEqual([`member.left:${id(20)}:${other}`, `member.left:${id(20)}:${third}`]);
+    expect(drafts[0]).toMatchObject({ actorId: actor, operationKey: `member.left:${id(20)}`, payload: { memberId: id(20), userId: actor } });
+  });
+
+  it("member.role_changed and trip.ownership_transferred have one recipient each", () => {
+    const [role] = buildTripNotifications({ type: "member.role_changed", tripId, operationRef: id(21), actorId: actor, recipients: [other],
+      payload: { userId: other, role: "admin" }, createdAt });
+    expect(role).toMatchObject({ userId: other, actorId: actor, payload: { userId: other, role: "admin" }, eventKey: `member.role_changed:${id(21)}:${other}` });
+    const [moved] = buildTripNotifications({ type: "trip.ownership_transferred", tripId, operationRef: id(22), actorId: actor, recipients: [other],
+      payload: { previousOwnerId: actor }, createdAt });
+    expect(moved).toMatchObject({ userId: other, actorId: actor, payload: { previousOwnerId: actor }, eventKey: `trip.ownership_transferred:${id(22)}:${other}` });
+  });
+
+  it("repeated operations on the same recipient get different keys when their operation ids differ, and the same key when repeated", () => {
+    expect(notificationEventKey("member.role_changed", id(30), other)).not.toBe(notificationEventKey("member.role_changed", id(31), other));
+    expect(notificationEventKey("member.role_changed", id(30), other)).toBe(notificationEventKey("member.role_changed", id(30), other));
+  });
+
+  it("retains notices for 90 days", () => { expect(NOTIFICATION_RETENTION_DAYS).toBe(90); });
 });
 
 describe("activityUpdatedFields", () => {

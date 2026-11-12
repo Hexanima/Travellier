@@ -1,4 +1,5 @@
 import type { ObjectId } from "../value-objects/object-id.js";
+import { noticeBodyLines, noticeHeadline } from "./notice-text.js";
 import { MAX_PUSH_DEVICES_PER_USER } from "./push-device.js";
 import { computeRetryDelay } from "./storage-deletion-job.js";
 import type { TripNotificationPayloads, TripNotificationType } from "./trip-notification.js";
@@ -34,32 +35,36 @@ export interface PushMessage {
 }
 
 /**
- * Literal text of the PRD for the unlinked participant (section "Edición de actividades"). The PRD defines no other push text, so the
- * rest are generic, without names, titles or any user text.
+ * Title and body come from the single text contract of the notices (`notice-text`), shared with the in-app inbox (T135). The body only
+ * holds lines that do not depend on a time zone (it may be empty); times are shown by the client from the inbox.
  */
-const UNLINKED_BODY = "Cambió el horario y se superpone con otro plan. Se retiró tu participación; revisá la actividad y elegí de nuevo.";
+const text = (event: PushableEvent) => ({ title: noticeHeadline(event), body: noticeBodyLines(event).join("\n") });
 
 export const buildPushMessage = (event: PushableEvent): PushMessage => {
   const base = { notificationId: event.id, type: event.type, tripId: event.tripId };
   switch (event.type) {
     case "post.created":
-      return { title: "Nuevo recuerdo", body: "Se compartió un recuerdo en tu viaje.",
+      return { ...text(event),
         data: { ...base, postId: event.payload.postId, ...(event.payload.activityId === null ? {} : { activityId: event.payload.activityId }) } };
     case "activity.created":
-      return { title: "Nueva actividad", body: "Se sumó una actividad al viaje.", data: { ...base, activityId: event.payload.activityId } };
+      return { ...text(event), data: { ...base, activityId: event.payload.activityId } };
     case "activity.updated":
-      return { title: "Actividad modificada", body: "Se modificó una actividad del viaje.", data: { ...base, activityId: event.payload.activityId } };
+      return { ...text(event), data: { ...base, activityId: event.payload.activityId } };
     case "activity.participant_unlinked": {
       const { activityId, newInterval } = event.payload;
-      return { title: "Actividad modificada", body: UNLINKED_BODY, data: { ...base, activityId, scheduledAt: newInterval.startsAt.toISOString(),
+      return { ...text(event), data: { ...base, activityId, scheduledAt: newInterval.startsAt.toISOString(),
         ...(newInterval.durationMinutes === null ? {} : { durationMinutes: String(newInterval.durationMinutes) }) } };
     }
     case "member.joined":
-      return { title: "Nuevo integrante", body: "Alguien se sumó al viaje.", data: { ...base, memberId: event.payload.memberId } };
+      return { ...text(event), data: { ...base, memberId: event.payload.memberId } };
     case "member.expelled":
-      return { title: "Ya no sos parte del viaje", body: "Ya no tenés acceso a un viaje.", data: base };
+      return { ...text(event), data: base };
     case "comment.created":
-      return { title: "Nuevo comentario", body: "Hay un comentario nuevo en un recuerdo del viaje.",
-        data: { ...base, commentId: event.payload.commentId, postId: event.payload.postId } };
+      return { ...text(event), data: { ...base, commentId: event.payload.commentId, postId: event.payload.postId } };
+    case "member.left":
+      return { ...text(event), data: { ...base, memberId: event.payload.memberId } };
+    case "member.role_changed":
+    case "trip.ownership_transferred":
+      return { ...text(event), data: base };
   }
 };
