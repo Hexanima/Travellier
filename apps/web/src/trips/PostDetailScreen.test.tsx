@@ -568,7 +568,7 @@ describe("PostDetailScreen delete (T128)", () => {
     expect(document.activeElement).toBe(byText(dialog() as HTMLElement, "button", "Cancelar"));
     const actions = byText(dialog() as HTMLElement, "button", "Cancelar").parentElement as HTMLElement;
     expect(actions.className).toBe("trip-members-actions");
-    expect(byText(actions, "button", "Eliminar")).toBeTruthy();
+    expect(byText(actions, "button", "Eliminar")?.textContent).toBe("Eliminar");
   });
   it("cancelling does not delete and returns the focus to the button", async () => {
     const remove = vi.fn();
