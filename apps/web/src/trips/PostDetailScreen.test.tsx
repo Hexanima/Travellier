@@ -566,6 +566,9 @@ describe("PostDetailScreen delete (T128)", () => {
     expect(dialog()?.textContent).toContain("Eliminar recuerdo");
     expect(dialog()?.textContent).toContain("Se eliminan el recuerdo, sus fotos, su gasto, sus comentarios y me gusta. Sus continuaciones pasan al recuerdo anterior. No se puede deshacer.");
     expect(document.activeElement).toBe(byText(dialog() as HTMLElement, "button", "Cancelar"));
+    const actions = byText(dialog() as HTMLElement, "button", "Cancelar").parentElement as HTMLElement;
+    expect(actions.className).toBe("trip-members-actions");
+    expect(byText(actions, "button", "Eliminar")).toBeTruthy();
   });
   it("cancelling does not delete and returns the focus to the button", async () => {
     const remove = vi.fn();

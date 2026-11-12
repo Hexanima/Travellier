@@ -241,8 +241,10 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
       <Modal isOpen={confirming} closeOnEscape title="Eliminar recuerdo" onClose={closeDelete} loading={removing} error={removeError?.text}>
         <p>Se eliminan el recuerdo, sus fotos, su gasto, sus comentarios y me gusta. Sus continuaciones pasan al recuerdo anterior. No se puede deshacer.</p>
         {removeError?.login ? <Link to="/login">Iniciar sesión</Link> : null}
-        <button ref={cancelRef} className="ui-button" type="button" onClick={closeDelete}>Cancelar</button>
-        <Button error onClick={() => void confirmDelete()}>Eliminar</Button>
+        <div className="trip-members-actions">
+          <button ref={cancelRef} className="ui-button" type="button" onClick={closeDelete}>Cancelar</button>
+          <Button error onClick={() => void confirmDelete()}>Eliminar</Button>
+        </div>
       </Modal>
     </div>
   </>;

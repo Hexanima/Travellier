@@ -349,8 +349,10 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
       <Modal isOpen={removeId !== undefined} closeOnEscape title="Eliminar comentario" onClose={closeDelete} loading={removing} error={removeError?.text}>
         <p>Se elimina el comentario y sus me gusta. No se puede deshacer.</p>
         {removeError?.login ? <Link to="/login">Iniciar sesión</Link> : null}
-        <button ref={cancelRef} className="ui-button" type="button" onClick={closeDelete}>Cancelar</button>
-        <Button error onClick={() => void confirmDelete()}>Eliminar</Button>
+        <div className="trip-members-actions">
+          <button ref={cancelRef} className="ui-button" type="button" onClick={closeDelete}>Cancelar</button>
+          <Button error onClick={() => void confirmDelete()}>Eliminar</Button>
+        </div>
       </Modal>
     </div>
   </div>;
