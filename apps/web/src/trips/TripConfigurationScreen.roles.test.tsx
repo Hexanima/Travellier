@@ -107,10 +107,45 @@ describe("Trip configuration: roles", () => {
     await submit(container);
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, { expenseMode: "balance" });
     expect(list).toHaveBeenCalledTimes(2);
-    expect(container.textContent).toContain("Ya no tenés permiso para cambiar el modo de gastos");
+    expect(container.textContent).toContain("Ya no tenés permiso para cambiar el modo de gastos. No se guardó ningún cambio.");
     expect(container.textContent).not.toContain("Configuración guardada");
     expect(container.querySelector('[name="expenseMode"]')).toBeNull();
     expect(container.textContent).toContain("Solo registro");
     expect(container.textContent).toContain(note);
+  });
+  it("a 403 keeps the edited visibility and discards only the pending mode", async () => {
+    const list = vi.fn().mockResolvedValueOnce(listing("admin")).mockResolvedValue(listing("participant"));
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } });
+    const { container } = await mount("admin", { list, update });
+    await change(container, "visibility", "public");
+    await change(container, "expenseMode", "balance");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, { visibility: "public", expenseMode: "balance" });
+    expect(container.querySelector('[name="visibility"]')).toHaveProperty("value", "public");
+    expect(container.querySelector('[name="expenseMode"]')).toBeNull();
+    expect(container.textContent).toContain("No se guardó ningún cambio.");
+  });
+  it("editing a field clears the «no changes» notice", async () => {
+    const { container } = await mount("admin");
+    await submit(container);
+    expect(container.textContent).toContain("No hay cambios para guardar.");
+    await change(container, "visibility", "public");
+    expect(container.textContent).not.toContain("No hay cambios para guardar.");
+  });
+  it("editing a field clears the permission notice", async () => {
+    const list = vi.fn().mockResolvedValueOnce(listing("admin")).mockResolvedValue(listing("participant"));
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "forbidden" } });
+    const { container } = await mount("admin", { list, update });
+    await change(container, "expenseMode", "balance");
+    await submit(container);
+    expect(container.textContent).toContain("Ya no tenés permiso");
+    await change(container, "visibility", "public");
+    expect(container.textContent).not.toContain("Ya no tenés permiso");
+  });
+  it("editing the mode clears the «no changes» notice", async () => {
+    const { container } = await mount("admin");
+    await submit(container);
+    await change(container, "expenseMode", "balance");
+    expect(container.textContent).not.toContain("No hay cambios para guardar.");
   });
 });

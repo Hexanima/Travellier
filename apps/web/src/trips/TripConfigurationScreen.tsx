@@ -57,6 +57,8 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
 
   useEffect(() => { void load(); }, [load]);
 
+  const clearNotices = () => { setSaved(false); setNoChanges(false); setForbiddenNotice(false); };
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!tripId || !values || detail?.kind !== "member" || savingRef.current) return;
@@ -83,8 +85,10 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
         setValues(valuesFromTrip(result.value));
         setSaved(true);
       } else if (result.error.kind === "forbidden") {
-        // The role changed: show the notice, reload role and detail, and drop the pending mode.
+        // The role changed: reload role and detail, drop only the pending mode and keep the edited visibility.
+        const pendingVisibility = values.visibility;
         await load(true);
+        setValues((current) => current && { ...current, visibility: pendingVisibility });
         setForbiddenNotice(true);
       } else if (result.error.kind === "not-found" || result.error.kind === "unauthorized") {
         setDetail(undefined);
@@ -122,13 +126,13 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
               <form className="auth-form trip-config-form" onSubmit={(event) => void submit(event)}>
                 <SelectField label="Visibilidad" name="visibility" value={values.visibility} loading={saving}
                   helpText="Un viaje público se puede encontrar y permite unirse sin invitación; uno privado requiere invitación."
-                  onChange={(event) => { const visibility = event.target.value as ConfigValues["visibility"]; setValues((current) => current && { ...current, visibility }); setSaved(false); }}>
+                  onChange={(event) => { const visibility = event.target.value as ConfigValues["visibility"]; setValues((current) => current && { ...current, visibility }); clearNotices(); }}>
                   <option value="private">Privado</option>
                   <option value="public">Público</option>
                 </SelectField>
                 {isAdmin ? <SelectField label="Modo de gastos" name="expenseMode" value={values.expenseMode} loading={saving}
                   helpText={modeHelp}
-                  onChange={(event) => { const expenseMode = event.target.value as ConfigValues["expenseMode"]; setValues((current) => current && { ...current, expenseMode }); setSaved(false); }}>
+                  onChange={(event) => { const expenseMode = event.target.value as ConfigValues["expenseMode"]; setValues((current) => current && { ...current, expenseMode }); clearNotices(); }}>
                   <option value="register">Solo registro</option>
                   <option value="balance">Con balance</option>
                 </SelectField> : <div className="trip-config-readonly">
@@ -142,7 +146,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
                     : "Los gastos anteriores se conservan. No se calcularán balances mientras esté activo el modo registro."}</Feedback>
                 ) : null}
                 {saveError ? <Feedback variant="error">No pudimos guardar la configuración. Intentá nuevamente.</Feedback> : null}
-                {forbiddenNotice ? <Feedback variant="error">Ya no tenés permiso para cambiar el modo de gastos.</Feedback> : null}
+                {forbiddenNotice ? <Feedback variant="error">Ya no tenés permiso para cambiar el modo de gastos. No se guardó ningún cambio.</Feedback> : null}
                 {noChanges ? <Feedback>No hay cambios para guardar.</Feedback> : null}
                 {saved ? <Feedback variant="success">Configuración guardada.</Feedback> : null}
                 <Button type="submit" loading={saving} loadingLabel="Guardando…">Guardar cambios</Button>
