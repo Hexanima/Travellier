@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as domain from "../../index.js";
 import type { Comment, ObjectId, TripCommentPort, TripCommentScope, TripNotificationDraft, TripRole } from "../../index.js";
 
@@ -83,7 +83,7 @@ describe("Trip comment use cases", () => {
     });
 
     it("does not emit when editing a comment", async () => {
-      records = [seed()];
+      records = [seed({ authorId: actor })];
       expect((await update()).ok).toBe(true);
       expect(notifications).toEqual([]);
     });
@@ -139,28 +139,54 @@ describe("Trip comment use cases", () => {
     expect(records[0]!.text).toBe("Original");
   });
 
-  it("any current member edits another member's comment keeping author and creation date", async () => {
-    records = [seed()];
-    const result = await update({ text: " Nuevo \n texto " });
-    expect(result).toEqual({ ok: true, value: { ...seed(), text: "Nuevo \n texto", authorIsFormerMember: false } });
-    expect(records[0]).toEqual({ ...seed(), text: "Nuevo \n texto" });
-  });
+  describe("only the author edits the text (T124)", () => {
+    const mine = () => seed({ authorId: actor });
+    const forbidden = { ok: false, error: { tag: "UnauthorizedError" } };
+    it("the author edits keeping author and creation date", async () => {
+      records = [mine()];
+      const result = await update({ text: " Nuevo \n texto " });
+      expect(result).toEqual({ ok: true, value: { ...mine(), text: "Nuevo \n texto", authorIsFormerMember: false } });
+      expect(records[0]).toEqual({ ...mine(), text: "Nuevo \n texto" });
+    });
 
-  it("editing with the same text is idempotent", async () => {
-    records = [seed()];
-    expect(await update({ text: "Original" })).toMatchObject({ ok: true, value: { text: "Original", authorId: id(9) } });
-    expect(records).toEqual([seed()]);
-  });
+    it.each(["participant", "admin"] as const)("a %s who is not the author gets 403 without writing", async (memberRole) => {
+      records = [seed()]; role = memberRole;
+      const replace = vi.spyOn(scope, "replaceText");
+      expect(await update()).toMatchObject(forbidden);
+      expect(replace).not.toHaveBeenCalled(); expect(writes).toBe(0); expect(records).toEqual([seed()]);
+    });
 
-  it("flags a former member author on update", async () => {
-    records = [seed({ authorId: id(50) })];
-    expect(await update()).toMatchObject({ ok: true, value: { authorId: id(50), authorIsFormerMember: true } });
-  });
+    it("nobody edits the comment of a former member", async () => {
+      records = [seed({ authorId: id(50) })]; role = "admin";
+      expect(await update()).toMatchObject(forbidden);
+      expect(records).toEqual([seed({ authorId: id(50) })]);
+    });
 
-  it("rejects invalid text on update without changing the comment", async () => {
-    records = [seed()];
-    expect(await update({ text: "" })).toMatchObject({ ok: false, error: { issues: [{ field: "text", code: "required" }] } });
-    expect(records).toEqual([seed()]);
+    it("a former member editing their own comment gets 404, like a non-member", async () => {
+      records = [mine()]; role = undefined;
+      expect(await update()).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(records).toEqual([mine()]);
+    });
+
+    it("a missing comment is 404 for anyone, and invalid text from a non author is 403, not 422", async () => {
+      records = [seed()];
+      expect(await update({ commentId: id(88) })).toMatchObject({ ok: false, error: { tag: "CommentNotFoundError" } });
+      expect(await update({ text: "" })).toMatchObject(forbidden);
+      expect(await update({ text: "a".repeat(2001) })).toMatchObject(forbidden);
+      expect(records).toEqual([seed()]);
+    });
+
+    it("editing with the same text is idempotent", async () => {
+      records = [mine()];
+      expect(await update({ text: "Original" })).toMatchObject({ ok: true, value: { text: "Original", authorId: actor } });
+      expect(records).toEqual([mine()]);
+    });
+
+    it("rejects invalid text from the author without changing the comment", async () => {
+      records = [mine()];
+      expect(await update({ text: "" })).toMatchObject({ ok: false, error: { issues: [{ field: "text", code: "required" }] } });
+      expect(records).toEqual([mine()]);
+    });
   });
 
   it("does not write when the transaction fails", async () => {

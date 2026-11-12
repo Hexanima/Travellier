@@ -14,7 +14,7 @@ const day: ItineraryDay = { id: dayId, tripId, destinationId: id(8), type: "acti
   date: new Date("2026-09-25T00:00:00Z"), startsAt: new Date("2026-09-25T10:00:00.123Z"), endsAt: new Date("2026-09-25T18:00:00.789Z") };
 const context = { tripId, authenticatedUserId: actor };
 const newActivity = { title: "Cena", scheduledAt: new Date("2026-09-25T12:00:00.456Z") };
-const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, authorId: id(9), createdAt,
+const seedPost = (fields: Partial<Post> = {}): Post => ({ id: postId, tripId, authorId: actor, createdAt,
   description: "Recuerdo", mapsUrl: "maps", activityId: null, parentPostId: null, transportId: null, ...fields });
 
 describe("Trip post use cases", () => {
@@ -106,7 +106,7 @@ describe("Trip post use cases", () => {
     expect(records[0]).not.toHaveProperty("dayId");
   });
 
-  it.each(["admin", "participant"] as const)("allows %s to edit another author's post and preserves ownership", async (memberRole) => {
+  it.each(["admin", "participant"] as const)("lets the author edit as %s and preserves ownership and publication time", async (memberRole) => {
     role = memberRole; records = [seedPost()];
     expect(await update({ description: "Editado", mapsUrl: null, authorId: actor, createdAt: new Date(0), id: id(99) }))
       .toEqual(domain.ok(seedPost({ description: "Editado", mapsUrl: null })));
@@ -234,9 +234,9 @@ describe("Trip post use cases", () => {
       expect(domain.getTripPostChain).toBeDefined();
       const result = await domain.getTripPostChain.execute(dependencies(), { ...context, postId: a });
       expect(result).toEqual(domain.ok({ post: records[1],
-        parent: { id: root, authorId: id(9), createdAt, description: "Recuerdo" },
-        children: [{ id: d, authorId: id(9), createdAt: new Date("2026-10-04T12:00:09Z"), description: "rama" },
-          { id: b, authorId: id(9), createdAt: new Date("2026-10-04T12:00:02Z"), description: "Recuerdo" }],
+        parent: { id: root, authorId: actor, createdAt, description: "Recuerdo" },
+        children: [{ id: d, authorId: actor, createdAt: new Date("2026-10-04T12:00:09Z"), description: "rama" },
+          { id: b, authorId: actor, createdAt: new Date("2026-10-04T12:00:02Z"), description: "Recuerdo" }],
         rootActivityId: links.activityId }));
     });
 
@@ -561,7 +561,7 @@ describe("Trip post use cases", () => {
       it("links an existing post to a new activity keeping its createdAt and marks the authenticated user as going", async () => {
         records = [seedPost({ createdAt: new Date("2026-09-01T00:00:00Z") })];
         const result = await link();
-        expect(result).toMatchObject({ ok: true, value: { outcome: "linked", post: { id: postId, activityId: id(20), authorId: id(9),
+        expect(result).toMatchObject({ ok: true, value: { outcome: "linked", post: { id: postId, activityId: id(20), authorId: actor,
           createdAt: new Date("2026-09-01T00:00:00Z") }, activity: { id: id(20), createdBy: actor, createdAt },
         participation: { userId: actor, activityId: id(20), status: "going" } } });
         expect(records[0]).toMatchObject({ activityId: id(20), createdAt: new Date("2026-09-01T00:00:00Z") });
@@ -1593,5 +1593,139 @@ describe("Trip post use cases", () => {
       expect(notifications).toEqual([]);
     });
   });
+  });
+
+  describe("content editing is reserved to the author (T124)", () => {
+    const author = id(9), withDuration = { ...newActivity, durationMinutes: 60 };
+    const agreed = { totalAmount: 100, currency: "ARS", payments: [{ userId: id(41), unit: "percent", value: 100 }],
+      shares: [{ userId: id(41), unit: "percent", value: 50 }, { userId: id(42), unit: "remainder", value: null }] };
+    const uuid = "00000000-0000-4000-8000-000000000001";
+    const photo = { key: `trips/${tripId}/photos/${actor}/${uuid}.jpg` };
+    const authorPhoto = { key: `trips/${tripId}/photos/${author}/${uuid}.jpg` };
+    let headObject: ReturnType<typeof vi.fn>;
+    const deps = () => {
+      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000 }));
+      const storage: domain.ObjectStoragePort = { createUploadTarget: async () => domain.err(new domain.UnknownError("unused")),
+        createDownloadTarget: async () => domain.err(new domain.UnknownError("unused")), headObject };
+      return { ...dependencies(), storage };
+    };
+    const as = (userId: ObjectId, fields = {}) => domain.updateTripPost.execute(deps(), { ...context, authenticatedUserId: userId, postId, ...fields });
+    const linkAs = (userId: ObjectId, fields = {}) => domain.linkTripPostToNewActivity.execute(deps(),
+      { ...context, authenticatedUserId: userId, postId, newActivity: withDuration, ...fields });
+    const forbidden = { ok: false, error: { tag: "UnauthorizedError" } };
+    const state = () => structuredClone({ records, activities, participations, photoRecords, expenseRecords, notifications });
+    const writers = () => (["insert", "replace", "insertActivity", "insertPhotos", "insertExpense", "updateExpenseFields", "saveParticipation", "appendNotifications"] as const)
+      .map((method) => vi.spyOn(scope, method));
+    const written = (spies: ReturnType<typeof writers>) => spies.reduce((sum, spy) => sum + spy.mock.calls.length, 0);
+    beforeEach(() => { records = [seedPost({ authorId: author })]; members = [actor, author, id(41), id(42)]; });
+
+    it("lets the author edit the content", async () => {
+      expect(await as(author, { description: "Editado" })).toMatchObject({ ok: true, value: { description: "Editado", authorId: author } });
+    });
+
+    it.each(["participant", "admin"] as const)("denies a %s who is not the author without writes", async (memberRole) => {
+      role = memberRole; const before = state(), spies = writers();
+      expect(await as(actor, { description: "Editado" })).toMatchObject(forbidden);
+      expect(written(spies)).toBe(0); expect(state()).toEqual(before);
+    });
+
+    it.each<[string, Record<string, unknown>]>([["mapsUrl", { mapsUrl: "otra" }], ["activityId null", { activityId: null }],
+      ["activityId", { activityId: links.activityId }], ["parentPostId", { parentPostId: links.parentPostId }],
+      ["parentPostId null", { parentPostId: null }], ["transportId", { transportId: links.transportId }],
+      ["description null", { description: null }]])("denies another member editing %s", async (_, fields) => {
+      const before = state(), spies = writers();
+      expect(await as(actor, fields)).toMatchObject(forbidden);
+      expect(written(spies)).toBe(0); expect(state()).toEqual(before);
+    });
+
+    it("denies photos of another member before any storage call", async () => {
+      const spies = writers(); const result = await as(actor, { photos: [photo] });
+      expect(result).toMatchObject(forbidden);
+      expect(headObject).not.toHaveBeenCalled(); expect(written(spies)).toBe(0);
+    });
+
+    it("lets the author append photos", async () => {
+      expect(await as(author, { photos: [authorPhoto] })).toMatchObject({ ok: true });
+      expect(headObject).toHaveBeenCalled(); expect(photoRecords).toHaveLength(1);
+    });
+
+    it("keeps non-members at 404 with priority over 403, also with photos", async () => {
+      role = undefined; const spies = writers();
+      expect(await as(actor, { description: "No", photos: [photo] })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(await as(actor, { description: "No" })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(headObject).not.toHaveBeenCalled(); expect(written(spies)).toBe(0);
+    });
+
+    it("answers a missing post with 404 also for a non author, with and without photos", async () => {
+      expect(await as(actor, { postId: id(98), description: "No" })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(await as(actor, { postId: id(98), photos: [photo] })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(headObject).not.toHaveBeenCalled();
+    });
+
+    it("answers 403 and not 422 to a non author with an invalid payload", async () => {
+      expect(await as(actor, { description: "x".repeat(6000) })).toMatchObject(forbidden);
+      expect(await as(actor, { activityId: id(97) })).toMatchObject(forbidden);
+      expect(await as(actor, { photos: "invalid" })).toMatchObject(forbidden);
+    });
+
+    it("denies a mixed PATCH of expense and content without touching the expense", async () => {
+      const spies = writers(), before = state();
+      expect(await as(actor, { description: "Editado", expense: agreed })).toMatchObject(forbidden);
+      expect(written(spies)).toBe(0); expect(state()).toEqual(before); expect(expenseRecords).toEqual([]);
+    });
+
+    it.each(["participant", "admin"] as const)("lets any current %s edit only the expense, payments and shares", async (memberRole) => {
+      role = memberRole;
+      const result = await as(actor, { expense: agreed });
+      expect(result).toMatchObject({ ok: true, value: { expense: { totalAmount: 100, payments: agreed.payments, shares: agreed.shares } } });
+      expect(expenseRecords).toHaveLength(1); expect(expenseRecords[0]).toMatchObject({ payments: agreed.payments });
+      expect(records).toEqual([seedPost({ authorId: author })]);
+      expect(await as(actor, { expense: { ...agreed, totalAmount: 200 } })).toMatchObject({ ok: true });
+      expect(expenseRecords[0]).toMatchObject({ totalAmount: 200 });
+    });
+
+    it("answers 404 to a former member author and 403 to the current member editing the content of a former member", async () => {
+      records = [seedPost({ authorId: actor })]; role = undefined;
+      expect(await as(actor, { description: "Editado" })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      role = "admin"; members = [actor, id(41), id(42)]; records = [seedPost({ authorId: id(99) })];
+      const spies = writers();
+      expect(await as(actor, { description: "Editado" })).toMatchObject(forbidden);
+      expect(written(spies)).toBe(0);
+      expect(await as(actor, { expense: agreed })).toMatchObject({ ok: true });
+    });
+
+    it("keeps the T87 retry of the author a no-op", async () => {
+      const body = { description: "Editado", photos: [authorPhoto], expense: agreed };
+      expect(await as(author, body)).toMatchObject({ ok: true });
+      const before = state();
+      expect(await as(author, body)).toMatchObject({ ok: true });
+      expect(state()).toEqual(before);
+    });
+
+    describe("linkTripPostToNewActivity", () => {
+      it.each<[string, Record<string, unknown>]>([["without expense", {}], ["with expense", { expense: agreed }]])(
+        "denies a non author %s and creates no activity", async (_, fields) => {
+          const before = state(), spies = writers();
+          expect(await linkAs(actor, fields)).toMatchObject(forbidden);
+          expect(written(spies)).toBe(0); expect(state()).toEqual(before); expect(activities).toEqual([]);
+        });
+
+      it("denies a non author with photos before storage, and keeps 404 for non members", async () => {
+        expect(await linkAs(actor, { photos: [photo] })).toMatchObject(forbidden);
+        expect(headObject).not.toHaveBeenCalled();
+        role = undefined;
+        expect(await linkAs(actor)).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      });
+
+      it("lets the author link and answers the retry of a saved newActivity.id, denying the same retry to a non author", async () => {
+        const wanted = { ...withDuration, id: id(600) };
+        expect(await linkAs(author, { newActivity: wanted })).toMatchObject({ ok: true, value: { outcome: "linked", activity: { id: id(600) } } });
+        const before = state();
+        expect(await linkAs(author, { newActivity: wanted })).toMatchObject({ ok: true, value: { outcome: "linked", activity: { id: id(600) } } });
+        expect(state()).toEqual(before);
+        expect(await linkAs(actor, { newActivity: wanted })).toMatchObject(forbidden);
+        expect(state()).toEqual(before);
+      });
+    });
   });
 });

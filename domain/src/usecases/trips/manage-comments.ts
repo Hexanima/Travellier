@@ -2,6 +2,7 @@ import { createComment, editCommentText, type Comment } from "../../entities/com
 import { CommentNotFoundError } from "../../errors/comment-not-found-error.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
+import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import type { TripCommentPort, TripCommentReadScope } from "../../ports/trip-comment-port.js";
 import type { TaggedError } from "../../types/error.js";
 import { err, ok, type AsyncResult } from "../../types/result.js";
@@ -57,7 +58,7 @@ export const createTripPostComment: UseCase<CreationDependencies, CreateTripPost
   }),
 };
 
-/** Any current member may edit; author and creation date are never touched. */
+/** Only the author edits the text (T124), so nobody edits the comment of a former member; author and creation date are never touched. */
 export const updateTripPostComment: UseCase<Dependencies, UpdateTripPostCommentPayload, CommentView, TaggedError> = {
   execute: ({ comments }, payload) => comments.withTransaction<CommentView>(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
@@ -68,6 +69,7 @@ export const updateTripPostComment: UseCase<Dependencies, UpdateTripPostCommentP
     if (!found.ok) return found;
     if (found.value === undefined || found.value.id !== payload.commentId || found.value.tripId !== payload.tripId
       || found.value.postId !== payload.postId) return err(new CommentNotFoundError());
+    if (found.value.authorId !== payload.authenticatedUserId) return err(new UnauthorizedError());
     const edited = editCommentText(found.value, payload.text);
     if (!edited.ok) return edited;
     const replaced = await scope.replaceText(edited.value);
