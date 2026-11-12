@@ -12,6 +12,8 @@ import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-ac
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
 import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { commentLength } from "./comment-text.js";
+import { POST_DESCRIPTION_MAX, descriptionTooLong } from "./post-text-limits.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -36,8 +38,11 @@ const expenseWaitMessage = "Esperá a que cargue el gasto guardado para guardar 
 const exceedsMessage = "El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en Pagos y reparto.";
 const splitRowsMessage = "Revisá pagos y reparto: no pudimos guardar algunas filas.";
 const splitFieldPattern = /^expense\.(payments|shares)\b/;
+const breakdownLimitMessage = "El desglose del gasto supera el máximo de 2000 caracteres. Editá el gasto.";
+const descriptionLimitMessage = `El texto supera el máximo de ${POST_DESCRIPTION_MAX} caracteres.`;
 const expenseFieldMessage = (field: string, code: string): string | undefined => {
   if (splitFieldPattern.test(field) && code === "exceeds_total") return exceedsMessage;
+  if (field === "expense.breakdown" && code === "too_long") return breakdownLimitMessage;
   if (field === "expense.totalAmount" && (code === "invalid" || code === "required")) return "Revisá el importe del gasto.";
   if (field === "expense.currency" && (code === "invalid" || code === "required")) return "Elegí la moneda del gasto.";
   return field.startsWith("expense.") ? "No pudimos guardar el gasto. Revisá sus datos." : undefined;
@@ -225,6 +230,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
     if (error.kind === "validation") {
       const mapped: Record<string, string> = {};
       const splitFields: { field: string; code?: string }[] = [];
+      let focusContent = false;
       for (const { field, code } of error.fields ?? []) {
         // A rejected retry id is dropped: the next attempt creates a fresh one (nothing was saved with it).
         if (field === "id") applyDraft((current) => withoutAttempt(current, "attemptId"));
@@ -237,6 +243,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
           mapped.photos = badPhotoMessage; setFocusRetry((value) => value + 1);
         } else if (field === "photos") mapped.photos ??= photosFieldMessage;
         else if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
+        else if (field === "description") {
+          // The server decides the content rule and the limit: both stay on the field and the draft is kept.
+          if (code === "required") { setMissingContent(true); focusContent = true; }
+          else mapped.description = code === "too_long" ? descriptionLimitMessage : fieldMessages.description!;
+        }
         else if (field in fieldMessages) mapped[field] = fieldMessages[field]!;
         else if (splitFieldPattern.test(field)) splitFields.push({ field, code });
         else if (expenseFieldMessage(field, code ?? "")) {
@@ -254,7 +265,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
           mapped.expense = Object.keys(placed.listErrors).length > 0 ? exceedsMessage : splitRowsMessage;
         } else mapped.expense ??= expenseFieldMessage(splitFields[0]!.field, "")!;
       }
-      setErrors(mapped); focusPending.current = Object.keys(mapped).some((name) => name !== "photos");
+      setErrors(mapped); focusPending.current = focusContent || Object.keys(mapped).some((name) => name !== "photos");
     }
   };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
@@ -310,10 +321,21 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
     event.preventDefault();
     if (savingRef.current || photosCtl.isBusy() || !tripId) return;
     setMessage(""); setFailure(undefined); setErrors({}); setSplitErrors(undefined); setMissingContent(false); setNotice(""); setPhotoError(undefined);
-    // Creating always needs text, a location or a photo; editing only when the text or the location changed and nothing is left
-    // (an existing memory can be relinked without them).
+    // Creating always needs text, a location or a photo; editing only when the text or the location changed and nothing is left, counting the
+    // photos already published (an existing memory can be relinked without them).
     const textChanged = draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl;
-    if (!hasContent(draft) && (!existing || textChanged)) { setMissingContent(true); focusPending.current = true; return; }
+    if (descriptionTooLong(draft.values.description)) { setErrors({ description: descriptionLimitMessage }); focusPending.current = true; return; }
+    const empty = !hasContent(draft);
+    if (empty && !existing) { setMissingContent(true); focusPending.current = true; return; }
+    // The published photos only count when this edit would leave neither text nor location: they are read now, lazily (nothing is loaded when opening).
+    // A failed read never blocks: the server applies the rule.
+    if (empty && existing && textChanged && photos?.api.countForPost) {
+      savingRef.current = true; setSaving(true);
+      let published: number | undefined;
+      try { const counted = await photos.api.countForPost(tripId, existing.id); published = counted.ok ? counted.value : undefined; } catch { published = undefined; }
+      finally { savingRef.current = false; setSaving(false); }
+      if (published === 0) { setMissingContent(true); focusPending.current = true; return; }
+    }
     const resolved = resolveActivity();
     if (resolved === "invalid") return;
     // A changed expense is a merge-patch against the stored one: it cannot be built until that is known.
@@ -464,6 +486,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
         {existing && published ? <p className="itinerary-secondary">Publicado el <time dateTime={existing.createdAt}>{published.format(new Date(existing.createdAt))}</time></p> : null}
         <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={missingContent ? photos ? missingContentWithPhotosMessage : missingContentMessage : errors.description}
           onChange={(event) => update("description", event.target.value)} />
+        <p className="comment-count">{commentLength(draft.values.description.trim())} / {POST_DESCRIPTION_MAX}</p>
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
         <LocationPreview value={draft.values.mapsUrl} context="composer" />
@@ -514,7 +537,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
         {message ? <Feedback>{message}</Feedback> : null}
         {failure && failure.kind !== "validation" && !photoConflict ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
           {(safeRetry || newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${safeRetry ? safeRetryHint : retryHint}` : ""}</Feedback> : null}
-        {failure?.kind === "validation" && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
+        {failure?.kind === "validation" && !missingContent && !errors.description && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>
           {existing ? "Guardar cambios" : "Publicar recuerdo"}
         </Button>

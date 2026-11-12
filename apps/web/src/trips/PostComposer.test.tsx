@@ -284,20 +284,22 @@ describe("PostComposer (edit)", () => {
     expect(update).not.toHaveBeenCalled();
     expect(container.textContent).toContain("No hay cambios para guardar.");
   });
-  it("does not allow emptying both: the save stays enabled, does not call update and shows an associated message that clears on typing", async () => {
-    const { container, update } = await render(editPath);
+  it("without a photo reader the server decides when both are emptied: its 422 description/required shows on the field, associated and focused, and the draft stays", async () => {
+    const required = { ok: false, error: { kind: "validation", fields: [{ field: "description", code: "required", message: "x" }] } };
+    const update = vi.fn().mockResolvedValue(required);
+    const { container } = await render(editPath, { update });
     await field(container, "description", "");
     const saveButton = container.querySelector('button[type="submit"]') as HTMLButtonElement;
     expect(saveButton.disabled).toBe(false);
     await click(saveButton);
-    expect(update).not.toHaveBeenCalled();
-    const alerts = Array.from(container.querySelectorAll('[role="alert"]')).filter((item) => item.textContent?.includes("Escribí un texto o agregá una ubicación."));
-    expect(alerts).toHaveLength(1);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: null });
+    const found = Array.from(container.querySelectorAll('[role="alert"]'));
+    expect(found.map((item) => item.textContent)).toEqual(["Escribí un texto o agregá una ubicación."]);
     const input = container.querySelector('[name="description"]') as HTMLTextAreaElement;
     expect(input.getAttribute("aria-invalid")).toBe("true");
-    expect(input.getAttribute("aria-describedby")).toBe(alerts[0].id);
-    expect(document.getElementById(input.getAttribute("aria-describedby")!)).toBe(alerts[0]);
+    expect(input.getAttribute("aria-describedby")).toBe(found[0].id);
     expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("");
     await field(container, "description", "Nuevo");
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
@@ -1210,5 +1212,65 @@ describe("PostComposer (share a memory of an activity)", () => {
       expect(value(container, "description")).toBe("");
       expect(summary(container)).toBe("Actividad: Otra");
     });
+  });
+});
+
+describe("PostComposer text limits", () => {
+  const tooLong = { ok: false, error: { kind: "validation", fields: [{ field: "description", code: "too_long", message: "x" }] } };
+  const limitMessage = "El texto supera el máximo de 5000 caracteres.";
+  const counter = (container: HTMLElement) => container.querySelector(".comment-count")?.textContent;
+  it("sends exactly 5000 characters", async () => {
+    const { container, create } = await render();
+    await field(container, "description", "a".repeat(5000)); await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "a".repeat(5000) });
+  });
+  it("counts code points and trims before measuring: 5000 emoji plus spaces is accepted", async () => {
+    const { container, create } = await render();
+    const text = "😀".repeat(5000);
+    await field(container, "description", `  ${text}  `);
+    expect(counter(container)).toBe("5000 / 5000");
+    await submit(container);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: text });
+  });
+  it("shows the counter in code points while typing", async () => {
+    const { container } = await render();
+    expect(counter(container)).toBe("0 / 5000");
+    await field(container, "description", "a😀b");
+    expect(counter(container)).toBe("3 / 5000");
+  });
+  it("5001 characters warn on the field, focus it, do not call the API and are never cut", async () => {
+    const { container, create } = await render();
+    const text = "a".repeat(5001);
+    await field(container, "description", text); await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toEqual([limitMessage]);
+    const input = container.querySelector('[name="description"]') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe(text);
+    await field(container, "description", "a".repeat(5000));
+    expect(alerts(container)).toHaveLength(0);
+  });
+  it("a 422 description/too_long shows on the field with focus and keeps the draft", async () => {
+    const create = vi.fn().mockResolvedValue(tooLong);
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Texto"); await field(container, "mapsUrl", "https://maps.example/x"); await submit(container);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(alerts(container).map((item) => item.textContent)).toEqual([limitMessage]);
+    expect(document.activeElement).toBe(container.querySelector('[name="description"]'));
+    expect(value(container, "description")).toBe("Texto"); expect(value(container, "mapsUrl")).toBe("https://maps.example/x");
+  });
+  it("a 422 description/required maps to the content field with its own message and focus", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "description", code: "required", message: "x" }] } });
+    const { container } = await render(undefined, { create });
+    await field(container, "mapsUrl", "https://maps.example/x"); await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["Escribí un texto o agregá una ubicación."]);
+    expect(document.activeElement).toBe(container.querySelector('[name="description"]'));
+    expect(value(container, "mapsUrl")).toBe("https://maps.example/x");
+  });
+  it("any other description code keeps the generic field message", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "description", code: "invalid", message: "x" }] } });
+    const { container } = await render(undefined, { create });
+    await field(container, "description", "Texto"); await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["Revisá el texto del recuerdo."]);
   });
 });

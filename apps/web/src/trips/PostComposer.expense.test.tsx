@@ -170,6 +170,7 @@ describe("PostComposer expense (create)", () => {
     [[{ field: "expense.currency", code: "required", message: "x" }], "Elegí la moneda del gasto."],
     [[{ field: "expense.currency", code: "invalid", message: "x" }], "Elegí la moneda del gasto."],
     [[{ field: "expense.breakdown", code: "invalid", message: "x" }], "No pudimos guardar el gasto. Revisá sus datos."],
+    [[{ field: "expense.breakdown", code: "too_long", message: "x" }], "El desglose del gasto supera el máximo de 2000 caracteres. Editá el gasto."],
   ])("maps a 422 %j to one alert and focuses the expense button, keeping the draft", async (fields, message) => {
     const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields } });
     const { container } = await render(newPath, { create });
