@@ -83,6 +83,27 @@ describe("control geometry and states", () => {
     expect(ruleBody(components, ".ui-modal__close")).toMatch(/min-height: 44px/);
   });
 
+  it("keeps the left-aligned layout of composite ui-buttons under inline-flex", () => {
+    const itinerary = read("trips/itinerary.css");
+    const stop = ruleBody(itinerary, ".destination-picker__stop.ui-button");
+    expect(stop).toMatch(/display: block/);
+    expect(stop).toMatch(/text-align: left/);
+    expect(stop).toMatch(/width: 100%/);
+    const banner = ruleBody(itinerary, ".itinerary-destination-banner.ui-button");
+    expect(banner).toMatch(/justify-content: flex-start/);
+    expect(banner).toMatch(/text-align: left/);
+    expect(banner).toMatch(/width: 100%/);
+    expect(ruleBody(itinerary, ".destination-picker__when")).toMatch(/display: block/);
+  });
+
+  it("styles the disabled modal close with tokens instead of opacity", () => {
+    const disabled = ruleBody(components, ".ui-modal__close:disabled");
+    expect(disabled).toMatch(/background: var\(--ui-color-disabled-surface\)/);
+    expect(disabled).toMatch(/color: var\(--ui-color-muted\)/);
+    expect(disabled).toMatch(/cursor: not-allowed/);
+    expect(disabled).not.toMatch(/opacity/);
+  });
+
   it("uses a 3px focus outline offset by 3px on buttons and 2px on fields", () => {
     expect(ruleBody(components, ".ui-button:focus-visible")).toMatch(/outline: 3px solid[^;]*;[\s\S]*outline-offset: 3px/);
     expect(ruleBody(components, ".ui-control:focus-visible")).toMatch(/outline: 2px solid[^;]*;[\s\S]*outline-offset: 3px/);
