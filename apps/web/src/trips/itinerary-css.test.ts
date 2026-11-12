@@ -132,6 +132,7 @@ describe("selector de destinos", () => {
   });
   it("la parada actual es soft; la incompleta usa disabled-surface y muted (sin opacity)", () => {
     expect(ruleBody(`${stop}[aria-current="true"]`)).toContain("background: var(--ui-color-soft)");
+    expect(ruleBody(`${stop}[aria-current="true"] .destination-picker__order`)).toContain("background: var(--ui-color-surface)");
     expect(ruleBody(`${stop}:hover:not(:disabled)`)).toContain("background: var(--ui-color-soft)");
     const disabled = ruleBody(`${stop}:disabled`);
     expect(disabled).toContain("background: var(--ui-color-disabled-surface)");

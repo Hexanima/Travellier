@@ -201,7 +201,7 @@
 .trip-shell .ui-tabpanel .ui-tablist .ui-tab[aria-selected="true"] { background: var(--ui-color-soft); color: var(--ui-color-brand); border-color: var(--ui-color-soft); }
 .trip-shell .ui-tabpanel .ui-tablist .ui-tab[aria-selected="false"]:hover { background: var(--ui-color-soft); color: var(--ui-color-brand); }
 .ui-tabpanel { display: grid; gap: 12px; min-width: 0; }
-.itinerary-days-nav { margin-top: 16px; }
+.itinerary-days-nav { margin-top: 16px; margin-bottom: 8px; }
 .itinerary-day-strip { display: flex; gap: 8px; overflow-x: auto; padding: 6px; margin: 0; list-style: none; }
 .itinerary-day-chip { flex: none; }
 .itinerary-day-chip.ui-button { min-height: 64px; background: var(--ui-color-surface); color: var(--ui-color-brand); border-color: var(--ui-color-border); }
@@ -215,6 +215,7 @@
 .destination-picker__stop.ui-button[aria-current="true"] { background: var(--ui-color-soft); }
 .destination-picker__stop.ui-button:disabled { background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
 .destination-picker__order { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-inline-end: var(--ui-space-3); border-radius: var(--ui-radius-pill); background: var(--ui-color-soft); color: var(--ui-color-brand); font-size: .75rem; line-height: 1.125rem; font-weight: 600; font-variant-numeric: tabular-nums; vertical-align: middle; }
+.destination-picker__stop.ui-button[aria-current="true"] .destination-picker__order { background: var(--ui-color-surface); }
 .destination-picker__name { font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; vertical-align: middle; overflow-wrap: anywhere; }
 .destination-picker__reason { display: block; margin-top: var(--ui-space-1); padding-inline-start: 40px; font-size: .875rem; line-height: 1.25rem; font-weight: 400; color: var(--ui-color-muted); }
 .destination-picker__when { display: block; padding-inline-start: 40px; font-size: .75rem; line-height: 1.125rem; font-weight: 600; color: var(--ui-color-muted); font-variant-numeric: tabular-nums; }
