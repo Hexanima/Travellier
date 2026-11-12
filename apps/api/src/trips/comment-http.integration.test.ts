@@ -121,4 +121,61 @@ describe("comment HTTP API", () => {
     expect(body(await f.request("GET", path(), undefined, admin)).comments).toMatchObject([{ authorId: f.actor.toHexString(), authorIsFormerMember: true }]);
     expect((await f.request("GET", path())).statusCode).toBe(404);
   });
+
+  describe("DELETE comments (T126)", () => {
+    const member = async (role: "admin" | "participant") => {
+      const userId = new ObjectId();
+      await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId, role, joinedAt: new Date() });
+      return userId;
+    };
+    const created = async () => body(await post()).comment as { id: string };
+    const del = (commentId: string, user = f.actor, url = path()) => f.request("DELETE", `${url}/${commentId}`, undefined, user);
+
+    it("answers 204 without a body to the author and the comment disappears from the list", async () => {
+      const first = await created(); await post({ text: "Otro" });
+      const response = await del(first.id);
+      expect([response.statusCode, response.body]).toEqual([204, ""]);
+      expect(body(await f.request("GET", path())).comments).toMatchObject([{ text: "Otro" }]);
+    });
+
+    it("answers 204 to an admin deleting the comment of another member", async () => {
+      const first = await created(); const admin = await member("admin");
+      expect((await del(first.id, admin)).statusCode).toBe(204);
+      expect(await f.db.collection("comments").countDocuments({})).toBe(0);
+    });
+
+    it("answers 403 Forbidden to a participant who is not the author", async () => {
+      const first = await created(); const other = await member("participant");
+      const response = await del(first.id, other);
+      expect(response.statusCode).toBe(403);
+      expect(body(response).error.code).toBe("Forbidden");
+      expect(await f.db.collection("comments").countDocuments({})).toBe(1);
+    });
+
+    it("answers 404 to a non member, an unknown post, a repeated delete and a comment of another post", async () => {
+      const first = await created();
+      expect((await del(first.id, new ObjectId())).statusCode).toBe(404);
+      const otherPost = await f.request("POST", f.path(), { description: "Otro" });
+      const otherPostId = JSON.parse(otherPost.body).post.id;
+      const crossed = await del(first.id, f.actor, path(otherPostId));
+      expect([crossed.statusCode, body(crossed).error.code]).toEqual([404, "CommentNotFoundError"]);
+      expect((await del(first.id, f.actor, path(new ObjectId().toHexString()))).statusCode).toBe(404);
+      expect((await del(first.id)).statusCode).toBe(204);
+      const repeated = await del(first.id);
+      expect([repeated.statusCode, body(repeated).error.code]).toEqual([404, "CommentNotFoundError"]);
+    });
+
+    it("answers 401 without a token, 400 for invalid ids and 503 when trips is not configured", async () => {
+      const first = await created();
+      expect((await handleApiRequest({ method: "DELETE", url: `${path()}/${first.id}` }, { trips: f.api })).statusCode).toBe(401);
+      expect((await del("nope")).statusCode).toBe(400);
+      expect((await del(first.id, f.actor, path("nope"))).statusCode).toBe(400);
+      expect((await handleApiRequest({ method: "DELETE", url: `${path()}/${first.id}`, authenticatedUserId: domainId(f.actor) })).statusCode).toBe(503);
+      expect(await f.db.collection("comments").countDocuments({})).toBe(1);
+    });
+
+    it("does not allow DELETE on the comment collection", async () => {
+      expect((await f.request("DELETE", path())).statusCode).not.toBe(204);
+    });
+  });
 });

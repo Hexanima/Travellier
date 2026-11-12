@@ -449,4 +449,62 @@ describe("post HTTP API", () => {
     const response = await f.request("POST", f.path(), input());
     expect(response.statusCode).toBe(500); expect(response.body).not.toContain("secret detail");
   });
+
+  describe("DELETE /trips/:tripId/posts/:postId (T126)", () => {
+    const url = (id: string, trip = f.trip.toHexString()) => `/trips/${trip}/posts/${id}`;
+    const member = async (role: "admin" | "participant") => {
+      const userId = new ObjectId();
+      await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId, role, joinedAt: new Date() });
+      return userId;
+    };
+
+    it("answers 204 without a body to the author and the post is gone", async () => {
+      const post = await create();
+      const response = await f.request("DELETE", url(post.id));
+      expect([response.statusCode, response.body]).toEqual([204, ""]);
+      expect((await f.request("GET", url(post.id))).statusCode).toBe(404);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+    });
+
+    it("answers 204 to an admin deleting another member's post", async () => {
+      const post = await create(), admin = await member("admin");
+      const response = await f.request("DELETE", url(post.id), undefined, admin);
+      expect([response.statusCode, response.body]).toEqual([204, ""]);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(0);
+    });
+
+    it("answers 403 Forbidden to a participant who is not the author and keeps the post", async () => {
+      const post = await create(), other = await member("participant");
+      const response = await f.request("DELETE", url(post.id), undefined, other);
+      expect(response.statusCode).toBe(403);
+      expect(JSON.parse(response.body).error.code).toBe("Forbidden");
+      expect(await f.db.collection("posts").countDocuments({})).toBe(1);
+    });
+
+    it("answers 404 to a non member, a Trip that is not theirs, an unknown post and a repeated delete", async () => {
+      const post = await create(), stranger = new ObjectId();
+      expect((await f.request("DELETE", url(post.id), undefined, stranger)).statusCode).toBe(404);
+      expect((await f.request("DELETE", url(new ObjectId().toHexString()))).statusCode).toBe(404);
+      expect((await f.request("DELETE", url(post.id, new ObjectId().toHexString()))).statusCode).toBe(404);
+      expect((await f.request("DELETE", url(post.id))).statusCode).toBe(204);
+      const repeated = await f.request("DELETE", url(post.id));
+      expect([repeated.statusCode, JSON.parse(repeated.body).error.code]).toEqual([404, "PostNotFoundError"]);
+    });
+
+    it("answers 401 without a session and 400 for an invalid id, changing nothing", async () => {
+      const post = await create();
+      expect((await handleApiRequest({ method: "DELETE", url: url(post.id) }, { trips: f.api })).statusCode).toBe(401);
+      expect((await f.request("DELETE", url("nope"))).statusCode).toBe(400);
+      expect((await f.request("DELETE", url(post.id, "nope"))).statusCode).toBe(400);
+      expect(await f.db.collection("posts").countDocuments({})).toBe(1);
+    });
+
+    it("answers 503 when the posts API is not configured and takes the identity only from the token", async () => {
+      const post = await create();
+      expect((await handleApiRequest({ method: "DELETE", url: url(post.id), authenticatedUserId: domainId(f.actor) })).statusCode).toBe(503);
+      const forged = await handleApiRequest({ method: "DELETE", url: url(post.id), body: { authorId: f.actor.toHexString(), authenticatedUserId: f.actor.toHexString() },
+        authenticatedUserId: domainId(await member("participant")) }, { trips: f.api });
+      expect(forged.statusCode).toBe(403);
+    });
+  });
 });
