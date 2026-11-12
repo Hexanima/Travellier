@@ -99,7 +99,7 @@ describe("notification persistence with the originating operation", () => {
 
   it("a required plan-change confirmation leaves no event", async () => {
     await addMember();
-    expect((await f.api.createPost!({ ...f.context(), newActivity: spontaneous })).ok).toBe(true);
+    expect((await f.api.createPost!({ ...f.context(), description: "Cena", newActivity: spontaneous })).ok).toBe(true);
     await f.db.collection("outboxEvents").deleteMany({});
     const before = await state();
     const conflicting = await f.api.createPost!({ ...f.context(), description: "Otra", newActivity: { ...spontaneous, title: "Otra cena" } });
