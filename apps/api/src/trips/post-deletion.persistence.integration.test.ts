@@ -158,7 +158,12 @@ describe("memory deletion persistence and transactions (T126)", () => {
       expect(await parentOf(e.id)).toEqual(new ObjectId(c.id));
       expect(await parentOf(sibling.id)).toEqual(new ObjectId(a.id));
       const childrenAfter = await f.db.collection("posts").find({ _id: { $in: [c.id, d.id, e.id].map((x) => new ObjectId(x)) } }).sort({ _id: 1 }).toArray();
-      expect(childrenAfter.map(({ parentPostId: _p, ...rest }) => rest)).toEqual(childrenBefore.map(({ parentPostId: _p, ...rest }) => rest));
+      const withoutParent = (doc: Record<string, unknown>) => {
+        const copy = { ...doc };
+        delete copy.parentPostId;
+        return copy;
+      };
+      expect(childrenAfter.map(withoutParent)).toEqual(childrenBefore.map(withoutParent));
       for (const kept of [c, d, e]) {
         expect(await count("postPhotos", { postId: new ObjectId(kept.id) })).toBe(1);
         expect(await count("postExpenses", { postId: new ObjectId(kept.id) })).toBe(1);
