@@ -34,7 +34,9 @@ describe("comment HTTP API", () => {
     const first = body(await post({ text: "Uno" })).comment;
     await post({ text: "Dos" });
     const editor = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: editor, role: "admin", joinedAt: new Date() });
-    const edited = await f.request("PATCH", `${path()}/${first.id}`, { text: " Editado ", authorId: new ObjectId().toHexString(), createdAt: new Date(0).toISOString() }, editor);
+    const denied = await f.request("PATCH", `${path()}/${first.id}`, { text: "Ajeno" }, editor);
+    expect(denied.statusCode, denied.body).toBe(403);
+    const edited = await f.request("PATCH", `${path()}/${first.id}`, { text: " Editado ", authorId: new ObjectId().toHexString(), createdAt: new Date(0).toISOString() });
     expect(edited.statusCode, edited.body).toBe(200);
     expect(body(edited)).toEqual({ comment: { ...first, text: "Editado" } });
     const listed = await f.request("GET", path());

@@ -9,12 +9,13 @@ import { createPost, hasPostContent, MAX_POST_CHAIN_DEPTH, relinkPost, requirePo
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
 import { PostRequestConflictError } from "../../errors/post-request-conflict-error.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
+import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
 import type { ObjectStoragePort } from "../../ports/object-storage-port.js";
 import type { TripPostPort, TripPostReadScope, TripPostScope } from "../../ports/trip-post-port.js";
 import type { TaggedError } from "../../types/error.js";
-import { err, ok, type AsyncResult } from "../../types/result.js";
+import { err, ok, type AsyncResult, type Result } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import { createObjectId, type ObjectId } from "../../value-objects/object-id.js";
 import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
@@ -135,6 +136,26 @@ const find = async (scope: TripPostReadScope, payload: PostDetailPayload): Async
   const post = await scope.find(payload.postId);
   if (!post.ok) return post;
   return post.value?.id === payload.postId && post.value.tripId === payload.tripId ? ok(post.value) : err(new PostNotFoundError());
+};
+/** Fields of the save that edit the content of the memory (T124); `null` counts as supplied, only `undefined` is absent. */
+const CONTENT_KEYS = ["description", "mapsUrl", "activityId", "parentPostId", "transportId", "photos", "newActivity"] as const;
+const touchesContent = (payload: object): boolean => CONTENT_KEYS.some((key) => Object.hasOwn(payload, key) && (payload as Record<string, unknown>)[key] !== undefined);
+/** Only the author edits the content (also in a PATCH mixed with `expense`); expense-only saves stay open to every current member. */
+const requireAuthor = (post: Post, payload: TripPostPayload): Result<undefined, UnauthorizedError> =>
+  !touchesContent(payload) || post.authorId === payload.authenticatedUserId ? ok(undefined) : err(new UnauthorizedError());
+/**
+ * Like `requireMemberBeforeStorage` for an existing post: a save with `photos` reads the post in the same snapshot and answers 404 or 403
+ * before any storage call.
+ */
+const requireAuthorBeforeStorage = async (posts: TripPostPort, payload: PostDetailPayload & PhotoReferences): AsyncResult<undefined> => {
+  if (payload.photos === undefined) return ok(undefined);
+  return posts.withReadSnapshot(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const post = await find(scope, payload);
+    if (!post.ok) return post;
+    return requireAuthor(post.value, payload);
+  });
 };
 const resolve = async (scope: TripPostReadScope, post: Pick<Post, "tripId"> & Partial<PostLinks>,
   activity?: Activity): AsyncResult<CreatePostContext> => {
@@ -388,7 +409,7 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
 /** Creates a spontaneous activity for an existing post (T55 exclusive link applies); the post keeps its publication time. */
 export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPostToNewActivityPayload, LinkTripPostToNewActivityResult, TaggedError> = {
   execute: async ({ posts, createId, now, storage }, payload) => {
-    const member = await requireMemberBeforeStorage(posts, payload);
+    const member = await requireAuthorBeforeStorage(posts, payload);
     if (!member.ok) return member;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
@@ -398,6 +419,8 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
     if (!trip.ok) return trip;
     const current = await find(scope, payload);
     if (!current.ok) return current;
+    const author = requireAuthor(current.value, payload);
+    if (!author.ok) return author;
     if (payload.activityId != null) return conflictingActivityLink();
     const wantedActivityId = payload.newActivity.id;
     if (wantedActivityId !== undefined) {
@@ -501,7 +524,7 @@ export const getTripPostChain: UseCase<Dependencies, PostDetailPayload, TripPost
 /** Edits the post and/or appends photos to it (never removes or reorders them); retrying a key already in the post is a no-op. */
 export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, UpdateTripPostResult, TaggedError> = {
   execute: async ({ posts, storage, createId, now }, payload) => {
-    const member = await requireMemberBeforeStorage(posts, payload);
+    const member = await requireAuthorBeforeStorage(posts, payload);
     if (!member.ok) return member;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
@@ -514,6 +537,8 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     if (!trip.ok) return trip;
     const current = await find(scope, payload);
     if (!current.ok) return current;
+    const author = requireAuthor(current.value, payload);
+    if (!author.ok) return author;
     const fields = ["description", "mapsUrl", "activityId", "parentPostId", "transportId"] as const;
     const supplied = fields.filter((field) => Object.hasOwn(payload, field) && payload[field] !== undefined);
     if (supplied.length === 0 && keys === undefined && payload.expense === undefined) {
