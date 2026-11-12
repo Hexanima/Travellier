@@ -535,4 +535,85 @@ describe("App authentication", () => {
 
     expect(persisted).toBe(false);
   });
+  describe("aviso de sesión vencida", () => {
+    const notice = "Tu sesión venció. Entrá con tu cuenta para seguir; tus viajes no se eliminan.";
+    const mount = async (route: string, storage = createSessionStorage()) => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      mountedRoots.push(root);
+      await act(async () => root.render(
+        <MemoryRouter initialEntries={[route]}>
+          <App apiBaseUrl="https://api.example.test" sessionStorage={storage} />
+        </MemoryRouter>,
+      ));
+      return container;
+    };
+    const stored = () => {
+      const storage = createSessionStorage();
+      vi.mocked(storage.read).mockResolvedValue({ accessToken: "access", refreshToken: "refresh" });
+      httpClient.post.mockResolvedValue({ ok: true, value: { accessToken: "renewed", refreshToken: "renewed-refresh" } });
+      httpClient.get.mockResolvedValue({ ok: true, value: { trips: [], profile: { name: "Nico", email: "nico@example.test", avatar: null } } });
+      return storage;
+    };
+
+    it("aparece en /login tras un 401 real con sesión activa", async () => {
+      const container = await mount("/trips", stored());
+      expect(container.textContent).not.toContain(notice);
+
+      await act(async () => httpClient.onUnauthorized?.("renewed"));
+
+      expect(container.textContent).toContain("Iniciar sesión");
+      expect(container.querySelector('[role="status"]')?.textContent).toBe(notice);
+    });
+
+    it("no aparece al cerrar sesión manualmente", async () => {
+      const container = await mount("/trips", stored());
+
+      await act(async () => {
+        logoutButton(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      expect(container.textContent).toContain("Iniciar sesión");
+      expect(container.textContent).not.toContain(notice);
+    });
+
+    it("no aparece sin sesión ni al abrir /login en frío", async () => {
+      const profileVisit = await mount("/profile");
+      expect(profileVisit.textContent).toContain("Iniciar sesión");
+      expect(profileVisit.textContent).not.toContain(notice);
+
+      const cold = await mount("/login");
+      expect(cold.textContent).not.toContain(notice);
+    });
+
+    it("un 401 tardío con otro token no lo crea ni cierra la sesión activa", async () => {
+      const container = await mount("/trips", stored());
+
+      await act(async () => httpClient.onUnauthorized?.("outgoing-token"));
+
+      expect(container.textContent).toContain("Mis viajes");
+      expect(container.textContent).not.toContain(notice);
+    });
+
+    it("se limpia al volver a entrar: tras el login y un cierre manual no reaparece", async () => {
+      const container = await mount("/trips", stored());
+      await act(async () => httpClient.onUnauthorized?.("renewed"));
+      expect(container.textContent).toContain(notice);
+
+      httpClient.post.mockResolvedValue({ ok: true, value: { accessToken: "second", refreshToken: "second-refresh" } });
+      await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+      await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+      await act(async () => {
+        container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      expect(container.textContent).toContain("Mis viajes");
+
+      await act(async () => {
+        logoutButton(container)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      expect(container.textContent).toContain("Iniciar sesión");
+      expect(container.textContent).not.toContain(notice);
+    });
+  });
 });

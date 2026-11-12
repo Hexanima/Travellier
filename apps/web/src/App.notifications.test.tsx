@@ -268,7 +268,7 @@ describe("App notices tied to the session", () => {
     expect(refreshes).toBe(1);
     // Dropped, not queued: nothing sends the user to the login by itself any more.
     expect(pathOf()).toBe("/");
-    await click(find("a", "Iniciar sesión"));
+    await click(find("a", "Ya tengo cuenta"));
     await submitLogin("b@example.test");
     expect(pathOf()).toBe("/trips");
   });

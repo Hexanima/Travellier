@@ -10,6 +10,8 @@ type AuthScreenProps = {
   auth?: Partial<AuthApi>;
   mode: AuthScreenMode;
   onAuthenticated?: (session: AuthenticatedSession) => void | Promise<void>;
+  /** Solo en login: la sesión terminó por un 401 real. */
+  sessionExpired?: boolean;
 };
 
 const validationMessages = {
@@ -20,10 +22,14 @@ const validationMessages = {
 const fieldErrors = (error: AuthFailure): Record<string, string> =>
   Object.fromEntries((error.fields ?? []).map(({ field, message }) => [field, message]));
 
-export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
+const sessionExpiredNotice = "Tu sesión venció. Entrá con tu cuenta para seguir; tus viajes no se eliminan.";
+
+export function AuthScreen({ auth, mode, onAuthenticated, sessionExpired = false }: AuthScreenProps) {
   const location = useLocation();
   const isRegister = mode === "register";
   const title = isRegister ? "Crear cuenta" : "Iniciar sesión";
+  const heading = isRegister ? "Vamos a viajar." : "Qué bueno verte.";
+  const help = isRegister ? "Creá tu cuenta y empezá a armar el próximo viaje." : "Entrá para seguir con los planes de tu grupo.";
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string>();
   const [success, setSuccess] = useState<string>();
@@ -95,10 +101,12 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell access-shell">
       <section className="auth-panel" aria-labelledby="auth-title">
-        <p className="eyebrow">Travellier</p>
-        <h1 id="auth-title">{title}</h1>
+        <p className="eyebrow" id="auth-title">{title}</p>
+        <h1>{heading}</h1>
+        <p className="auth-help">{help}</p>
+        {!isRegister && sessionExpired ? <Feedback variant="info">{sessionExpiredNotice}</Feedback> : null}
         <form className="auth-form" noValidate onSubmit={submit}>
           <TextField label="Email" name="email" type="email" autoComplete="email" error={errors.email} loading={loading} />
           <PasswordField
@@ -109,6 +117,7 @@ export function AuthScreen({ auth, mode, onAuthenticated }: AuthScreenProps) {
             error={errors.password}
             loading={loading}
           />
+          {isRegister ? <p className="auth-note">Podés agregar tu nombre y foto después, desde tu perfil.</p> : null}
           {formError ? <Feedback variant="error">{formError}</Feedback> : null}
           {success ? <Feedback variant="success">{success}</Feedback> : null}
           <Button type="submit" loading={loading} loadingLabel="Enviando…">{title}</Button>

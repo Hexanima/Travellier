@@ -126,6 +126,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   const session = useRef<AuthenticatedSession | undefined>(undefined)
   const [sessionReady, setSessionReady] = useState(false)
   const [hasSession, setHasSession] = useState(false)
+  // True only after a real 401 ended an active session; cleared when a session starts or is closed on purpose.
+  const [sessionExpired, setSessionExpired] = useState(false)
   const [launchChecked, setLaunchChecked] = useState(false)
   const deepLinkReceived = useRef(false)
   const defaultAuth = useRef<AuthApi | undefined>(undefined)
@@ -175,10 +177,12 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         // A 401 leaves no authentication to revoke with: forget the push registration locally.
         pushRef.current?.reset()
         // The rejected session is over: neither its foreground announcement nor an action waiting for a session survives it (it could be opened by another account).
-        if (session.current !== undefined) opener.current?.discard()
+        const hadSession = session.current !== undefined
+        if (hadSession) opener.current?.discard()
         setNoticeAnnounced(false)
         session.current = undefined
         resetRememberedFilter()
+        if (hadSession) setSessionExpired(true)
         setHasSession(false)
       },
     })
@@ -417,6 +421,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     if (session.current !== undefined) await revokePush()
     await queueStorageOperation(() => storage.save(authenticatedSession))
     session.current = authenticatedSession
+    setSessionExpired(false)
     setHasSession(true)
     setSessionReady(true)
     void pushRef.current?.resume()
@@ -431,6 +436,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     await revokePush()
     session.current = undefined
     resetRememberedFilter()
+    setSessionExpired(false)
     setHasSession(false)
     await queueStorageOperation(() => storage.clear())
     navigate('/login')
@@ -449,7 +455,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
       <ExternalLinkContext.Provider value={linkPort}>
       <Routes>
         <Route path="/" element={<PublicHome />} />
-        <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} />} />
+        <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} sessionExpired={sessionExpired} />} />
         <Route path="/register" element={<AuthScreen auth={activeAuth} mode="register" />} />
         <Route path="/invite/:code" element={<InviteRoute sessionReady={sessionReady} hasSession={hasSession} trips={activeTrips} push={activePush} />} />
         <Route path="/trips" element={
@@ -594,15 +600,20 @@ function ApiConfigurationError() {
 
 function PublicHome() {
   return (
-    <main className="app-shell">
-      <section className="status-panel">
-        <p className="eyebrow">Viajes en grupo</p>
-        <h1>Travellier</h1>
-        <p className="domain-check">Inicio</p>
-        <p className="auth-links">
-          <Link to="/login">Iniciar sesión</Link>
-          <Link to="/register">Crear cuenta</Link>
-        </p>
+    <main className="app-shell access-shell">
+      <section className="welcome-panel" aria-labelledby="welcome-title">
+        <div className="welcome-brand">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7V4h10v3M4 7h16v14H4zM9 7v14M15 7v14" /></svg>
+          <h1 id="welcome-title">Travellier</h1>
+          <p className="welcome-tagline">El viaje empieza con ustedes.</p>
+          <p>Organicen los planes. Guarden los momentos.</p>
+        </div>
+        <h2 className="welcome-title">Todo el viaje, en un solo lugar.</h2>
+        <p className="welcome-help">Itinerario, fotos y recuerdos compartidos con tu grupo.</p>
+        <div className="welcome-actions">
+          <Link className="ui-button" to="/register">Crear cuenta</Link>
+          <Link className="ui-button ui-button--secondary" to="/login">Ya tengo cuenta</Link>
+        </div>
       </section>
     </main>
   )

@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProfileScreen } from "./ProfileScreen.js";
+import { initials } from "./display-name.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -169,5 +170,58 @@ describe("ProfileScreen", () => {
     });
     await submit(container);
     expect(updateProfile).toHaveBeenCalledWith({ name: "Nico" });
+  });
+  it("resumen: iniciales con nombre accesible cuando no hay foto, nombre y email visibles", async () => {
+    const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: { ...profile, name: "Nico Pérez" } }) });
+    const summary = container.querySelector(".profile-summary")!;
+    const avatar = summary.querySelector(".profile-avatar")!;
+
+    expect(avatar.textContent).toBe("NP");
+    expect(avatar.getAttribute("role")).toBe("img");
+    expect(avatar.getAttribute("aria-label")).toBe("Sin foto de perfil");
+    expect(summary.textContent).toContain("Nico Pérez");
+    expect(summary.textContent).toContain("nico@example.test");
+  });
+
+  it("resumen: con foto usa una imagen con texto alternativo y sin iniciales", async () => {
+    const container = await render({
+      getProfile: vi.fn().mockResolvedValue({ ok: true, value: { ...profile, avatar: "avatars/user/old.jpg" } }),
+      getAvatarUrl: vi.fn().mockResolvedValue({ ok: true, value: { url: "https://s3.example.test/old" } }),
+    });
+    const image = container.querySelector(".profile-summary img.profile-avatar");
+
+    expect(image?.getAttribute("alt")).toBe("Foto de perfil");
+    expect(container.querySelector(".profile-avatar--empty")).toBeNull();
+  });
+
+  it("rechaza una foto de tipo inválido o de más de 5 MB con el mismo texto y sin guardar", async () => {
+    const updateProfile = vi.fn();
+    const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: profile }), updateProfile });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const pick = async (file: File) => act(async () => {
+      Object.defineProperty(input, "files", { configurable: true, value: [file] });
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    await pick(new File(["x"], "a.gif", { type: "image/gif" }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("Elegí una imagen JPG, PNG o WebP.");
+    await pick(new File([new Uint8Array(5 * 1024 * 1024 + 1)], "a.jpg", { type: "image/jpeg" }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La foto debe pesar menos de 5 MB.");
+    await submit(container);
+    expect(updateProfile).not.toHaveBeenCalled();
+  });
+
+  it("conserva «Volver a viajes» y no incluye copy de estudio ni funciones futuras", async () => {
+    const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: profile }) });
+
+    expect(container.querySelector('a[href="/trips"]')?.textContent).toBe("Volver a viajes");
+    expect(container.textContent).not.toMatch(/estudio|próximamente|futur/i);
+  });
+
+  it("initials: dos letras con nombre completo, una con un nombre y ninguna sin nombre", () => {
+    expect(initials("nico pérez gómez")).toBe("NP");
+    expect(initials("Nico")).toBe("N");
+    expect(initials(null)).toBe("");
+    expect(initials("  ")).toBe("");
   });
 });
