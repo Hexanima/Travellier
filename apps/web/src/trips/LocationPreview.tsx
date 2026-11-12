@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/Button.js";
 import { useExternalLink } from "./external-link-context.js";
 import { parseMapsLink, type MapsLink } from "./maps-link.js";
+import "../components/integrations.css";
 
 export type LocationPreviewContext = "activity" | "memory" | "composer";
 export type LocationPreviewProps = { value: string | null | undefined; context: LocationPreviewContext };
@@ -44,7 +45,7 @@ function ValidPreview({ link, context }: { link: Valid; context: LocationPreview
     setOpening(false); setFailed(problem);
   };
 
-  return <div className="location-preview" data-context={context}>
+  return <div className="location-preview" data-context={context} data-state={opening ? "opening" : failed ? "failed" : "idle"}>
     <span className="location-preview__icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" width="20" height="20" focusable="false"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z" /></svg>
     </span>
@@ -53,8 +54,8 @@ function ValidPreview({ link, context }: { link: Valid; context: LocationPreview
       {link.shortener ? <span className="activity-context">Enlace corto: se abre sin vista previa.</span> : null}
     </span>
     {port
-      ? <Button className="location-preview__open" aria-label={name} aria-disabled={opening || undefined} onClick={() => void open()}>Abrir en Maps</Button>
-      : <a className="activity-maps-link location-preview__open" href={link.url} target="_blank" rel="noopener noreferrer" aria-label={name}>Abrir en Maps</a>}
+      ? <Button variant="secondary" className="location-preview__open" aria-label={name} aria-disabled={opening || undefined} onClick={() => void open()}>Abrir en Maps</Button>
+      : <a className="ui-button ui-button--secondary activity-maps-link location-preview__open" href={link.url} target="_blank" rel="noopener noreferrer" aria-label={name}>Abrir en Maps</a>}
     {failed ? <p className="activity-context location-preview__error" role="alert">{openFailed}</p> : null}
   </div>;
 }

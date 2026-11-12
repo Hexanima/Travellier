@@ -1,0 +1,54 @@
+/* Avisos, permiso de push, calendario nativo, exportacion .ics y tarjeta de lugar (DESIGN.md / prototipo). Todo con ambito para ganar por especificidad sin tocar itinerary.css ni App.css. */
+
+/* Avisos personales: filas con divisor, sin vinetas */
+.notice-list.ui-list { gap: 0; margin: 0; padding: 0; list-style: none; }
+.notice-list .notice { display: grid; gap: 4px; min-width: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; overflow-wrap: anywhere; }
+.notice-list .notice p { margin: 0; }
+.notice-list .notice > p:first-child { font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.notice-list .notice .itinerary-secondary { font-size: .875rem; line-height: 1.25rem; color: var(--ui-color-muted); }
+.notice-list .notice ul { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.notice-list .notice a { display: inline-flex; align-items: center; justify-self: start; max-width: 100%; min-height: 44px; }
+.notice-list [data-notification]:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+
+/* Permiso de push: el ancho completo del boton se acota a esta tarjeta */
+.push-notices { display: grid; gap: 12px; min-width: 0; }
+.push-notices h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+.push-panel { display: grid; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-soft); overflow-wrap: anywhere; }
+.push-panel p { margin: 0; font-size: .875rem; line-height: 1.25rem; }
+.push-panel [role="status"]:empty { margin-block: -6px; }
+.push-panel > .ui-button { width: 100%; }
+.push-panel > .ui-button[aria-busy="true"] { cursor: progress; }
+.push-panel:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.push-panel[data-state="denied"] { border-color: var(--ui-color-danger); background: var(--ui-color-surface); }
+.push-panel[data-state="denied"]::before { content: "!"; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--ui-radius-pill); background: var(--ui-color-danger); color: var(--ui-color-accent-contrast); font-weight: 700; }
+.push-panel[data-state="error"] { border-color: var(--ui-color-danger); background: var(--ui-color-surface); }
+.push-panel[data-state="error"]::before { content: "!"; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--ui-radius-pill); background: var(--ui-color-danger); color: var(--ui-color-accent-contrast); font-weight: 700; }
+
+/* Calendario nativo: sincronizacion (primaria) frente a la exportacion estatica (secundaria) */
+.calendar-sync[data-state] { display: grid; justify-items: stretch; gap: 12px; min-width: 0; max-width: 60ch; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-soft); overflow-wrap: anywhere; }
+.calendar-sync[data-state] p { margin: 0; font-size: .875rem; line-height: 1.25rem; }
+.calendar-sync[data-state] [role="status"]:empty { margin-block: -6px; }
+.calendar-sync[data-state] .ui-button { width: 100%; }
+.calendar-sync[data-state] .ui-button[aria-busy="true"] { cursor: progress; }
+.calendar-sync[data-state] > [role="group"] { display: grid; justify-items: stretch; justify-content: stretch; gap: 12px; padding: 12px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); }
+.calendar-sync[data-state]:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.calendar-sync[data-state="denied"] { border-color: var(--ui-color-danger); background: var(--ui-color-surface); }
+.calendar-sync[data-state="denied"]::before { content: "!"; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--ui-radius-pill); background: var(--ui-color-danger); color: var(--ui-color-accent-contrast); font-weight: 700; }
+.calendar-sync[data-state="error"] { border-color: var(--ui-color-danger); background: var(--ui-color-surface); }
+.calendar-sync[data-state="error"]::before { content: "!"; display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--ui-radius-pill); background: var(--ui-color-danger); color: var(--ui-color-accent-contrast); font-weight: 700; }
+
+/* Exportacion .ics: copia estatica, sin promesa de actualizacion */
+section.ics-export { display: grid; justify-items: start; gap: 12px; min-width: 0; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); overflow-wrap: anywhere; }
+section.ics-export .ics-export-notice { margin: 0; font-size: .875rem; line-height: 1.25rem; color: var(--ui-color-muted); }
+section.ics-export .ui-feedback { justify-self: stretch; }
+
+/* Tarjeta de lugar: texto y "Abrir en Maps"; no hay proveedor de mapas, asi que no se dibuja ningun mapa */
+.location-preview[data-context] { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; max-width: 100%; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-soft); }
+.location-preview[data-context][data-state="failed"] { border: 1px solid var(--ui-color-danger); }
+.location-preview[data-context] .location-preview__icon { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--ui-radius-control); background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); }
+.location-preview[data-context] .location-preview__text { display: grid; gap: 4px; min-width: 0; }
+.location-preview[data-context] .location-preview__place { overflow-wrap: anywhere; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.location-preview[data-context] .location-preview__open { grid-column: 1 / -1; display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 100%; max-width: 100%; min-height: 52px; text-decoration: none; }
+.location-preview[data-context] .location-preview__open:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+.location-preview[data-context] .location-preview__open[aria-disabled="true"] { cursor: progress; }
+.location-preview[data-context] .location-preview__error { grid-column: 1 / -1; margin: 0; padding: 12px; border: 1px solid var(--ui-color-danger); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); color: var(--ui-color-form-error); }
