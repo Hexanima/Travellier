@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveTripBounds } from "./trip-schedule.js";
+import { deriveTripBounds, deriveTripSchedule } from "./trip-schedule.js";
 
 const d = (value: string) => new Date(value);
 
@@ -61,5 +61,81 @@ describe("deriveTripBounds", () => {
   it("accepts any iterable", () => {
     const bounds = deriveTripBounds(new Set([{ departureAt: d("2026-10-01T10:00:00.000Z") }]));
     expect(bounds.startAt).toEqual(d("2026-10-01T10:00:00.000Z"));
+  });
+});
+
+describe("deriveTripSchedule", () => {
+  const out = (destinationId: string, departureAt: unknown, arrivalAt: unknown) => ({ destinationId, direction: "outbound", departureAt, arrivalAt });
+  const back = (destinationId: string, departureAt: unknown, arrivalAt: unknown) => ({ destinationId, direction: "return", departureAt, arrivalAt });
+  const t = (value: string) => d(value);
+
+  it("returns null bounds without destinations", () => {
+    expect(deriveTripSchedule([], [out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z"))])).toEqual({ startAt: null, endAt: null });
+  });
+
+  it("leaves the end empty without transports", () => {
+    expect(deriveTripSchedule(["a"], [])).toEqual({ startAt: null, endAt: null });
+  });
+
+  it("leaves the end empty with only an outbound transport but keeps the start", () => {
+    const schedule = deriveTripSchedule(["a"], [out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z"))]);
+    expect(schedule.startAt).toEqual(t("2026-10-01T10:00:00.000Z"));
+    expect(schedule.endAt).toBeNull();
+  });
+
+  it("uses min and max when the only destination has outbound and return", () => {
+    const schedule = deriveTripSchedule(["a"], [
+      out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z")),
+      back("a", t("2026-10-09T10:00:00.000Z"), t("2026-10-09T14:00:00.000Z")),
+    ]);
+    expect(schedule).toEqual({ startAt: t("2026-10-01T10:00:00.000Z"), endAt: t("2026-10-09T14:00:00.000Z") });
+  });
+
+  it("leaves the end empty when one of two destinations has no return", () => {
+    const schedule = deriveTripSchedule(["a", "b"], [
+      out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z")),
+      back("a", t("2026-10-05T10:00:00.000Z"), t("2026-10-05T12:00:00.000Z")),
+      out("b", t("2026-10-05T14:00:00.000Z"), t("2026-10-05T16:00:00.000Z")),
+    ]);
+    expect(schedule.endAt).toBeNull();
+    expect(schedule.startAt).toEqual(t("2026-10-01T10:00:00.000Z"));
+  });
+
+  it("leaves the end empty when a destination has no transports at all", () => {
+    const schedule = deriveTripSchedule(["a", "b"], [
+      out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z")),
+      back("a", t("2026-10-05T10:00:00.000Z"), t("2026-10-05T12:00:00.000Z")),
+    ]);
+    expect(schedule.endAt).toBeNull();
+  });
+
+  it("uses the maximum when every destination has a return", () => {
+    const schedule = deriveTripSchedule(["a", "b"], [
+      out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z")),
+      back("a", t("2026-10-05T10:00:00.000Z"), t("2026-10-05T12:00:00.000Z")),
+      out("b", t("2026-10-05T14:00:00.000Z"), t("2026-10-05T16:00:00.000Z")),
+      back("b", t("2026-10-12T10:00:00.000Z"), t("2026-10-12T18:00:00.000Z")),
+    ]);
+    expect(schedule).toEqual({ startAt: t("2026-10-01T10:00:00.000Z"), endAt: t("2026-10-12T18:00:00.000Z") });
+  });
+
+  it("treats a return without a valid arrivalAt as missing", () => {
+    const outbound = out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z"));
+    for (const arrivalAt of [null, undefined, "2026-10-09T10:00:00.000Z", new Date("invalid")]) {
+      expect(deriveTripSchedule(["a"], [outbound, back("a", t("2026-10-09T10:00:00.000Z"), arrivalAt)]).endAt).toBeNull();
+    }
+  });
+
+  it("ignores transports of unknown destinations for completeness", () => {
+    const schedule = deriveTripSchedule(["a"], [
+      out("a", t("2026-10-01T10:00:00.000Z"), t("2026-10-01T12:00:00.000Z")),
+      back("zzz", t("2026-10-09T10:00:00.000Z"), t("2026-10-09T14:00:00.000Z")),
+    ]);
+    expect(schedule.endAt).toBeNull();
+  });
+
+  it("does not invent invalid dates", () => {
+    const schedule = deriveTripSchedule(["a"], [out("a", "x", null), back("a", null, t("2026-10-09T14:00:00.000Z"))]);
+    expect(schedule).toEqual({ startAt: t("2026-10-09T14:00:00.000Z"), endAt: t("2026-10-09T14:00:00.000Z") });
   });
 });

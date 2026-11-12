@@ -10,10 +10,12 @@ export interface TripView extends Trip {
 }
 
 /** Elemento de Mis viajes: fechas UTC derivadas de los transportes (no persistidas). */
-export interface TripListItem extends TripView {
+export type TripListItem = Omit<TripView, "primaryDestination"> & {
+  /** Null si el viaje no tiene destino primario (datos incompletos). */
+  primaryDestination: TripDestination | null;
   startAt: Date | null;
   endAt: Date | null;
-}
+};
 
 export interface PublicTripPreview {
   id: ObjectId;
