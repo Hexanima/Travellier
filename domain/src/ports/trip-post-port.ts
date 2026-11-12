@@ -63,6 +63,18 @@ export interface TripPostScope extends TripPostReadScope, NotificationScope {
   listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
   /** Upsert only this activity/user pair in the same transaction. */
   saveParticipation: (participation: ActivityParticipation) => AsyncResult<ActivityParticipation>;
+  /** Moves the direct children of a post of this Trip under `newParentId` (`null` = independent); only `parentPostId` changes. */
+  relinkChildren: (postId: ObjectId, newParentId: ObjectId | null) => AsyncResult<void>;
+  /** Removes the expense of a post of this Trip (nothing to remove is not an error). */
+  deleteExpense: (postId: ObjectId) => AsyncResult<void>;
+  /** Removes the comments of a post (with the likes of those comments) and the likes of the post itself. */
+  deletePostEngagement: (postId: ObjectId) => AsyncResult<void>;
+  /** Removes the photo records of a post of this Trip (the objects are cleaned by `enqueueStorageDeletion`). */
+  deletePhotos: (postId: ObjectId) => AsyncResult<void>;
+  /** Records one pending storage deletion job for these object keys, in the same transaction. */
+  enqueueStorageDeletion: (keys: readonly string[], createdAt: Date) => AsyncResult<void>;
+  /** Removes one post of this Trip; no document matched fails with `PostNotFoundError`. */
+  deletePost: (postId: ObjectId) => AsyncResult<void>;
 }
 
 export interface TripPostPort {

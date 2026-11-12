@@ -178,6 +178,8 @@ export interface TripApi extends TripInvitationApi {
   getPost?: (payload: PostDetailPayload) => AsyncResult<Post>;
   getPostChain?: (payload: PostDetailPayload) => AsyncResult<TripPostChainResult>;
   updatePost?: (payload: UpdateTripPostPayload) => AsyncResult<UpdateTripPostResult>;
+  /** Author or admin removes a memory with its photos, expense, comments and likes (T126). */
+  deletePost?: (payload: PostDetailPayload) => AsyncResult<void>;
   linkPostToNewActivity?: (payload: LinkTripPostToNewActivityPayload) => AsyncResult<LinkTripPostToNewActivityResult>;
   createPhotoUploads?: (payload: PhotoUploadPayload) => AsyncResult<{ uploads: PhotoUploadView[] }>;
   getPostPhotos?: (payload: PostPhotoPayload) => AsyncResult<PostPhotoView[]>;
@@ -188,6 +190,8 @@ export interface TripApi extends TripInvitationApi {
   listComments?: (payload: TripCommentPayload) => AsyncResult<CommentView[]>;
   createComment?: (payload: CreateTripPostCommentPayload) => AsyncResult<CommentView>;
   updateComment?: (payload: UpdateTripPostCommentPayload) => AsyncResult<CommentView>;
+  /** Author or admin removes a comment with its likes (T126). */
+  deleteComment?: (payload: Omit<UpdateTripPostCommentPayload, "text">) => AsyncResult<void>;
   likePost?: (payload: TripPostLikePayload) => AsyncResult<LikeState>;
   unlikePost?: (payload: TripPostLikePayload) => AsyncResult<LikeState>;
   likeComment?: (payload: TripCommentLikePayload) => AsyncResult<LikeState>;
@@ -879,6 +883,11 @@ export const handleApiRequest = async (
       const result = await trips.updateComment({ ...context, commentId: commentId.value, text: payload.text });
       return result.ok ? jsonResponse(200, { comment: result.value }) : errorResponse(result.error);
     }
+    if (request.method === "DELETE" && commentId?.ok) {
+      if (!trips?.deleteComment) return unavailableResponse();
+      const result = await trips.deleteComment({ ...context, commentId: commentId.value });
+      return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
+    }
   }
 
   const notificationListMatch = request.method === "GET" ? requestWithQuery.url?.match(/^\/notifications(?:\?(.*))?$/) : null;
@@ -975,6 +984,11 @@ export const handleApiRequest = async (
         if (!trips?.getPost) return unavailableResponse();
         const result = await trips.getPost(detail);
         return result.ok ? jsonResponse(200, { post: result.value }) : errorResponse(result.error);
+      }
+      if (request.method === "DELETE") {
+        if (!trips?.deletePost) return unavailableResponse();
+        const result = await trips.deletePost(detail);
+        return result.ok ? { statusCode: 204, headers: {}, body: "" } : errorResponse(result.error);
       }
       if (request.method === "PATCH") {
         if (!payload) return invalidRequestResponse();

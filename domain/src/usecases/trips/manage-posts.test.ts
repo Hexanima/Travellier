@@ -23,8 +23,9 @@ describe("Trip post use cases", () => {
   let photoRecords: PostPhoto[], listDaysCalls: number, days: ItineraryDay[], records: Post[], activities: Activity[], participations: ActivityParticipation[];
   let targets: Record<string, { id: ObjectId; tripId: ObjectId } | undefined>;
   let scope: TripPostScope, posts: TripPostPort, sequence: number, notifications: TripNotificationDraft[];
+  let jobs: { keys: string[]; createdAt: Date }[], engagement: ObjectId[], writeLog: string[];
   beforeEach(() => {
-    notifications = [];
+    notifications = []; jobs = []; engagement = []; writeLog = [];
     role = "participant"; votingEnabled = false; tripExists = true; photoRecords = []; expenseRecords = []; members = [actor, id(41), id(42)]; listDaysCalls = 0; days = [day]; records = []; activities = []; participations = []; sequence = 20;
     targets = Object.fromEntries(Object.entries(links).map(([field, id]) => [field, { id, tripId }]));
     scope = {
@@ -67,13 +68,27 @@ describe("Trip post use cases", () => {
         if (index >= 0) participations[index] = participation; else participations.push(participation);
         return domain.ok(participation);
       },
+      relinkChildren: async (parent, newParent) => {
+        writeLog.push("relinkChildren");
+        records = records.map((p) => p.parentPostId === parent ? { ...p, parentPostId: newParent } : p);
+        return domain.ok(undefined);
+      },
+      deleteExpense: async (post) => { writeLog.push("deleteExpense"); expenseRecords = expenseRecords.filter((e) => e.postId !== post); return domain.ok(undefined); },
+      deletePostEngagement: async (post) => { writeLog.push("deletePostEngagement"); engagement.push(post); return domain.ok(undefined); },
+      deletePhotos: async (post) => { writeLog.push("deletePhotos"); photoRecords = photoRecords.filter((p) => p.postId !== post); return domain.ok(undefined); },
+      enqueueStorageDeletion: async (keys, at) => { writeLog.push("enqueueStorageDeletion"); jobs.push({ keys: [...keys], createdAt: at }); return domain.ok(undefined); },
+      deletePost: async (post) => {
+        writeLog.push("deletePost");
+        if (!records.some((p) => p.id === post)) return domain.err(new domain.PostNotFoundError());
+        records = records.filter((p) => p.id !== post); return domain.ok(undefined);
+      },
     };
     posts = {
       withReadSnapshot: async (_, work) => work(scope),
       withTransaction: async (_, work) => {
-        const before = structuredClone({ records, activities, participations, photoRecords, expenseRecords, notifications });
+        const before = structuredClone({ records, activities, participations, photoRecords, expenseRecords, notifications, jobs, engagement });
         const result = await work(scope);
-        if (!result.ok) { notifications = before.notifications; expenseRecords = before.expenseRecords; photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
+        if (!result.ok) { jobs = before.jobs; engagement = before.engagement; notifications = before.notifications; expenseRecords = before.expenseRecords; photoRecords = before.photoRecords; records = before.records; activities = before.activities; participations = before.participations; }
         return result;
       },
     };
@@ -1727,5 +1742,107 @@ describe("Trip post use cases", () => {
         expect(state()).toEqual(before);
       });
     });
+  });
+
+  describe("deleteTripPost (T126)", () => {
+    const [a, b, c, d] = [id(50), id(51), id(52), id(53)];
+    const author = id(60);
+    const photo = (n: number, post: ObjectId, key: string, order = 1): PostPhoto =>
+      ({ id: id(n), postId: post, tripId, uploaderId: actor, s3Key: key, order, uploadedAt: createdAt });
+    const remove = (fields = {}) => {
+      expect(domain.deleteTripPost).toBeDefined();
+      return domain.deleteTripPost.execute({ posts, now: () => createdAt }, { ...context, postId: a, ...fields });
+    };
+    const mine = (fields: Partial<Post> = {}) => seedPost({ id: a, ...fields });
+    const expense = (post: ObjectId): PostExpense => ({ id: id(70), postId: post, tripId, currency: "ARS", totalAmount: 1000, payments: [], shares: [], createdAt } as unknown as PostExpense);
+    const forbidden = { ok: false, error: { tag: "UnauthorizedError" } };
+
+    it("the author deletes their post as participant or admin", async () => {
+      for (const memberRole of ["participant", "admin"] as const) {
+        role = memberRole; records = [mine()];
+        expect(await remove()).toEqual(domain.ok(undefined));
+        expect(records).toEqual([]);
+      }
+    });
+
+    it("an admin deletes the post of another member and of a former member", async () => {
+      role = "admin";
+      for (const owner of [author, id(99)]) {
+        records = [mine({ authorId: owner })];
+        expect(await remove()).toEqual(domain.ok(undefined));
+        expect(records).toEqual([]);
+      }
+    });
+
+    it("a participant who is not the author gets 403 without writes", async () => {
+      records = [mine({ authorId: author })]; photoRecords = [photo(80, a, "k1")];
+      expect(await remove()).toMatchObject(forbidden);
+      expect(writeLog).toEqual([]); expect(records).toEqual([mine({ authorId: author })]); expect(jobs).toEqual([]);
+    });
+
+    it("a non member, former member or missing Trip gets TripNotFoundError without writes", async () => {
+      role = undefined; records = [mine()];
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      tripExists = false; role = "admin";
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(writeLog).toEqual([]); expect(records).toHaveLength(1);
+    });
+
+    it("a missing post or one of another Trip gets PostNotFoundError", async () => {
+      role = "admin"; records = [mine({ tripId: id(999) })];
+      expect(await remove()).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(await remove({ postId: id(77) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      expect(writeLog).toEqual([]);
+    });
+
+    it("enqueues all the photo keys in one job with the deletion time, and removes photos, expense and engagement", async () => {
+      records = [mine(), seedPost({ id: b })];
+      photoRecords = [photo(80, a, "k1", 1), photo(81, a, "k2", 2), photo(82, b, "other")];
+      expenseRecords = [expense(a), expense(b)];
+      expect(await remove()).toEqual(domain.ok(undefined));
+      expect(jobs).toEqual([{ keys: ["k1", "k2"], createdAt }]);
+      expect(photoRecords.map((p) => p.postId)).toEqual([b]);
+      expect(expenseRecords.map((e) => e.postId)).toEqual([b]);
+      expect(engagement).toEqual([a]);
+      expect(writeLog).toEqual(["enqueueStorageDeletion", "deletePhotos", "deleteExpense", "deletePostEngagement", "relinkChildren", "deletePost"]);
+    });
+
+    it("without photos nothing is enqueued", async () => {
+      records = [mine()];
+      expect(await remove()).toEqual(domain.ok(undefined));
+      expect(jobs).toEqual([]); expect(writeLog).not.toContain("enqueueStorageDeletion");
+    });
+
+    it("deleting the middle of a chain hangs its child from the grandparent", async () => {
+      records = [seedPost({ id: a }), seedPost({ id: b, parentPostId: a }), seedPost({ id: c, parentPostId: b, description: "Hijo" })];
+      photoRecords = [photo(80, c, "kc")]; expenseRecords = [expense(c)];
+      expect(await remove({ postId: b })).toEqual(domain.ok(undefined));
+      expect(records.map((p) => [p.id, p.parentPostId])).toEqual([[a, null], [c, a]]);
+      expect(records[1]!.description).toBe("Hijo");
+      expect(photoRecords).toHaveLength(1); expect(expenseRecords).toHaveLength(1); expect(jobs).toEqual([]);
+    });
+
+    it("deleting a root leaves its child independent, without inheriting the activity", async () => {
+      records = [seedPost({ id: a, activityId: links.activityId }), seedPost({ id: b, parentPostId: a })];
+      expect(await remove()).toEqual(domain.ok(undefined));
+      expect(records).toEqual([seedPost({ id: b, parentPostId: null })]);
+    });
+
+    it("a branched node moves every child to its parent", async () => {
+      records = [seedPost({ id: a }), seedPost({ id: b, parentPostId: a }), seedPost({ id: c, parentPostId: b }),
+        seedPost({ id: d, parentPostId: b }), seedPost({ id: id(54), parentPostId: a })];
+      expect(await remove({ postId: b })).toEqual(domain.ok(undefined));
+      expect(records.map((p) => [p.id, p.parentPostId])).toEqual([[a, null], [c, a], [d, a], [id(54), a]]);
+    });
+
+    it.each(["enqueueStorageDeletion", "deletePhotos", "deleteExpense", "deletePostEngagement", "relinkChildren", "deletePost"] as const)(
+      "a failure in %s leaves no effects", async (step) => {
+        records = [mine(), seedPost({ id: b, parentPostId: a })]; photoRecords = [photo(80, a, "k1")]; expenseRecords = [expense(a)];
+        const before = structuredClone({ records, photoRecords, expenseRecords });
+        vi.spyOn(scope, step).mockResolvedValueOnce(domain.err(new domain.UnknownError("boom")));
+        expect(await remove()).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect({ records, photoRecords, expenseRecords }).toEqual(before);
+        expect(jobs).toEqual([]); expect(engagement).toEqual([]);
+      });
   });
 });

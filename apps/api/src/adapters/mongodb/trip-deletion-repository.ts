@@ -1,5 +1,6 @@
 import { ObjectId as MongoObjectId, type Db } from "mongodb";
 import { createObjectId, err, ok, TaggedError, TripNotFoundError, UnknownError, type TripDeletionPort, type TripRole } from "app-domain";
+import { enqueueStorageDeletionJob } from "./storage-deletion-job-enqueue.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
 const destinationRecordCollections = ["transports", "itineraryDays", "activities", "posts"] as const;
@@ -61,13 +62,9 @@ export const createMongoTripDeletionRepository = (database: Db): TripDeletionPor
           removeTrip: async () => {
             const photos = await database.collection("postPhotos").find({ tripId: mongoTripId },
               { ...options, projection: { s3Key: 1 } }).toArray();
-            const objectKeys = [...new Set(photos.flatMap((photo) => typeof photo.s3Key === "string" && photo.s3Key !== "" ? [photo.s3Key] : []))];
-            if (objectKeys.length > 0) {
-              // Preserve cleanup intent atomically. S3 cleanup belongs to the storage deletion worker (never to this transaction).
-              const createdAt = new Date();
-              await database.collection("storageDeletionJobs").insertOne({ tripId: mongoTripId, objectKeys, createdAt, status: "pending",
-                attempts: 0, resolvedKeys: [], rejectedKeys: [], nextAttemptAt: createdAt }, options);
-            }
+            // Preserve cleanup intent atomically (S3 cleanup belongs to the storage deletion worker, never to this transaction).
+            await enqueueStorageDeletionJob(database, mongoTripId, photos.flatMap((photo) => typeof photo.s3Key === "string" ? [photo.s3Key] : []),
+              new Date(), session);
             for (const name of ["tripMembers", "destinations", "transports", "itineraryDays", "activities",
               "activityParticipations", "posts", "postPhotos", "postExpenses", "postLikes", "comments", "commentLikes", "outboxEvents"]) {
               await database.collection(name).deleteMany({ tripId: mongoTripId }, options);
