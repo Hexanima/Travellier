@@ -185,6 +185,23 @@ describe("Mongo Trip management repository", () => {
     });
   });
 
+  it("requires admin role in the membership filter when the update includes expenseMode", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    const input = record();
+    await repository.createWithAdminAndDestination(input);
+    const tripId = new ObjectId(input.trip.id);
+    const participant = new ObjectId();
+    await database.collection("tripMembers").insertOne({ tripId, userId: participant, role: "participant", joinedAt: new Date() });
+    const before = await database.collection("trips").findOne({ _id: tripId });
+
+    expect(await repository.updateConfigurationForMember(input.trip.id, domainId(participant), { expenseMode: "balance" })).toEqual({ ok: true, value: undefined });
+    expect(await repository.updateConfigurationForMember(input.trip.id, domainId(participant), { visibility: "public", expenseMode: "balance" })).toEqual({ ok: true, value: undefined });
+    expect(await database.collection("trips").findOne({ _id: tripId })).toEqual(before);
+
+    expect(await repository.updateConfigurationForMember(input.trip.id, domainId(participant), { visibility: "public" })).toMatchObject({ ok: true, value: { visibility: "public" } });
+    expect(await repository.updateConfigurationForMember(input.trip.id, input.trip.createdBy, { expenseMode: "balance" })).toMatchObject({ ok: true, value: { expenseMode: "balance" } });
+  });
+
   it("finds the member role: admin owner, participant, and none for outsiders", async () => {
     const repository = createMongoTripManagementRepository(database);
     const input = record();
