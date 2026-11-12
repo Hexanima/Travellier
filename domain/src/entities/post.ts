@@ -37,6 +37,20 @@ export interface CreatePostContext {
 const invalid = (field: string, code: string, message: string) =>
   err(new ValidationError([{ field, code, message }]));
 
+/** Maximum memory text length in Unicode code points (not UTF-16 units). Measured on the text as received, never trimmed or cut. */
+export const MAX_POST_DESCRIPTION_LENGTH = 5000;
+
+export interface PostContent { description: string | null | undefined; mapsUrl: string | null | undefined; photoCount: number }
+
+/** A memory needs text (after trim), a location or at least one photo; an expense or a link does not count. */
+export const hasPostContent = (content: PostContent): boolean =>
+  (typeof content.description === "string" && content.description.trim() !== "")
+  || (typeof content.mapsUrl === "string" && content.mapsUrl.trim() !== "") || content.photoCount > 0;
+
+export const requirePostContent = (content: PostContent): Result<undefined, ValidationError> =>
+  hasPostContent(content) ? ok(undefined)
+    : invalid("description", "required", "A memory needs text, a location or a photo.");
+
 /** The post is independent of the itinerary; the caller resolves the requested links from a consistent persistence snapshot. */
 export const createPost = (input: CreatePostInput, context: CreatePostContext): Result<Post, ValidationError> => {
   if (input.tripId !== context.trip.id) {
@@ -67,6 +81,9 @@ export const createPost = (input: CreatePostInput, context: CreatePostContext): 
     if (input[field] != null && typeof input[field] !== "string") {
       return invalid(field, "invalid", `Post ${field} must be text or null.`);
     }
+  }
+  if (typeof input.description === "string" && [...input.description].length > MAX_POST_DESCRIPTION_LENGTH) {
+    return invalid("description", "too_long", `Post description must have at most ${MAX_POST_DESCRIPTION_LENGTH} characters.`);
   }
   if (!(input.createdAt instanceof Date) || !Number.isFinite(input.createdAt.getTime())) {
     return invalid("createdAt", "invalid", "Post creation time must be a valid UTC instant.");

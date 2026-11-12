@@ -320,3 +320,28 @@ describe("resolvePostChain", () => {
     expect(domain.resolvePostChain(posts[0]!, lookup(posts))).toMatchObject(issue("parentPostId", "too_deep"));
   });
 });
+
+describe("post content rules (T122)", () => {
+  const emojis = (count: number) => "😀".repeat(count);
+  it("measures the description in code points without trimming or cutting", () => {
+    expect(domain.MAX_POST_DESCRIPTION_LENGTH).toBe(5000);
+    const ok5000 = domain.createPost({ ...input(), description: emojis(5000) }, context());
+    expect(ok5000).toMatchObject({ ok: true, value: { description: emojis(5000) } });
+    expect(domain.createPost({ ...input(), description: emojis(5001) }, context())).toMatchObject(issue("description", "too_long"));
+    expect(domain.createPost({ ...input(), description: "a".repeat(4999) + " " + "b" }, context())).toMatchObject(issue("description", "too_long"));
+  });
+  it.each([
+    [{ description: "hola", mapsUrl: null, photoCount: 0 }],
+    [{ description: null, mapsUrl: "https://maps.example/x", photoCount: 0 }],
+    [{ description: "  ", mapsUrl: null, photoCount: 2 }],
+  ])("accepts content %j", (content) => {
+    expect(domain.requirePostContent(content)).toMatchObject({ ok: true });
+  });
+  it.each([
+    [{ description: null, mapsUrl: null, photoCount: 0 }],
+    [{ description: "   \n ", mapsUrl: null, photoCount: 0 }],
+    [{ description: "", mapsUrl: "  ", photoCount: 0 }],
+  ])("rejects missing content %j", (content) => {
+    expect(domain.requirePostContent(content)).toMatchObject(issue("description", "required"));
+  });
+});

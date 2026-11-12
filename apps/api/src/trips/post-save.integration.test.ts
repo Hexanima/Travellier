@@ -122,6 +122,87 @@ describe("joint post save and idempotent retry", () => {
     });
   });
 
+  describe("minimum content and text limits (T122)", () => {
+    const issuesOf = (response: { body: string }) => { const error = JSON.parse(response.body).error; return (error.fields ?? error.issues) as { field: string; code: string }[]; };
+    const expense = { totalAmount: 10, currency: "ARS" };
+
+    it.each([["nothing", {}], ["blank text", { description: "  " }], ["only an expense", { expense }], ["a new activity without content", { newActivity: withDuration() }],
+      ["only a parent link", { parentPostId: "parent" }]])(
+      "POST with %s answers 422 and stores no post, photo, activity nor expense", async (_, body) => {
+        const parent = JSON.parse((await post({ description: "Padre" })).body).post;
+        const before = await data();
+        const sent = JSON.parse(JSON.stringify(body).replace('"parent"', JSON.stringify(parent.id)));
+        const response = await post(sent);
+        expect(response.statusCode, response.body).toBe(422);
+        expect(issuesOf(response)).toEqual(expect.arrayContaining([expect.objectContaining({ field: "description", code: "required" })]));
+        expect(await data()).toEqual(before);
+      });
+
+    it("POST with only a photo answers 201 and keeps it", async () => {
+      const response = await post({ photos: photoRefs(1) });
+      expect(response.statusCode, response.body).toBe(201);
+      expect(JSON.parse(response.body)).toMatchObject({ post: { description: null, mapsUrl: null }, photos: [{ order: 1 }] });
+      expect(await counts()).toMatchObject({ posts: 1, postPhotos: 1 });
+    });
+
+    it("the retry of a post saved only with a photo answers the saved result without writing", async () => {
+      const body = { id: newId(), photos: photoRefs(1) };
+      const first = await post(body);
+      expect(first.statusCode, first.body).toBe(201);
+      const before = await data();
+      const retry = await post(body);
+      expect(retry.statusCode, retry.body).toBe(201);
+      expect(JSON.parse(retry.body)).toEqual(JSON.parse(first.body));
+      expect(await data()).toEqual(before);
+    });
+
+    it("a joint save without content stores nothing, photos and expense included, and the PATCH that removes the last content leaves the document intact", async () => {
+      const before = await data();
+      expect((await post({ newActivity: withDuration(), expense, photos: [] })).statusCode).toBe(422);
+      expect(await data()).toEqual(before);
+      const created = JSON.parse((await post({ description: "Texto" })).body).post;
+      const saved = await data();
+      for (const body of [{ description: null }, { description: "" }, { description: "   ", expense }]) {
+        const response = await patch(created.id, body);
+        expect(response.statusCode, response.body).toBe(422);
+        expect(issuesOf(response)).toEqual(expect.arrayContaining([expect.objectContaining({ field: "description", code: "required" })]));
+        expect(await data()).toEqual(saved);
+      }
+      const joint = await patch(created.id, { description: null, newActivity: withDuration(), expense });
+      expect(joint.statusCode, joint.body).toBe(422);
+      expect(await data()).toEqual(saved);
+    });
+
+    it("a PATCH that deletes the text keeps working while published photos remain", async () => {
+      const created = JSON.parse((await post({ description: "Texto", photos: photoRefs(1) })).body).post;
+      const response = await patch(created.id, { description: null });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({ post: { id: created.id, description: null } });
+      expect(await counts()).toMatchObject({ posts: 1, postPhotos: 1 });
+      expect((await patch(created.id, { description: null, mapsUrl: null })).statusCode).toBe(200);
+    });
+
+    it("limits the text to 5000 code points and the breakdown to 2000, answering the field without cutting", async () => {
+      const before = await data();
+      const longText = await post({ description: "😀".repeat(5001) });
+      expect(longText.statusCode, longText.body).toBe(422);
+      expect(issuesOf(longText)).toEqual(expect.arrayContaining([expect.objectContaining({ field: "description", code: "too_long" })]));
+      const longBreakdown = await post({ description: "Texto", expense: { ...expense, breakdown: "😀".repeat(2001) } });
+      expect(longBreakdown.statusCode, longBreakdown.body).toBe(422);
+      expect(issuesOf(longBreakdown)).toEqual(expect.arrayContaining([expect.objectContaining({ field: "expense.breakdown", code: "too_long" })]));
+      expect(await data()).toEqual(before);
+      const exact = await post({ description: "😀".repeat(5000), expense: { ...expense, breakdown: "😀".repeat(2000) } });
+      expect(exact.statusCode, exact.body).toBe(201);
+      const created = JSON.parse(exact.body);
+      expect(created.post.description).toBe("😀".repeat(5000));
+      expect(created.expense.breakdown).toBe("😀".repeat(2000));
+      const saved = await data();
+      expect((await patch(created.post.id, { description: "😀".repeat(5001) })).statusCode).toBe(422);
+      expect((await patch(created.post.id, { expense: { breakdown: "😀".repeat(2001) } })).statusCode).toBe(422);
+      expect(await data()).toEqual(saved);
+    });
+  });
+
   describe("idempotent retry by client post id (T87)", () => {
     it("without id the server generates one and a retry creates another post (as before)", async () => {
       const first = JSON.parse((await post({ description: "Hola" })).body), second = JSON.parse((await post({ description: "Hola" })).body);
