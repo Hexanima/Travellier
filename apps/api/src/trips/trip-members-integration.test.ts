@@ -98,7 +98,7 @@ describe("local Trip member API", () => {
 
       const expelUrl = `${memberUrl}/${participantId.toHexString()}`;
       expect((await fetch(expelUrl, { method: "DELETE", headers: participantHeaders })).status).toBe(403);
-      expect((await fetch(expelUrl, { method: "DELETE", headers: outsiderHeaders })).status).toBe(403);
+      expect((await fetch(expelUrl, { method: "DELETE", headers: outsiderHeaders })).status).toBe(404);
       expect((await fetch(`${memberUrl}/${adminId.toHexString()}`, { method: "DELETE", headers: adminHeaders })).status).toBe(403);
       expect((await fetch(expelUrl, { method: "DELETE", headers: adminHeaders })).status).toBe(204);
       expect((await fetch(expelUrl, { method: "DELETE", headers: adminHeaders })).status).toBe(404);
