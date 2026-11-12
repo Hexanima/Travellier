@@ -132,8 +132,18 @@ describe("permiso de push, calendario y exportación .ics", () => {
       expect(body, state).toContain("background: var(--ui-color-surface)");
       const marker = ruleBody(`${base}[data-state="${state}"]::before`);
       expect(marker, state).toContain("content:");
+      expect(marker, state).toContain('content: "!" / "";');
+      expect(marker, state).toMatch(/content: "!";[^}]*content: "!" \/ "";/);
       expect(marker, state).toContain("border-radius: var(--ui-radius-pill)");
     }
+  });
+  it("todo content generado lleva texto alternativo vacio y respaldo previo", () => {
+    const declarations = css.match(/content:[^;]*;/g) ?? [];
+    expect(declarations.length).toBeGreaterThan(0);
+    const generated = declarations.filter((d) => /content:\s*"[^"]+"/.test(d));
+    const silenced = declarations.filter((d) => d === 'content: "!" / "";');
+    expect(silenced.length).toBe(generated.length / 2);
+    expect(generated.every((d) => d === 'content: "!";' || d === 'content: "!" / "";')).toBe(true);
   });
   it("los botones ocupados conservan el cursor de progreso sin opacity", () => {
     expect(ruleBody('.push-panel > .ui-button[aria-busy="true"]')).toContain("cursor: progress");

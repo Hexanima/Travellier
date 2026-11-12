@@ -163,6 +163,7 @@ describe("CalendarSyncPanel visual hooks", () => {
     for (const status of every) {
       const { container } = await render(status);
       expect(container.querySelector(".calendar-sync")?.getAttribute("data-state")).toBe(status.state);
+      expect(container.querySelectorAll('[role="status"]').length, status.state).toBe(1);
       const alerts = container.querySelectorAll('[role="alert"]').length;
       if (status.state !== "error" && status.state !== "needs-account") expect(alerts).toBe(0);
     }
