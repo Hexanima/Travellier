@@ -126,11 +126,14 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
-  const body = <>
+  const body = <div className="memory-feed">
       <header className="itinerary-header">
         {inShell ? <h2>Recuerdos</h2> : <h1>Recuerdos</h1>}
         <p>Lo que vive el grupo, del más reciente al más antiguo. Horarios en tu zona local.</p>
-        <Link className="trips-settings-link" to={create}>Nuevo recuerdo</Link>
+        <Link className="memory-fab" to={create}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /></svg>
+          <span className="memory-fab__label">Nuevo recuerdo</span>
+        </Link>
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">{noticeText(saved)}</Feedback> : null}
       {alreadySaved ? <div className="activity-detail">
@@ -163,7 +166,7 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
           <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
         </ListItem>)}
       </List> : null}
-  </>;
+  </div>;
   if (inShell) return body;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">

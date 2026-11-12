@@ -128,6 +128,30 @@ describe("PostDetailScreen content", () => {
     expect(next?.querySelector("ul, ol")?.getAttribute("aria-label")).toBe("Continuaciones");
     expect(get).toHaveBeenCalledTimes(1);
   });
+  it("shows the parent as one compact row with the same link, origin and no list, and keeps continuations and comments in separate panels", async () => {
+    const get = vi.fn().mockResolvedValue(ok(detail(5, { postExtra: { parentPostId: itineraryId(3) }, parent: summary(3), children: [summary(7)] })));
+    const { container } = await open(get, 5, { origin: { path: `${base}`, label: "diario" } });
+    const previous = section(container, "Recuerdo anterior");
+    expect(previous?.querySelector("ul, ol, li")).toBeNull();
+    const rows = previous?.querySelectorAll(".memory-parent a") ?? [];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.getAttribute("href")).toBe(href(3));
+    expect(rows[0]!.textContent).toBe("Resumen 3");
+    expect(previous?.querySelector(".memory-parent")?.textContent).toMatch(/Publicado .*2026/);
+    await click(rows[0]);
+    expect(last().pathname).toBe(href(3));
+    expect(last().state).toEqual({ origin: { path: `${base}`, label: "diario" } });
+  });
+  it("keeps continuations and comments in separate tab panels", async () => {
+    const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5, { children: [summary(7)] }))));
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]'));
+    expect(tabs.map((tab) => tab.textContent)).toEqual(["Continuaciones", "Comentarios"]);
+    const panels = Array.from(container.querySelectorAll('[role="tabpanel"]'));
+    expect(panels).toHaveLength(2);
+    expect(panels[0]!.contains(panels[1]!)).toBe(false);
+    expect(panels[0]!.querySelector("li a")?.getAttribute("href")).toBe(href(7));
+    expect(panels[0]!.querySelector(".comment-list")).toBeNull();
+  });
   it("shows an empty state for the continuations without inventing items", async () => {
     const { container } = await open(vi.fn().mockResolvedValue(ok(detail(5))));
     expect(section(container, "Continuaciones")?.textContent).toContain("Todavía no hay continuaciones.");

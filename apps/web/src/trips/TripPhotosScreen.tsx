@@ -34,15 +34,18 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   const empty = <section className="trips-empty">
     <Heading level={inShell ? 3 : 2}>Todavía no hay fotos</Heading>
     <p>Las fotos aparecen cuando alguien las agrega a un recuerdo.</p>
-    <Link to={create}>Nuevo recuerdo</Link>
   </section>;
-  const body = <>
+  const body = <div className="memory-feed">
       <header className="itinerary-header">
         {inShell ? <h2 ref={heading} tabIndex={-1}>Fotos</h2> : <h1 ref={heading} tabIndex={-1}>Fotos</h1>}
         <p>Las fotos del viaje, de la más reciente a la más antigua. Horarios en tu zona local.</p>
+        <Link className="memory-fab" to={create}>
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" /></svg>
+          <span className="memory-fab__label">Nuevo recuerdo</span>
+        </Link>
       </header>
       <PhotoBrowser gallery={gallery} people={people} timeZone={timeZone} tripId={tripId} label="Fotos del viaje" originLabel="fotos" empty={empty} focusTarget={() => heading.current} />
-  </>;
+  </div>;
   if (inShell) return body;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
