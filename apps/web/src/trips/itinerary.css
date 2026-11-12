@@ -1,16 +1,16 @@
 .itinerary-shell {
-  --itinerary-transit-surface: #edf1f5;
-  --itinerary-transit-text: #344d63;
-  --itinerary-activity-surface: #ffffff;
+  --itinerary-transit-surface: var(--ui-color-soft);
+  --itinerary-transit-text: var(--ui-color-brand);
+  --itinerary-activity-surface: var(--ui-color-surface);
 }
 .itinerary-header { display: grid; justify-items: start; gap: 12px; margin-bottom: 32px; }
 .itinerary-header h1 { margin: 0; font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; }
-.itinerary-header > p { margin: 0; color: #526270; line-height: 1.5; }
+.itinerary-header > p { margin: 0; color: var(--ui-color-muted); line-height: 1.5; }
 .itinerary-header > a { min-height: 44px; display: inline-flex; align-items: center; }
 .itinerary-days { display: grid; gap: 40px; }
 .itinerary-day h2 { margin: 0 0 16px; font-size: clamp(1.2rem, 4.5vw, 1.5rem); line-height: 1.35; text-wrap: balance; }
 .itinerary-bands { display: grid; gap: 12px; }
-.itinerary-band { padding: 20px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius); background: var(--itinerary-activity-surface); }
+.itinerary-band { padding: 20px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--itinerary-activity-surface); }
 .itinerary-band--transit_out, .itinerary-band--transit_return, .itinerary-band--arrival { background: var(--itinerary-transit-surface); }
 .itinerary-band-header { display: flex; align-items: start; justify-content: space-between; gap: 12px 20px; margin-bottom: 16px; }
 .itinerary-band-header h3 { margin: 0 0 4px; color: var(--ui-color-accent); font-size: 1rem; }
@@ -20,11 +20,11 @@
 .itinerary-range { flex-shrink: 0; font-size: .875rem; }
 .itinerary-items { gap: 0; }
 .itinerary-items > .itinerary-item { display: grid; grid-template-columns: 5ch minmax(0, 1fr); gap: 16px; padding: 16px 0; border: 0; border-top: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; }
-.itinerary-item-time { padding-top: 2px; font-size: .875rem; color: #526270; }
+.itinerary-item-time { padding-top: 2px; font-size: .875rem; color: var(--ui-color-muted); }
 .itinerary-item-content { min-width: 0; overflow-wrap: anywhere; }
 .itinerary-item-content h4 { margin: 0 0 6px; font-size: 1rem; line-height: 1.4; }
 .itinerary-item-content p { margin: 6px 0 0; line-height: 1.5; }
-.itinerary-secondary, .itinerary-band-empty { font-size: .875rem; color: #526270; }
+.itinerary-secondary, .itinerary-band-empty { font-size: .875rem; color: var(--ui-color-muted); }
 .itinerary-band-empty { margin: 0; line-height: 1.5; }
 .itinerary-posts { margin-top: 16px; gap: 0; }
 .itinerary-posts > .itinerary-nested-post { padding: 12px 0; border: 0; border-top: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; }
@@ -33,7 +33,7 @@
 .itinerary-post-expense span { font-size: .875rem; }
 .itinerary-expenses { display: flex; justify-content: space-between; gap: 12px 24px; padding: 16px 0; border-bottom: 1px solid var(--ui-color-border); }
 .itinerary-expenses p { margin: 0; line-height: 1.45; }
-.itinerary-expenses span { display: block; color: #526270; font-size: .875rem; margin-top: 4px; }
+.itinerary-expenses span { display: block; color: var(--ui-color-muted); font-size: .875rem; margin-top: 4px; }
 .itinerary-expense-total { text-align: right; }
 .itinerary-expense-total strong { font-size: 1.25rem; }
 .itinerary-expenses { flex-wrap: wrap; }
@@ -41,8 +41,8 @@
 .itinerary-trip-expenses, .itinerary-outside-expenses { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--ui-color-border); }
 .itinerary-trip-expenses p, .itinerary-outside-expenses p { margin: 0; line-height: 1.45; }
 .itinerary-trip-expenses .itinerary-expense-total, .itinerary-outside-expenses > .itinerary-expense-total { text-align: left; }
-.itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-primary, currentColor); outline-offset: 4px; }
-.itinerary-shell ::selection { color: #fff; background: var(--ui-color-accent); }
+.itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-focus); outline-offset: 4px; }
+.itinerary-shell ::selection { color: var(--ui-color-accent-contrast); background: var(--ui-color-brand); }
 .activity-create { margin-bottom: var(--ui-space-4); }
 .activity-title.ui-button, .transport-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
 .activity-title.ui-button:hover:not(:disabled), .transport-title.ui-button:hover:not(:disabled) { color: var(--ui-color-text); }
@@ -54,7 +54,7 @@
 .transport-dialog h3 { outline-offset: 2px; }
 .activity-form, .activity-detail { display: grid; gap: var(--ui-space-4); }
 .activity-detail h3, .activity-detail p, .activity-context { margin: 0; line-height: 1.5; }
-.activity-context { color: #526270; font-size: .875rem; }
+.activity-context { color: var(--ui-color-muted); font-size: .875rem; }
 .activity-date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--ui-space-3); }
 .activity-description { white-space: pre-wrap; overflow-wrap: anywhere; }
 .activity-maps-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--ui-color-accent); text-underline-offset: .2em; }
@@ -131,7 +131,7 @@
 .post-photos-add, .post-photo-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .post-photos-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .post-photo { display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: center; }
-.post-photo img, .post-photo-placeholder { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #d9e2f2; grid-row: span 2; }
+.post-photo img, .post-photo-placeholder { width: 64px; height: 64px; object-fit: cover; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); grid-row: span 2; }
 .post-photo-actions { grid-column: 2; }
 
 /* Structural only: the final look belongs to the visual phase. */
@@ -150,7 +150,7 @@
 .activity-memories__list img { display: block; width: 4rem; aspect-ratio: 1 / 1; object-fit: cover; }
 /* Provisional structure of the .ics export (no final tokens): T98 places it. */
 .ics-export { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
-.ics-export-notice, .ics-export-empty { margin: 0; color: #526270; line-height: 1.5; }
+.ics-export-notice, .ics-export-empty { margin: 0; color: var(--ui-color-muted); line-height: 1.5; }
 /* Provisional structure of the native calendar sync panel (no final tokens): T98 places it. */
 .calendar-sync { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
 .calendar-sync p { margin: 0; line-height: 1.5; }
