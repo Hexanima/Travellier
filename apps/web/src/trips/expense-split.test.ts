@@ -274,7 +274,7 @@ describe("amount limit in rows", () => {
   it("parseRowValue flags a value above the limit and accepts the edge; percent keeps range", () => {
     expect(parseRowValue("amount", "1000000000000", false)).toEqual({ ok: false, code: "exceeds_max" });
     expect(parseRowValue("amount", "999999999999,99", false)).toEqual({ ok: true, value: 999_999_999_999.99 });
-    expect(parseRowValue("percent", "1000000000000", false)).toEqual({ ok: false, code: "exceeds_max" });
+    expect(parseRowValue("percent", "1000000000000", false)).toEqual({ ok: false, code: "range" });
     expect(parseRowValue("percent", "100,01", false)).toEqual({ ok: false, code: "range" });
   });
   it("checkSplit marks the row with the limit message", () => {
