@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
-import { Button, Feedback, LoadingState, TextAreaField } from "../components/index.js";
+import { Button, Feedback, LoadingState, Modal, TextAreaField } from "../components/index.js";
 import { commentLength, commentProblem, COMMENT_MAX } from "./comment-text.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
 import { oldestFirst, type CommentResponse, type TripCommentApi } from "./trip-comment-api.js";
@@ -8,7 +8,7 @@ import type { LikeState } from "./trip-like-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import { commentKey, type LikeKey, type LikesController } from "./use-likes.js";
 import { useCommentDraft } from "./use-comment-drafts.js";
-import { canEditContent } from "./authorship.js";
+import { canDeleteContent, canEditContent } from "./authorship.js";
 
 const authorOnlyMessage = "Solo el autor puede editar este comentario. Tu texto se conserva.";
 const sessionExpired = "Tu sesión venció. Volvé a iniciar sesión.";
@@ -80,15 +80,15 @@ export function CommentComposer({ name, label, text, onText, onSubmit, submitLab
   </form>;
 }
 
-type People = { loaded: boolean; currentUserId?: string; names: Readonly<Record<string, string>> };
+type People = { loaded: boolean; currentUserId?: string; role?: "admin" | "participant"; names: Readonly<Record<string, string>> };
 const authorOf = (comment: CommentResponse, people: People) => comment.authorIsFormerMember ? "Ex integrante"
   : comment.authorId === people.currentUserId ? "Vos" : people.names[comment.authorId] ?? "Integrante";
 const focusField = (form: HTMLElement | null) => form?.querySelector("textarea")?.focus();
 
-type ItemProps = { comment: CommentResponse; author: string; canEdit?: boolean; format: (iso: string) => string; likes: LikesController;
+type ItemProps = { comment: CommentResponse; author: string; canEdit?: boolean; canDelete?: boolean; onDelete?: (commentId: string) => void; format: (iso: string) => string; likes: LikesController;
   update: (commentId: string, text: string) => Promise<TripResult<CommentResponse>>; onSaved: (comment: CommentResponse) => void };
 /** One comment with its inline edit: the draft (`edit:<id>`) outlives the component; the server decides who may edit. */
-export function CommentItem({ comment, author, canEdit = true, format, likes, update, onSaved }: ItemProps) {
+export function CommentItem({ comment, author, canEdit = true, canDelete = false, onDelete, format, likes, update, onSaved }: ItemProps) {
   const draft = useCommentDraft(`edit:${comment.id}`);
   const [editing, setEditing] = useState(draft.text !== undefined);
   const [saving, setSaving] = useState(false);
@@ -141,9 +141,11 @@ export function CommentItem({ comment, author, canEdit = true, format, likes, up
       <MessageView message={message} />
     </CommentComposer> : <>
       <p className="comment-text">{comment.text}</p>
-      {canEdit ? <div className="comment-actions">
-        <button type="button" className="ui-button" ref={editButton} aria-label={`Editar comentario de ${author}`}
-          onClick={() => { focus.current = "field"; setEditing(true); }}>Editar</button>
+      {canEdit || canDelete ? <div className="comment-actions">
+        {canEdit ? <button type="button" className="ui-button" ref={editButton} aria-label={`Editar comentario de ${author}`}
+          onClick={() => { focus.current = "field"; setEditing(true); }}>Editar</button> : null}
+        {canDelete ? <Button error aria-label={`Eliminar comentario de ${author}`}
+          onClick={() => { draft.clear(); onDelete?.(comment.id); }}>Eliminar</Button> : null}
       </div> : null}
     </>}
     <LikeButton likeKey={key} state={state} busy={likes.busy(key)} disabled={likes.status !== "ready" || likes.blocked} notice={likes.notice(key)}
@@ -166,6 +168,15 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   const [updateFailed, setUpdateFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<Message>();
+  // Deleting: one dialog for the whole panel; `removeId` is the comment it asks about.
+  const [removeId, setRemoveId] = useState<string>();
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<{ text: string; login?: boolean }>();
+  const [removeNotice, setRemoveNotice] = useState<Message>();
+  const removingRef = useRef(false);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const focusAfter = useRef<{ kind: "button"; id: string } | { kind: "field" } | { kind: "item"; id: string } | undefined>(undefined);
   const draft = useCommentDraft(`new:${postId}`);
   const text = draft.text ?? "";
   const alive = useRef(true);
@@ -176,6 +187,18 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   const latest = useRef({ comments, members, likes, text });
   latest.current = { comments, members, likes, text };
 
+  /** One silent attempt: a failed members list never blocks the comments. Returns what it read (undefined on failure). */
+  const readPeople = useCallback(async (): Promise<People | undefined> => {
+    try {
+      const result = await latest.current.members.list(tripId);
+      if (!alive.current || !result.ok) return undefined;
+      const role = result.value.members.find((member) => member.userId === result.value.currentUserId)?.role;
+      const read: People = { loaded: true, currentUserId: result.value.currentUserId, ...(role === "admin" || role === "participant" ? { role } : {}),
+        names: Object.fromEntries(result.value.members.flatMap((member) => member.name ? [[member.userId, member.name]] : [])) };
+      setPeople(read);
+      return read;
+    } catch { return undefined; }
+  }, [tripId]);
   const load = useCallback(async (): Promise<boolean> => {
     const id = requests.current += 1;
     const failed = (error: TripFailure) => { setUpdateFailed(true); setList((current) => current.kind === "ready" ? current : { kind: "error", error }); return false; };
@@ -192,14 +215,9 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   useEffect(() => {
     alive.current = true;
     void load();
-    void (async () => {
-      try {
-        const result = await latest.current.members.list(tripId);
-        if (alive.current && result.ok) setPeople({ loaded: true, currentUserId: result.value.currentUserId, names: Object.fromEntries(result.value.members.flatMap((member) => member.name ? [[member.userId, member.name]] : [])) });
-      } catch { /* a failed members list never blocks the comments */ }
-    })();
+    void readPeople();
     return () => { alive.current = false; };
-  }, [load, tripId]);
+  }, [load, readPeople]);
 
   const reload = async () => {
     setUpdating(true);
@@ -246,8 +264,67 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   const saved = useCallback((comment: CommentResponse) => setList((current) => current.kind === "ready"
     ? { kind: "ready", items: current.items.map((item) => item.id === comment.id ? comment : item) } : current), []);
 
+  const items = list.kind === "ready" ? list.items : [];
+  const mayDelete = (comment: CommentResponse, who: People) => canDeleteContent(who, comment.authorId, comment.authorIsFormerMember);
+  const askDelete = (commentId: string) => { setRemoveError(undefined); setRemoveNotice(undefined); setRemoveId(commentId); };
+  const closeDelete = () => { if (removingRef.current) return; const id = removeId; setRemoveId(undefined); if (id) focusAfter.current = { kind: "button", id }; };
+  // Runs after Modal's own effect: the initial focus goes to the safe action.
+  useEffect(() => { if (removeId !== undefined) cancelRef.current?.focus(); }, [removeId]);
+  // A role that changed while the dialog was open: it no longer applies, so it closes.
+  const removeTarget = items.find((comment) => comment.id === removeId);
+  useEffect(() => {
+    if (removeId !== undefined && !removingRef.current && (removeTarget === undefined || !mayDelete(removeTarget, people))) setRemoveId(undefined);
+  }, [removeId, removeTarget, people]);
+  // After a change of the list or the dialog the focus goes to a control that still exists.
+  useEffect(() => {
+    const target = focusAfter.current;
+    if (!target || removeId !== undefined) return;
+    focusAfter.current = undefined;
+    const found = target.kind === "field" ? undefined : panel.current?.querySelector<HTMLElement>(`[data-comment="${target.id}"] button[data-error]`);
+    (found ?? panel.current?.querySelector<HTMLElement>("textarea[name=comment-new]"))?.focus();
+  }, [list, removeId]);
+  const dropComment = (commentId: string) => setList((current) => current.kind === "ready" ? { kind: "ready", items: current.items.filter((item) => item.id !== commentId) } : current);
+  const confirmDelete = async () => {
+    const commentId = removeId;
+    if (commentId === undefined || removingRef.current) return;
+    removingRef.current = true; setRemoving(true); setRemoveError(undefined);
+    const index = items.findIndex((item) => item.id === commentId);
+    const next = items.slice(index + 1).find((item) => mayDelete(item, people));
+    try {
+      const result = await comments.remove(tripId, postId, commentId);
+      if (!alive.current) return;
+      if (result.ok) {
+        setRemoveId(undefined); dropComment(commentId); focusAfter.current = next ? { kind: "item", id: next.id } : { kind: "field" };
+        void latest.current.likes.refresh();
+        setRemoveNotice({ variant: "success", text: "Comentario eliminado" });
+        return;
+      }
+      const { error } = result;
+      if (error.kind === "not-found" && error.code === "CommentNotFoundError") {
+        // Already deleted (a retry after an unconfirmed failure, or by someone else): the list is the truth.
+        setRemoveId(undefined); dropComment(commentId); void load();
+        focusAfter.current = next ? { kind: "item", id: next.id } : { kind: "field" };
+        setRemoveNotice({ variant: "info", text: "Este comentario ya no está disponible." });
+      } else if (error.kind === "unauthorized") setRemoveError({ text: sessionExpired, login: true });
+      else if (error.kind === "forbidden") {
+        const text = "Ya no tenés permiso para eliminar este comentario.";
+        const read = await readPeople();
+        const target = items[index];
+        if (!alive.current) return;
+        if (read && target && !mayDelete(target, read)) { setRemoveId(undefined); setRemoveNotice({ variant: "error", text }); focusAfter.current = { kind: "field" }; }
+        else setRemoveError({ text });
+      } else if (error.kind === "not-found") setRemoveError({ text: "Este recuerdo ya no está disponible para tu cuenta." });
+      else setRemoveError({ text: deleteFailure });
+    } catch {
+      if (alive.current) setRemoveError({ text: deleteFailure });
+    } finally {
+      removingRef.current = false;
+      if (alive.current) setRemoving(false);
+    }
+  };
+
   const unavailable = list.kind === "error" && (list.error.kind === "forbidden" || list.error.kind === "not-found");
-  return <div className="comments-panel">
+  return <div className="comments-panel" ref={panel}>
     {list.kind === "loading" ? <LoadingState label="Cargando comentarios…" /> : null}
     {list.kind === "error" ? <div className="trips-state">
       <Feedback variant="error">{unavailable ? "Ya no podés ver los comentarios de este recuerdo." : list.error.kind === "unauthorized" ? sessionExpired
@@ -259,13 +336,24 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
       {updateFailed ? <Feedback variant="error" role="status">No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.</Feedback> : null}
       <Button onClick={() => void reload()} disabled={updating}>Actualizar comentarios</Button>
       {list.items.length === 0 ? <p className="itinerary-secondary">Todavía no hay comentarios.</p> : <ul className="comment-list" aria-label="Comentarios">
-        {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} canEdit={canEditContent(people, comment.authorId, comment.authorIsFormerMember)} format={format} likes={likes} update={update} onSaved={saved} />)}
+        {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} canEdit={canEditContent(people, comment.authorId, comment.authorIsFormerMember)}
+          canDelete={mayDelete(comment, people)} onDelete={askDelete} format={format} likes={likes} update={update} onSaved={saved} />)}
       </ul>}
+      <MessageView message={removeNotice} />
       <CommentComposer name="comment-new" label="Escribí un comentario" text={text} onText={draft.setText} onSubmit={() => void publish()} submitLabel="Comentar"
         busyLabel="Publicando…" busy={creating} emptyHint="Escribí un comentario para poder publicarlo." formRef={form}>
         <MessageView message={message} />
       </CommentComposer>
     </> : null}
+    <div className="members-dialog">
+      <Modal isOpen={removeId !== undefined} closeOnEscape title="Eliminar comentario" onClose={closeDelete} loading={removing} error={removeError?.text}>
+        <p>Se elimina el comentario y sus me gusta. No se puede deshacer.</p>
+        {removeError?.login ? <Link to="/login">Iniciar sesión</Link> : null}
+        <button ref={cancelRef} className="ui-button" type="button" onClick={closeDelete}>Cancelar</button>
+        <Button error onClick={() => void confirmDelete()}>Eliminar</Button>
+      </Modal>
+    </div>
   </div>;
 }
+const deleteFailure = "No pudimos eliminar el comentario. Revisá tu conexión e intentá nuevamente.";
 const unconfirmedMessage: Message = { variant: "error", text: "No pudimos confirmar si se publicó. Revisá los comentarios antes de reintentar. Tu texto se conserva." };

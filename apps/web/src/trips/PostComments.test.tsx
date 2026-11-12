@@ -811,3 +811,141 @@ describe("comments panel: edit by authorship (T125)", () => {
     expect(item(container, 5).querySelector('[role="alert"]')?.textContent).toBe("Ya no podés editar este comentario.");
   });
 });
+
+describe("comments panel: delete (T128)", () => {
+  const roster = (role: "admin" | "participant") => ok({ currentUserId: me, members: [{ id: itineraryId(40), userId: me, name: "Yo", role, joinedAt: "2026-01-01T00:00:00.000Z" },
+    { id: itineraryId(41), userId: other, name: "Marta", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] });
+  const asParticipant = { list: vi.fn().mockResolvedValue(roster("participant")) };
+  const delButton = (container: HTMLElement, n: number) => Array.from(item(container, n).querySelectorAll("button")).find((node) => node.textContent === "Eliminar") as HTMLButtonElement | undefined;
+  const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
+  const confirm = () => button(dialog() as HTMLElement, "Eliminar");
+  const failure = (kind: string, extra: object = {}) => fail(kind, extra);
+  const notice = (container: HTMLElement) => container.querySelector('[role="status"]');
+  it("offers «Eliminar» to an admin on every comment and to a participant only on their own", async () => {
+    const admin = await render(apis([own(5), comment(6)]));
+    expect(delButton(admin, 5)).toBeTruthy();
+    expect(delButton(admin, 6)).toBeTruthy();
+    const participant = await render(apis([own(5), comment(6)], { members: asParticipant }));
+    expect(delButton(participant, 5)).toBeTruthy();
+    expect(delButton(participant, 6)).toBeUndefined();
+  });
+  it("labels the button with the author and uses the error style", async () => {
+    const container = await render(apis([comment(6)]));
+    expect(delButton(container, 6)?.getAttribute("aria-label")).toBe("Eliminar comentario de Marta");
+    expect(delButton(container, 6)?.getAttribute("data-error")).toBe("true");
+  });
+  it("hides it for a former member's comment unless admin, and offers it while the member list is unknown", async () => {
+    const former = await render(apis([own(5, { authorIsFormerMember: true })], { members: asParticipant }));
+    expect(delButton(former, 5)).toBeUndefined();
+    const unknown = await render(apis([comment(6)], { members: { list: vi.fn().mockResolvedValue(fail("server")) } }));
+    expect(delButton(unknown, 6)).toBeTruthy();
+  });
+  it("is not shown while the comment is being edited", async () => {
+    const container = await render(apis([own(5), own(6)]));
+    await click(button(item(container, 5), "Editar"));
+    expect(delButton(container, 5)).toBeUndefined();
+    expect(delButton(container, 6)).toBeTruthy();
+  });
+  it("confirms in a dialog with the safe action focused, and cancelling deletes nothing and returns the focus", async () => {
+    const api = apis([comment(6)]);
+    const container = await render(api);
+    await click(delButton(container, 6));
+    expect(dialog()?.textContent).toContain("Eliminar comentario");
+    expect(dialog()?.textContent).toContain("Se elimina el comentario y sus me gusta. No se puede deshacer.");
+    expect(document.activeElement).toBe(button(dialog() as HTMLElement, "Cancelar"));
+    await click(button(dialog() as HTMLElement, "Cancelar"));
+    expect(dialog()).toBeNull();
+    expect(api.comments.remove).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(delButton(container, 6));
+    expect(order(container)).toEqual(["Comentario 6"]);
+  });
+  it("deletes once, removes it from the list, refreshes the likes, announces politely and moves the focus to the next «Eliminar»", async () => {
+    const pending = deferred<unknown>();
+    const api = apis([comment(5), comment(6), comment(7)], { comments: { remove: vi.fn().mockReturnValue(pending.promise) } });
+    const container = await render(api);
+    await click(delButton(container, 6));
+    const summaries = api.likes.summary.mock.calls.length;
+    await act(async () => { for (let i = 0; i < 2; i += 1) confirm()?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })); });
+    expect(api.comments.remove).toHaveBeenCalledTimes(1);
+    expect(api.comments.remove).toHaveBeenCalledWith(tripId, postId, itineraryId(6));
+    await act(async () => pending.resolve(ok(undefined)));
+    expect(dialog()).toBeNull();
+    expect(order(container)).toEqual(["Comentario 5", "Comentario 7"]);
+    expect(api.likes.summary.mock.calls.length).toBeGreaterThan(summaries);
+    expect(notice(container)?.textContent).toBe("Comentario eliminado");
+    expect(document.activeElement).toBe(delButton(container, 7));
+  });
+  it("moves the focus to the comment field when there is no next «Eliminar»", async () => {
+    const api = apis([comment(5)], { comments: { remove: vi.fn().mockResolvedValue(ok(undefined)) } });
+    const container = await render(api);
+    await click(delButton(container, 5));
+    await click(confirm());
+    expect(order(container)).toEqual([]);
+    expect(document.activeElement).toBe(field(container, NEW));
+  });
+  it("leaves the edit draft of another comment alone", async () => {
+    const api = apis([own(5), own(6)], { comments: { remove: vi.fn().mockResolvedValue(ok(undefined)) } });
+    const container = await render(api);
+    await click(button(item(container, 6), "Editar"));
+    await type(container, `comment-edit-${itineraryId(6)}`, "a medias");
+    await click(delButton(container, 5));
+    await click(confirm());
+    expect(item(container, 5)).toBeNull();
+    expect(field(container, `comment-edit-${itineraryId(6)}`)?.value).toBe("a medias");
+  });
+  it("treats a missing comment (404 with its code) as deleted: removes it and reloads the list", async () => {
+    const remove = vi.fn().mockResolvedValue(failure("not-found", { code: "CommentNotFoundError" }));
+    const api = apis([comment(5), comment(6)], { comments: { remove } });
+    const container = await render(api);
+    api.comments.list.mockResolvedValue(ok([comment(5)]));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()).toBeNull();
+    expect(api.comments.list).toHaveBeenCalledTimes(2);
+    expect(order(container)).toEqual(["Comentario 5"]);
+    expect(notice(container)?.textContent).toBe("Este comentario ya no está disponible.");
+  });
+  it("on 403 explains it, re-reads the role and closes when it no longer applies", async () => {
+    let demoted = false;
+    const list = vi.fn().mockImplementation(async () => demoted ? roster("participant") : roster("admin"));
+    const remove = vi.fn().mockImplementation(async () => { demoted = true; return failure("forbidden"); });
+    const container = await render(apis([comment(6)], { members: { list }, comments: { remove } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Ya no tenés permiso para eliminar este comentario.");
+    expect(delButton(container, 6)).toBeUndefined();
+    expect(order(container)).toEqual(["Comentario 6"]);
+  });
+  it("on 403 keeps the dialog with the message when the permission still seems valid", async () => {
+    const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockResolvedValue(failure("forbidden")) } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("Ya no tenés permiso para eliminar este comentario.");
+  });
+  it("on 401 asks to sign in again", async () => {
+    const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockResolvedValue(failure("unauthorized")) } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("Tu sesión venció. Volvé a iniciar sesión.");
+    expect(Array.from((dialog() as HTMLElement).querySelectorAll("a")).find((a) => a.textContent === "Iniciar sesión")).toBeTruthy();
+  });
+  it("on a network failure keeps the dialog and the comment, and retries", async () => {
+    const remove = vi.fn().mockResolvedValueOnce(failure("network")).mockResolvedValueOnce(ok(undefined));
+    const container = await render(apis([comment(6)], { comments: { remove } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("No pudimos eliminar el comentario.");
+    expect(order(container)).toEqual(["Comentario 6"]);
+    await click(confirm());
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(dialog()).toBeNull();
+    expect(order(container)).toEqual([]);
+  });
+  it("treats a thrown error like a network failure", async () => {
+    const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockRejectedValue(new Error("x")) } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("No pudimos eliminar el comentario.");
+  });
+});
