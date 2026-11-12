@@ -255,3 +255,30 @@ describe("itinerary screen expenses", () => {
     });
   });
 });
+
+describe("itinerary screen expenses outside the itinerary in both modes", () => {
+  it.each(["register", "balance"] as const)("offers the shortcut and the outside section in %s mode, with the amount and the publication date", async (mode) => {
+    const value = fixture();
+    value.expenseMode = mode;
+    value.posts[0].createdAt = "2026-10-03T12:00:00.789Z";
+    const container = await render(value);
+    const shortcut = button(container, "Ver gastos fuera del itinerario (1)");
+    expect(shortcut?.classList.contains("ui-button--secondary")).toBe(true);
+    const item = outsideSection(container)!.querySelector(`[data-outside-expense="${itineraryId(10)}"]`)!;
+    expect(item.textContent).toContain("ARS 25,50");
+    expect(item.textContent).toMatch(/Publicado .*2026/);
+    expect(item.classList.contains("itinerary-outside-expenses__item")).toBe(true);
+    expect(dayExpenses(container).textContent).toContain(mode === "balance" ? "Modo balance" : "Modo registro");
+  });
+  it("wraps the expense date and the publication date of a moved expense in their own spans and keeps the line text", async () => {
+    const value = fixture();
+    linkPost(value.posts[0], { activityId: itineraryId(8) });
+    value.activities[0].postIds = [itineraryId(10)];
+    value.posts[0].createdAt = "2026-09-26T15:00:00.000Z";
+    value.expenses[0] = { ...value.expenses[0]!, source: "activity", rootActivityId: itineraryId(8), occurredAt: "2026-09-25T12:00:00.123Z", publishedAt: "2026-09-26T15:00:00.000Z" };
+    const container = await render(value);
+    const line = Array.from(container.querySelectorAll<HTMLElement>(`[data-itinerary-post="${itineraryId(10)}"] .itinerary-secondary`)).find((item) => item.textContent?.startsWith("Gasto del"))!;
+    expect(line.querySelectorAll(".expense-date")).toHaveLength(2);
+    expect(line.textContent).toMatch(/^Gasto del 25 .* 2026 · Publicado 26 .* 2026$/);
+  });
+});

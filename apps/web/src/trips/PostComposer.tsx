@@ -20,6 +20,7 @@ import { LocationPreview } from "./LocationPreview.js";
 import { usePostDraft } from "./use-post-drafts.js";
 import { usePostPhotos, type PostPhotoDeps, type UploadOutcome } from "./use-post-photos.js";
 import "./itinerary.css";
+import "./expenses.css";
 
 /** `photos` is optional: without it the composer shows no photo section (nothing about photos reaches the form). */
 export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string; photos?: PostPhotoDeps;
@@ -493,18 +494,18 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
         <section className="post-expense-section" aria-label="Gasto">
           <p id="post-expense-summary">{expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
           {attributionStale ? <p id="post-expense-attribution" className="itinerary-secondary">Se recalcula al guardar</p> : null}
-          {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al {formatLocalDate(attribution.occurredAt, timeZone)} (actividad) · Publicado el {formatLocalDate(attribution.publishedAt, timeZone)}</p> : null}
+          {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al <span className="expense-date">{formatLocalDate(attribution.occurredAt, timeZone)}</span> (actividad) · Publicado el <span className="expense-date">{formatLocalDate(attribution.publishedAt, timeZone)}</span></p> : null}
           {existing && savedExpense ? <p className="itinerary-secondary">{expenseNotice}</p> : null}
           {expenseLoad.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
           {expenseLoad.kind === "error" ? <div className="trips-state">
             <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente. Podés seguir editando el texto.</Feedback>
             <Button onClick={() => setExpenseAttempt((value) => value + 1)}>Reintentar</Button>
           </div> : null}
-          <button ref={expenseRef} name="expense" type="button" className="ui-button" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
+          <button ref={expenseRef} name="expense" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
             aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution || attributionStale ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
             {draft.extras.expense !== null || savedExpense ? "Editar gasto" : "Agregar gasto"}</button>
           {draft.extras.expense !== null && !savedExpense ? <Button disabled={saving} onClick={removeExpense}>Quitar gasto</Button> : null}
-          <button ref={splitRef} name="split" type="button" className="ui-button" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined}
+          <button ref={splitRef} name="split" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined}
             aria-describedby={splitTouched ? "post-split-summary" : undefined} onClick={() => openSplit()}>Pagos y reparto</button>
           {splitTouched ? <p id="post-split-summary" className="itinerary-secondary">Pagos y reparto con cambios sin guardar</p> : null}
           {errors.expense ? <p className="ui-field__error" id="post-expense-error" role="alert">{errors.expense}</p> : null}

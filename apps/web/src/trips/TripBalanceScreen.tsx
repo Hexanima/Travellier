@@ -14,6 +14,7 @@ import type { TripPostApi } from "./trip-post-api.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { useTripRefresh } from "./use-trip-refresh.js";
 import "./itinerary.css";
+import "./expenses.css";
 
 export type TripBalanceScreenProps = { balance: Pick<TripBalanceApi, "get">; posts: Pick<TripPostApi, "list">; members: Pick<TripMembersApi, "list"> };
 type Ready = { kind: "ready"; balance: TripBalance; people: PhotoPeople; titles: ReadonlyMap<string, string> | undefined };
@@ -84,7 +85,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
 
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   const create = `/trips/${tripId}/memories/new`;
-  return <main className="app-shell trips-shell itinerary-shell">
+  return <main className="app-shell trips-shell itinerary-shell trip-balance">
     <PullToRefresh onRefresh={() => load()}>
     <div className="trips-panel">
       <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
@@ -103,7 +104,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       {state.kind === "ready" ? <>
         {refreshing ? <LoadingState label="Actualizando balance…" /> : null}
         {refreshError ? <Feedback variant="error">No pudimos actualizar el balance. Lo que ves puede estar desactualizado.</Feedback> : null}
-        <div className="activity-detail"><Button onClick={() => { void load(); }}>Actualizar balance</Button></div>
+        <div className="activity-detail balance-refresh"><Button variant="secondary" onClick={() => { void load(); }}>Actualizar balance</Button></div>
         {state.balance.expenseMode === "register"
           ? <section className="trips-empty">
             <p>Este viaje está en modo registro: no se calculan deudas ni compensaciones. Los gastos siguen registrados en cada recuerdo.</p>
@@ -133,11 +134,11 @@ function BalanceSections({ tripId, ready, create, location, navigate }: { tripId
         <Link to={create}>Nuevo recuerdo</Link>
       </section>
       : <p className="itinerary-secondary">Las compensaciones son sugerencias: la app no registra transferencias ni cobros.</p>}
-    {balance.currencies.map(({ currency, expenseCount, balances, settlements }) => <section key={currency} className="activity-detail" aria-labelledby={`balance-${currency}`}>
+    {balance.currencies.map(({ currency, expenseCount, balances, settlements }) => <section key={currency} className="activity-detail balance-currency" aria-labelledby={`balance-${currency}`}>
       <h2 id={`balance-${currency}`}>{currencyTitle[currency]}</h2>
       <p className="itinerary-secondary">{countText(expenseCount)}</p>
       <List className="itinerary-posts" aria-label={`Saldos en ${currencyTitle[currency]}`}>
-        {balances.map(({ userId, paidCents, shareCents, netCents }) => <ListItem key={userId} className="itinerary-nested-post">
+        {balances.map(({ userId, paidCents, shareCents, netCents }) => <ListItem key={userId} className="itinerary-nested-post balance-row" data-net={netCents > 0 ? "credit" : netCents < 0 ? "debit" : "even"}>
           <p><strong>{label(userId)}</strong>: {memberStatus(netCents, currency)}</p>
           <p className="itinerary-secondary">Pagó {formatCents(paidCents, currency)} · Le correspondía {formatCents(shareCents, currency)}</p>
         </ListItem>)}
@@ -145,16 +146,16 @@ function BalanceSections({ tripId, ready, create, location, navigate }: { tripId
       <h3>Compensaciones sugeridas</h3>
       {settlements.length === 0 ? <p>No hay compensaciones sugeridas en esta moneda.</p>
         : <List aria-label={`Compensaciones sugeridas en ${currencyTitle[currency]}`}>
-          {settlements.map(({ fromUserId, toUserId, cents }) => <ListItem key={`${fromUserId}-${toUserId}`}>{settlementText(label(fromUserId), label(toUserId), cents, currency, isCurrentUser(people, fromUserId), isCurrentUser(people, toUserId))}</ListItem>)}
+          {settlements.map(({ fromUserId, toUserId, cents }) => <ListItem key={`${fromUserId}-${toUserId}`} className="balance-settlement">{settlementText(label(fromUserId), label(toUserId), cents, currency, isCurrentUser(people, fromUserId), isCurrentUser(people, toUserId))}</ListItem>)}
         </List>}
     </section>)}
-    {balance.excludedExpenses.length > 0 ? <section className="activity-detail" aria-labelledby="balance-pending">
+    {balance.excludedExpenses.length > 0 ? <section className="activity-detail balance-pending" aria-labelledby="balance-pending">
       <h2 id="balance-pending">Gastos por completar</h2>
       <p>Estos gastos todavía no entran en el balance ({balance.excludedExpenses.length}).</p>
       <List className="itinerary-posts" aria-label="Gastos por completar">
         {balance.excludedExpenses.map((item) => {
           const title = titles?.get(item.postId) ?? "Recuerdo";
-          return <ListItem key={item.expenseId} className="itinerary-nested-post" data-balance-expense={item.expenseId} tabIndex={-1}>
+          return <ListItem key={item.expenseId} className="itinerary-nested-post balance-pending-item" data-balance-expense={item.expenseId} tabIndex={-1}>
             <p className="itinerary-post-description">{title}</p>
             <p className="itinerary-secondary">{excludedAmount(item)}</p>
             <ul aria-label="Motivos">{item.reasons.map((reason) => <li key={reason}>{reasonText[reason]}</li>)}</ul>

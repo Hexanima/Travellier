@@ -6,6 +6,7 @@ import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-dr
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
+import "./expenses.css";
 
 export type ExpenseFormProps = { itinerary: Pick<TripItineraryApi, "get"> };
 type Saved = { kind: "loading" } | { kind: "error" } | { kind: "ready"; expense?: SavedExpense };
@@ -72,7 +73,7 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
         <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente.</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button>
       </div> : null}
-      {saved.kind === "ready" ? <Form draft={draft} commit={commit} saved={saved.expense} leaving={leaving} back={back} /> : <Button onClick={back}>Cancelar</Button>}
+      {saved.kind === "ready" ? <Form draft={draft} commit={commit} saved={saved.expense} leaving={leaving} back={back} /> : <Button variant="secondary" onClick={back}>Cancelar</Button>}
     </div>
   </main>;
 }
@@ -114,6 +115,6 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
     </SelectField>
     <TextAreaField label="Desglose (opcional)" name="breakdown" rows={3} value={values.breakdown} onChange={(event) => update("breakdown", event.target.value)} />
     <Button type="submit">Aceptar</Button>
-    <Button onClick={back}>Cancelar</Button>
+    <Button variant="secondary" onClick={back}>Cancelar</Button>
   </form>;
 }

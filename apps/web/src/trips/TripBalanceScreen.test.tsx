@@ -420,4 +420,44 @@ describe("TripBalanceScreen: coming back from the editor", () => {
   });
 });
 
+describe("TripBalanceScreen: presentation hooks", () => {
+  it("marks the screen and each currency apart, without a total or a conversion", async () => {
+    const { container } = await render();
+    expect(container.querySelector("main")?.classList.contains("trip-balance")).toBe(true);
+    expect(Array.from(container.querySelectorAll(".balance-currency h2")).map((item) => item.textContent)).toEqual(["Pesos (ARS)", "Dólares (USD)"]);
+    expect(container.textContent).not.toMatch(/Total|conversi|cotizaci/i);
+  });
+  it("keeps the text of each balance row and hooks data-net as credit, debit or even only as a style hook", async () => {
+    const even = { currency: "EUR" as const, expenseCount: 1, balances: [entry(me, 500, 500), entry(beto, 500, 500)], settlements: [] };
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(balance({ currencies: [ars(), even] }))) });
+    const nets = (title: string) => Array.from(section(container, title).querySelectorAll<HTMLElement>("[data-net]")).map((item) => item.getAttribute("data-net"));
+    expect(nets("Pesos (ARS)")).toEqual(["credit", "debit", "debit"]);
+    expect(nets("Euros (EUR)")).toEqual(["even", "even"]);
+    const first = section(container, "Pesos (ARS)").querySelector<HTMLElement>("[data-net]")!;
+    expect(first.textContent).toBe("Vos: Tiene a favor ARS 20,00Pagó ARS 30,00 · Le correspondía ARS 10,00");
+    expect(section(container, "Euros (EUR)").textContent).toContain("Sin saldo pendiente");
+  });
+  it("keeps the settlements, the pending expenses and the fixed notice free of paid/collected language", async () => {
+    const withPending = balance({ excludedExpenses: [pending(1, ["missing_shares"], { formerMemberIds: [gone] })] });
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(withPending)) });
+    expect(container.querySelectorAll(".balance-settlement").length).toBe(3);
+    expect(container.querySelector("#balance-pending")?.closest("section")?.classList.contains("balance-pending")).toBe(true);
+    const item = pendingItems(container)[0]!;
+    expect(item.getAttribute("data-balance-expense")).toBe(itineraryId(41));
+    expect(item.textContent).toContain("Completar pagos y reparto");
+    expect(item.textContent).toContain("Ex integrante 1");
+    expect(container.textContent).toContain("Las compensaciones son sugerencias: la app no registra transferencias ni cobros.");
+    expect(container.textContent).not.toMatch(forbidden);
+  });
+  it("the refresh button is secondary", async () => {
+    const { container } = await render();
+    expect(button(container, "Actualizar balance")?.classList.contains("ui-button--secondary")).toBe(true);
+  });
+  it("register mode keeps its links without balance sections", async () => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(register)) });
+    expect(container.querySelector(".balance-currency")).toBeNull();
+    expect(link(container, "Ver gastos del viaje")).toBeTruthy();
+  });
+});
+
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as typeof window.scrollTo; });

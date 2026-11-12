@@ -385,3 +385,46 @@ describe("ExpenseSplitForm", () => {
     expect(container.textContent).toContain("Los porcentajes se recalculan sobre el total mostrado; los montos fijos no cambian");
   });
 });
+describe("ExpenseSplitForm: presentation hooks", () => {
+  it("marks every row with its unit and the former members, who keep «Ex integrante N» and have no Quitar", async () => {
+    const saved = view({ payments: [{ userId: dani, unit: "amount", value: 10 }], shares: [{ userId: dani, unit: "amount", value: 10 }, { userId: me, unit: "remainder", value: null }, { userId: beto, unit: "excluded", value: null }] });
+    const { container } = await open({ path: editPath, saved, draft: seeded(null), ids: [me, beto] });
+    const payment = rows(container, "payments")[0]!, shares = rows(container, "shares");
+    for (const row of [payment, ...shares]) expect(row.classList.contains("expense-split__row")).toBe(true);
+    expect(payment.getAttribute("data-former")).not.toBeNull();
+    expect(payment.getAttribute("data-unit")).toBe("amount");
+    expect(shares[0]!.getAttribute("data-former")).not.toBeNull();
+    expect(shares[0]!.textContent).toContain("Ex integrante 1");
+    expect(shares[0]!.querySelector("button")).toBeNull();
+    expect(shares[1]!.getAttribute("data-former")).toBeNull();
+    expect(shares[1]!.getAttribute("data-unit")).toBe("remainder");
+    expect(shares[1]!.textContent).toContain("Le tocan");
+    expect(shares[2]!.getAttribute("data-unit")).toBe("excluded");
+    expect(shares[2]!.textContent).not.toContain("Le tocan");
+  });
+  it("shows the total and a summary per section with the summary class, keeping the text", async () => {
+    const { container } = await open({ draft: seeded(filled, { payments: [{ key: "p1", userId: me, unit: "amount", value: "40" }], shares: null }) });
+    expect(container.querySelector(".expense-split__total")?.textContent).toBe("Total del gasto: ARS 100,00");
+    const summary = container.querySelector('[data-section="payments"] .expense-split__summary')!;
+    expect(summary.textContent).toContain("Cubierto ARS 40,00 de ARS 100,00 · Faltan ARS 60,00");
+  });
+  it("«Agregar pago», «Incluir a todos», «Incluir a X» and «Cancelar» are secondary and found by name", async () => {
+    const { container } = await open({ draft: seeded(filled, { payments: null, shares: [{ key: "s1", userId: me, unit: "remainder", value: "" }] }) });
+    for (const label of ["Agregar pago", "Incluir a todos", "Incluir a Beto", "Cancelar"]) {
+      expect(button(container, label)?.classList.contains("ui-button--secondary"), label).toBe(true);
+    }
+    expect(button(container, "Aceptar")?.classList.contains("ui-button--secondary")).toBe(false);
+    expect(container.querySelector('[data-section="shares"] .expense-split__row button')?.classList.contains("ui-button--secondary")).toBe(true);
+  });
+  it("Cancelar after editing rows keeps the rest of the draft and discards only the unaccepted split", async () => {
+    const { container } = await open();
+    await choose(unitOf(rows(container, "shares")[0]!), "excluded");
+    await click(button(container, "Cancelar"));
+    const result = probe(container);
+    expect(result.draft?.extras.split).toEqual({ payments: null, shares: null });
+    expect(result.draft?.extras.expense).toEqual(filled);
+    expect(result.draft?.values).toEqual(seeded().values);
+    expect(result.returned).toEqual({ focus: "split" });
+  });
+});
+
