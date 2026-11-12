@@ -95,8 +95,11 @@ export function useActivityParticipations(tripId: string | undefined, activityId
     let result: TripResult<ParticipationResponse>;
     try { result = confirmation ? await api.set(tripId, activityId, target, confirmation) : await api.set(tripId, activityId, target); } catch { result = { ok: false, error: { kind: "network" } }; }
     if (generation.current !== revision) return;
-    if (result.ok) publish(activityId, { ...fromResponse(result.value), saved: true });
-    else if (result.error.kind === "participation-conflict" && result.error.confirmation) {
+    if (result.ok) {
+      publish(activityId, { ...fromResponse(result.value), saved: true });
+      // A confirmed write succeeded atomically: the server left «No voy» in exactly the incompatible plans the person confirmed.
+      if (confirmation) for (const { activityId: other } of confirmation.confirmedConflicts) if (other !== activityId) publish(other, { kind: "ready", status: "not_going" });
+    } else if (result.error.kind === "participation-conflict" && result.error.confirmation) {
       publish(activityId, { ...base(previous), confirming: { target, confirmation: result.error.confirmation, ...(confirmation ? { stale: true } : {}) } });
     } else publish(activityId, { ...base(previous), error: result.error, failedStatus: target });
   }, [api, tripId, publish]);
