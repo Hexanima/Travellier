@@ -23,11 +23,15 @@ export const createBrowserImageCodec = ({ createImageBitmap, createCanvas }: Bro
     const canvas = createCanvas();
     canvas.width = width; canvas.height = height;
     const context = canvas.getContext("2d");
-    if (!context) return undefined;
+    if (!context) { canvas.width = 0; canvas.height = 0; return undefined; }
     // JPEG has no alpha: transparent PNG/WebP areas would turn black without a white background.
     context.fillStyle = "#ffffff";
     context.fillRect(0, 0, width, height);
     context.drawImage(image as never, 0, 0, width, height);
-    return new Promise<Blob | undefined>((resolve) => canvas.toBlob((blob) => resolve(blob ?? undefined), "image/jpeg", quality));
+    return new Promise<Blob | undefined>((resolve) => canvas.toBlob((blob) => {
+      // Free the backing store now: iOS WebKit caps total canvas memory and a later toBlob would return null.
+      canvas.width = 0; canvas.height = 0;
+      resolve(blob ?? undefined);
+    }, "image/jpeg", quality));
   },
 });
