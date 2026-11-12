@@ -1,6 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObjectId } from "mongodb";
+import { processStorageDeletionJobs } from "app-domain";
 import { childPostsQuery } from "../adapters/mongodb/trip-post-repository.js";
+import { createMongoPhotoLinkRepository } from "../adapters/mongodb/photo-link-repository.js";
+import { createMongoStorageDeletionJobRepository } from "../adapters/mongodb/storage-deletion-job-repository.js";
+import { FakeCleanupStorage } from "../../test/fake-cleanup-storage.js";
+import { FakeObjectStorage } from "../../test/fake-object-storage.js";
 import { PostFixture, domainId } from "../../test/post-fixture.js";
 
 describe("post persistence and transactions", () => {
@@ -426,6 +432,218 @@ describe("post persistence and transactions", () => {
         expect(participations).toMatchObject([{ status: "going", userId: f.actor }]);
         expect(participations[0].activityId.toHexString()).toBe(winner.value.activity.id);
       }
+    });
+  });
+
+  describe("removing photos and expense while editing (T127)", () => {
+    let fake: FakeObjectStorage;
+    beforeEach(async () => { fake = new FakeObjectStorage(); f.storage = fake; await f.reset(); });
+    afterAll(() => { f.storage = undefined; });
+
+    const keyFor = () => {
+      const key = `trips/${f.trip}/photos/${f.actor}/${randomUUID()}.jpg`;
+      fake.put(key, "image/jpeg");
+      return key;
+    };
+    const joinAs = async (role: "admin" | "participant") => {
+      const user = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: user, role, joinedAt: new Date() });
+      return user;
+    };
+    const pct = (userId: ObjectId) => ({ userId: userId.toHexString(), unit: "percent", value: 100 });
+    const rest = (userId: ObjectId) => ({ userId: userId.toHexString(), unit: "remainder", value: null });
+    /** A post with `count` photos; `refs[i]` is the photo uploaded with `keys[i]`. */
+    const withPhotos = async (count: number, fields: object = {}) => {
+      const keys = Array.from({ length: count }, keyFor);
+      const { post, photos } = await create({ photos: keys.map((key) => ({ key })), ...fields });
+      return { post, keys, refs: photos!.map((photo) => ({ id: photo.id })) };
+    };
+    const patch = (postId: string, fields: object, user: ObjectId = f.actor) =>
+      f.api.updatePost!({ ...f.context(), authenticatedUserId: domainId(user), postId: domainId(new ObjectId(postId)), ...fields });
+    const stored = async (postId: string) => (await f.db.collection("postPhotos").find({ postId: new ObjectId(postId) }).sort({ order: 1 }).toArray());
+    const dump = async () => Promise.all(["posts", "postPhotos", "postExpenses", "storageDeletionJobs", "outboxEvents"]
+      .map((name) => f.db.collection(name).find().sort({ _id: 1 }).toArray()));
+    const jobs = () => f.db.collection("storageDeletionJobs").find().toArray();
+
+    it("removes only the chosen documents, renumbers without hitting the unique index even when the first of three goes, and queues one pending job", async () => {
+      const { post, keys, refs } = await withPhotos(3);
+      const other = await withPhotos(2);
+      const otherBefore = await stored(other.post.id);
+      const result = await patch(post.id, { removePhotos: [refs[0]!] });
+      expect(result).toMatchObject({ ok: true, value: { photos: [{ id: refs[1]!.id, order: 1 }, { id: refs[2]!.id, order: 2 }] } });
+      expect((await stored(post.id)).map((p) => [p.s3Key, p.order])).toEqual([[keys[1], 1], [keys[2], 2]]);
+      expect(await stored(other.post.id)).toEqual(otherBefore);
+      const queued = await jobs();
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ tripId: f.trip, status: "pending", attempts: 0, objectKeys: [keys[0]], resolvedKeys: [], rejectedKeys: [] });
+    });
+
+    it("removes the middle and the last ones, and several at once in a single job", async () => {
+      const { post, keys, refs } = await withPhotos(4);
+      expect((await patch(post.id, { removePhotos: [refs[1]!] })).ok).toBe(true);
+      expect((await stored(post.id)).map((p) => p.order)).toEqual([1, 2, 3]);
+      expect((await patch(post.id, { removePhotos: [refs[3]!, refs[0]!] })).ok).toBe(true);
+      expect((await stored(post.id)).map((p) => [p.s3Key, p.order])).toEqual([[keys[2], 1]]);
+      const queued = await jobs();
+      expect(queued.map((job) => [...job.objectKeys].sort())).toEqual([[keys[1]], [keys[0], keys[3]].sort()]);
+    });
+
+    it("appends a new photo after the renumbered ones in the same PATCH", async () => {
+      const { post, keys, refs } = await withPhotos(2);
+      const added = keyFor();
+      expect(await patch(post.id, { removePhotos: [refs[0]!], photos: [{ key: added }] })).toMatchObject({ ok: true });
+      expect((await stored(post.id)).map((p) => [p.s3Key, p.order])).toEqual([[keys[1], 1], [added, 2]]);
+      expect((await jobs())[0]).toMatchObject({ objectKeys: [keys[0]] });
+    });
+
+    it("the storage worker deletes the removed key only, and not one that was linked again elsewhere", async () => {
+      const { post, keys, refs } = await withPhotos(3);
+      const kept = await withPhotos(1);
+      expect((await patch(post.id, { removePhotos: [refs[0]!, refs[1]!] })).ok).toBe(true);
+      // The object still exists: another memory links it before the cleanup runs.
+      expect((await patch(kept.post.id, { photos: [{ key: keys[1]! }] })).ok).toBe(true);
+      const cleanup = new FakeCleanupStorage();
+      for (const key of [...keys, ...kept.keys]) cleanup.put(key, new Date("2026-01-01T00:00:00Z"));
+      const now = new Date(Date.now() + 60_000);
+      const result = await processStorageDeletionJobs({ jobs: createMongoStorageDeletionJobRepository(f.db), links: createMongoPhotoLinkRepository(f.db), storage: cleanup,
+        now: () => now, createOwner: () => "owner", deadline: new Date(now.getTime() + 45_000), maxJobs: 10 });
+      expect(result).toMatchObject({ ok: true, value: { processed: 1, completed: 1, resolvedKeys: 1, rejectedKeys: 1 } });
+      expect([...cleanup.deleted]).toEqual([keys[0]]);
+      expect(cleanup.keys().sort()).toEqual([keys[1], keys[2], ...kept.keys].sort());
+    });
+
+    describe("minimum content", () => {
+      it("rejects removing the last photo of a post without text or location, leaving the snapshot identical and no job", async () => {
+        const { post, refs } = await withPhotos(2, { description: null });
+        expect((await patch(post.id, { removePhotos: [refs[0]!] })).ok).toBe(true);
+        const before = await dump(), jobsBefore = (await jobs()).length;
+        expect(await patch(post.id, { removePhotos: [refs[1]!] })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ code: "required" }] } });
+        expect(await dump()).toEqual(before); expect((await jobs()).length).toBe(jobsBefore);
+        expect(await patch(post.id, { description: "Ahora con texto", removePhotos: [refs[1]!] })).toMatchObject({ ok: true, value: { photos: [] } });
+        expect(await stored(post.id)).toEqual([]);
+      });
+      it("clearing the text while removing the last photo is rejected as a whole", async () => {
+        const { post, refs } = await withPhotos(1);
+        const before = await dump();
+        expect(await patch(post.id, { description: null, removePhotos: [refs[0]!] })).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+        expect(await dump()).toEqual(before);
+      });
+    });
+
+    describe("expense: null", () => {
+      it("deletes only the expense of the post, answers the post without the expense and omits it in the detail", async () => {
+        const post = (await create({ expense: { totalAmount: 10, currency: "ARS" } })).post;
+        const kept = (await create({ expense: { totalAmount: 20, currency: "ARS" } })).post;
+        const result = await patch(post.id, { expense: null });
+        expect(result.ok && "expense" in result.value).toBe(false);
+        expect(await f.db.collection("postExpenses").find().toArray()).toMatchObject([{ postId: new ObjectId(kept.id) }]);
+        const detail = await f.api.getPostChain!({ ...f.context(), postId: post.id });
+        expect(detail.ok && "expense" in detail.value).toBe(false);
+      });
+
+      it("recomputes the balance after removing the expense, keeping an incomplete expense excluded", async () => {
+        await f.db.collection("trips").updateOne({ _id: f.trip }, { $set: { expenseMode: "balance" } });
+        const other = await joinAs("participant");
+        const full = (total: number, payer: ObjectId) => ({ totalAmount: total, currency: "ARS", payments: [pct(payer)], shares: [rest(f.actor), rest(other)] });
+        const first = (await create({ expense: full(100, f.actor) })).post, second = (await create({ expense: full(40, other) })).post;
+        await create({ expense: { totalAmount: 30, currency: "ARS", payments: [pct(f.actor)] } });
+        const balance = async () => { const r = await f.api.getBalance!(f.context()); if (!r.ok) throw r.error; return r.value; };
+        const net = (value: Awaited<ReturnType<typeof balance>>, user: ObjectId) =>
+          value.currencies.find((c) => c.currency === "ARS")?.balances.find((row) => row.userId === user.toHexString())?.netCents;
+        const before = await balance();
+        expect([before.includedExpenseCount, net(before, f.actor), net(before, other)]).toEqual([2, 3000, -3000]);
+        expect((await patch(second.id, { expense: null }, other)).ok).toBe(true);
+        const after = await balance();
+        expect([after.includedExpenseCount, net(after, f.actor), net(after, other)]).toEqual([1, 5000, -5000]);
+        expect(after.excludedExpenses).toHaveLength(1);
+        expect((await patch(first.id, { expense: null })).ok).toBe(true);
+        expect((await balance()).includedExpenseCount).toBe(0);
+      });
+
+      it("without a stored expense it writes nothing", async () => {
+        const { post } = await create(); const before = await dump();
+        expect(await patch(post.id, { expense: null })).toMatchObject({ ok: true });
+        expect(await dump()).toEqual(before);
+      });
+    });
+
+    it("answers a retry of a PATCH that removed photos, the expense and edited the text without new writes or jobs (T87)", async () => {
+      const { post, refs } = await withPhotos(3, { expense: { totalAmount: 10, currency: "ARS" } });
+      const body = { description: "Editado", removePhotos: [refs[1]!], expense: null };
+      expect(await patch(post.id, body)).toMatchObject({ ok: true });
+      const before = await dump();
+      expect(await patch(post.id, body)).toMatchObject({ ok: true, value: { description: "Editado", photos: [{ id: refs[0]!.id, order: 1 }, { id: refs[2]!.id, order: 2 }] } });
+      expect(await dump()).toEqual(before); expect(await jobs()).toHaveLength(1);
+    });
+
+    it("lets a participant who is not the author remove the expense but answers 403 to removePhotos, with no changes", async () => {
+      const { post, refs } = await withPhotos(2, { expense: { totalAmount: 10, currency: "ARS" } });
+      const other = await joinAs("participant"), admin = await joinAs("admin"); const before = await dump();
+      for (const user of [other, admin]) {
+        expect(await patch(post.id, { removePhotos: [refs[0]!] }, user)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+        expect(await patch(post.id, { removePhotos: [refs[0]!], expense: null }, user)).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+      }
+      expect(await dump()).toEqual(before);
+      expect(await patch(post.id, { expense: null }, other)).toMatchObject({ ok: true });
+      expect(await f.db.collection("postExpenses").countDocuments()).toBe(0);
+      expect(await stored(post.id)).toHaveLength(2); expect(await jobs()).toHaveLength(0);
+    });
+
+    it("ignores an unknown photo and one of another Trip, and rejects one of another post of this Trip, without writes", async () => {
+      const { post, refs } = await withPhotos(2); const other = await withPhotos(1);
+      const tripB = new ObjectId(), photoB = new ObjectId();
+      await f.db.collection("postPhotos").insertOne({ _id: photoB, tripId: tripB, postId: new ObjectId(), uploaderId: f.actor, s3Key: "trips/b/x.jpg", order: 1, uploadedAt: new Date() });
+      const before = await dump();
+      expect(await patch(post.id, { removePhotos: [{ id: new ObjectId().toHexString() }, { id: photoB.toHexString() }] }))
+        .toMatchObject({ ok: true, value: { photos: [{ id: refs[0]!.id, order: 1 }, { id: refs[1]!.id, order: 2 }] } });
+      expect(await dump()).toEqual(before);
+      expect(await patch(post.id, { removePhotos: [other.refs[0]!] })).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "removePhotos[0].id", code: "not_in_post" }] } });
+      expect(await dump()).toEqual(before);
+    });
+
+    describe("rollback", () => {
+      const failWith = (name: string, method: "insertOne" | "updateOne" | "deleteMany") => {
+        const collection = f.db.collection(name), original = f.db.collection.bind(f.db);
+        vi.spyOn(collection, method).mockRejectedValueOnce(new Error("forced failure"));
+        vi.spyOn(f.db, "collection").mockImplementation((key, options) => key === name ? collection : original(key, options));
+      };
+      it.each([["storageDeletionJobs", "insertOne"], ["postPhotos", "deleteMany"], ["postPhotos", "updateOne"], ["postExpenses", "deleteMany"]] as const)(
+        "a failure in %s.%s leaves no photo, order, expense or job changed", async (name, method) => {
+          const { post, refs } = await withPhotos(3, { expense: { totalAmount: 10, currency: "ARS" } });
+          const before = await dump();
+          failWith(name, method);
+          expect(await patch(post.id, { removePhotos: [refs[0]!], expense: null })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          vi.restoreAllMocks();
+          expect(await dump()).toEqual(before);
+        });
+    });
+
+    describe("concurrency", () => {
+      it("two PATCH that remove the same photo serialize: both succeed and a single job holds the key", async () => {
+        for (let round = 0; round < 3; round++) {
+          await f.reset();
+          const { post, keys, refs } = await withPhotos(3);
+          const results = await Promise.all([patch(post.id, { removePhotos: [refs[0]!] }), patch(post.id, { removePhotos: [refs[0]!] })]);
+          expect(results.map((r) => r.ok)).toEqual([true, true]);
+          expect((await stored(post.id)).map((p) => [p.s3Key, p.order])).toEqual([[keys[1], 1], [keys[2], 2]]);
+          const queued = await jobs();
+          expect(queued).toHaveLength(1); expect(queued[0]).toMatchObject({ objectKeys: [keys[0]] });
+        }
+      });
+
+      it("removing a photo while the post is deleted serializes without duplicating a key in the jobs", async () => {
+        for (let round = 0; round < 3; round++) {
+          await f.reset();
+          const { post, keys, refs } = await withPhotos(2);
+          const [edited, deleted] = await Promise.all([patch(post.id, { removePhotos: [refs[0]!] }),
+            f.api.deletePost!({ ...f.context(), postId: domainId(new ObjectId(post.id)) })]);
+          expect(deleted.ok).toBe(true);
+          if (!edited.ok) expect(edited.error.tag).toBe("PostNotFoundError");
+          const queuedKeys = (await jobs()).flatMap((job) => job.objectKeys as string[]);
+          expect(queuedKeys.sort()).toEqual([...keys].sort());
+          expect(new Set(queuedKeys).size).toBe(queuedKeys.length);
+          expect(await f.db.collection("postPhotos").countDocuments()).toBe(0);
+        }
+      });
     });
   });
 });

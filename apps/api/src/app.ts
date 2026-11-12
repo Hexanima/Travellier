@@ -663,17 +663,27 @@ const clientId = (value: unknown) => {
   return id?.ok ? id.value : undefined;
 };
 
-const postPayload = (payload: Record<string, unknown>):
-  Result<Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense">, ValidationError> => {
+type PostBody = Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense"> & { removePhotos?: unknown };
+/** `removePhotos` only exists in a plain PATCH of a post: not on creation and not together with `newActivity`. */
+const unsupportedRemovePhotos = () => errorResponse(new ValidationError([
+  { field: "removePhotos", code: "unsupported", message: "removePhotos is only accepted when editing a post without newActivity." },
+]));
+const postPayload = (payload: Record<string, unknown>): Result<PostBody, ValidationError> => {
   const invalid = (field: string, code = "invalid") => err(new ValidationError([
     { field, code, message: `Post ${field} is ${code === "required" ? "required" : "invalid"}.` },
   ]));
-  const fields: Partial<PostEditableFields> & Pick<CreateTripPostPayload, "newActivity" | "dayId" | "photos" | "expense"> = {};
+  const fields: PostBody = {};
   // Photo references are validated by the domain (all failures are reported together with the storage checks).
   if (Object.hasOwn(payload, "photos")) fields.photos = payload.photos;
-  // Only the JSON type is checked here; the amount, currency and unsupported keys are domain rules.
+  // Only the list type is checked here; ids, duplicates and the limit are domain rules (and it only applies to a PATCH of a post).
+  if (Object.hasOwn(payload, "removePhotos")) {
+    if (!Array.isArray(payload.removePhotos)) return invalid("removePhotos");
+    fields.removePhotos = payload.removePhotos;
+  }
+  // Only the JSON type is checked here; the amount, currency and unsupported keys are domain rules. `null` removes the stored expense
+  // (a PATCH of a post); the domain rejects it on creation and when a spontaneous activity is linked.
   if (Object.hasOwn(payload, "expense")) {
-    if (typeof payload.expense !== "object" || payload.expense === null || Array.isArray(payload.expense)) return invalid("expense");
+    if (payload.expense !== null && (typeof payload.expense !== "object" || Array.isArray(payload.expense))) return invalid("expense");
     fields.expense = payload.expense;
   }
   // A client dayId never reaches the post (ignored like createdAt); only a new activity uses it, and it is optional:
@@ -960,6 +970,7 @@ export const handleApiRequest = async (
       if (!payload) return invalidRequestResponse();
       const parsed = postPayload(payload);
       if (!parsed.ok) return errorResponse(parsed.error);
+      if (parsed.value.removePhotos !== undefined) return unsupportedRemovePhotos();
       let postIdFromClient: ObjectId | undefined;
       if (Object.hasOwn(payload, "id")) {
         postIdFromClient = clientId(payload.id);
@@ -996,6 +1007,7 @@ export const handleApiRequest = async (
         if (!parsed.ok) return errorResponse(parsed.error);
         if (Object.keys(parsed.value).length === 0) return invalidRequestResponse();
         if (parsed.value.newActivity !== undefined) {
+          if (parsed.value.removePhotos !== undefined) return unsupportedRemovePhotos();
           if (!trips?.linkPostToNewActivity) return unavailableResponse();
           const linked = await trips.linkPostToNewActivity({ ...detail, ...parsed.value, newActivity: parsed.value.newActivity,
             confirmedConflicts: payload.confirmedConflicts, confirmedActivity: payload.confirmedActivity });
