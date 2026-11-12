@@ -40,6 +40,19 @@ export const createPostPhotoStore = (records: Collection<PostPhotoDocument>, tri
     },
     findPhotosByKeys: async (keys: readonly string[]): AsyncResult<PostPhoto[]> =>
       ok((await records.find({ s3Key: { $in: [...keys] } }, options).toArray()).map(toPostPhoto)),
+    /** Removes only these photo records of the post (filtered by Trip and post, so an id of another post or Trip is ignored). */
+    deletePhotosByIds: async (postId: ObjectId, photoIds: readonly ObjectId[]): AsyncResult<void> => {
+      if (photoIds.length === 0) return ok(undefined);
+      await records.deleteMany({ _id: { $in: photoIds.map((photoId) => new MongoObjectId(photoId)) }, postId: new MongoObjectId(postId), tripId: mongoTripId }, options);
+      return ok(undefined);
+    },
+    /** One by one, in the order given (ascending old order, after the removals): each new value is free when it is applied. */
+    setPhotoOrders: async (postId: ObjectId, updates: readonly { id: ObjectId; order: number }[]): AsyncResult<void> => {
+      for (const update of updates) {
+        await records.updateOne({ _id: new MongoObjectId(update.id), postId: new MongoObjectId(postId), tripId: mongoTripId }, { $set: { order: update.order } }, options);
+      }
+      return ok(undefined);
+    },
     insertPhotos: async (photos: readonly PostPhoto[]): AsyncResult<void> => {
       if (photos.length === 0) return ok(undefined);
       if (photos.some((photo) => photo.tripId !== tripId)) throw new TripNotFoundError();

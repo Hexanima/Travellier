@@ -676,3 +676,70 @@ describe("query string handling (T91)", () => {
     expect(listPhotos).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, limit: "2" });
   });
 });
+
+describe("post PATCH: removePhotos and expense null (T127)", () => {
+  const user = "507f1f77bcf86cd799439011", trip = "507f191e810c19729de860ea", post = "507f191e810c19729de860eb";
+  const photo = "507f191e810c19729de860ec";
+  const stored = { id: post, tripId: trip, authorId: user, description: "Recuerdo", mapsUrl: null, activityId: null, parentPostId: null, transportId: null };
+  const call = (method: string, body: unknown, trips: Record<string, unknown>, url = `/trips/${trip}/posts/${post}`) =>
+    handleApiRequest({ method, url, authenticatedUserId: user, body: JSON.stringify(body) } as never, { trips } as never);
+  const fields = (response: { body: string }) => (JSON.parse(response.body).error?.fields ?? []).map((issue: { field: string; code: string }) => `${issue.field}/${issue.code}`);
+
+  it("forwards expense null to updatePost and answers the post without the expense key", async () => {
+    const updatePost = vi.fn().mockResolvedValue({ ok: true, value: stored });
+    const response = await call("PATCH", { expense: null }, { updatePost });
+    expect(response.statusCode).toBe(200);
+    expect(updatePost).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, postId: post, expense: null });
+    expect(JSON.parse(response.body)).toEqual({ post: stored });
+  });
+
+  it.each([["a number", 10], ["a list", []], ["text", "10"]])("rejects an expense that is %s without calling the use case", async (_, expense) => {
+    const updatePost = vi.fn();
+    const response = await call("PATCH", { expense }, { updatePost });
+    expect(response.statusCode).toBe(422);
+    expect(fields(response)).toEqual(["expense/invalid"]);
+    expect(updatePost).not.toHaveBeenCalled();
+  });
+
+  it("forwards a well formed removePhotos and answers the remaining photos, also when empty", async () => {
+    const updatePost = vi.fn().mockResolvedValue({ ok: true, value: { ...stored, photos: [] } });
+    const response = await call("PATCH", { removePhotos: [{ id: photo }] }, { updatePost });
+    expect(response.statusCode).toBe(200);
+    expect(updatePost).toHaveBeenCalledWith({ tripId: trip, authenticatedUserId: user, postId: post, removePhotos: [{ id: photo }] });
+    expect(JSON.parse(response.body)).toEqual({ post: stored, photos: [] });
+  });
+
+  it("answers photos and omits the expense after removing both in one PATCH", async () => {
+    const photos = [{ id: photo, order: 1 }];
+    const updatePost = vi.fn().mockResolvedValue({ ok: true, value: { ...stored, photos } });
+    const response = await call("PATCH", { removePhotos: [{ id: photo }], expense: null, description: "Nuevo" }, { updatePost });
+    expect(JSON.parse(response.body)).toEqual({ post: stored, photos });
+    expect(updatePost.mock.calls[0]![0]).toMatchObject({ removePhotos: [{ id: photo }], expense: null, description: "Nuevo" });
+  });
+
+  it.each([["null", null], ["an object", { id: photo }], ["text", "x"]])("rejects removePhotos that is %s", async (_, removePhotos) => {
+    const updatePost = vi.fn();
+    const response = await call("PATCH", { removePhotos }, { updatePost });
+    expect(response.statusCode).toBe(422);
+    expect(fields(response)).toEqual(["removePhotos/invalid"]);
+    expect(updatePost).not.toHaveBeenCalled();
+  });
+
+  it("rejects removePhotos together with newActivity and on creation", async () => {
+    const updatePost = vi.fn(), linkPostToNewActivity = vi.fn(), createPost = vi.fn();
+    const trips = { updatePost, linkPostToNewActivity, createPost };
+    const withActivity = await call("PATCH", { removePhotos: [{ id: photo }], newActivity: { title: "Cena", scheduledAt: "2026-09-25T12:00:00.000Z" } }, trips);
+    expect(withActivity.statusCode).toBe(422);
+    expect(fields(withActivity)).toEqual(["removePhotos/unsupported"]);
+    const creation = await call("POST", { description: "Recuerdo", removePhotos: [{ id: photo }] }, trips, `/trips/${trip}/posts`);
+    expect(creation.statusCode).toBe(422);
+    expect(fields(creation)).toEqual(["removePhotos/unsupported"]);
+    expect([updatePost, linkPostToNewActivity, createPost].every((fn) => fn.mock.calls.length === 0)).toBe(true);
+  });
+
+  it("lets the domain reject expense null on creation", async () => {
+    const createPost = vi.fn().mockResolvedValue({ ok: false, error: { tag: "ValidationError", issues: [], message: "" } });
+    await call("POST", { description: "Recuerdo", expense: null }, { createPost }, `/trips/${trip}/posts`);
+    expect(createPost.mock.calls[0]![0]).toMatchObject({ expense: null });
+  });
+});

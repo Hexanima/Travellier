@@ -71,6 +71,13 @@ export interface TripPostScope extends TripPostReadScope, NotificationScope {
   deletePostEngagement: (postId: ObjectId) => AsyncResult<void>;
   /** Removes the photo records of a post of this Trip (the objects are cleaned by `enqueueStorageDeletion`). */
   deletePhotos: (postId: ObjectId) => AsyncResult<void>;
+  /** Removes only these photo records of a post of this Trip (ids of other posts or Trips are ignored); the objects are cleaned by `enqueueStorageDeletion`. */
+  deletePhotosByIds: (postId: ObjectId, photoIds: readonly ObjectId[]) => AsyncResult<void>;
+  /**
+   * Sets the `order` of photos of a post of this Trip. Call it after the removals, with `updates` in ascending order of the OLD `order`: each
+   * new value is never above the old one and the gaps are already free, so applying them one by one never meets the unique index.
+   */
+  setPhotoOrders: (postId: ObjectId, updates: readonly { id: ObjectId; order: number }[]) => AsyncResult<void>;
   /** Records one pending storage deletion job for these object keys, in the same transaction. */
   enqueueStorageDeletion: (keys: readonly string[], createdAt: Date) => AsyncResult<void>;
   /** Removes one post of this Trip; no document matched fails with `PostNotFoundError`. */

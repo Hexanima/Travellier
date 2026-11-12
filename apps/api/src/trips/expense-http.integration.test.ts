@@ -176,7 +176,7 @@ describe("post expense HTTP API (T79)", () => {
       const post = await seedPost(), url = `${f.path()}/${post.id}`;
       await f.request("PATCH", url, { expense });
       for (const [bad, expected] of [[{ totalAmount: -1 }, ["expense.totalAmount/invalid"]], [{ payments: null }, ["expense.payments/invalid"]],
-        [{ currency: "BRL", shares: null }, ["expense.currency/invalid", "expense.shares/invalid"]], [{ paidBy: new ObjectId().toHexString() }, ["expense.paidBy/unsupported"]], [null, ["expense/invalid"]],
+        [{ currency: "BRL", shares: null }, ["expense.currency/invalid", "expense.shares/invalid"]], [{ paidBy: new ObjectId().toHexString() }, ["expense.paidBy/unsupported"]],
         [[], ["expense/invalid"]], ["x", ["expense/invalid"]], [{}, ["expense/invalid"]]] as const) {
         const response = await f.request("PATCH", url, { description: "No se guarda", expense: bad });
         expect(outcome(response), response.body).toEqual([422, "ValidationError"]);

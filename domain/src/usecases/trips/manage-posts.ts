@@ -3,7 +3,7 @@ import type { ActivityConflict } from "../../entities/activity-conflict.js";
 import type { ActivityParticipation } from "../../entities/activity-participation.js";
 import { resolveActivityDayId } from "../../entities/activity-schedule.js";
 import { applyPostExpense, describePostExpense, parsePostExpenseInput, type PostExpense, type PostExpenseView, type PostExpensePlan } from "../../entities/post-expense.js";
-import type { PostPhotoRef } from "../../entities/post-photo.js";
+import { parsePhotoRemovals, planPhotoRemoval, type PostPhoto, type PostPhotoRef } from "../../entities/post-photo.js";
 import { isSameRequest } from "../../entities/post-save-request.js";
 import { createPost, hasPostContent, MAX_POST_CHAIN_DEPTH, relinkPost, requirePostContent, resolvePostChain, type CreatePostContext, type Post, type PostLinks } from "../../entities/post.js";
 import { PostNotFoundError } from "../../errors/post-not-found-error.js";
@@ -11,7 +11,7 @@ import { PostRequestConflictError } from "../../errors/post-request-conflict-err
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
 import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
-import { ValidationError } from "../../errors/validation-error.js";
+import { ValidationError, type ValidationIssue } from "../../errors/validation-error.js";
 import type { ObjectStoragePort } from "../../ports/object-storage-port.js";
 import type { TripPostPort, TripPostReadScope, TripPostScope } from "../../ports/trip-post-port.js";
 import type { TaggedError } from "../../types/error.js";
@@ -50,8 +50,15 @@ export type CreateTripPostPayload = TripPostPayload & Partial<PostEditableFields
 interface PhotoReferences { photos?: unknown }
 /** Expense of the save (`{ totalAmount?, currency?, breakdown? }`, merge-patch over the stored expense); validated by the use case. */
 interface ExpenseReference { expense?: unknown }
-export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields> & PhotoReferences & ExpenseReference;
-/** The post; when the save carried `photos` it also lists the photos of the post (`id`, `order`), and with `expense` the saved expense. */
+/**
+ * `removePhotos`: `[{ id }]` of photos of this post to remove (author only; the S3 key is never exposed). `expense: null` removes the stored
+ * expense (any current member); an `expense` object edits it.
+ */
+export type UpdateTripPostPayload = PostDetailPayload & Partial<PostEditableFields> & PhotoReferences & ExpenseReference & { removePhotos?: unknown };
+/**
+ * The post; when the save carried `photos` or `removePhotos` it also lists every photo of the post after the save (`id`, `order`), and with an
+ * `expense` object the saved expense (the key is absent after `expense: null`).
+ */
 export type UpdateTripPostResult = Post & { photos?: PostPhotoRef[]; expense?: PostExpenseView };
 export type LinkTripPostToNewActivityPayload = PostDetailPayload & Partial<PostEditableFields> & PlanConfirmation & PhotoReferences & ExpenseReference & {
   dayId?: ObjectId;
@@ -138,17 +145,17 @@ const find = async (scope: TripPostReadScope, payload: PostDetailPayload): Async
   return post.value?.id === payload.postId && post.value.tripId === payload.tripId ? ok(post.value) : err(new PostNotFoundError());
 };
 /** Fields of the save that edit the content of the memory (T124); `null` counts as supplied, only `undefined` is absent. */
-const CONTENT_KEYS = ["description", "mapsUrl", "activityId", "parentPostId", "transportId", "photos", "newActivity"] as const;
+const CONTENT_KEYS = ["description", "mapsUrl", "activityId", "parentPostId", "transportId", "photos", "removePhotos", "newActivity"] as const;
 const touchesContent = (payload: object): boolean => CONTENT_KEYS.some((key) => Object.hasOwn(payload, key) && (payload as Record<string, unknown>)[key] !== undefined);
 /** Only the author edits the content (also in a PATCH mixed with `expense`); expense-only saves stay open to every current member. */
 const requireAuthor = (post: Post, payload: TripPostPayload): Result<undefined, UnauthorizedError> =>
   !touchesContent(payload) || post.authorId === payload.authenticatedUserId ? ok(undefined) : err(new UnauthorizedError());
 /**
- * Like `requireMemberBeforeStorage` for an existing post: a save with `photos` reads the post in the same snapshot and answers 404 or 403
+ * Like `requireMemberBeforeStorage` for an existing post: a save with `photos` or `removePhotos` reads the post in the same snapshot and answers 404 or 403
  * before any storage call.
  */
-const requireAuthorBeforeStorage = async (posts: TripPostPort, payload: PostDetailPayload & PhotoReferences): AsyncResult<undefined> => {
-  if (payload.photos === undefined) return ok(undefined);
+const requireAuthorBeforeStorage = async (posts: TripPostPort, payload: PostDetailPayload & PhotoReferences & { removePhotos?: unknown }): AsyncResult<undefined> => {
+  if (payload.photos === undefined && payload.removePhotos === undefined) return ok(undefined);
   return posts.withReadSnapshot(payload.tripId, async (scope) => {
     const trip = await authorize(scope, payload);
     if (!trip.ok) return trip;
@@ -521,15 +528,45 @@ export const getTripPostChain: UseCase<Dependencies, PostDetailPayload, TripPost
   }),
 };
 
-/** Edits the post and/or appends photos to it (never removes or reorders them); retrying a key already in the post is a no-op. */
+/**
+ * Inside the transaction, before any write: the ids a save wants to remove. An id of another post of this Trip is rejected; one that exists
+ * nowhere, or in another Trip, is ignored (a retry stays a no-op and no existence is revealed). A photo removed and added back by the same
+ * save (its key in `photos`) is a conflict.
+ */
+const checkPhotoRemovals = async (scope: TripPostScope, input: { tripId: ObjectId; postId: ObjectId; existing: readonly PostPhoto[];
+  ids: readonly ObjectId[]; keys: readonly string[] | undefined }): AsyncResult<undefined> => {
+  const issues: ValidationIssue[] = [];
+  for (const [index, photoId] of input.ids.entries()) {
+    const own = input.existing.find((photo) => photo.id === photoId);
+    if (own !== undefined) {
+      if (input.keys?.includes(own.s3Key)) issues.push({ field: `removePhotos[${index}].id`, code: "conflict", message: "Photo is removed and added in the same save." });
+      continue;
+    }
+    const found = await scope.findPhoto(photoId);
+    if (!found.ok) return found;
+    if (found.value !== undefined && found.value.tripId === input.tripId && found.value.postId !== input.postId) {
+      issues.push({ field: `removePhotos[${index}].id`, code: "not_in_post", message: "Photo does not belong to this post." });
+    }
+  }
+  return issues.length > 0 ? err(new ValidationError(issues)) : ok(undefined);
+};
+
+/**
+ * Edits the post, appends photos, removes photos by id (author only; the keys are queued for storage cleanup and the rest renumbered
+ * contiguously) and/or removes the expense with `expense: null` (any current member). Retrying a key already in the post, an id already
+ * removed or an expense already removed is a no-op.
+ */
 export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, UpdateTripPostResult, TaggedError> = {
   execute: async ({ posts, storage, createId, now }, payload) => {
     const member = await requireAuthorBeforeStorage(posts, payload);
     if (!member.ok) return member;
+    const removals = payload.removePhotos === undefined ? ok(undefined) : parsePhotoRemovals(payload.removePhotos);
+    if (!removals.ok) return removals;
+    const removalIds = removals.value;
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
     if (!verified.ok) return verified;
     const keys = verified.value;
-    if ((keys !== undefined || payload.expense !== undefined) && (createId === undefined || now === undefined)) {
+    if ((keys !== undefined || removalIds !== undefined || payload.expense !== undefined) && (createId === undefined || now === undefined)) {
       return err(new UnknownError("Photo and expense registration is not configured."));
     }
     return posts.withTransaction<UpdateTripPostResult>(payload.tripId, async (scope) => {
@@ -541,7 +578,7 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     if (!author.ok) return author;
     const fields = ["description", "mapsUrl", "activityId", "parentPostId", "transportId"] as const;
     const supplied = fields.filter((field) => Object.hasOwn(payload, field) && payload[field] !== undefined);
-    if (supplied.length === 0 && keys === undefined && payload.expense === undefined) {
+    if (supplied.length === 0 && keys === undefined && removalIds === undefined && payload.expense === undefined) {
       return err(new ValidationError([{ field: "post", code: "required", message: "An editable field is required." }]));
     }
     const merged: Post = { ...current.value, ...Object.fromEntries(supplied.map((field) => [field, payload[field]])) };
@@ -561,26 +598,62 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
         return err(new ValidationError([{ field: "parentPostId", code: "too_deep", message: "Post chain exceeds the supported depth." }]));
       }
     }
-    if (supplied.includes("description") || supplied.includes("mapsUrl")) {
+    const contentEdited = supplied.includes("description") || supplied.includes("mapsUrl");
+    if (removalIds === undefined && contentEdited) {
       const content = await requireSavedContent(scope, post.value, keys?.length ?? 0);
       if (!content.ok) return content;
     }
+    let removal: ReturnType<typeof planPhotoRemoval> | undefined;
+    if (removalIds !== undefined) {
+      const published = await scope.listPhotos(payload.postId);
+      if (!published.ok) return published;
+      const checked = await checkPhotoRemovals(scope, { tripId: payload.tripId, postId: payload.postId, existing: published.value, ids: removalIds, keys });
+      if (!checked.ok) return checked;
+      removal = planPhotoRemoval({ existing: published.value, ids: removalIds });
+    }
     const photoPlan = keys === undefined ? undefined : await planPostPhotos(scope, { tripId: payload.tripId, postId: payload.postId,
-      uploaderId: payload.authenticatedUserId, keys, createId: createId!, uploadedAt: now!() });
+      uploaderId: payload.authenticatedUserId, keys, createId: createId!, uploadedAt: now!(), existing: removal?.remaining });
     if (photoPlan && !photoPlan.ok) return photoPlan;
-    const expensePlan = payload.expense === undefined ? ok(undefined)
+    if (removal !== undefined && (contentEdited || removal.removed.length > 0)) {
+      // The minimum content counts the photos the post will have after this save.
+      const finalCount = photoPlan ? photoPlan.value.photos.length : removal.remaining.length;
+      const content = requirePostContent({ description: post.value.description, mapsUrl: post.value.mapsUrl, photoCount: finalCount });
+      if (!content.ok) return content;
+    }
+    const expensePlan = payload.expense === undefined || payload.expense === null ? ok(undefined)
       : await planPostExpense(scope, { tripId: payload.tripId, postId: payload.postId, expense: payload.expense, createId: createId!, createdAt: now!() });
     if (!expensePlan.ok) return expensePlan;
+    let removeExpense = false;
+    if (payload.expense === null) {
+      const stored = await scope.findExpense(payload.postId);
+      if (!stored.ok) return stored;
+      removeExpense = stored.value !== undefined;
+    }
     // A photos-only or expense-only edit leaves the stored post untouched.
     if (supplied.length > 0) {
       const saved = await scope.replace(post.value);
       if (!saved.ok) return saved;
     }
+    if (removal !== undefined && removal.removed.length > 0) {
+      const queued = await scope.enqueueStorageDeletion([...new Set(removal.removed.map((photo) => photo.s3Key).filter((key) => key !== ""))], now!());
+      if (!queued.ok) return queued;
+      const deleted = await scope.deletePhotosByIds(payload.postId, removal.removed.map((photo) => photo.id));
+      if (!deleted.ok) return deleted;
+      if (removal.orderUpdates.length > 0) {
+        const renumbered = await scope.setPhotoOrders(payload.postId, removal.orderUpdates);
+        if (!renumbered.ok) return renumbered;
+      }
+    }
     const photos = photoPlan && await registerPostPhotos(scope, photoPlan.value);
     if (photos && !photos.ok) return photos;
     const expense = expensePlan.value && await registerPostExpense(scope, expensePlan.value);
     if (expense && !expense.ok) return expense;
-    return ok(photos || expense ? { ...post.value, ...(photos ? { photos: photos.value } : {}), ...(expense ? { expense: expense.value } : {}) } : post.value);
+    if (removeExpense) {
+      const cleared = await scope.deleteExpense(payload.postId);
+      if (!cleared.ok) return cleared;
+    }
+    const listed: PostPhotoRef[] | undefined = photos ? photos.value : removal?.remaining.map(({ id, order }) => ({ id, order }));
+    return ok(listed || expense ? { ...post.value, ...(listed ? { photos: listed } : {}), ...(expense ? { expense: expense.value } : {}) } : post.value);
     });
   },
 };
