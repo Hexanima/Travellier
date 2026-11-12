@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, SelectField, TextAreaField, TextField } from "../components/index.js";
 import { diffExpense, expenseCurrencies, expenseDraftFromSaved, validateExpense, type AmountError, type ExpenseDraft, type SavedExpense } from "./expense-draft.js";
+import { commentLength } from "./comment-text.js";
+import { EXPENSE_BREAKDOWN_MAX } from "./post-text-limits.js";
 import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
@@ -11,13 +13,14 @@ import "./expenses.css";
 export type ExpenseFormProps = { itinerary: Pick<TripItineraryApi, "get"> };
 type Saved = { kind: "loading" } | { kind: "error" } | { kind: "ready"; expense?: SavedExpense };
 /** Order in which the first error is shown and focused. */
-const errorOrder = ["amount", "currency"] as const;
+const errorOrder = ["amount", "currency", "breakdown"] as const;
 const amountMessages: Record<AmountError, string> = {
   required: "Ingresá el importe.",
   invalid: "Ingresá un importe válido mayor a cero, por ejemplo 12,50.",
   precision: "El importe admite hasta 2 decimales. No lo redondeamos por vos.",
 };
 const currencyMessage = "Elegí la moneda.";
+const breakdownMessage = `El desglose supera el máximo de ${EXPENSE_BREAKDOWN_MAX} caracteres.`;
 const empty: ExpenseDraft = { amount: "", currency: "", breakdown: "" };
 
 export function ExpenseForm(props: ExpenseFormProps) {
@@ -97,7 +100,7 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
     if (!checked.ok) {
       // One alert at a time: the first invalid field in form order.
       const field = errorOrder.find((name) => checked.errors[name]);
-      if (field) setError({ field, message: field === "amount" ? amountMessages[checked.errors.amount!] : currencyMessage });
+      if (field) setError({ field, message: field === "amount" ? amountMessages[checked.errors.amount!] : field === "currency" ? currencyMessage : breakdownMessage });
       return;
     }
     // Equal to what is stored (even typed another way): the draft stays untouched so nothing is sent.
@@ -113,7 +116,8 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
       <option value="">Elegí la moneda</option>
       {expenseCurrencies.map((currency) => <option key={currency} value={currency}>{currency}</option>)}
     </SelectField>
-    <TextAreaField label="Desglose (opcional)" name="breakdown" rows={3} value={values.breakdown} onChange={(event) => update("breakdown", event.target.value)} />
+    <TextAreaField label="Desglose (opcional)" name="breakdown" rows={3} value={values.breakdown} error={shown("breakdown")} onChange={(event) => update("breakdown", event.target.value)} />
+    <p className="comment-count">{commentLength(values.breakdown.trim())} / {EXPENSE_BREAKDOWN_MAX}</p>
     <Button type="submit">Aceptar</Button>
     <Button variant="secondary" onClick={back}>Cancelar</Button>
   </form>;

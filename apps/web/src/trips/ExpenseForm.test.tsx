@@ -288,3 +288,41 @@ describe("ExpenseForm", () => {
     });
   });
 });
+
+describe("ExpenseForm breakdown limit", () => {
+  const fill = async (container: HTMLElement, breakdown: string) => {
+    await type(field(container, "amount"), "5"); await choose(field(container, "currency"), "EUR"); await type(field(container, "breakdown"), breakdown);
+  };
+  it("shows the breakdown length in code points without cutting the text", async () => {
+    const { container } = await open();
+    await type(field(container, "breakdown"), `${"a".repeat(2001)}😀`);
+    expect(container.querySelector(".comment-count")?.textContent).toBe("2002 / 2000");
+    expect(field(container, "breakdown").value.length).toBe(2003);
+    expect(field(container, "breakdown").getAttribute("maxlength")).toBeNull();
+  });
+  it("2001 characters show one alert, focus the breakdown and do not confirm", async () => {
+    const { container } = await open();
+    await fill(container, "a".repeat(2001));
+    await click(button(container, "Aceptar"));
+    const alerts = container.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.textContent).toBe("El desglose supera el máximo de 2000 caracteres.");
+    expect(document.activeElement).toBe(field(container, "breakdown"));
+    expect(container.querySelector('[data-testid="probe"]')).toBeNull();
+    expect(field(container, "amount")).not.toBeNull();
+  });
+  it("2000 characters (an emoji counts once) are accepted and travel in the draft", async () => {
+    const { container } = await open();
+    const text = `${"😀".repeat(1000)}${"a".repeat(1000)}`;
+    await fill(container, text);
+    await click(button(container, "Aceptar"));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(probe(container).draft?.extras.expense?.breakdown).toBe(text);
+  });
+  it("the amount error wins over the breakdown error (form order)", async () => {
+    const { container } = await open();
+    await type(field(container, "amount"), "abc"); await choose(field(container, "currency"), "EUR"); await type(field(container, "breakdown"), "a".repeat(2001));
+    await click(button(container, "Aceptar"));
+    expect(document.activeElement).toBe(field(container, "amount"));
+  });
+});

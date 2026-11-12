@@ -1,4 +1,5 @@
 import { toCents } from "app-domain";
+import { breakdownTooLong } from "./post-text-limits.js";
 import type { ExpenseInput } from "./trip-post-api.js";
 
 export type ExpenseCurrency = "ARS" | "EUR" | "USD";
@@ -9,7 +10,7 @@ export type ExpenseDraft = { amount: string; currency: "" | ExpenseCurrency; bre
 export type SavedExpense = { totalAmount: number; currency: ExpenseCurrency | null; breakdown: string | null };
 export type AmountError = "required" | "invalid" | "precision";
 export type ParsedAmount = { ok: true; cents: number; amount: number } | { ok: false; code: AmountError };
-export type ExpenseErrors = { amount?: AmountError; currency?: "required" };
+export type ExpenseErrors = { amount?: AmountError; currency?: "required"; breakdown?: "too_long" };
 export type ValidExpense = { totalAmount: number; currency: ExpenseCurrency; breakdown: string | null };
 
 /**
@@ -40,6 +41,8 @@ export const validateExpense = (draft: ExpenseDraft):
   const errors: ExpenseErrors = {};
   if (!amount.ok) errors.amount = amount.code;
   if (draft.currency === "") errors.currency = "required";
+  if (breakdownTooLong(draft.breakdown)) errors.breakdown = "too_long";
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
   if (!amount.ok || draft.currency === "") return { ok: false, errors };
   const breakdown = draft.breakdown.trim();
   return { ok: true, cents: amount.cents, value: { totalAmount: amount.amount, currency: draft.currency, breakdown: breakdown === "" ? null : breakdown } };
