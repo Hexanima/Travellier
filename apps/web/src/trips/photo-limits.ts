@@ -10,11 +10,6 @@ export const normalizeContentType = (value: string | undefined): string | undefi
   if (!text) return undefined;
   return `image/${text === "jpg" ? "jpeg" : text}`;
 };
-/** Input check: what the device may hand over (the final output still goes through `validatePhoto`). */
-export const isConvertibleInput = (contentType: string | undefined): boolean => {
-  const normalized = normalizeContentType(contentType);
-  return normalized === "image/heic" || normalized === "image/heif" || (normalized !== undefined && accepted.has(normalized));
-};
 /** Final output check: jpeg/png/webp, not empty and up to 10 MiB. */
 export const validatePhoto = (contentType: string | undefined, sizeBytes: number): PhotoCheck => {
   const normalized = normalizeContentType(contentType);
