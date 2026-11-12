@@ -10,6 +10,7 @@ import type { TripMembersApi } from "./trip-members-api.js";
 import type { SavedExpenseView, TripPostApi } from "./trip-post-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
+import "./expenses.css";
 
 export type ExpenseSplitFormProps = { posts: Pick<TripPostApi, "get">; members: Pick<TripMembersApi, "list"> };
 type Load = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpenseView; people: PhotoPeople };
@@ -81,7 +82,7 @@ function Shell({ posts, members, tripId, postId, draft, commit, setReturned, com
       {load.kind === "ready" && totals && !totals.ok ? <div className="trips-state"><Feedback variant="error">{blockedMessage}</Feedback></div> : null}
       {load.kind === "ready" && totals?.ok
         ? <Editor draft={draft} commit={commit} saved={load.saved} people={load.people} totals={totals.totals} entry={entry} leaving={leaving} back={back} />
-        : <Button onClick={back}>Cancelar</Button>}
+        : <Button variant="secondary" onClick={back}>Cancelar</Button>}
     </div>
   </main>;
 }
@@ -170,7 +171,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
   const errorCount = Object.keys(serverErrors).length;
   const showAlert = (submitted && !check.valid) || errorCount > 0 || Object.keys(serverLists).length > 0;
   const summary = (section: SectionCheck<unknown>, list?: string) => section.summary && <>
-    <p className="itinerary-secondary">Cubierto {formatCents(section.summary.coveredCents, totals.currency)} de {total}
+    <p className="itinerary-secondary expense-split__summary">Cubierto {formatCents(section.summary.coveredCents, totals.currency)} de {total}
       {section.summary.missingCents > 0 ? ` · Faltan ${formatCents(section.summary.missingCents, totals.currency)}` : section.listError ? "" : " · Completo"}</p>
     {section.listError ? <p className="ui-field__error">{section.listError}</p> : list ? <p className="ui-field__error">{list}</p> : null}
   </>;
@@ -178,14 +179,14 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
   const aria = (key: string, text?: string) => ({ "aria-invalid": text ? true : undefined, "aria-describedby": text ? `split-error-${key}` : undefined });
 
   return <form ref={formRef} className="activity-form expense-split" onSubmit={accept} noValidate>
-    <p className="itinerary-secondary">Total del gasto: {total}</p>
+    <p className="itinerary-secondary expense-split__total">Total del gasto: {total}</p>
     <section data-section="payments" aria-labelledby="split-payments-title" className="post-expense-section">
       <h2 id="split-payments-title">Pagos realizados</h2>
       <p className="itinerary-secondary">Cargá lo que cada persona puso, por monto o porcentaje del total. Puede haber varios pagos de la misma persona.</p>
       <ul className="split-rows">
         {payments.map((row) => {
           const text = errorOf(row.key, check.payments), name = label(row.userId), isFormer = former.has(row.userId);
-          return <li key={row.key} data-row data-row-key={row.key}>
+          return <li key={row.key} className="expense-split__row" data-row data-row-key={row.key} data-unit={row.unit} data-former={isFormer || undefined}>
             <span className="split-person">{name}</span>
             <select name={`payments-${row.key}-unit`} className="ui-control" aria-label={`Tipo de pago de ${name}`} value={row.unit}
               onChange={(event) => editPayment(row.key, { unit: event.target.value as PaymentRow["unit"] })}>
@@ -193,7 +194,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
             </select>
             <input name={`payments-${row.key}-value`} className="ui-control" type="text" inputMode="decimal" autoComplete="off" aria-label={`Valor del pago de ${name}`}
               value={row.value} {...aria(row.key, text)} onChange={(event) => editPayment(row.key, { value: event.target.value })} />
-            {isFormer ? null : <Button onClick={() => removeRow("payments", row.key)} aria-label={`Quitar pago de ${name}`}>Quitar</Button>}
+            {isFormer ? null : <Button variant="secondary" onClick={() => removeRow("payments", row.key)} aria-label={`Quitar pago de ${name}`}>Quitar</Button>}
             {rowError(row.key, text)}
           </li>;
         })}
@@ -202,7 +203,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
         <option value="">Elegí quién pagó</option>
         {currentIds.map((id) => <option key={id} value={id}>{authorLabel(people, id)}</option>)}
       </select>
-      <button data-focus="add-payment" type="button" className="ui-button" aria-disabled={adding === "" || undefined} onClick={addPayment}>Agregar pago</button>
+      <button data-focus="add-payment" type="button" className="ui-button ui-button--secondary" aria-disabled={adding === "" || undefined} onClick={addPayment}>Agregar pago</button>
       {summary(check.payments, serverLists.payments)}
       {check.incomplete.payments?.map((text) => <p key={text} className="itinerary-secondary">{text}</p>)}
     </section>
@@ -212,7 +213,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
       <ul className="split-rows">
         {shares.map((row) => {
           const text = errorOf(row.key, check.shares), name = label(row.userId), isFormer = former.has(row.userId), rest = check.shares.remainderCents?.[row.key];
-          return <li key={row.key} data-row data-row-key={row.key}>
+          return <li key={row.key} className="expense-split__row" data-row data-row-key={row.key} data-unit={row.unit} data-former={isFormer || undefined}>
             <span className="split-person">{name}</span>
             <select name={`shares-${row.key}-unit`} className="ui-control" aria-label={`Parte de ${name}`} value={row.unit}
               onChange={(event) => {
@@ -225,7 +226,7 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
               ? <input name={`shares-${row.key}-value`} className="ui-control" type="text" inputMode="decimal" autoComplete="off" aria-label={`Valor de la parte de ${name}`}
                 value={row.value} {...aria(row.key, text)} onChange={(event) => editShare(row.key, { value: event.target.value })} /> : null}
             {rest !== undefined ? <span className="itinerary-secondary">Le tocan {formatCents(rest, totals.currency)}</span> : null}
-            {isFormer ? null : <Button onClick={() => removeRow("shares", row.key)} aria-label={`Quitar la parte de ${name}`}>Quitar</Button>}
+            {isFormer ? null : <Button variant="secondary" onClick={() => removeRow("shares", row.key)} aria-label={`Quitar la parte de ${name}`}>Quitar</Button>}
             {rowError(row.key, text)}
           </li>;
         })}
@@ -233,15 +234,15 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
       {shares.some((row) => row.unit === "percent") ? <p className="itinerary-secondary">{percentNote}</p> : null}
       <h3>Integrantes sin parte</h3>
       {withoutShare.length === 0 ? <p className="itinerary-secondary">Todos los integrantes tienen una parte.</p> : <ul className="split-rows">
-        {withoutShare.map((id) => <li key={id}><Button data-focus={`include-${id}`} onClick={() => include(id)}>{`Incluir a ${authorLabel(people, id)}`}</Button></li>)}
+        {withoutShare.map((id) => <li key={id}><Button variant="secondary" data-focus={`include-${id}`} onClick={() => include(id)}>{`Incluir a ${authorLabel(people, id)}`}</Button></li>)}
       </ul>}
-      <button type="button" className="ui-button" aria-disabled={withoutShare.length === 0 || undefined}
+      <button type="button" className="ui-button ui-button--secondary" aria-disabled={withoutShare.length === 0 || undefined}
         onClick={() => { if (withoutShare.length > 0) { setShares((rows) => includeAll(rows, currentIds)); clearList("shares"); } }}>Incluir a todos</button>
       {summary(check.shares, serverLists.shares)}
       {check.incomplete.shares?.map((text) => <p key={text} className="itinerary-secondary">{text}</p>)}
     </section>
     {showAlert ? <p className="ui-field__error" role="alert" data-focus="alert" tabIndex={-1}>{submitted && !check.valid ? alertMessage : serverAlertMessage}</p> : null}
     <Button type="submit">Aceptar</Button>
-    <Button onClick={back}>Cancelar</Button>
+    <Button variant="secondary" onClick={back}>Cancelar</Button>
   </form>;
 }

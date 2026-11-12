@@ -333,7 +333,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       {state.kind === "ready" && view && view.tripExpenses.expenseCount > 0 ? <section className="itinerary-trip-expenses" aria-labelledby="itinerary-trip-expenses">
         <Heading level={sub} id="itinerary-trip-expenses">Gastos del viaje</Heading>
         <ExpenseLines totals={view.tripExpenses} />
-        {view.outsideExpensePosts.length > 0 ? <Button onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
+        {view.outsideExpensePosts.length > 0 ? <Button variant="secondary" onClick={showOutsideExpenses}>Ver gastos fuera del itinerario ({view.outsideExpensePosts.length})</Button> : null}
       </section> : null}
       {state.kind === "ready" ? <TransportCostSummary totals={state.value.transportCostTotals} transports={state.value.transports}
         destinations={state.value.destinations} headingLevel={sub} /> : null}
@@ -394,7 +394,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
         <Heading level={sub} id="itinerary-outside-expenses">Gastos fuera del itinerario</Heading>
         <ExpenseLines totals={view.outsideExpenses} />
         <List className="itinerary-posts">
-          {view.outsideExpensePosts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-outside-expense={post.id}>
+          {view.outsideExpensePosts.map((post) => <ListItem className="itinerary-nested-post itinerary-outside-expenses__item" key={post.id} data-outside-expense={post.id}>
             <p className="itinerary-post-description"><PostLink tripId={tripId ?? ""} postId={post.id} anchor={itineraryAnchor(post.id)} label="itinerario">
               {post.description ?? "Post sin descripción."}</PostLink></p>
             <p className="itinerary-post-expense"><strong>{formatExpenseAmount(post.expense!)}</strong>{post.expense!.breakdown ? <span>{post.expense!.breakdown}</span> : null}</p>
@@ -472,6 +472,6 @@ function PostSummary({ tripId, post, publication, timeZone, attribution }: { tri
     {post.context.parentPostId !== null ? <p className="itinerary-secondary">Relacionado con otro post</p> : null}
     {post.expense !== null ? <p className="itinerary-post-expense"><strong>Gasto: {formatExpenseAmount(post.expense)}</strong>
       {post.expense.breakdown ? <span>{post.expense.breakdown}</span> : null}</p> : null}
-    {moved && attribution ? <p className="itinerary-secondary">Gasto del {formatLocalDate(attribution.occurredAt, timeZone)} · Publicado {formatLocalDate(attribution.publishedAt, timeZone)}</p> : null}
+    {moved && attribution ? <p className="itinerary-secondary">Gasto del <span className="expense-date">{formatLocalDate(attribution.occurredAt, timeZone)}</span> · Publicado <span className="expense-date">{formatLocalDate(attribution.publishedAt, timeZone)}</span></p> : null}
   </div>;
 }

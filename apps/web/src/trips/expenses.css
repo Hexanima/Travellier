@@ -1,0 +1,52 @@
+/* Gastos, pagos y reparto y balance (DESIGN.md / prototipo). Todo con ámbito para ganar por especificidad sin tocar itinerary.css ni App.css. */
+
+/* Balance: una tarjeta por moneda, sin sumar ni convertir */
+.trip-balance .balance-refresh { justify-items: start; }
+.trip-balance .balance-currency { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); min-width: 0; }
+.trip-balance .balance-currency h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; overflow-wrap: anywhere; }
+.trip-balance .balance-currency h3 { margin: 0; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.trip-balance .balance-currency .ui-list { display: grid; margin: 0; padding: 0; gap: 0; list-style: none; }
+.trip-balance .balance-currency .balance-row { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--ui-color-border); font-size: 1rem; line-height: 1.5rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.trip-balance .balance-currency .balance-row p { margin: 0; }
+.trip-balance .balance-currency .balance-row .itinerary-secondary { font-size: .875rem; line-height: 1.25rem; }
+.trip-balance .balance-currency .balance-settlement { padding: 12px 0; border: 0; border-top: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; font-size: 1rem; line-height: 1.5rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.trip-balance .balance-pending { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); min-width: 0; }
+.trip-balance .balance-pending h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+.trip-balance .balance-pending .itinerary-posts { margin-top: 0; }
+.trip-balance .balance-pending .balance-pending-item { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--ui-color-border); overflow-wrap: anywhere; }
+.trip-balance .balance-pending-item p { margin: 0; }
+.trip-balance .balance-pending-item ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.trip-balance .balance-pending-item .trips-settings-link { display: inline-flex; align-items: center; min-height: 44px; }
+.trip-balance .trips-empty { display: grid; gap: 12px; }
+.trip-balance .trips-empty p { margin: 0; }
+.trip-balance .trips-empty a { display: inline-flex; align-items: center; min-height: 44px; }
+
+/* Editor «Pagos y reparto» */
+.expense-split .expense-split__total { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; color: var(--ui-color-text); font-variant-numeric: tabular-nums; }
+.expense-split .post-expense-section { gap: 12px; min-width: 0; }
+.expense-split .post-expense-section h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+.expense-split .post-expense-section h3 { margin: 0; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.expense-split .split-rows .expense-split__row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; align-items: center; padding: 12px 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-control); background: var(--ui-color-surface); min-width: 0; }
+.expense-split .split-person { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+.expense-split .expense-split__row .ui-control { min-width: 0; }
+.expense-split .expense-split__row > .itinerary-secondary { min-width: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.expense-split .expense-split__row .ui-field__error { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.expense-split .expense-split__row .ui-button { grid-column: 1 / -1; justify-self: end; min-height: 44px; }
+.expense-split .expense-split__summary { margin: 0; padding: 12px 16px; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); color: var(--ui-color-text); font-size: .875rem; line-height: 1.25rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.expense-split .post-expense-section > .ui-button { width: 100%; }
+.expense-split .split-rows li:not(.expense-split__row) .ui-button { width: 100%; }
+.expense-split [tabindex="-1"]:focus { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+@media (max-width: 359px) {
+  .expense-split .split-rows .expense-split__row { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+}
+
+/* Bloque «Gasto» del compositor y fechas */
+.post-composer .post-expense-section { gap: 12px; padding: 16px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); min-width: 0; }
+.post-composer #post-expense-summary { font-size: 1rem; line-height: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.expense-date { display: inline-block; font-variant-numeric: tabular-nums; }
+
+/* Gastos del viaje y gastos fuera del itinerario */
+.itinerary-trip-expenses .ui-button { display: inline-flex; justify-self: start; justify-content: flex-start; max-width: 100%; text-align: left; }
+.itinerary-outside-expenses .itinerary-outside-expenses__item { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--ui-color-border); overflow-wrap: anywhere; }
+.itinerary-outside-expenses .itinerary-outside-expenses__item p { margin: 0; }
+.itinerary-outside-expenses .itinerary-outside-expenses__item .itinerary-post-expense { display: grid; gap: 4px; }
