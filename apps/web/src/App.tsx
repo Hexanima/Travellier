@@ -504,7 +504,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
-          <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
+          <Route index element={<TripMemoriesScreen posts={tripPosts} members={tripMembers} />} />
           <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
           <Route path="photos" element={<TripPhotosScreen members={tripMembers} />} />
           <Route path=":postId" element={<PostDetailScreen posts={tripPosts} members={tripMembers} comments={tripComments} likes={tripLikes} />} />
