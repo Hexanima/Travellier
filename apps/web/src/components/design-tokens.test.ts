@@ -112,3 +112,53 @@ describe("control geometry and states", () => {
     expect(rest).not.toContain("translateY");
   });
 });
+
+describe("itinerary overrides, focus and type scale", () => {
+  const itinerary = read("trips/itinerary.css");
+  const app = read("App.css");
+  const rule = (css: string, selector: string) => {
+    const start = css.indexOf(selector);
+    return start < 0 ? "" : css.slice(css.indexOf("{", start) + 1).split("}")[0] ?? "";
+  };
+
+  it("keeps disabled itinerary buttons distinguishable with disabled-surface and muted", () => {
+    for (const selector of [
+      '.activity-participation-actions .ui-button:disabled:not([aria-pressed="true"]):not([aria-busy="true"])',
+      '.activity-participation-modified .activity-modified:disabled:not([aria-busy="true"])',
+      '.memory-tab.ui-button:disabled:not([aria-selected="true"]):not([aria-busy="true"])',
+    ]) {
+      const body = rule(itinerary, selector);
+      expect(body, selector).toContain("var(--ui-color-disabled-surface)");
+      expect(body, selector).toContain("var(--ui-color-muted)");
+      expect(body, selector).toContain("cursor: not-allowed");
+    }
+    const title = rule(itinerary, ".activity-title.ui-button:disabled, .transport-title.ui-button:disabled");
+    expect(title).toContain("var(--ui-color-muted)");
+    expect(rule(itinerary, '.activity-participation-actions .ui-button[aria-pressed="true"]:disabled')).toContain("cursor: not-allowed");
+  });
+
+  it("uses the focus token with a 3px offset in every focus-visible rule", () => {
+    for (const file of cssFiles) {
+      const css = read(file);
+      for (const match of css.matchAll(/:focus-visible\s*\{([^}]*)\}/g)) {
+        const body = match[1] ?? "";
+        expect(body, `${file}: ${body}`).toContain("var(--ui-color-focus)");
+        expect(body, `${file}: ${body}`).toMatch(/outline-offset: 3px/);
+      }
+    }
+  });
+
+  it("keeps link-like titles at 44px, start aligned", () => {
+    const body = rule(itinerary, ".activity-title.ui-button, .transport-title.ui-button");
+    expect(body).toContain("min-height: 44px");
+    expect(body).toContain("justify-content: flex-start");
+  });
+
+  it("uses the DESIGN.md scale (title 24/32 for screens, heading 18/26 for days) without clamp", () => {
+    for (const file of cssFiles) expect(read(file), file).not.toContain("clamp(");
+    expect(rule(app, "h1")).toMatch(/font-size: 1\.5rem;[\s\S]*line-height: 2rem/);
+    expect(rule(app, ".trips-header h1,\n.trip-form-panel h1")).toMatch(/font-size: 1\.5rem/);
+    expect(rule(itinerary, ".itinerary-header h1")).toMatch(/font-size: 1\.5rem; line-height: 2rem/);
+    expect(rule(itinerary, ".itinerary-day h2")).toMatch(/font-size: 1\.125rem; line-height: 1\.625rem/);
+  });
+});

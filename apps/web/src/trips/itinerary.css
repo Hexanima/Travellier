@@ -4,11 +4,11 @@
   --itinerary-activity-surface: var(--ui-color-surface);
 }
 .itinerary-header { display: grid; justify-items: start; gap: 12px; margin-bottom: 32px; }
-.itinerary-header h1 { margin: 0; font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; }
+.itinerary-header h1 { margin: 0; font-size: 1.5rem; line-height: 2rem; }
 .itinerary-header > p { margin: 0; color: var(--ui-color-muted); line-height: 1.5; }
 .itinerary-header > a { min-height: 44px; display: inline-flex; align-items: center; }
 .itinerary-days { display: grid; gap: 40px; }
-.itinerary-day h2 { margin: 0 0 16px; font-size: clamp(1.2rem, 4.5vw, 1.5rem); line-height: 1.35; text-wrap: balance; }
+.itinerary-day h2 { margin: 0 0 16px; font-size: 1.125rem; line-height: 1.625rem; text-wrap: balance; }
 .itinerary-bands { display: grid; gap: 12px; }
 .itinerary-band { padding: 20px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--itinerary-activity-surface); }
 .itinerary-band--transit_out, .itinerary-band--transit_return, .itinerary-band--arrival { background: var(--itinerary-transit-surface); }
@@ -44,7 +44,7 @@
 .itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-focus); outline-offset: 4px; }
 .itinerary-shell ::selection { color: var(--ui-color-accent-contrast); background: var(--ui-color-brand); }
 .activity-create { margin-bottom: var(--ui-space-4); }
-.activity-title.ui-button, .transport-title.ui-button { border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
+.activity-title.ui-button, .transport-title.ui-button { min-height: 44px; justify-content: flex-start; border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
 .activity-title.ui-button:hover:not(:disabled), .transport-title.ui-button:hover:not(:disabled) { color: var(--ui-color-text); }
 .transport-steps, .transport-days { margin: 0; padding-inline-start: var(--ui-space-4); display: grid; gap: var(--ui-space-2); line-height: 1.5; }
 .transport-facts { margin: 0; display: grid; gap: var(--ui-space-2); }
@@ -70,7 +70,7 @@
 .activity-dialog .ui-modal { max-block-size: calc(100dvh - 32px); overflow-y: auto; overscroll-behavior: contain; scrollbar-color: var(--ui-color-accent) var(--ui-color-surface); }
 .activity-dialog .ui-modal__close { min-width: 44px; min-height: 44px; }
 .activity-dialog .ui-control { min-width: 0; caret-color: var(--ui-color-accent); }
-.activity-dialog a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-dialog a:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-dialog .ui-modal__title { overflow-wrap: anywhere; }
 .activity-dialog .ui-modal__content { margin-inline: 0; }
 .activity-participation { min-width: 0; margin: var(--ui-space-4) 0 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-3); }
@@ -80,9 +80,9 @@
 .activity-participation-actions .ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
 .activity-participation-actions .ui-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
 .activity-participation-actions .ui-button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-color-accent) 10%, var(--ui-color-surface)); }
-.activity-participation-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-participation-actions .ui-button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-participation a { min-height: 44px; display: inline-flex; align-items: center; color: var(--ui-color-accent); text-underline-offset: .2em; }
-.activity-participation a:focus-visible { outline: 3px solid var(--ui-color-accent); outline-offset: 2px; }
+.activity-participation a:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-participation-modified { display: grid; gap: var(--ui-space-2); }
 .activity-participation-modified .activity-modified { min-height: 44px; justify-self: start; background: var(--ui-color-surface); color: var(--ui-color-accent); }
 .activity-participation-modified [role="region"] p { margin: 0; }
@@ -116,6 +116,11 @@
 .memory-tabs { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
 .memory-tab.ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
 .memory-tab.ui-button[aria-selected="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); }
+.activity-participation-actions .ui-button:disabled:not([aria-pressed="true"]):not([aria-busy="true"]), .activity-participation-actions .ui-button[aria-disabled="true"]:not([aria-pressed="true"]):not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
+.activity-participation-actions .ui-button[aria-pressed="true"]:disabled { cursor: not-allowed; }
+.activity-participation-modified .activity-modified:disabled:not([aria-busy="true"]), .activity-participation-modified .activity-modified[aria-disabled="true"]:not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
+.memory-tab.ui-button:disabled:not([aria-selected="true"]):not([aria-busy="true"]), .memory-tab.ui-button[aria-disabled="true"]:not([aria-selected="true"]):not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
+.activity-title.ui-button:disabled, .transport-title.ui-button:disabled, .activity-title.ui-button[aria-disabled="true"], .transport-title.ui-button[aria-disabled="true"] { background: transparent; color: var(--ui-color-muted); cursor: not-allowed; }
 .memory-panel[hidden] { display: none; }
 .comments-panel, .comment-list, .comment-form, .comment-item { display: grid; gap: var(--ui-space-3); }
 .comment-list { list-style: none; margin: 0; padding: 0; }
