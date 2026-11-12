@@ -500,3 +500,19 @@ describe("App Trip routes", () => {
     });
   });
 });
+
+describe("App Trip routes: invitación por link", () => {
+  it("conserva el texto y el código, y usa el panel y el contenedor de viajes", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: true, value: { tripId, joined: true } });
+    const container = await render("/invite/VIAJE-X7K2", true, { joinByCode });
+    expect(container.querySelector("h1")?.textContent).toBe("Unirse a un viaje");
+    expect(container.querySelector("main.app-shell.trips-shell")).not.toBeNull();
+    expect(container.querySelector("section.status-panel.invite-panel strong")?.textContent).toBe("VIAJE-X7K2");
+    const confirm = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar unión");
+    expect(confirm).toBeDefined();
+    expect(joinByCode).not.toHaveBeenCalled();
+    await act(async () => confirm?.click());
+    expect(joinByCode).toHaveBeenCalledWith("VIAJE-X7K2");
+    expect(container.textContent).toContain("Te uniste al viaje.");
+  });
+});

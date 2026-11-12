@@ -100,7 +100,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
 
   return (
     <main className="app-shell trips-shell">
-      <section className="trips-panel" aria-labelledby="trips-title">
+      <section className="trips-panel trips-panel--catalog" aria-labelledby="trips-title">
         <header className="trips-header">
           <div>
             <h1 id="trips-title">Mis viajes</h1>
@@ -110,8 +110,8 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
         </header>
         {tripGone ? <Feedback variant="info">Ya no tenés acceso a ese viaje.</Feedback> : null}
         <nav className="trips-entry-actions" aria-label="Unirse a un viaje">
-          <Link className="trips-join-link" to="/trips/join">Unirse con código</Link>
-          <Link className="trips-join-link" to="/trips/explore">Explorar viajes públicos</Link>
+          <Link className="ui-button ui-button--secondary" to="/trips/join">Unirse con código</Link>
+          <Link className="ui-button ui-button--secondary" to="/trips/explore">Explorar viajes públicos</Link>
         </nav>
 
         <Tabs idPrefix="trips-filter" label="Filtrar viajes" items={filterTabs} selected={filter} onSelect={selectFilter}>
@@ -128,13 +128,13 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                 <>
                   <h2>Todavía no tenés viajes</h2>
                   <p>Creá uno para empezar a planificar con tu grupo.</p>
-                  <Link to="/trips/new">Crear mi primer viaje</Link>
+                  <Link className="ui-button" to="/trips/new">Crear mi primer viaje</Link>
                 </>
               ) : filter === "active" ? (
                 <>
                   <h2>No tenés viajes activos</h2>
                   <p>Tus viajes terminados están en Finalizados.</p>
-                  <Link to="/trips/new">Crear viaje</Link>
+                  <Link className="ui-button" to="/trips/new">Crear viaje</Link>
                 </>
               ) : (
                 <h2>Todavía no tenés viajes finalizados</h2>
@@ -152,11 +152,13 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                   </div>
-                  <Link className="trips-settings-link" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
-                  <Link className="trips-settings-link" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
-                  <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
-                  <Link className="trips-settings-link" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
-                  <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
+                  <div className="trips-item-links">
+                    <Link className="trips-settings-link" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
+                    <Link className="trips-settings-link" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
+                    <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
+                    <Link className="trips-settings-link" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
+                    <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
+                  </div>
                 </ListItem>
               ))}
             </List>
@@ -167,7 +169,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
           <Link to="/profile">Mi perfil</Link>
           {/* Provisional entry to the notices center: T98 gives it its place in the final navigation. */}
           <Link to="/notifications">Avisos</Link>
-          <Button onClick={() => void logout()} aria-disabled={closingSession || undefined}>
+          <Button variant="secondary" onClick={() => void logout()} aria-disabled={closingSession || undefined}>
             {closingSession ? "Cerrando sesión…" : "Cerrar sesión"}
           </Button>
         </nav>

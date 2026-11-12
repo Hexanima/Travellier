@@ -27,7 +27,7 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
 
   return (
     <main className="app-shell trips-shell">
-      <section className="trips-panel" aria-labelledby="trip-explore-title">
+      <section className="trips-panel trips-panel--catalog" aria-labelledby="trip-explore-title">
         <Link className="trips-back" to="/trips">Volver a mis viajes</Link>
         <header className="trips-header">
           <div>
@@ -47,7 +47,7 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
           <div className="trips-empty">
             <h2>No hay viajes públicos para explorar</h2>
             <p>Podés crear uno o unirte con el código que te compartieron.</p>
-            <Link to="/trips/join">Unirse con código</Link>
+            <Link className="ui-button" to="/trips/join">Unirse con código</Link>
           </div>
         ) : null}
         {!loading && !loadError && items.length > 0 ? (
@@ -59,7 +59,9 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
                   <p className="trips-destination">{trip.primaryDestination.name}</p>
                   {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                 </div>
-                <Link className="trips-settings-link" to={`/trips/explore/${trip.id}`}>Ver viaje</Link>
+                <div className="trips-item-links">
+                  <Link className="trips-settings-link" to={`/trips/explore/${trip.id}`}>Ver viaje</Link>
+                </div>
               </ListItem>
             ))}
           </List>
@@ -154,7 +156,7 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
               <>
                 <p>Al confirmar, vas a formar parte de este viaje como participante.</p>
                 {joinError ? <Feedback variant="error">No pudimos confirmar la unión. Intentá nuevamente.</Feedback> : null}
-                <Button onClick={() => void confirm()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
+                <Button variant="secondary" onClick={() => void confirm()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
               </>
             )}
           </div>

@@ -564,8 +564,8 @@ function InviteEntry({ sessionReady, hasSession, trips, push, code }: InviteEntr
   }
 
   return (
-    <main className="app-shell">
-      <section className="status-panel">
+    <main className="app-shell trips-shell">
+      <section className="status-panel invite-panel">
         <p className="eyebrow">Invitación</p>
         <h1>Unirse a un viaje</h1>
         <p>Tu código de invitación: <strong>{code}</strong></p>

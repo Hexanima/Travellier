@@ -439,9 +439,9 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
                 {memberList.members.map((member) => (
                   <ListItem key={member.id} className="trip-member-item">
                     <span>{displayName(member.name)}{member.userId === memberList.currentUserId ? " (vos)" : ""}</span>
-                    <span className="trip-member-role">{roleLabel(member, ownerId)}</span>
+                    <span className={member.userId === ownerId ? "trip-member-role role-badge role-badge--owner" : "trip-member-role role-badge"}>{roleLabel(member, ownerId)}</span>
                     {memberActions(actor, member, ownerId).canManage ? (
-                      <Button disabled={busy} data-member-action="manage" aria-label={`Gestionar a ${displayName(member.name)}`}
+                      <Button variant="secondary" disabled={busy} data-member-action="manage" aria-label={`Gestionar a ${displayName(member.name)}`}
                         onClick={() => open({ kind: "manage", userId: member.userId })}>Gestionar</Button>
                     ) : null}
                   </ListItem>
@@ -464,9 +464,11 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
             ) : null}
           </>
         ) : null}
-        <Modal isOpen={dialog !== undefined} title={dialog ? titles[dialog.kind] : ""} onClose={() => setDialog(undefined)} loading={busy} error={dialogError}>
-          {dialogBody()}
-        </Modal>
+        <div className="members-dialog">
+          <Modal isOpen={dialog !== undefined} title={dialog ? titles[dialog.kind] : ""} onClose={() => setDialog(undefined)} loading={busy} error={dialogError}>
+            {dialogBody()}
+          </Modal>
+        </div>
     </>
   );
   if (inShell) return <section aria-labelledby="trip-members-title">{body}</section>;
