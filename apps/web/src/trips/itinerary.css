@@ -41,7 +41,7 @@
 .itinerary-trip-expenses, .itinerary-outside-expenses { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--ui-color-border); }
 .itinerary-trip-expenses p, .itinerary-outside-expenses p { margin: 0; line-height: 1.45; }
 .itinerary-trip-expenses .itinerary-expense-total, .itinerary-outside-expenses > .itinerary-expense-total { text-align: left; }
-.itinerary-outside-expenses:focus { outline: 2px solid var(--ui-color-focus); outline-offset: 4px; }
+.itinerary-outside-expenses:focus { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .itinerary-shell ::selection { color: var(--ui-color-accent-contrast); background: var(--ui-color-brand); }
 .activity-create { margin-bottom: var(--ui-space-4); }
 .activity-title.ui-button, .transport-title.ui-button { min-height: 44px; justify-content: flex-start; border: 0; background: transparent; color: var(--ui-color-accent); padding: 0; text-align: start; white-space: normal; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: .2em; }
@@ -51,7 +51,7 @@
 .transport-facts div { display: flex; gap: var(--ui-space-2); }
 .transport-facts dt { font-weight: 600; }
 .transport-facts dd { margin: 0; overflow-wrap: anywhere; }
-.transport-dialog h3 { outline-offset: 2px; }
+.transport-dialog h3:focus { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-form, .activity-detail { display: grid; gap: var(--ui-space-4); }
 .activity-detail h3, .activity-detail p, .activity-context { margin: 0; line-height: 1.5; }
 .activity-context { color: var(--ui-color-muted); font-size: .875rem; }

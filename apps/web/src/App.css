@@ -211,6 +211,7 @@ dd {
 .journey-step-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .journey-step-heading h4 { margin: 0; font-size: 1rem; }
 .journey-step-heading .ui-button { background: var(--ui-color-surface); color: var(--ui-color-brand); }
+.journey-step-heading .ui-button:disabled:not([aria-busy="true"]), .journey-step-heading .ui-button[aria-disabled="true"]:not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
 .journey-steps > .ui-button { justify-self: start; }
 .journey-add { margin-top: 28px; }
 .journey-add h2 { margin-bottom: 18px; }

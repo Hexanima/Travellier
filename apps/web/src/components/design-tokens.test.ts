@@ -137,6 +137,48 @@ describe("itinerary overrides, focus and type scale", () => {
     expect(rule(itinerary, '.activity-participation-actions .ui-button[aria-pressed="true"]:disabled')).toContain("cursor: not-allowed");
   });
 
+  it("keeps disabled state on App.css journey step buttons", () => {
+    for (const selector of [
+      '.journey-step-heading .ui-button:disabled:not([aria-busy="true"])',
+      '.journey-step-heading .ui-button[aria-disabled="true"]:not([aria-busy="true"])',
+    ]) {
+      const body = rule(app, selector);
+      expect(body, selector).toContain("var(--ui-color-disabled-surface)");
+      expect(body, selector).toContain("var(--ui-color-muted)");
+      expect(body, selector).toContain("cursor: not-allowed");
+    }
+  });
+
+  it("gives every .ui-button background/color override outside components.css its own disabled rule", () => {
+    for (const file of cssFiles.filter((f) => f !== "components/components.css")) {
+      const css = read(file);
+      for (const match of css.matchAll(/^([^{}@\n][^{}]*)\{([^}]*)\}/gm)) {
+        const body = match[2] ?? "";
+        if (!/(^|[\s;])(background|color)\s*:/.test(body)) continue;
+        for (const sel of (match[1] ?? "").split(",").map((x) => x.trim())) {
+          if (!/\.ui-button(?![\w-])/.test(sel) || /:(hover|disabled|focus)|\[aria-/.test(sel)) continue;
+          if (/background:\s*transparent/.test(body) && /\.(activity|transport)-title/.test(sel)) continue;
+          expect(css, `${file}: ${sel}`).toContain(`${sel}:disabled`);
+        }
+      }
+    }
+  });
+
+  it("uses the focus token, 3px outline and 3px offset in programmatic :focus rules", () => {
+    for (const file of cssFiles) {
+      const css = read(file);
+      for (const match of css.matchAll(/:focus\s*\{([^}]*)\}/g)) {
+        const body = match[1] ?? "";
+        expect(body, `${file}: ${body}`).toMatch(/outline: 3px solid var\(--ui-color-focus\)/);
+        expect(body, `${file}: ${body}`).toMatch(/outline-offset: 3px/);
+      }
+      for (const match of css.matchAll(/([^{}]*)\{([^}]*outline-offset[^}]*)\}/g)) {
+        expect(match[2], `${file}: ${match[1]}`).toMatch(/outline-offset: 3px/);
+      }
+    }
+    expect(read("trips/itinerary.css")).toMatch(/\.transport-dialog h3:focus\s*\{[^}]*outline: 3px solid var\(--ui-color-focus\)/);
+  });
+
   it("uses the focus token with a 3px offset in every focus-visible rule", () => {
     for (const file of cssFiles) {
       const css = read(file);
