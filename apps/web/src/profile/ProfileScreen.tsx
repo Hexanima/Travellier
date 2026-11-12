@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 
 import type { AuthApi, AuthenticatedProfile } from "../auth/auth-api.js";
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
+import { initials, displayName } from "./display-name.js";
 import { PushNotices } from "../push/PushNotices.js";
 import type { PushDeviceService } from "../push/push-device-service.js";
 
@@ -106,11 +107,11 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
   };
 
   return (
-    <main className="app-shell">
+    <main className="app-shell access-shell">
       <section className="auth-panel" aria-labelledby="profile-title">
         <p className="eyebrow">Travellier</p>
         <h1 id="profile-title">Mi perfil</h1>
-        <p><Link to="/trips">Volver a viajes</Link></p>
+        <Link className="trips-back" to="/trips">Volver a viajes</Link>
         {loading ? <LoadingState label="Cargando perfil…" /> : null}
         {loadError ? (
           <>
@@ -119,11 +120,18 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
           </>
         ) : null}
         {profile ? (
+          <div className="profile-summary">
+            {avatarUrl
+              ? <img className="profile-avatar" src={avatarUrl} alt="Foto de perfil" />
+              : <span className="profile-avatar profile-avatar--empty" role="img" aria-label="Sin foto de perfil">{initials(profile.name)}</span>}
+            <p className="profile-name">{displayName(profile.name)}</p>
+            <p className="profile-email">{profile.email}</p>
+          </div>
+        ) : null}
+        {profile ? (
           <form className="auth-form" onSubmit={(event) => void submit(event)} noValidate>
-            {avatarUrl ? <img className="profile-avatar" src={avatarUrl} alt="Foto de perfil" /> : <div className="profile-avatar profile-avatar--empty" aria-label="Sin foto de perfil">Sin foto</div>}
             <TextField key={profile.name ?? ""} label="Nombre" name="name" defaultValue={profile.name ?? ""} autoComplete="name" error={nameError} loading={saving} />
             {(profile.name ?? "").trim() === "" ? <p>Todavía no cargaste tu nombre.</p> : null}
-            <p>Email: {profile.email}</p>
             <div className="ui-field">
               <label className="ui-field__label" htmlFor="profile-avatar">Foto de perfil</label>
               <input

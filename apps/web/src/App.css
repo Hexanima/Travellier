@@ -17,18 +17,76 @@
   width: min(760px, 100%);
 }
 
-.auth-panel {
-  width: min(440px, 100%);
-}
+.auth-panel { width: min(440px, 100%); min-width: 0; }
+.welcome-panel { width: min(440px, 100%); min-width: 0; }
 
 .auth-form {
   display: grid;
   gap: 16px;
 }
 
+.auth-form .ui-button { width: 100%; }
+.welcome-actions .ui-button { width: 100%; }
+
+.auth-help,
+.auth-note,
+.welcome-help {
+  margin: 0 0 20px;
+  color: var(--ui-color-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.auth-note { margin: 0; font-size: 0.875rem; }
+.auth-panel .ui-feedback { margin-bottom: 16px; overflow-wrap: anywhere; }
+
+.welcome-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding: 32px 24px;
+  border-radius: var(--ui-radius-card);
+  background: var(--ui-color-brand);
+  color: var(--ui-color-accent-contrast);
+}
+
+.welcome-brand svg {
+  width: 40px;
+  height: 40px;
+  color: var(--ui-color-on-brand-muted);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.welcome-brand p {
+  margin: 0;
+  color: var(--ui-color-on-brand-muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.welcome-brand .welcome-tagline { color: var(--ui-color-accent-contrast); font-weight: 700; }
+.welcome-title { margin: 0 0 8px; font-size: 1.5rem; line-height: 2rem; overflow-wrap: anywhere; }
+.welcome-actions { display: grid; gap: 12px; }
+
+.profile-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
 .profile-avatar {
-  width: 96px;
-  height: 96px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
   object-fit: cover;
 }
@@ -37,16 +95,30 @@
   display: grid;
   place-items: center;
   background: var(--ui-color-soft);
-  color: var(--ui-color-text);
-  font-size: 0.875rem;
+  color: var(--ui-color-brand);
+  font-size: 1.5rem;
+  font-weight: 700;
 }
 
-.auth-links,
+.profile-name { max-width: 100%; min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 1.25rem; font-weight: 700; line-height: 1.75rem; }
+.profile-email { max-width: 100%; min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ui-color-muted); font-size: 0.875rem; }
+
 .auth-switch {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
   margin: 20px 0 0;
+  overflow-wrap: anywhere;
 }
+
+.auth-switch a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.auth-switch a:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 
 .eyebrow {
   margin: 0 0 8px;
@@ -60,6 +132,13 @@ h1 {
   margin: 0 0 24px;
   font-size: 1.5rem;
   line-height: 2rem;
+}
+
+.welcome-brand h1 {
+  margin: 0;
+  font-size: 2rem;
+  line-height: 2.5rem;
+  overflow-wrap: anywhere;
 }
 
 dl {
@@ -229,4 +308,10 @@ dd {
   .journey-destination, .journey-add { padding: 20px; }
   .journey-field-grid { grid-template-columns: 1fr; }
   .journey-step-heading { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 359px) {
+  .access-shell { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  .welcome-brand { padding: 24px 16px; }
+  .welcome-brand h1 { font-size: 1.75rem; line-height: 2.25rem; }
 }
