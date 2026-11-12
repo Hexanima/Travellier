@@ -7,7 +7,7 @@ export const PUSH_DEVICE_MIGRATION_ID = "0007-push-device-indexes";
 
 /**
  * `outboxEvents` doubles as the personal inbox (T91, not defined by the PRD): one document per (event, recipient). Additive indexes only:
- * the inbox read (`userId`, newest first) and the Trip cascade/authorization (`tripId`). No TTL; it never touches existing documents.
+ * the inbox read (`userId`, newest first) and the Trip cascade/authorization (`tripId`). No TTL here (retention is 0011); it never touches existing documents.
  */
 export const NOTIFICATION_INBOX_MIGRATION_ID = "0008-notification-inbox-indexes";
 
@@ -16,6 +16,15 @@ export const NOTIFICATION_INBOX_MIGRATION_ID = "0008-notification-inbox-indexes"
  * counters after their window; correctness never depends on it because each document id includes the window start.
  */
 export const RATE_LIMIT_MIGRATION_ID = "0009-rate-limit-ttl-index";
+
+/**
+ * Retention of notices (T135): TTL on `outboxEvents.createdAt`, 90 days (NOTIFICATION_RETENTION_DAYS of the domain; the literal is frozen here
+ * because a migration never changes once applied). Partial on finished dispatches (`sent`, `skipped`, `failed`): a `pending` event is never
+ * expired, so it cannot be deleted while the dispatcher may still claim it (the dispatcher turns one older than 24 h into a terminal state,
+ * after which this index can expire it). Needs MongoDB 6.0+ for `$in` in a partial filter. Only index DDL: it touches no document.
+ */
+export const NOTIFICATION_RETENTION_MIGRATION_ID = "0011-notification-retention-ttl-index";
+const NOTIFICATION_RETENTION_SECONDS = 90 * 24 * 3600;
 
 const pendingMigrations: {
   id: string;
@@ -48,6 +57,11 @@ const pendingMigrations: {
       { key: { userId: 1, createdAt: -1, _id: -1 }, name: "userId_createdAt_id" },
       { key: { tripId: 1 }, name: "tripId" },
     ] }],
+  },
+  {
+    id: NOTIFICATION_RETENTION_MIGRATION_ID,
+    collections: [{ name: "outboxEvents", indexes: [{ key: { createdAt: 1 }, name: "createdAt_retention_ttl", expireAfterSeconds: NOTIFICATION_RETENTION_SECONDS,
+      partialFilterExpression: { status: { $in: ["sent", "skipped", "failed"] } } }] }],
   },
   {
     id: RATE_LIMIT_MIGRATION_ID,

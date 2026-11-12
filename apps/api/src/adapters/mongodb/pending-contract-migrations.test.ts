@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MongoClient, ObjectId, type Db } from "mongodb";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import { describePostExpense, resolveExpense } from "app-domain";
+import { describePostExpense, NOTIFICATION_RETENTION_DAYS, resolveExpense } from "app-domain";
 import { auditMongoContracts } from "./contract-audit.js";
 import { migrateMongoSchema } from "./migrations.js";
 import { expenseGapCases, gapOwnPayer, gapPayer } from "../../../test/expense-gap-cases.js";
@@ -15,6 +15,9 @@ const pushDeviceVersion = "0007-push-device-indexes";
 const inboxVersion = "0008-notification-inbox-indexes";
 const rateLimitVersion = "0009-rate-limit-ttl-index";
 const tripOwnerVersion = "0010-trip-owner-from-created-by";
+const retentionVersion = "0011-notification-retention-ttl-index";
+const RETENTION_SECONDS = 90 * 24 * 3600;
+const retentionFilter = { status: { $in: ["sent", "skipped", "failed"] } };
 let server: MongoMemoryServer;
 let client: MongoClient;
 let database: Db;
@@ -45,7 +48,8 @@ describe("incremental pending contracts", () => {
     const indexes = await database.collection("outboxEvents").listIndexes().toArray();
     expect(indexes).toContainEqual(expect.objectContaining({ name: "eventKey_unique", key: { eventKey: 1 }, unique: true }));
     expect(indexes).toContainEqual(expect.objectContaining({ name: "status_availableAt", key: { status: 1, availableAt: 1 } }));
-    expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
+    // The only expiring index is the partial retention one of 0011 (never on a pending dispatch).
+    expect(indexes.filter((index) => index.expireAfterSeconds !== undefined).map((index) => index.name)).toEqual(["createdAt_retention_ttl"]);
     await database.collection("outboxEvents").insertOne({ eventKey: "operation-1", tripId: legacyIds.trip });
     await expect(database.collection("outboxEvents").insertOne({ eventKey: "operation-1", tripId: legacyIds.trip })).rejects.toMatchObject({ code: 11000 });
   });
@@ -65,9 +69,9 @@ describe("incremental pending contracts", () => {
     const indexes = await database.collection("outboxEvents").listIndexes().toArray();
     expect(indexes).toContainEqual(expect.objectContaining({ name: "userId_createdAt_id", key: { userId: 1, createdAt: -1, _id: -1 } }));
     expect(indexes).toContainEqual(expect.objectContaining({ name: "tripId", key: { tripId: 1 } }));
-    // The T44 indexes remain and nothing expires.
+    // The T44 indexes remain; the inbox indexes themselves do not expire anything (0011 adds the retention one).
     expect(indexes).toContainEqual(expect.objectContaining({ name: "eventKey_unique", unique: true }));
-    expect(indexes.some((index) => index.expireAfterSeconds !== undefined)).toBe(false);
+    expect(indexes.filter((index) => index.expireAfterSeconds !== undefined).map((index) => index.name)).toEqual(["createdAt_retention_ttl"]);
     expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
   });
 
@@ -79,6 +83,43 @@ describe("incremental pending contracts", () => {
     await migrateMongoSchema(database);
     expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
     expect(await database.collection("outboxEvents").find({}, { projection: { _id: 0 } }).toArray()).toEqual([event]);
+  });
+
+  describe("0011 retains notices for 90 days (T135)", () => {
+    it("creates a partial TTL index on createdAt that only covers finished dispatches", async () => {
+      await migrateMongoSchema(database);
+      const indexes = await database.collection("outboxEvents").listIndexes().toArray();
+      expect(indexes).toContainEqual(expect.objectContaining({ name: "createdAt_retention_ttl", key: { createdAt: 1 }, expireAfterSeconds: RETENTION_SECONDS,
+        partialFilterExpression: retentionFilter }));
+      expect(RETENTION_SECONDS).toBe(7_776_000);
+      expect(RETENTION_SECONDS).toBe(NOTIFICATION_RETENTION_DAYS * 24 * 3600);
+      expect(await database.collection("_migrations").countDocuments({ id: retentionVersion })).toBe(1);
+      // The other indexes of the collection remain.
+      for (const name of ["eventKey_unique", "status_availableAt", "userId_createdAt_id", "tripId"]) expect(indexes.map((index) => index.name)).toContain(name);
+    });
+
+    it("is idempotent and does not touch existing events or the version timestamp", async () => {
+      await migrateMongoSchema(database);
+      const old = new Date("2020-01-01T00:00:00.000Z");
+      const events = [{ eventKey: "a", status: "pending", createdAt: old }, { eventKey: "b", status: "sent", createdAt: new Date() }];
+      await database.collection("outboxEvents").insertMany(events.map((event) => ({ ...event })));
+      const before = await database.collection("outboxEvents").find({}, { projection: { _id: 0 } }).sort({ eventKey: 1 }).toArray();
+      const mark = await database.collection("_migrations").findOne({ id: retentionVersion });
+      await migrateMongoSchema(database);
+      await migrateMongoSchema(database);
+      expect(await database.collection("_migrations").find({ id: retentionVersion }).toArray()).toEqual([mark]);
+      expect(await database.collection("outboxEvents").find({}, { projection: { _id: 0 } }).sort({ eventKey: 1 }).toArray()).toEqual(before);
+      expect((await database.collection("outboxEvents").listIndexes().toArray()).filter((index) => index.name === "createdAt_retention_ttl")).toHaveLength(1);
+    });
+
+    it("applies over a database that already had 0008 (upgrade) without rewriting it", async () => {
+      await migrateMongoSchema(database);
+      await database.collection("outboxEvents").dropIndex("createdAt_retention_ttl");
+      await database.collection("_migrations").deleteOne({ id: retentionVersion });
+      await migrateMongoSchema(database);
+      expect((await database.collection("outboxEvents").listIndexes().toArray()).map((index) => index.name)).toContain("createdAt_retention_ttl");
+      expect(await database.collection("_migrations").countDocuments({ id: inboxVersion })).toBe(1);
+    });
   });
 
   it("versions the TTL index of rateLimits and keeps it idempotent without touching counters (T102)", async () => {

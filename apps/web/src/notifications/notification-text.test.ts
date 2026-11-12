@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { noticeBodyLines, noticeHeadline, type NoticeEvent } from "app-domain";
 import { itineraryId } from "../trips/itinerary-test-fixture.js";
 import type { TripNotification } from "./trip-notification-api.js";
 import { describeNotification, formatDuration, formatNoticeTime } from "./notification-text.js";
@@ -92,5 +93,29 @@ describe("notice texts (generic, built in the client)", () => {
   it("never carries a title, description, name or text of the notice's origin", () => {
     const all = JSON.stringify(describeNotification(unlinked(), UTC));
     expect(all).not.toMatch(/@|Secreto|undefined|null/);
+  });
+});
+
+describe("parity with the push text contract of the domain (T135)", () => {
+  const ids = { a: itineraryId(10), b: itineraryId(11), c: itineraryId(12) };
+  const payloads: Record<string, Record<string, unknown>> = {
+    "post.created": { postId: ids.a, actorId: ids.b, activityId: null },
+    "comment.created": { commentId: ids.a, postId: ids.b, actorId: ids.c },
+    "member.joined": { memberId: ids.a, userId: ids.b },
+    "member.expelled": { tripId: trip },
+    "activity.created": { activityId: ids.a, actorId: ids.b, scheduledAt: "2026-12-01T15:00:00.000Z", durationMinutes: 90 },
+    "activity.updated": { activityId: ids.a, actorId: ids.b, changedFields: ["scheduledAt", "mapsUrl"] },
+    "activity.participant_unlinked": { activityId: ids.a, reason: "schedule_conflict", changedFields: ["durationMinutes"], changedAt: at,
+      newInterval: { startsAt: "2026-12-01T15:00:00.000Z", durationMinutes: 60, endsAt: "2026-12-01T16:00:00.000Z" }, incompatibleActivities: [] },
+  };
+
+  it.each(Object.keys(payloads))("the client headline of %s is the one the push uses", (type) => {
+    const headline = describeNotification(item(type, payloads[type]!), UTC).headline;
+    expect(headline).toBe(noticeHeadline({ type, payload: payloads[type] } as unknown as NoticeEvent));
+  });
+
+  it.each(Object.keys(payloads))("every line of the push body of %s is also a line of the inbox", (type) => {
+    const lines = describeNotification(item(type, payloads[type]!), UTC).lines;
+    for (const line of noticeBodyLines({ type, payload: payloads[type] } as unknown as NoticeEvent)) expect(lines).toContain(line);
   });
 });

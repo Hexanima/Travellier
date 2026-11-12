@@ -97,8 +97,11 @@ describe("leaving a Trip and the cleanup of future participations (T116)", () =>
     expect(await f.db.collection("activityParticipations").find({ userId: { $ne: C } }).sort({ _id: 1 }).toArray()).toEqual(othersBefore);
     expect(await f.db.collection("activities").find().sort({ _id: 1 }).toArray()).toEqual(activitiesBefore);
     expect(await Promise.all(content.map((name) => f.db.collection(name).find().toArray()))).toEqual(contentBefore);
-    // A voluntary leave emits no notice.
-    expect(await f.db.collection("outboxEvents").countDocuments({})).toBe(eventsBefore);
+    // A voluntary leave notifies exactly the members who stay (T135), with ids only.
+    const leftEvents = await f.db.collection("outboxEvents").find({ type: "member.left" }).sort({ _id: 1 }).toArray();
+    expect(leftEvents.map((event) => String(event.userId)).sort()).toEqual(sorted(O, B, D));
+    expect(leftEvents.every((event) => event.status === "pending" && String(event.actorId) === String(C) && String(event.payload.userId) === String(C))).toBe(true);
+    expect(await f.db.collection("outboxEvents").countDocuments({})).toBe(eventsBefore + 3);
     // An activity left without participants stays listed.
     const listed = await call(D, "GET", "/activities");
     expect(listed.statusCode).toBe(200);
@@ -108,6 +111,41 @@ describe("leaving a Trip and the cleanup of future participations (T116)", () =>
     const created = await call(D, "POST", "/activities", { title: "Nuevo", dayId: futureDay.toHexString(), scheduledAt: at(FUTURE, 17).toISOString() });
     expect(created.statusCode).toBe(201);
     expect(await f.db.collection("outboxEvents").countDocuments({ userId: C })).toBe(0);
+  }, 30_000);
+
+  const inbox = async (user: ObjectId) => {
+    const response = await f.request("GET", "/notifications", undefined, user);
+    expect(response.statusCode, response.body).toBe(200);
+    return (JSON.parse(response.body) as { notifications: { type: string; payload: Record<string, unknown> }[] }).notifications;
+  };
+
+  it("shows member.left to the members who stay through GET /notifications and nothing to the one who left", async () => {
+    expect((await leave(C)).statusCode).toBe(204);
+    for (const user of [O, B, D]) {
+      const notices = (await inbox(user)).filter((notice) => notice.type === "member.left");
+      expect(notices, String(user)).toHaveLength(1);
+      expect(notices[0]?.payload).toMatchObject({ userId: C.toHexString() });
+    }
+    expect((await inbox(C)).filter((notice) => notice.type === "member.left")).toEqual([]);
+    expect(await f.db.collection("outboxEvents").countDocuments({ userId: C })).toBe(0);
+  }, 30_000);
+
+  it("a retried leave does not duplicate the notices and a rejected owner leave emits none", async () => {
+    expect((await leave(C)).statusCode).toBe(204);
+    expect((await leave(C)).statusCode).toBe(404);
+    expect(await f.db.collection("outboxEvents").countDocuments({ type: "member.left" })).toBe(3);
+    expect((await leave(O)).statusCode).toBe(409);
+    expect((await leave(X)).statusCode).toBe(404);
+    expect(await f.db.collection("outboxEvents").countDocuments({ type: "member.left" })).toBe(3);
+  }, 30_000);
+
+  it("an expulsion produces only member.expelled and a later leave notifies just the members who stay, with no role or ownership notices", async () => {
+    expect((await expel(B, D)).statusCode).toBe(204);
+    const events = await f.db.collection("outboxEvents").find({}).toArray();
+    expect(events.map((event) => [event.type, String(event.userId)])).toEqual([["member.expelled", String(D)]]);
+    expect((await leave(C)).statusCode).toBe(204);
+    expect((await f.db.collection("outboxEvents").find({ type: { $in: ["member.role_changed", "trip.ownership_transferred"] } }).toArray())).toEqual([]);
+    expect((await f.db.collection("outboxEvents").find({ type: "member.left" }).toArray()).map((event) => String(event.userId)).sort()).toEqual(sorted(O, B));
   }, 30_000);
 
   it("answers 404 to a second attempt, to a non-member and to a missing Trip, writing nothing", async () => {

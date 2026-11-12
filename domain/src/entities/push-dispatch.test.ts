@@ -12,6 +12,7 @@ import {
   computePushRetryDelay,
   type PushableEvent,
 } from "./push-dispatch.js";
+import { noticeBodyLines, noticeHeadline } from "./notice-text.js";
 import type { TripNotificationType } from "./trip-notification.js";
 
 const id = (value: string): ObjectId => {
@@ -35,6 +36,9 @@ const events: Record<TripNotificationType, PushableEvent> = {
   "member.joined": { id: notificationId, type: "member.joined", tripId, payload: { memberId, userId } },
   "member.expelled": { id: notificationId, type: "member.expelled", tripId, payload: { tripId } },
   "comment.created": { id: notificationId, type: "comment.created", tripId, payload: { commentId, postId, actorId } },
+  "member.left": { id: notificationId, type: "member.left", tripId, payload: { memberId, userId } },
+  "member.role_changed": { id: notificationId, type: "member.role_changed", tripId, payload: { userId, role: "admin" } },
+  "trip.ownership_transferred": { id: notificationId, type: "trip.ownership_transferred", tripId, payload: { previousOwnerId: actorId } },
 };
 
 const allStrings = (data: Record<string, unknown>) => Object.values(data).every((value) => typeof value === "string");
@@ -65,6 +69,9 @@ describe("buildPushMessage", () => {
     expect(data("member.joined")).toEqual({ notificationId, type: "member.joined", tripId, memberId });
     expect(data("comment.created")).toEqual({ notificationId, type: "comment.created", tripId, commentId, postId });
     expect(data("member.expelled")).toEqual({ notificationId, type: "member.expelled", tripId });
+    expect(data("member.left")).toEqual({ notificationId, type: "member.left", tripId, memberId });
+    expect(data("member.role_changed")).toEqual({ notificationId, type: "member.role_changed", tripId });
+    expect(data("trip.ownership_transferred")).toEqual({ notificationId, type: "trip.ownership_transferred", tripId });
     expect(data("activity.participant_unlinked")).toEqual({
       notificationId, type: "activity.participant_unlinked", tripId, activityId, scheduledAt: "2026-12-01T15:00:00.000Z", durationMinutes: "90" });
   });
@@ -84,13 +91,27 @@ describe("buildPushMessage", () => {
       const message = buildPushMessage(event);
       expect(allStrings(message.data)).toBe(true);
       expect(message.title.length).toBeGreaterThan(0);
-      expect(message.body.length).toBeGreaterThan(0);
     }
   });
 
-  it("uses the literal text of the PRD for the unlinked participant and does not list incompatible activities", () => {
+  it("uses the headline of the inbox as title and the lines without time as body for every type", () => {
+    for (const event of Object.values(events)) {
+      const message = buildPushMessage(event);
+      expect(message.title).toBe(noticeHeadline(event));
+      expect(message.body).toBe(noticeBodyLines(event).join("\n"));
+    }
+  });
+
+  it("builds the body with no time of day: only the lines that do not depend on the device time zone", () => {
+    expect(buildPushMessage(events["activity.created"]).body).toBe("Duración: 1 h 30 min");
+    expect(buildPushMessage(events["activity.updated"]).body).toBe("Cambió el horario, la duración, el contenido y la ubicación.");
+    expect(buildPushMessage(events["post.created"]).body).toBe("");
+    for (const event of Object.values(events)) expect(buildPushMessage(event).body).not.toMatch(/\d{1,2}:\d{2}|Empieza el|Nuevo horario/);
+  });
+
+  it("uses the literal text of the PRD for the unlinked participant as title and does not list incompatible activities", () => {
     const message = buildPushMessage(events["activity.participant_unlinked"]);
-    expect(message.body).toBe("Cambió el horario y se superpone con otro plan. Se retiró tu participación; revisá la actividad y elegí de nuevo.");
+    expect(message.title).toBe("Cambió el horario y se superpone con otro plan. Se retiró tu participación; revisá la actividad y elegí de nuevo.");
     expect(JSON.stringify(message)).not.toContain(otherActivity);
   });
 

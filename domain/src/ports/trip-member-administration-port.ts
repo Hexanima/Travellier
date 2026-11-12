@@ -8,9 +8,12 @@ export interface TripMemberAdministrationScope {
   findMember: (userId: ObjectId) => AsyncResult<{ id: ObjectId; role: TripRole } | undefined>;
   /** Titular actual (`trips.ownerId`); `undefined` si el viaje todavía no lo tiene. */
   findOwnerId: () => AsyncResult<ObjectId | undefined>;
-  setRole: (userId: ObjectId, role: TripRole) => AsyncResult<void>;
+  /** User ids of the CURRENT members, read under the Trip lock (recipients of the leaving notice). */
+  listMemberIds: () => AsyncResult<ObjectId[]>;
+  /** Changes the role and, in the same transaction and as its last write, writes `notifications`. */
+  setRole: (userId: ObjectId, role: TripRole, notifications: readonly TripNotificationDraft[]) => AsyncResult<void>;
   /** `trips.ownerId = toUserId`, el destino queda admin y el anterior titular conserva admin. */
-  transferOwnership: (fromUserId: ObjectId, toUserId: ObjectId) => AsyncResult<void>;
+  transferOwnership: (fromUserId: ObjectId, toUserId: ObjectId, notifications: readonly TripNotificationDraft[]) => AsyncResult<void>;
   /**
    * Single path for leaving and expulsion. Deletes the membership (any role) and, only if it was deleted and in the same
    * transaction, the user's participations in activities of the Trip that start after `at` (decisionRequired marks included;

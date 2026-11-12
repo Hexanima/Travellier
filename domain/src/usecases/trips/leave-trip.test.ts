@@ -36,6 +36,7 @@ const createFake = (options: { ownerId?: ObjectId | null; removed?: boolean; own
       return ok(role === undefined || membershipId === undefined ? undefined : { id: membershipId, role });
     },
     findOwnerId: async () => ok(options.ownerId === null ? undefined : options.ownerId ?? owner),
+    listMemberIds: async () => ok([...roles.keys()]),
     setRole: vi.fn(), transferOwnership: vi.fn(), removeMember,
   };
   const port: TripMemberAdministrationPort = { withTransaction: (_tripId, work) => { events.push("begin"); return work(scope); } };
@@ -47,10 +48,15 @@ const leave = (fake: ReturnType<typeof createFake>, actorUserId: ObjectId) =>
   leaveTrip.execute({ administration: fake.port, now: fake.now }, { tripId, actorUserId });
 
 describe("leaveTrip", () => {
-  it("lets a participant leave with no notices and the instant read inside the transaction", async () => {
+  const leftNotice = (leaver: ObjectId, recipient: ObjectId) => ({ eventKey: `member.left:${membershipIds.get(leaver)}:${recipient}`, type: "member.left",
+    tripId, userId: recipient, actorId: leaver, operationKey: `member.left:${membershipIds.get(leaver)}`,
+    payload: { memberId: membershipIds.get(leaver), userId: leaver }, createdAt: at });
+
+  it("lets a participant leave with a notice for each remaining member and the instant read inside the transaction", async () => {
     const fake = createFake();
     expect(await leave(fake, participant)).toEqual({ ok: true, value: undefined });
-    expect(fake.removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant, [], at);
+    expect(fake.removeMember).toHaveBeenCalledWith(membershipIds.get(participant), participant,
+      [leftNotice(participant, owner), leftNotice(participant, admin)], at);
     expect(fake.roles.has(participant)).toBe(false);
     expect(fake.events).toEqual(["begin", "now", "removeMember"]);
   });
@@ -58,7 +64,18 @@ describe("leaveTrip", () => {
   it("lets a non-owner admin leave", async () => {
     const fake = createFake();
     expect(await leave(fake, admin)).toEqual({ ok: true, value: undefined });
-    expect(fake.removeMember).toHaveBeenCalledWith(membershipIds.get(admin), admin, [], at);
+    expect(fake.removeMember).toHaveBeenCalledWith(membershipIds.get(admin), admin, [leftNotice(admin, owner), leftNotice(admin, participant)], at);
+  });
+
+  it("never notifies the one who leaves and has no recipients when nobody stays", async () => {
+    const fake = createFake();
+    await leave(fake, participant);
+    const notices = fake.removeMember.mock.calls[0]?.[2] as { userId: ObjectId }[];
+    expect(notices.map((notice) => notice.userId)).not.toContain(participant);
+    const alone = createFake();
+    alone.roles.delete(owner); alone.roles.delete(admin);
+    expect(await leave(alone, participant)).toEqual({ ok: true, value: undefined });
+    expect(alone.removeMember.mock.calls[0]?.[2]).toEqual([]);
   });
 
   it("rejects the owner without writing anything", async () => {
@@ -67,6 +84,7 @@ describe("leaveTrip", () => {
     expect(fake.removeMember).not.toHaveBeenCalled();
     expect(fake.now).not.toHaveBeenCalled();
     expect(fake.roles.has(owner)).toBe(true);
+    expect(fake.removeMember.mock.calls).toEqual([]);
   });
 
   it("reports a non-member as Trip not found", async () => {
@@ -78,6 +96,17 @@ describe("leaveTrip", () => {
   it("reports a membership removed concurrently as missing", async () => {
     const fake = createFake({ removed: false });
     expect(await leave(fake, participant)).toMatchObject({ ok: false, error: { tag: "TripMemberNotFoundError" } });
+    // The notices travel with removeMember, which wrote nothing: there is no other write that could publish them.
+    expect(fake.removeMember).toHaveBeenCalledTimes(1);
+  });
+
+  it("propagates a failure listing the members without removing anyone", async () => {
+    const fake = createFake();
+    const failure = new UnknownError("list");
+    const failing: TripMemberAdministrationPort = { withTransaction: (tid, work) => fake.port.withTransaction(tid, (scope) =>
+      work({ ...scope, listMemberIds: async () => err(failure) })) };
+    expect(await leaveTrip.execute({ administration: failing, now: fake.now }, { tripId, actorUserId: participant })).toEqual(err(failure));
+    expect(fake.removeMember).not.toHaveBeenCalled();
   });
 
   it.each([["without owner", { ownerId: null }], ["with an owner that is not a member", { ownerIsMember: false }]])(

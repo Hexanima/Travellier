@@ -5,10 +5,14 @@ import type { Activity } from "./activity.js";
 
 /**
  * Events persisted with the operation that originates them (T91). There is no event for likes, votes, post or comment edits,
- * going/not going or activity deletion.
+ * going/not going or activity deletion. T135 adds leaving (to the members who stay), role change (to the affected member) and
+ * ownership transfer (to the new owner); the expulsion keeps its single recipient.
  */
 export type TripNotificationType = "post.created" | "activity.created" | "activity.updated" | "activity.participant_unlinked"
-  | "member.joined" | "member.expelled" | "comment.created";
+  | "member.joined" | "member.expelled" | "comment.created" | "member.left" | "member.role_changed" | "trip.ownership_transferred";
+
+/** Notices stay in the inbox this long (TTL index on `outboxEvents`; a still pending dispatch is never deleted). */
+export const NOTIFICATION_RETENTION_DAYS = 90;
 
 export type ActivityUpdatedField = "title" | "description" | "mapsUrl" | "scheduledAt" | "durationMinutes";
 
@@ -21,6 +25,11 @@ export interface TripNotificationPayloads {
   "member.joined": { memberId: ObjectId; userId: ObjectId };
   "member.expelled": { tripId: ObjectId };
   "comment.created": { commentId: ObjectId; postId: ObjectId; actorId: ObjectId };
+  /** `userId` is whoever left. */
+  "member.left": { memberId: ObjectId; userId: ObjectId };
+  /** `role` is the new role of the recipient. */
+  "member.role_changed": { userId: ObjectId; role: "admin" | "participant" };
+  "trip.ownership_transferred": { previousOwnerId: ObjectId };
 }
 
 export interface ParticipantUnlinkedPayload {

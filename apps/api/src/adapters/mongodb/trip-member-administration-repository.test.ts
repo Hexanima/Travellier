@@ -48,8 +48,8 @@ describe("Mongo trip member administration repository", () => {
       expect(await scope.findMember(hex(participant))).toEqual(ok({ id: memberships.participant.toHexString(), role: "participant" }));
       expect(await scope.findMember(hex(new ObjectId()))).toEqual(ok(undefined));
       expect(await scope.findOwnerId()).toEqual(ok(owner.toHexString()));
-      expect(await scope.setRole(hex(participant), "admin")).toEqual(ok(undefined));
-      return scope.setRole(hex(admin), "participant");
+      expect(await scope.setRole(hex(participant), "admin", [])).toEqual(ok(undefined));
+      return scope.setRole(hex(admin), "participant", []);
     });
     expect(result).toEqual(ok(undefined));
     expect(await database.collection("tripMembers").findOne({ userId: participant, tripId })).toMatchObject({ role: "admin" });
@@ -66,7 +66,7 @@ describe("Mongo trip member administration repository", () => {
 
   it("transfers the ownership: new owner admin, previous owner stays admin", async () => {
     const { tripId, owner, participant, repository } = await seed();
-    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(participant)));
+    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(participant), []));
     expect(result).toEqual(ok(undefined));
     expect(await database.collection("trips").findOne({ _id: tripId })).toMatchObject({ ownerId: participant, destinationOrderRevision: 1 });
     expect(await database.collection("tripMembers").findOne({ tripId, userId: participant })).toMatchObject({ role: "admin" });
@@ -76,7 +76,7 @@ describe("Mongo trip member administration repository", () => {
   it("aborts a transfer whose previous owner is stale, without writing anything", async () => {
     const { tripId, admin, participant, repository } = await seed();
     const before = await snapshot(tripId);
-    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(admin), hex(participant)));
+    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(admin), hex(participant), []));
     expect(result.ok).toBe(false);
     expect(await snapshot(tripId)).toEqual(before);
   });
@@ -84,7 +84,7 @@ describe("Mongo trip member administration repository", () => {
   it("aborts a transfer to a non-member without writing anything", async () => {
     const { tripId, owner, repository } = await seed();
     const before = await snapshot(tripId);
-    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(new ObjectId())));
+    const result = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(new ObjectId()), []));
     expect(result.ok).toBe(false);
     expect(await snapshot(tripId)).toEqual(before);
   });
@@ -94,11 +94,91 @@ describe("Mongo trip member administration repository", () => {
     const before = await snapshot(tripId);
     const failure = new UnknownError("business rejection");
     const result = await repository.withTransaction(hex(tripId), async (scope) => {
-      await scope.setRole(hex(participant), "admin");
+      await scope.setRole(hex(participant), "admin", []);
       return err(failure);
     });
     expect(result).toEqual(err(failure));
     expect(await snapshot(tripId)).toEqual(before);
+  });
+
+  it("lists the current members of the Trip under the lock, and no others", async () => {
+    const { tripId, owner, admin, participant, repository } = await seed();
+    await seed();
+    const result = await repository.withTransaction(hex(tripId), (scope) => scope.listMemberIds());
+    expect(result).toEqual(ok([owner, admin, participant].map((id) => id.toHexString())));
+  });
+
+  describe("notices of role changes and ownership transfers (T135)", () => {
+    const failOutbox = () => {
+      const outbox = database.collection("outboxEvents"), original = database.collection.bind(database);
+      vi.spyOn(database, "collection").mockImplementation((name, options) => name === "outboxEvents" ? outbox : original(name, options));
+      vi.spyOn(outbox, "bulkWrite").mockRejectedValueOnce(new Error("outbox failure"));
+    };
+    const roleNotice = (tripId: ObjectId, userId: ObjectId, actor: ObjectId, role: "admin" | "participant", operation = new ObjectId()) => buildTripNotifications({
+      type: "member.role_changed", tripId: hex(tripId), operationRef: hex(operation), actorId: hex(actor), recipients: [hex(userId)], payload: { userId: hex(userId), role }, createdAt: at });
+
+    it("writes the role and its notice in the same transaction", async () => {
+      const { tripId, owner, participant, repository } = await seed();
+      const notices = roleNotice(tripId, participant, owner, "admin");
+      expect(await repository.withTransaction(hex(tripId), (scope) => scope.setRole(hex(participant), "admin", notices))).toEqual(ok(undefined));
+      expect(await database.collection("tripMembers").findOne({ tripId, userId: participant })).toMatchObject({ role: "admin" });
+      const events = await database.collection("outboxEvents").find({ tripId }).toArray();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: "member.role_changed", userId: participant, actorId: owner, status: "pending", payload: { userId: participant, role: "admin" } });
+    });
+
+    it("does not duplicate a notice with the same key and keeps distinct operations as distinct notices", async () => {
+      const { tripId, owner, participant, repository } = await seed();
+      const operation = new ObjectId();
+      const same = roleNotice(tripId, participant, owner, "admin", operation);
+      await repository.withTransaction(hex(tripId), (scope) => scope.setRole(hex(participant), "admin", same));
+      await repository.withTransaction(hex(tripId), (scope) => scope.setRole(hex(participant), "admin", same));
+      expect(await database.collection("outboxEvents").countDocuments({ tripId })).toBe(1);
+      await repository.withTransaction(hex(tripId), (scope) => scope.setRole(hex(participant), "participant", roleNotice(tripId, participant, owner, "participant")));
+      expect(await database.collection("outboxEvents").countDocuments({ tripId })).toBe(2);
+    });
+
+    it("rolls back the role when the notice write fails", async () => {
+      const { tripId, owner, participant, repository } = await seed();
+      const before = await snapshot(tripId);
+      failOutbox();
+      try {
+        const result = await repository.withTransaction(hex(tripId), (scope) => scope.setRole(hex(participant), "admin", roleNotice(tripId, participant, owner, "admin")));
+        expect(result.ok).toBe(false);
+      } finally { vi.restoreAllMocks(); }
+      expect(await snapshot(tripId)).toEqual(before);
+    });
+
+    it("writes the transfer and its notice together, only for the new owner", async () => {
+      const { tripId, owner, participant, repository } = await seed();
+      const notices = buildTripNotifications({ type: "trip.ownership_transferred", tripId: hex(tripId), operationRef: hex(new ObjectId()), actorId: hex(owner),
+        recipients: [hex(participant)], payload: { previousOwnerId: hex(owner) }, createdAt: at });
+      expect(await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(participant), notices))).toEqual(ok(undefined));
+      expect(await database.collection("trips").findOne({ _id: tripId })).toMatchObject({ ownerId: participant });
+      const events = await database.collection("outboxEvents").find({ tripId }).toArray();
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: "trip.ownership_transferred", userId: participant, payload: { previousOwnerId: owner } });
+    });
+
+    it("rolls back owner and role when the transfer notice write fails", async () => {
+      const { tripId, owner, participant, repository } = await seed();
+      const before = await snapshot(tripId);
+      failOutbox();
+      try {
+        const notices = buildTripNotifications({ type: "trip.ownership_transferred", tripId: hex(tripId), operationRef: hex(new ObjectId()), actorId: hex(owner),
+          recipients: [hex(participant)], payload: { previousOwnerId: hex(owner) }, createdAt: at });
+        expect((await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(owner), hex(participant), notices))).ok).toBe(false);
+      } finally { vi.restoreAllMocks(); }
+      expect(await snapshot(tripId)).toEqual(before);
+    });
+
+    it("writes no notice when the owner is stale (the write aborts first)", async () => {
+      const { tripId, admin, participant, repository } = await seed();
+      const notices = roleNotice(tripId, participant, admin, "admin");
+      const stale = await repository.withTransaction(hex(tripId), (scope) => scope.transferOwnership(hex(admin), hex(participant), notices));
+      expect(stale.ok).toBe(false);
+      expect(await database.collection("outboxEvents").countDocuments({ tripId })).toBe(0);
+    });
   });
 
   it("returns TripNotFoundError for a missing Trip", async () => {

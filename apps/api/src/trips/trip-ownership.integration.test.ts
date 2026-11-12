@@ -105,6 +105,63 @@ describe("Trip admins, ownership transfer and expulsion (T115)", () => {
   const roleOf = async (tripId: string, person: Person) =>
     (await database.collection("tripMembers").findOne({ tripId: new ObjectId(tripId), userId: users[person] }))?.role ?? null;
 
+  const inbox = async (person: Person) => {
+    const response = await send(person, "GET", "/notifications");
+    expect(response.status, response.text).toBe(200);
+    return (JSON.parse(response.text) as { notifications: { type: string; tripId: string; actorId: string | null; payload: Record<string, unknown> }[] }).notifications;
+  };
+  const noticesOf = async (person: Person, tripId: string, type: string) => (await inbox(person)).filter((notice) => notice.tripId === tripId && notice.type === type);
+
+  it("notifies the role change only to the affected member, once per real change (T135)", async () => {
+    const tripId = await newTrip();
+    expect((await setRole("A", tripId, "C", "admin")).status).toBe(204);
+    expect((await setRole("A", tripId, "C", "admin")).status).toBe(204);
+    expect((await setRole("A", tripId, "C", "participant")).status).toBe(204);
+    expect((await setRole("A", tripId, "C", "participant")).status).toBe(204);
+    expect((await setRole("A", tripId, "C", "admin")).status).toBe(204);
+    const notices = await noticesOf("C", tripId, "member.role_changed");
+    expect(notices.map((notice) => notice.payload.role).sort()).toEqual(["admin", "admin", "participant"]);
+    expect(notices.every((notice) => notice.actorId === users.A.toHexString() && notice.payload.userId === users.C.toHexString())).toBe(true);
+    for (const person of ["A", "B", "D"] as const) expect(await noticesOf(person, tripId, "member.role_changed"), person).toEqual([]);
+    expect((await state(tripId)).events).toHaveLength(3);
+  }, 30_000);
+
+  it("emits no role notice for rejected changes nor for the same role", async () => {
+    const tripId = await newTrip();
+    await setRole("A", tripId, "B", "admin");
+    await setRole("B", tripId, "C", "admin");
+    await setRole("A", tripId, "A", "participant");
+    await setRole("A", tripId, "X", "admin");
+    await setRole("A", tripId, "C", "owner");
+    expect((await state(tripId)).events).toEqual([]);
+  }, 30_000);
+
+  it("notifies the transfer only to the new owner, with the previous owner in the payload and no role notice (T135)", async () => {
+    const tripId = await newTrip();
+    expect((await transfer("A", tripId, "C")).status).toBe(204);
+    const notices = await noticesOf("C", tripId, "trip.ownership_transferred");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({ actorId: users.A.toHexString(), payload: { previousOwnerId: users.A.toHexString() } });
+    for (const person of ["A", "B", "D"] as const) expect(await noticesOf(person, tripId, "trip.ownership_transferred"), person).toEqual([]);
+    expect((await state(tripId)).events.map((event) => [event.type, String(event.userId)])).toEqual([["trip.ownership_transferred", users.C.toHexString()]]);
+    // Rejected or repeated transfers emit nothing more.
+    expect((await transfer("A", tripId, "C")).status).toBe(403);
+    expect((await transfer("C", tripId, "C")).status).toBe(422);
+    expect((await transfer("C", tripId, "X")).status).toBe(404);
+    expect((await state(tripId)).events).toHaveLength(1);
+    // Transferring back is a new operation: a new notice for the previous owner.
+    expect((await transfer("C", tripId, "A")).status).toBe(204);
+    expect(await noticesOf("A", tripId, "trip.ownership_transferred")).toHaveLength(1);
+    expect((await state(tripId)).events).toHaveLength(2);
+  }, 30_000);
+
+  it("an expulsion notifies only the expelled member and never a member.left", async () => {
+    const tripId = await newTrip();
+    expect((await expel("A", tripId, "C")).status).toBe(204);
+    expect((await state(tripId)).events.map((event) => [event.type, String(event.userId)])).toEqual([["member.expelled", users.C.toHexString()]]);
+    for (const person of ["A", "B", "D"] as const) expect(await noticesOf(person, tripId, "member.left"), person).toEqual([]);
+  }, 30_000);
+
   it("lets only the owner name and remove admins, reflected in the listing, and repeating is a 204 with no change", async () => {
     const tripId = await newTrip();
     expect((await setRole("A", tripId, "C", "admin")).status).toBe(204);
