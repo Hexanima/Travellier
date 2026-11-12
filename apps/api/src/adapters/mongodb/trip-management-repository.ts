@@ -221,10 +221,18 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         return err(unknownError());
       }
     },
+    findMemberRole: async (tripId, userId) => {
+      try {
+        const member = await members.findOne({ tripId: new MongoObjectId(tripId), userId: new MongoObjectId(userId) }, { projection: { role: 1 } });
+        return ok(member?.role);
+      } catch {
+        return err(unknownError());
+      }
+    },
     updateConfigurationForMember: async (tripId, userId, update: TripConfigurationUpdate) => {
       try {
         const mongoTripId = new MongoObjectId(tripId);
-        const member = await members.findOne({ tripId: mongoTripId, userId: new MongoObjectId(userId) }, { projection: { _id: 1 } });
+        const member = await members.findOne({ tripId: mongoTripId, userId: new MongoObjectId(userId), ...(update.expenseMode !== undefined ? { role: "admin" as const } : {}) }, { projection: { _id: 1 } });
         if (member === null) return ok(undefined);
         const trip = await trips.findOneAndUpdate({ _id: mongoTripId }, { $set: update }, { returnDocument: "after" });
         if (trip === null) return ok(undefined);

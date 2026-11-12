@@ -1,6 +1,7 @@
 import { createTripWithAdmin, type TripExpenseMode, type TripVisibility } from "../../entities/trip.js";
 import { createTripDestination } from "../../entities/trip-destination.js";
 import { TripNotFoundError } from "../../errors/trip-not-found-error.js";
+import { UnauthorizedError } from "../../errors/unauthorized-error.js";
 import { UnknownError } from "../../errors/unknown-error.js";
 import { ValidationError } from "../../errors/validation-error.js";
 import type { TripConfigurationUpdate, TripDetail, TripListItem, TripManagementPort, TripView } from "../../ports/trip-management-port.js";
@@ -114,6 +115,13 @@ export const updateTripConfiguration: UseCase<TripManagementDependencies, Update
   execute: async ({ trips }, payload) => {
     const validation = validateConfiguration(payload);
     if (validation !== undefined) return err(validation);
+
+    if (payload.expenseMode !== undefined) {
+      const role = await trips.findMemberRole(payload.tripId, payload.authenticatedUserId);
+      if (!role.ok) return role;
+      if (role.value === undefined) return err(new TripNotFoundError());
+      if (role.value !== "admin") return err(new UnauthorizedError());
+    }
 
     const update: TripConfigurationUpdate = {
       ...(payload.visibility === undefined ? {} : { visibility: payload.visibility }),

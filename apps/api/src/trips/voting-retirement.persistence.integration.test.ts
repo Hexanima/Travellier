@@ -52,6 +52,7 @@ describe("T47 active contracts and historical data", () => {
   it("updates supported configuration without changing the stored legacy flag or votes", async () => {
     await seedLegacy();
     const votes = await f.db.collection("activityVotes").find().toArray();
+    await f.db.collection("tripMembers").updateOne({ tripId: f.trip, userId: f.actor }, { $set: { role: "admin" } });
     const response = await f.request("PATCH", `${tripPath()}/config`, { visibility: "private", expenseMode: "balance", votingEnabled: false });
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response.body).trip).not.toHaveProperty("votingEnabled");

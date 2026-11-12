@@ -133,7 +133,7 @@ describe("Trip use cases", () => {
 
   it("validates configuration before a member-scoped update", async () => {
     const seen: unknown[] = [];
-    const repository = { updateConfigurationForMember: async (...args: unknown[]) => { seen.push(args); return ok(view); } };
+    const repository = { findMemberRole: async () => ok("admin"), updateConfigurationForMember: async (...args: unknown[]) => { seen.push(args); return ok(view); } };
     const payload = { authenticatedUserId: userId, tripId, visibility: "public", votingEnabled: true, expenseMode: "balance" } as const;
     expect(await updateTripConfiguration.execute({ trips: repository } as never, payload)).toEqual(ok(view));
     expect(seen).toEqual([[tripId, userId, { visibility: "public", expenseMode: "balance" }]]);
@@ -146,5 +146,67 @@ describe("Trip use cases", () => {
     const result = await updateTripConfiguration.execute({ trips: { updateConfigurationForMember: async () => ok(view) } } as never,
       { authenticatedUserId: userId, tripId, votingEnabled: true } as never);
     expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError", issues: [{ field: "configuration" }] } });
+  });
+
+  describe("expense mode permissions", () => {
+    const setup = (role: "admin" | "participant" | undefined) => {
+      const writes: unknown[] = [];
+      const roleCalls: unknown[] = [];
+      const repository = {
+        findMemberRole: async (...args: unknown[]) => { roleCalls.push(args); return ok(role); },
+        updateConfigurationForMember: async (...args: unknown[]) => { writes.push(args); return ok(view); },
+      };
+      return { writes, roleCalls, repository };
+    };
+    const base = { authenticatedUserId: userId, tripId };
+
+    it("rejects a participant changing expenseMode without writing", async () => {
+      const { writes, repository } = setup("participant");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, expenseMode: "balance" });
+      expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+      expect(writes).toHaveLength(0);
+    });
+
+    it("allows an admin who is not the owner", async () => {
+      const { writes, repository } = setup("admin");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { authenticatedUserId: id("507f1f77bcf86cd799439099"), tripId, expenseMode: "balance" });
+      expect(result).toEqual(ok(view));
+      expect(writes).toHaveLength(1);
+    });
+
+    it("allows the owner (admin role)", async () => {
+      const { writes, repository } = setup("admin");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, expenseMode: "balance" });
+      expect(result).toEqual(ok(view));
+      expect(writes).toHaveLength(1);
+    });
+
+    it("answers not found to a non-member without writing", async () => {
+      const { writes, repository } = setup(undefined);
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, expenseMode: "balance" });
+      expect(result).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(writes).toHaveLength(0);
+    });
+
+    it("lets a participant change only visibility", async () => {
+      const { writes, repository } = setup("participant");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, visibility: "public" });
+      expect(result).toEqual(ok(view));
+      expect(writes).toHaveLength(1);
+    });
+
+    it("rejects a mixed payload from a participant entirely", async () => {
+      const { writes, repository } = setup("participant");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, visibility: "public", expenseMode: "balance" });
+      expect(result).toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+      expect(writes).toHaveLength(0);
+    });
+
+    it("validates the payload before consulting the role", async () => {
+      const { roleCalls, repository } = setup("participant");
+      const result = await updateTripConfiguration.execute({ trips: repository } as never, { ...base, expenseMode: "invalid" } as never);
+      expect(result).toMatchObject({ ok: false, error: { tag: "ValidationError" } });
+      expect(roleCalls).toHaveLength(0);
+    });
   });
 });

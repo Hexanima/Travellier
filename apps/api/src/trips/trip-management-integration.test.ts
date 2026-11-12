@@ -112,4 +112,71 @@ describe("local Trip API", () => {
       await client.close();
     }
   }, 15_000);
+
+  it("restricts expense mode changes to admins, keeps payments and shares, and hides the Trip from outsiders", async () => {
+    const databaseName = "travellier_trip_expense_mode_test";
+    const client = new MongoClient(replSet.getUri());
+    await client.connect();
+    const database = client.db(databaseName);
+    await migrateMongoSchema(database);
+    const localApi = await createLocalApi({ MONGODB_URI: replSet.getUri(), MONGODB_DATABASE_NAME: databaseName, JWT_SECRET: "trip-mode-secret" });
+    await new Promise<void>((resolve) => localApi.app.listen(0, resolve));
+    const baseUrl = `http://127.0.0.1:${(localApi.app.address() as AddressInfo).port}`;
+    const tokens = createAuthenticationTokenAdapter({ jwtSecret: "trip-mode-secret", accessTokenLifetimeMs: 900_000 });
+    const headersFor = async (user: ObjectId) => {
+      const id = createObjectId(user.toHexString());
+      if (!id.ok) throw new Error("Invalid test id");
+      const token = await tokens.createAccessToken(id.value);
+      if (!token.ok) throw new Error("Unable to create test JWT");
+      return { authorization: `Bearer ${token.value}`, "content-type": "application/json" };
+    };
+    const [owner, admin, participant, outsider] = [new ObjectId(), new ObjectId(), new ObjectId(), new ObjectId()];
+    const [ownerH, adminH, participantH, outsiderH] = [await headersFor(owner), await headersFor(admin), await headersFor(participant), await headersFor(outsider)];
+    const patch = (tripId: string, headers: Record<string, string>, body: object) =>
+      fetch(`${baseUrl}/trips/${tripId}/config`, { method: "PATCH", headers, body: JSON.stringify(body) });
+
+    try {
+      const created = await fetch(`${baseUrl}/trips`, { method: "POST", headers: ownerH, body: JSON.stringify({ name: "Patagonia", primaryDestination: "Bariloche" }) });
+      const { trip } = await created.json() as { trip: { id: string } };
+      const tripOid = new ObjectId(trip.id);
+      await database.collection("tripMembers").insertMany([
+        { tripId: tripOid, userId: admin, role: "admin", joinedAt: new Date() },
+        { tripId: tripOid, userId: participant, role: "participant", joinedAt: new Date() },
+      ]);
+      const stored = () => database.collection("trips").findOne({ _id: tripOid }, { projection: { expenseMode: 1, visibility: 1 } });
+
+      expect((await patch(trip.id, ownerH, { expenseMode: "balance" })).status).toBe(200);
+      expect(await stored()).toMatchObject({ expenseMode: "balance" });
+      expect((await patch(trip.id, adminH, { expenseMode: "register" })).status).toBe(200);
+      expect(await stored()).toMatchObject({ expenseMode: "register" });
+
+      const before = await stored();
+      const forbidden = await patch(trip.id, participantH, { expenseMode: "balance" });
+      expect(forbidden.status).toBe(403);
+      expect(await stored()).toEqual(before);
+      expect((await patch(trip.id, participantH, { visibility: "public", expenseMode: "balance" })).status).toBe(403);
+      expect(await stored()).toEqual(before);
+      expect((await patch(trip.id, participantH, { visibility: "public" })).status).toBe(200);
+      expect(await stored()).toMatchObject({ expenseMode: "register", visibility: "public" });
+      expect((await patch(trip.id, outsiderH, { expenseMode: "balance" })).status).toBe(404);
+      expect(await stored()).toMatchObject({ expenseMode: "register" });
+
+      const ana = new ObjectId(), beto = new ObjectId();
+      await database.collection("postExpenses").insertOne({
+        tripId: tripOid, postId: new ObjectId(), totalAmount: 1000, currency: "ARS", breakdown: null, createdAt: new Date(),
+        payments: [{ userId: ana, unit: "amount", value: 400 }, { userId: beto, unit: "percent", value: 60 }],
+        shares: [{ userId: ana, unit: "amount", value: 100 }, { userId: beto, unit: "remainder", value: null }],
+      });
+      const rows = () => database.collection("postExpenses").findOne({ tripId: tripOid }, { projection: { payments: 1, shares: 1 } });
+      const snapshot = await rows();
+      expect((await patch(trip.id, adminH, { expenseMode: "balance" })).status).toBe(200);
+      expect(await rows()).toEqual(snapshot);
+      expect((await patch(trip.id, ownerH, { expenseMode: "register" })).status).toBe(200);
+      expect(await rows()).toEqual(snapshot);
+    } finally {
+      await new Promise<void>((resolve, reject) => localApi.app.close((error) => error === undefined ? resolve() : reject(error)));
+      await localApi.close();
+      await client.close();
+    }
+  });
 });

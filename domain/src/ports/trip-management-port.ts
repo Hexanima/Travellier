@@ -1,5 +1,5 @@
 import type { TripDestination } from "../entities/trip-destination.js";
-import type { TripMember } from "../entities/trip-member.js";
+import type { TripMember, TripRole } from "../entities/trip-member.js";
 import type { Trip, TripExpenseMode, TripVisibility } from "../entities/trip.js";
 import type { TaggedError } from "../types/error.js";
 import type { AsyncResult } from "../types/result.js";
@@ -43,6 +43,7 @@ export interface TripManagementPort<TError extends TaggedError = TaggedError> {
   findByIdForViewer: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripDetail | undefined, TError>;
   listForMember: (userId: ObjectId) => AsyncResult<TripListItem[], TError>;
   listPublic: () => AsyncResult<PublicTripPreview[], TError>;
+  findMemberRole: (tripId: ObjectId, userId: ObjectId) => AsyncResult<TripRole | undefined, TError>;
   updateConfigurationForMember: (
     tripId: ObjectId,
     userId: ObjectId,
