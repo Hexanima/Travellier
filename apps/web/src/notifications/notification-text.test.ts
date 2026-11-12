@@ -96,6 +96,25 @@ describe("notice texts (generic, built in the client)", () => {
   });
 });
 
+describe("texts of the member and ownership notices", () => {
+  it("has generic headlines, no lines and no personal data", () => {
+    const left = describeNotification(item("member.left", { memberId: itineraryId(7), userId: itineraryId(8) }), UTC);
+    const admin = describeNotification(item("member.role_changed", { userId: itineraryId(8), role: "admin" }), UTC);
+    const participant = describeNotification(item("member.role_changed", { userId: itineraryId(8), role: "participant" }), UTC);
+    const moved = describeNotification(item("trip.ownership_transferred", { previousOwnerId: itineraryId(8) }), UTC);
+    expect(left.headline).toBe("Un integrante salió del viaje");
+    expect(admin.headline).toBe("Ahora sos admin de este viaje");
+    expect(participant.headline).toBe("Ya no sos admin de este viaje");
+    expect(moved.headline).toBe("Ahora sos el titular de este viaje");
+    for (const view of [left, admin, participant, moved]) {
+      expect(view.lines).toEqual([]);
+      expect(view.incompatible).toEqual([]);
+      expect(view.decision).toBeUndefined();
+      expect(JSON.stringify(view)).not.toContain(itineraryId(8));
+    }
+  });
+});
+
 describe("parity with the push text contract of the domain (T135)", () => {
   const ids = { a: itineraryId(10), b: itineraryId(11), c: itineraryId(12) };
   const payloads: Record<string, Record<string, unknown>> = {
@@ -107,6 +126,9 @@ describe("parity with the push text contract of the domain (T135)", () => {
     "activity.updated": { activityId: ids.a, actorId: ids.b, changedFields: ["scheduledAt", "mapsUrl"] },
     "activity.participant_unlinked": { activityId: ids.a, reason: "schedule_conflict", changedFields: ["durationMinutes"], changedAt: at,
       newInterval: { startsAt: "2026-12-01T15:00:00.000Z", durationMinutes: 60, endsAt: "2026-12-01T16:00:00.000Z" }, incompatibleActivities: [] },
+    "member.left": { memberId: ids.a, userId: ids.b },
+    "member.role_changed": { userId: ids.a, role: "admin" },
+    "trip.ownership_transferred": { previousOwnerId: ids.a },
   };
 
   it.each(Object.keys(payloads))("the client headline of %s is the one the push uses", (type) => {

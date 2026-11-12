@@ -339,6 +339,50 @@ describe("App opening notices from a push", () => {
     expect(pathOf()).toBe("/trips");
   });
 
+  const memberTrip = { kind: "member", id: tripId, name: "Patagonia", description: null, primaryDestination: { name: "Bariloche" }, visibility: "private", inviteCode: "VIAJE-X7K2", expenseMode: "register" };
+  const me = { id: itineraryId(40), userId: itineraryId(20), name: "Nico", role: "admin", isOwner: true, joinedAt: at };
+  const memberApis = (get: ReturnType<typeof vi.fn>): Partial<AppProps> => ({
+    trips: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get } as never,
+    members: { list: vi.fn().mockResolvedValue({ ok: true, value: { members: [me], currentUserId: itineraryId(20), ownerId: itineraryId(20) } }) } as never,
+  });
+
+  it.each([
+    ["member.left", { memberId: itineraryId(41) }],
+    ["member.role_changed", {}],
+    ["trip.ownership_transferred", {}],
+  ])("a simulated push of %s opens the members of the Trip, with the way back to the notices", async (type, extra) => {
+    const t = fakePort();
+    const get = vi.fn().mockResolvedValue({ ok: true, value: memberTrip });
+    await render("/trips", makeFetch(), { noticePort: t.port, ...memberApis(get) });
+    await t.action(data(type, extra));
+    expect(pathOf()).toBe(`/trips/${tripId}/members`);
+    expect(get).toHaveBeenCalledWith(tripId);
+    expect(document.body.textContent).toContain("Integrantes");
+    expect(find("a", "Volver a avisos")).toBeDefined();
+  });
+
+  it("a push of a new notice for a Trip that is no longer accessible shows the existing generic message", async () => {
+    const t = fakePort();
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
+    await render("/trips", makeFetch(), { noticePort: t.port, ...memberApis(get) });
+    await t.action(data("member.role_changed"));
+    expect(pathOf()).toBe(`/trips/${tripId}/members`);
+    expect(document.body.textContent).toContain("No encontramos este viaje o ya no sos integrante.");
+    expect(find("a", "Volver a avisos")).toBeDefined();
+  });
+
+  it("the center omits an unknown notice, shows the new ones and opens the members from «Ver integrantes»", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const get = vi.fn().mockResolvedValue({ ok: true, value: memberTrip });
+    const list = [notice(1, "member.left", { memberId: itineraryId(41), userId: itineraryId(42) }), notice(2, "future.type", { x: 1 }),
+      notice(3, "member.role_changed", { userId: itineraryId(20), role: "admin" }, { actorId: null }), notice(4, "trip.ownership_transferred", { previousOwnerId: itineraryId(42) })];
+    await render("/notifications", makeFetch({ notifications: list }), memberApis(get));
+    expect(document.querySelectorAll("li")).toHaveLength(3);
+    await click(find("a", "Ver integrantes"));
+    expect(pathOf()).toBe(`/trips/${tripId}/members`);
+    expect(document.body.textContent).toContain("Integrantes");
+  });
+
   it("an expulsion opens the center, never the Trip", async () => {
     const t = fakePort();
     const expelled = notice(1, "member.expelled", { tripId }, { actorId: null });

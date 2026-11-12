@@ -4,7 +4,9 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { itineraryId } from "../trips/itinerary-test-fixture.js";
+import { createHttpClient } from "../api/index.js";
 import { NotificationsScreen } from "./NotificationsScreen.js";
+import { createTripNotificationApi } from "./trip-notification-api.js";
 import type { TripNotification } from "./trip-notification-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -23,6 +25,9 @@ const unlinked = (n: number): TripNotification => ({ ...base, id: itineraryId(n)
   activityId: itineraryId(200 + n), reason: "schedule_conflict", changedFields: ["scheduledAt", "durationMinutes"], changedAt: at,
   newInterval: { startsAt: at, durationMinutes: 60, endsAt: "2026-11-10T11:00:00.000Z" },
   incompatibleActivities: [{ activityId: itineraryId(500), reason: "overlap", scheduledAt: at, durationMinutes: 30 }, { activityId: itineraryId(501), reason: "same_start", scheduledAt: at, durationMinutes: null }] } });
+const left = (n: number): TripNotification => ({ ...base, id: itineraryId(n), type: "member.left", payload: { memberId: itineraryId(600 + n), userId: itineraryId(601) } });
+const roleChanged = (n: number, role: "admin" | "participant"): TripNotification => ({ ...base, id: itineraryId(n), type: "member.role_changed", payload: { userId: itineraryId(601), role } });
+const transferred = (n: number): TripNotification => ({ ...base, id: itineraryId(n), type: "trip.ownership_transferred", payload: { previousOwnerId: itineraryId(5) } });
 const page = (items: TripNotification[], nextCursor: string | null) => ({ ok: true as const, value: { notifications: items, nextCursor } });
 const fail = (kind: string) => ({ ok: false as const, error: { kind } });
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
@@ -41,6 +46,46 @@ const alerts = () => document.querySelectorAll('[role="alert"]');
 const byText = (text: string, selector = "button, a") => [...document.querySelectorAll<HTMLElement>(selector)].find((element) => element.textContent?.trim() === text);
 const click = (element: Element | undefined) => act(async () => { element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
 const flush = () => act(async () => { await Promise.resolve(); });
+
+describe("NotificationsScreen: member and ownership notices (T136)", () => {
+  it("shows the three new notices with their headline and a «Ver integrantes» link inside the Trip, with the notices origin", async () => {
+    await mount(vi.fn().mockResolvedValue(page([left(1), roleChanged(2, "admin"), roleChanged(3, "participant"), transferred(4)], null)));
+    const items = [...document.querySelectorAll("li")];
+    expect(items.map((li) => li.getAttribute("data-type"))).toEqual(["member.left", "member.role_changed", "member.role_changed", "trip.ownership_transferred"]);
+    expect(items.map((li) => li.querySelector("strong")!.textContent)).toEqual(["Un integrante salió del viaje", "Ahora sos admin de este viaje", "Ya no sos admin de este viaje", "Ahora sos el titular de este viaje"]);
+    for (const li of items) {
+      const link = [...li.querySelectorAll("a")].find((a) => a.textContent === "Ver integrantes")!;
+      expect(link.getAttribute("href")).toBe(`/trips/${trip}/members`);
+      expect(link.className).toBe("trips-settings-link");
+    }
+    await click(byText("Ver integrantes"));
+    expect(here.pathname).toBe(`/trips/${trip}/members`);
+    expect(here.state).toEqual({ origin: expect.objectContaining({ path: "/notifications" }) });
+  });
+
+  const fromServer = (notifications: unknown[], nextCursor: string | null = null) => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ notifications, nextCursor }), { status: 200 }));
+    const client = createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized: vi.fn() });
+    return { list: createTripNotificationApi(client).list };
+  };
+  const wire = (item: TripNotification) => JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
+
+  it("an unknown or invalid notice is omitted and the others are still shown", async () => {
+    const unknown = { ...wire(post(2)), id: itineraryId(902), type: "activity.deleted" };
+    const invalid = { ...wire(left(3)), id: itineraryId(903), payload: { memberId: "x", userId: "y" } };
+    await mount(vi.fn(fromServer([wire(post(1)), unknown, invalid, wire(left(4))]).list));
+    expect([...document.querySelectorAll("li")].map((li) => li.getAttribute("data-type"))).toEqual(["post.created", "member.left"]);
+    expect(alerts()).toHaveLength(0);
+  });
+
+  it("when every notice is omitted it shows the empty state, without an alert, and keeps «Cargar más»", async () => {
+    await mount(vi.fn(fromServer([{ ...wire(post(1)), type: "x" }, "junk"], "more").list));
+    expect(document.body.textContent).toContain("Todavía no tenés avisos");
+    expect(byText("Cargar más")).toBeDefined();
+    expect(alerts()).toHaveLength(0);
+  });
+});
 
 describe("NotificationsScreen", () => {
   it("shows a loading state, then the notices in the server order, and focuses the heading", async () => {
