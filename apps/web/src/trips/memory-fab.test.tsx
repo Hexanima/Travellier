@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -106,5 +107,31 @@ describe("acceso flotante a Nuevo recuerdo en Fotos", () => {
     const errored = await renderPhotos(vi.fn().mockResolvedValue(failure));
     expect(errored.querySelector('[role="alert"]')).toBeTruthy();
     expectSingleFab(errored);
+  });
+});
+
+describe("el acceso flotante no queda sobre el visor de fotos", () => {
+  const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const zOf = (css: string, selector: string) => Number(/z-index:\s*(\d+)/.exec(css.split(`\n${selector} {`)[1]?.split("}")[0] ?? "")?.[1]);
+  it("con el visor abierto el modal es un diálogo cuyo backdrop pinta por encima del flotante", async () => {
+    const container = await renderPhotos(vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo(2), photo(1)], nextCursor: null } }));
+    expectSingleFab(container);
+    await act(async () => container.querySelector<HTMLButtonElement>(".photo-grid__open")!.click());
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).toBeTruthy();
+    const backdrop = dialog!.closest(".ui-modal-backdrop");
+    expect(backdrop).toBeTruthy();
+    const fabZ = zOf(read("./itinerary.css"), ".memory-fab");
+    const backdropZ = zOf(read("../components/components.css"), ".ui-modal-backdrop");
+    expect(fabZ).toBeGreaterThan(0);
+    expect(backdropZ).toBeGreaterThan(fabZ);
+    expect(backdrop!.querySelector("a.memory-fab")).toBeNull();
+  });
+  it("al cerrar el visor vuelve a haber un único enlace «Nuevo recuerdo»", async () => {
+    const container = await renderPhotos(vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo(2)], nextCursor: null } }));
+    await act(async () => container.querySelector<HTMLButtonElement>(".photo-grid__open")!.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('[role="dialog"] .ui-modal__close')!.click());
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expectSingleFab(container);
   });
 });

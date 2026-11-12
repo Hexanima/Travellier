@@ -121,8 +121,10 @@
 .post-link-options { display: grid; gap: 4px; }
 .post-link-option { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .memory-tabs { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
-.memory-tab.ui-button { min-height: 44px; background: var(--ui-color-surface); color: var(--ui-color-accent); }
+.memory-tab.ui-button { min-height: 44px; border-color: var(--ui-color-border); background: var(--ui-color-surface); color: var(--ui-color-muted); }
 .memory-tab.ui-button[aria-selected="true"] { border-color: var(--ui-color-soft); background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.memory-tab.ui-button:not([aria-selected="true"]):hover:not(:disabled) { background: var(--ui-color-soft); color: var(--ui-color-brand); }
+.memory-tab.ui-button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-participation-actions .ui-button:disabled:not([aria-pressed="true"]):not([aria-busy="true"]), .activity-participation-actions .ui-button[aria-disabled="true"]:not([aria-pressed="true"]):not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
 .activity-participation-actions .ui-button[aria-pressed="true"]:disabled { cursor: not-allowed; }
 .activity-participation-modified .activity-modified:disabled:not([aria-busy="true"]), .activity-participation-modified .activity-modified[aria-disabled="true"]:not([aria-busy="true"]) { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }

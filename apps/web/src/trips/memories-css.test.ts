@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
  * sobre el texto de itinerary.css. Las medidas reales se verifican en navegador.
  */
 const css = readFileSync(new URL("./itinerary.css", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+const componentsCss = readFileSync(new URL("../components/components.css", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const ruleBody = (selector: string) => {
   const marker = `\n${selector} {`;
   const start = css.lastIndexOf(marker);
@@ -30,7 +31,7 @@ const focus = (body: string) => {
 const paddingBottom = /padding(?:-bottom)?:[^;]*calc\(104px \+ env\(safe-area-inset-bottom\)\)/;
 
 describe("recuerdos: acceso flotante", () => {
-  it("el FAB es un círculo de 56px fijo con safe areas y por debajo de los modales", () => {
+  it("el FAB es un círculo de 56px fijo con safe areas y por debajo de todo modal (backdrop genérico z-index 10)", () => {
     const fab = ruleBody(".memory-fab");
     expect(fab).toContain("position: fixed");
     expect(fab).toContain("right: max(24px, env(safe-area-inset-right))");
@@ -42,7 +43,11 @@ describe("recuerdos: acceso flotante", () => {
     expect(fab).toContain("color: var(--ui-color-accent-contrast)");
     const z = Number(/z-index:\s*(\d+)/.exec(fab)?.[1]);
     expect(z).toBeGreaterThan(0);
-    expect(z).toBeLessThan(10);
+    const backdropZ = Number(/z-index:\s*(\d+)/.exec(componentsCss.split("\n.ui-modal-backdrop {")[1]?.split("}")[0] ?? "")?.[1]);
+    expect(backdropZ).toBeGreaterThan(z);
+    const layers = [".activity-dialog", ".participation-conflict-layer", ".activity-confirm-layer"].map((layer) => Number(/z-index:\s*(\d+)/.exec(ruleBody(`${layer} .ui-modal-backdrop`))?.[1]));
+    expect(layers).toEqual([10, 20, 20]);
+    for (const layer of layers) expect(layer).toBeGreaterThanOrEqual(backdropZ);
     expect(fab).not.toContain("opacity");
   });
   it("foco con token y offset 3px, hover más oscuro y 16px bajo 360px", () => {
@@ -140,11 +145,28 @@ describe("recuerdos de actividad y cadenas", () => {
     expect(selected).toContain("color: var(--ui-color-brand)");
     focus(ruleBody(".activity-memories__tab:focus-visible"));
   });
-  it("las pestañas Continuaciones/Comentarios seleccionadas son soft con texto de marca, como las del diario", () => {
+  it("las pestañas Continuaciones/Comentarios seleccionadas son soft con texto de marca y borde soft, como las del diario", () => {
     const selected = ruleBody(".memory-tab.ui-button[aria-selected=\"true\"]");
     expect(selected).toContain("background: var(--ui-color-soft)");
+    expect(selected).toContain("border-color: var(--ui-color-soft)");
     expect(selected).toContain("color: var(--ui-color-brand)");
     expect(selected).not.toContain("accent-contrast");
+  });
+  it("la pestaña no seleccionada es surface con borde y texto atenuados, distinta de la seleccionada", () => {
+    const tab = ruleBody(".memory-tab.ui-button");
+    expect(tab).toContain("min-height: 44px");
+    expect(tab).toContain("border-color: var(--ui-color-border)");
+    expect(tab).toContain("background: var(--ui-color-surface)");
+    expect(tab).toContain("color: var(--ui-color-muted)");
+    expect(tab).not.toContain("--ui-color-brand");
+    expect(tab).not.toContain("--ui-color-accent)");
+    const selected = ruleBody(".memory-tab.ui-button[aria-selected=\"true\"]");
+    expect(selected).not.toContain("var(--ui-color-border)");
+    expect(selected).not.toContain("var(--ui-color-surface)");
+    const hover = ruleBody(".memory-tab.ui-button:not([aria-selected=\"true\"]):hover:not(:disabled)");
+    expect(hover).toContain("background: var(--ui-color-soft)");
+    expect(hover).toContain("color: var(--ui-color-brand)");
+    focus(ruleBody(".memory-tab.ui-button:focus-visible"));
   });
   it("el recuerdo anterior es una fila compacta soft con texto de marca", () => {
     const parent = ruleBody(".memory-parent");
