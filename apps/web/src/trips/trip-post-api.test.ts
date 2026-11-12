@@ -245,12 +245,24 @@ describe("post HTTP adapter with an expense", () => {
     expect(sent(fetch).body).toEqual({ description: "Texto", expense: { totalAmount: 25.5, currency: "ARS", breakdown: "cena" } });
     expect(result).toEqual({ ok: true, value: { ...post(), expense: { postId: itineraryId(5), totalAmount: 25.5, currency: "ARS", breakdown: "cena" } } });
   });
-  it("updates with a merge-patch that keeps explicit null breakdown and never sends expense: null", async () => {
+  it("updates with a merge-patch that keeps explicit null breakdown", async () => {
     const { api, fetch } = setup({ post: post(), expense: stored({ breakdown: null }) });
     await api.update(tripId, itineraryId(5), { expense: { breakdown: null } });
     expect(sent(fetch).body).toEqual({ expense: { breakdown: null } });
-    await api.update(tripId, itineraryId(5), { description: "x", expense: null } as unknown as PostInput);
-    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ description: "x" });
+  });
+  it("sends expense: null to remove the expense and accepts a response without expense", async () => {
+    const { api, fetch } = setup({ post: post() });
+    expect(await api.update(tripId, itineraryId(5), { description: "x", expense: null })).toEqual({ ok: true, value: post() });
+    expect(sent(fetch).body).toEqual({ description: "x", expense: null });
+  });
+  it("sends removePhotos with only the id of each photo and omits an empty or malformed list", async () => {
+    const { api, fetch } = setup({ post: post() });
+    await api.update(tripId, itineraryId(5), { removePhotos: [{ id: itineraryId(7), key: "trips/x" } as { id: string }, { id: "nope" }, { id: itineraryId(8) }] });
+    expect(sent(fetch).body).toEqual({ removePhotos: [{ id: itineraryId(7) }, { id: itineraryId(8) }] });
+    await api.update(tripId, itineraryId(5), { description: "y", removePhotos: [] });
+    expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ description: "y" });
+    await api.update(tripId, itineraryId(5), { description: "z", removePhotos: [{ id: "nope" }] });
+    expect(JSON.parse(fetch.mock.calls[2][1].body)).toEqual({ description: "z" });
   });
   it("omits undefined keys of the expense", async () => {
     const { api, fetch } = setup({ post: post(), expense: stored() }, 201);
@@ -330,4 +342,29 @@ describe("post HTTP adapter with payments and shares (T84)", () => {
     expect(result.ok && result.value.post.id).toBe(itineraryId(5));
   });
 
+});
+
+describe("post HTTP adapter: remove", () => {
+  const url = `https://api.test/trips/${tripId}/posts/${itineraryId(5)}`;
+  const make = (fetch: ReturnType<typeof vi.fn>) =>
+    createTripPostApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized: vi.fn() }));
+  it("deletes without a body and answers ok on 204", async () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
+    expect(await make(fetch).remove(tripId, itineraryId(5))).toEqual({ ok: true, value: undefined });
+    expect(sent(fetch)).toEqual({ url, method: "DELETE", body: undefined });
+  });
+  it("encodes the ids in the path", async () => {
+    const fetch = vi.fn().mockImplementation(async () => new Response(null, { status: 204 }));
+    await make(fetch).remove("a/b", "c d");
+    expect(fetch.mock.calls[0][0]).toBe("https://api.test/trips/a%2Fb/posts/c%20d");
+  });
+  it.each([[403, "Forbidden", "forbidden"], [404, "PostNotFoundError", "not-found"], [500, "InternalError", "server"]])(
+    "maps %s to %s", async (status, code, kind) => {
+      const { api } = setup({ error: { code, message: "x" } }, status);
+      expect(await api.remove(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind } });
+    });
+  it("maps a network failure", async () => {
+    const fetch = vi.fn().mockRejectedValue(new TypeError("net"));
+    expect(await make(fetch).remove(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network" } });
+  });
 });

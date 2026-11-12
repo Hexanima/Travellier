@@ -7,6 +7,13 @@ const ana = itineraryId(2);
 const member = (userId: string, name: string | null) => ({ id: itineraryId(900), userId, name, role: "participant" as const, joinedAt: "2026-11-01T10:00:00.000Z" });
 
 describe("photo authors", () => {
+  it("keeps the role of the current user and leaves it undefined without a match", async () => {
+    const admin = { ...member(me, "Yo"), role: "admin" as const };
+    const of = (members: unknown[]) => loadPeople({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members } }) }, "trip");
+    expect((await of([admin, member(ana, "Ana")])).role).toBe("admin");
+    expect((await of([member(me, "Yo")])).role).toBe("participant");
+    expect((await of([member(ana, "Ana")])).role).toBeUndefined();
+  });
   it("labels the current user as «Vos» and a member by name", async () => {
     const people = await loadPeople({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [member(me, "Yo"), member(ana, "Ana")] } }) }, "trip");
     expect(authorLabel(people, me)).toBe("Vos");

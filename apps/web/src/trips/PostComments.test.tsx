@@ -26,7 +26,7 @@ const membersOk = ok({ currentUserId: me, members: [{ id: itineraryId(40), userI
   { id: itineraryId(41), userId: other, name: "Marta", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] });
 type Apis = { comments: { [K in keyof TripCommentApi]: ReturnType<typeof vi.fn> }; likes: { [K in keyof TripLikeApi]: ReturnType<typeof vi.fn> }; members: { list: ReturnType<typeof vi.fn> } };
 const apis = (list: unknown[] = [], over: Partial<Record<string, unknown>> = {}): Apis => ({
-  comments: { list: vi.fn().mockResolvedValue(ok(list)), create: vi.fn(), update: vi.fn(), ...(over.comments as object) },
+  comments: { list: vi.fn().mockResolvedValue(ok(list)), create: vi.fn(), update: vi.fn(), remove: vi.fn(), ...(over.comments as object) },
   likes: { summary: vi.fn().mockResolvedValue(ok(summary())), setPostLike: vi.fn(), setCommentLike: vi.fn(), ...(over.likes as object) },
   members: { list: vi.fn().mockResolvedValue(membersOk), ...(over.members as object) } });
 function Panel({ api }: { api: Apis }) {

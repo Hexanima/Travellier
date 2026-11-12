@@ -71,3 +71,26 @@ describe("published photos count adapter", () => {
     expect(await setup({ error: { code: "PostNotFoundError", message: "x" } }, 404).api.countForPost(tripId, itineraryId(9))).toEqual({ ok: false, error: { kind: "not-found" } });
   });
 });
+
+describe("published photos of a post", () => {
+  const postId = itineraryId(2);
+  const photo = (n: number, extra: Record<string, unknown> = {}) => ({ id: itineraryId(n), order: n, url: `https://cdn.test/p${n}?sig=x`, ...extra });
+  it("lists id, order and url sorted by order, from the post's photos path", async () => {
+    const { api, fetch } = setup({ photos: [photo(7), photo(3)] }, 200);
+    expect(await api.listForPost(tripId, postId)).toEqual({ ok: true, value: [
+      { id: itineraryId(3), order: 3, url: "https://cdn.test/p3?sig=x" }, { id: itineraryId(7), order: 7, url: "https://cdn.test/p7?sig=x" }] });
+    expect(fetch.mock.calls[0][0]).toBe(`https://api.test/trips/${tripId}/posts/${postId}/photos`);
+  });
+  it("drops an unusable url but keeps the photo", async () => {
+    const { api } = setup({ photos: [photo(3, { url: "http://x.test/a" }), photo(4, { url: undefined })] }, 200);
+    expect(await api.listForPost(tripId, postId)).toEqual({ ok: true, value: [{ id: itineraryId(3), order: 3 }, { id: itineraryId(4), order: 4 }] });
+  });
+  it("is a server failure for a malformed list", async () => {
+    for (const body of [{}, { photos: "x" }, { photos: [{ id: "bad", order: 1 }] }, { photos: [{ id: itineraryId(3), order: "x" }] }]) {
+      expect(await setup(body, 200).api.listForPost(tripId, postId)).toEqual({ ok: false, error: { kind: "server" } });
+    }
+  });
+  it("still counts", async () => {
+    expect(await setup({ photos: [photo(3), photo(4)] }, 200).api.countForPost(tripId, postId)).toEqual({ ok: true, value: 2 });
+  });
+});
