@@ -237,4 +237,48 @@ describe("AuthScreen", () => {
 
     expect(register).toHaveBeenCalledTimes(2);
   });
+  it("registro: exactamente email y contraseña, sin nombre ni verificación, con la nota del perfil", async () => {
+    const container = await renderAuthScreen({ mode: "register", auth: { register: vi.fn() } });
+
+    const names = Array.from(container.querySelectorAll("input")).map((input) => input.getAttribute("name"));
+    expect(names).toEqual(["email", "password"]);
+    expect(container.querySelector('[name="name"]')).toBeNull();
+    expect(container.textContent).not.toMatch(/verific/i);
+    expect(container.textContent).toContain("Podés agregar tu nombre y foto después, desde tu perfil.");
+    expect(container.querySelector("input[type=email]")?.getAttribute("autocomplete")).toBe("email");
+    expect(container.querySelector('[name="password"]')?.getAttribute("autocomplete")).toBe("new-password");
+  });
+
+  it("login: sección con nombre accesible, h1 propio y sin nota de perfil", async () => {
+    const container = await renderAuthScreen({ mode: "login", auth: { login: vi.fn() } });
+    const section = container.querySelector("section")!;
+    const labelId = section.getAttribute("aria-labelledby")!;
+
+    expect(container.querySelector(`#${labelId}`)?.textContent).toBe("Iniciar sesión");
+    expect(container.querySelectorAll("h1")).toHaveLength(1);
+    expect(container.querySelector("h1")?.textContent).toBe("Qué bueno verte.");
+    expect(container.textContent).not.toContain("desde tu perfil");
+    expect(container.querySelector('[name="password"]')?.getAttribute("autocomplete")).toBe("current-password");
+  });
+
+  it("errores de validación: aria-invalid y role=alert en los campos", async () => {
+    const container = await renderAuthScreen({ mode: "login", auth: { login: vi.fn() } });
+    await submit(container);
+
+    expect(container.querySelector('[name="email"]')?.getAttribute("aria-invalid")).toBe("true");
+    expect(container.querySelector('[name="password"]')?.getAttribute("aria-invalid")).toBe("true");
+    expect(container.querySelectorAll('[role="alert"]').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("aviso de sesión vencida accesible solo en login y con sessionExpired", async () => {
+    const expired = await renderAuthScreen({ mode: "login", sessionExpired: true });
+    const notice = expired.querySelector('[role="status"]');
+    expect(notice?.textContent).toBe("Tu sesión venció. Entrá con tu cuenta para seguir; tus viajes no se eliminan.");
+
+    const plain = await renderAuthScreen({ mode: "login" });
+    expect(plain.textContent).not.toContain("Tu sesión venció");
+
+    const register = await renderAuthScreen({ mode: "register", sessionExpired: true });
+    expect(register.textContent).not.toContain("Tu sesión venció");
+  });
 });

@@ -18,17 +18,24 @@ describe("App", () => {
     expect(markup).not.toContain('href="/login"');
   });
 
-  it("renders the public initial route", () => {
+  it("renders the welcome with brand heading and the two entry links", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/"]}>
         <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
+    const anchors = markup.match(/<a [^>]*>[^<]*<\/a>/g) ?? [];
+    const link = (text: string) => anchors.find((anchor) => anchor.endsWith(`>${text}</a>`)) ?? "";
 
-    expect(markup).toContain("Travellier");
-    expect(markup).toContain("Inicio");
-    expect(markup).toContain('href="/login"');
-    expect(markup).toContain('href="/register"');
+    expect(markup).toMatch(/<h1[^>]*>[^<]*Travellier/);
+    expect(markup).toContain("welcome-brand");
+    expect(link("Crear cuenta")).toContain('href="/register"');
+    expect(link("Crear cuenta")).toMatch(/class="ui-button"/);
+    expect(link("Ya tengo cuenta")).toContain('href="/login"');
+    expect(link("Ya tengo cuenta")).toContain("ui-button ui-button--secondary");
+    expect(markup).not.toContain("Inicio");
+    expect(markup).not.toContain("BUE");
+    expect(markup).not.toMatch(/estudio|próximamente|futur/i);
     expect(markup).not.toContain("Clean Architecture Template");
   });
 
