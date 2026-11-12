@@ -55,6 +55,21 @@ describe("prepareTransportInput", () => {
       expect(prepareTransportInput({ ...loaded, departurePlace: "C" }, saved.direction, undefined, undefined, saved))
         .toMatchObject({ ok: true, value: { departurePlace: "C", costPerPerson: cost, costCurrency: "ARS" } });
     });
+    it.each([0, 12.345, -5, 1e21, 1_000_000_000_000])("sends null cost when %s is kept but the type has no cost", (cost) => {
+      const saved = { ...precise, costPerPerson: cost, costCurrency: "ARS" as const };
+      const loaded = formValuesFromTransport(saved);
+      for (const type of ["car", "other", "bus_local"] as const) {
+        const result = prepareTransportInput({ ...loaded, type, steps: [{ line: "1", fromStop: "A", toStop: "B", estimatedTime: "14:00" }] },
+          saved.direction, undefined, undefined, saved);
+        expect(result).toMatchObject({ ok: true, value: { type, costPerPerson: null, costCurrency: null } });
+      }
+    });
+    it("requires the currency client-side when an untouched out-of-rule cost has none", () => {
+      const saved = { ...precise, costPerPerson: 0, costCurrency: null };
+      const loaded = formValuesFromTransport(saved);
+      expect(prepareTransportInput({ ...loaded, costCurrency: "" }, saved.direction, undefined, undefined, saved))
+        .toMatchObject({ ok: false, errors: { costCurrency: "Elegí la moneda del costo." } });
+    });
     it("validates the cost when the person edits it", () => {
       const saved = { ...precise, costPerPerson: 12.345, costCurrency: "ARS" as const };
       const loaded = formValuesFromTransport(saved);

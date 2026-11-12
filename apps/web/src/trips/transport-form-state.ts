@@ -116,10 +116,12 @@ export const prepareTransportInput = (values: TransportFormValues, direction: Tr
   let costPerPerson: number | null = null;
   // A stored cost outside the input rules that the person did not touch travels as stored and is not validated.
   const stored = original?.costPerPerson;
-  const untouchedStored = typeof stored === "number" && !storedCostText(stored).faithful && values.costPerPerson === String(stored);
+  const hasCost = values.type === "flight" || values.type === "bus_long";
+  const untouchedStored = hasCost && typeof stored === "number" && !storedCostText(stored).faithful && values.costPerPerson === String(stored);
   if (untouchedStored) {
     costPerPerson = stored;
-  } else if ((values.type === "flight" || values.type === "bus_long") && values.costPerPerson.trim() !== "") {
+    if (!isCurrency(values.costCurrency)) errors.costCurrency = "Elegí la moneda del costo.";
+  } else if (hasCost && values.costPerPerson.trim() !== "") {
     const parsed = parseAmount(values.costPerPerson);
     if (!parsed.ok) errors.costPerPerson = costMessages[parsed.code];
     else {

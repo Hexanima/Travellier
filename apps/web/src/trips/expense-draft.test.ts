@@ -24,7 +24,7 @@ describe("parseAmount", () => {
   it.each(["70368744177664,01", "70368744177664.01", "70368744177664,04", "70368744177665,01", "90071992547409,91", "90071992547409,99", "900719925474099,99", "99999999999999999999,99"])(
     "rejects %s above the limit, without rounding it", (raw) => {
       expect(parseAmount(raw)).toEqual({ ok: false, code: "exceeds_max" });
-  });
+    });
   it.each([["999999999999,99", 99999999999999], ["999999999999,98", 99999999999998], ["70368744177,64", 7036874417764], ["9007199254,74", 900719925474],
     ["1000000000,01", 100000000001]])("accepts %s, exactly representable", (raw, cents) => {
     const parsed = parseAmount(raw);

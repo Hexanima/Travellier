@@ -428,7 +428,6 @@ describe("ExpenseSplitForm: presentation hooks", () => {
   });
 });
 
-
 describe("ExpenseSplitForm amount limit", () => {
   it("a fixed value above the limit blocks with the limit notice and keeps the typed text", async () => {
     const { container } = await open();
