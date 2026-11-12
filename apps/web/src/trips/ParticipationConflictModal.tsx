@@ -35,7 +35,7 @@ export function ParticipationConflictModal({ conflicts, activities, timeZone, st
         })}
       </ul>
       <div className="participation-conflict-actions">
-        <button ref={keepRef} className="ui-button" type="button" disabled={saving} onClick={onCancel}>Conservar mi participación actual</button>
+        <button ref={keepRef} className="ui-button ui-button--secondary" type="button" disabled={saving} onClick={onCancel}>Conservar mi participación actual</button>
         <Button loading={saving} onClick={onConfirm}>Cambiar de plan</Button>
       </div>
       {saving ? <LoadingState label="Guardando tu cambio de plan…" /> : null}

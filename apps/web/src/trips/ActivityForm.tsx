@@ -116,7 +116,7 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
           error={errors.durationMinutes} onChange={(event) => update("durationMinutes", event.target.value)} />
       </div>
     </fieldset>
-    {!existing ? <Button type="button" disabled={saving} onClick={chooseWindowStart}>Usar inicio de franja</Button> : null}
+    {!existing ? <Button type="button" variant="secondary" disabled={saving} onClick={chooseWindowStart}>Usar inicio de franja</Button> : null}
     {exactScheduledAt ? <p className="activity-context">Hora exacta: <time dateTime={exactScheduledAt}>{clock.format(new Date(exactScheduledAt))}</time>.</p> : null}
     <TextAreaField label="Descripción (opcional)" name="description" value={values.description} loading={saving} error={errors.description}
       onChange={(event) => update("description", event.target.value)} />
