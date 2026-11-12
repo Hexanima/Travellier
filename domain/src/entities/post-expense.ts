@@ -1,6 +1,6 @@
 import { err, ok, type Result } from "../types/result.js";
 import { ValidationError, type ValidationIssue } from "../errors/validation-error.js";
-import { createCurrency, toCents, type Currency } from "../value-objects/money.js";
+import { checkWritableAmount, createCurrency, toCents, type Currency } from "../value-objects/money.js";
 import { createObjectId, type ObjectId } from "../value-objects/object-id.js";
 import { resolveExpense, validateExpenseRules, type ExpenseIncompleteReason, type ExpensePayment, type ExpenseShare } from "./expense.js";
 
@@ -33,9 +33,16 @@ export interface PostExpenseView extends PostExpense {
 export const MAX_EXPENSE_BREAKDOWN_LENGTH = 2000;
 const FIELDS: readonly PostExpenseField[] = ["totalAmount", "currency", "breakdown", "payments", "shares"];
 const ROW_KEYS: Record<"payments" | "shares", readonly string[]> = { payments: ["userId", "unit", "value"], shares: ["userId", "unit", "value"] };
+const MAX_AMOUNT_TEXT = "999999999999.99";
 const issue = (field: string, code: string, message: string): ValidationIssue => ({ field: `expense.${field}`, code, message });
-/** Positive, safe and with at most 2 decimals (rounding a third decimal silently would store a different amount). */
+/** New input: positive, up to the PRD limit and with at most 2 decimals (rounding a third decimal silently would store a different amount). */
 const validTotal = (value: unknown) => {
+  const writable = checkWritableAmount(value, { positive: true });
+  if (!writable.ok) return writable;
+  return validateExpenseRules({ totalAmount: value }).ok ? writable : { ok: false as const, code: "invalid" as const };
+};
+/** Merged expense: positive, safe and with at most 2 decimals; the limit applies only to new input, so stored totals keep working. */
+const storedTotalValid = (value: unknown) => {
   const rules = validateExpenseRules({ totalAmount: value });
   if (!rules.ok || typeof value !== "number") return false;
   const cents = toCents(value);
@@ -54,7 +61,9 @@ export const parsePostExpenseInput = (raw: unknown): Result<PostExpenseInput, Va
     if (!(FIELDS as readonly string[]).includes(key)) issues.push(issue(key, "unsupported", `Expense ${key} is not supported.`));
   }
   if (record.totalAmount !== undefined) {
-    if (validTotal(record.totalAmount)) input.totalAmount = record.totalAmount as number;
+    const total = validTotal(record.totalAmount);
+    if (total.ok) input.totalAmount = record.totalAmount as number;
+    else if (total.code === "exceeds_max") issues.push(issue("totalAmount", "exceeds_max", `Expense totalAmount must be at most ${MAX_AMOUNT_TEXT}.`));
     else issues.push(issue("totalAmount", "invalid", "Expense totalAmount must be a positive decimal with at most 2 decimals."));
   }
   if (record.currency !== undefined) {
@@ -78,6 +87,14 @@ export const parsePostExpenseInput = (raw: unknown): Result<PostExpenseInput, Va
     }
     rows.forEach((row: unknown, index) => {
       if (row === null || typeof row !== "object" || Array.isArray(row)) return; // reported by the rules with the row path
+      const { unit, value } = row as { unit?: unknown; value?: unknown };
+      if (unit === "amount" && typeof value === "number" && value >= 0) { // negatives and non-finite values are reported by the rules
+        const amount = checkWritableAmount(value, { positive: false });
+        if (!amount.ok) {
+          issues.push(issue(`${name}[${index}].value`, amount.code, amount.code === "exceeds_max"
+            ? `Expense ${name}[${index}].value must be at most ${MAX_AMOUNT_TEXT}.` : `Expense ${name}[${index}].value must have at most 2 decimals.`));
+        }
+      }
       for (const key of Object.keys(row)) {
         if (!ROW_KEYS[name].includes(key)) issues.push(issue(`${name}[${index}].${key}`, "unsupported", `Expense ${name}[${index}].${key} is not supported.`));
       }
@@ -118,7 +135,7 @@ export const applyPostExpense = (input: { existing: PostExpense | undefined; inp
       issues.push(...rules.error.issues.map((found) => /^(payments|shares)\b/.test(found.field) ? issue(found.field, found.code, found.message)
         : issue(found.field, "invalid", found.message)));
     } else {
-      if (!validTotal(totalAmount)) issues.push(issue("totalAmount", "invalid", "Expense totalAmount must have at most 2 decimals."));
+      if (!storedTotalValid(totalAmount)) issues.push(issue("totalAmount", "invalid", "Expense totalAmount must have at most 2 decimals."));
       // Normalized rows (lowercase ids, null values) are what gets stored when the key travelled in this save.
       if (revalidate) {
         if (patch.payments !== undefined) payments = rules.value.payments ?? [];

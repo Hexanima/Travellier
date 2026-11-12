@@ -1,6 +1,6 @@
 import { ValidationError } from "../errors/validation-error.js";
 import { err, ok, type Result } from "../types/result.js";
-import { CURRENCIES, type Currency } from "../value-objects/money.js";
+import { CURRENCIES, checkWritableAmount, type Currency } from "../value-objects/money.js";
 import type { ObjectId } from "../value-objects/object-id.js";
 
 export type TransportDirection = "outbound" | "return";
@@ -94,6 +94,7 @@ export const validateUrbanTransportSteps = (steps: readonly UrbanTransportStep[]
 const validateTransport = (
   input: CreateTransportInput,
   allowLegacy: boolean,
+  storedCostUnchanged = false,
 ): Result<Transport, ValidationError> => {
   const allowLegacySteps = allowLegacy;
   const allowLegacyCurrency = allowLegacy;
@@ -118,6 +119,13 @@ const validateTransport = (
   }
   if (input.costPerPerson !== null && (typeof input.costPerPerson !== "number" || !Number.isFinite(input.costPerPerson))) {
     return invalid("costPerPerson", "invalid", "Cost per person must be a finite number or null.");
+  }
+  if (!allowLegacy && !storedCostUnchanged && input.costPerPerson !== null) {
+    const cost = checkWritableAmount(input.costPerPerson, { positive: true });
+    if (!cost.ok) {
+      return invalid("costPerPerson", cost.code, cost.code === "exceeds_max"
+        ? "Cost per person must be at most 999999999999.99." : "Cost per person must be greater than 0 with at most 2 decimals.");
+    }
   }
   const currency: unknown = input.costCurrency;
   if (currency !== undefined && currency !== null && !CURRENCIES.some((candidate) => candidate === currency)) {
@@ -167,7 +175,8 @@ const validateTransport = (
 };
 
 /** All creation and editing paths enforce canonical instants. */
-export const createTransport = (input: CreateTransportInput): Result<Transport, ValidationError> => validateTransport(input, false);
+export const createTransport = (input: CreateTransportInput, options?: { storedCostUnchanged?: boolean }): Result<Transport, ValidationError> =>
+  validateTransport(input, false, options?.storedCostUnchanged === true);
 
 /** Historical clocks have no recoverable timezone; reading never converts them. */
 export const readTransport = (input: Transport): Result<Transport, ValidationError> => validateTransport(input, true);

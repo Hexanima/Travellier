@@ -233,3 +233,10 @@ describe("resolveExpense: seeded invariants and consistency with checkExpenseCom
     }
   });
 });
+
+describe("stored totals above the T133 limit still resolve", () => {
+  it("resolves a total of 1e13 on read", () => {
+    const resolution = resolve({ totalAmount: 1e13, payments: [row("percent", 100)], shares: [row("remainder", null)] });
+    expect(resolution.status).toBe("complete");
+  });
+});

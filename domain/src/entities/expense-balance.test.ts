@@ -264,3 +264,10 @@ describe("calculateTripBalance: properties (seeded)", () => {
     }
   });
 });
+
+describe("calculateTripBalance: stored totals above the T133 limit", () => {
+  it("still enters the balance", () => {
+    const ars = only([expense({ totalAmount: 1e13 })]);
+    expect(net(ars, nico)).toBe(500000000000000);
+  });
+});
