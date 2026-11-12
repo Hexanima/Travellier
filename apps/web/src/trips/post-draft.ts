@@ -23,19 +23,23 @@ export type PostDraft = {
   values: { description: string; mapsUrl: string };
   /**
    * Subforms extend the draft here; the composer contract does not change. `expense` is `null` for «no expense» when creating and
-   * for «untouched» when editing (an expense is never removed from a saved memory).
+   * for «untouched» when editing (removing a saved one is `removeExpense`).
    */
   extras: { link: PostLink | null; transportId: string | null; newActivity: NewActivityDraft | null; photos: PhotoDraftItem[]; expense: ExpenseDraft | null;
+    /** Ids of published photos the author marked to remove on save (reversible until then); never the S3 key. Only edits send them. */
+    removePhotoIds: string[];
+    /** The saved expense is removed on save (`expense: null`); meaningless without a saved expense. */
+    removeExpense: boolean;
     /** Payments and shares edited in their own subform; a `null` list is untouched (the stored one stays). Kept apart from `expense`. */
     split: SplitDraft } };
 /** The activity already resolved against the itinerary (instant in UTC and duration), computed by the composer at submit time. */
 export type ResolvedNewActivity = { scheduledAt: string; durationMinutes: number | null };
 type Saved = Pick<PostResponse, "description" | "mapsUrl"> & Partial<Pick<PostResponse, "parentPostId" | "activityId" | "transportId">>;
-export const emptyDraft = (): PostDraft => ({ values: { description: "", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense: null, split: emptySplit() } });
+export const emptyDraft = (): PostDraft => ({ values: { description: "", mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [], expense: null, split: emptySplit(), removePhotoIds: [], removeExpense: false } });
 /** A parent wins over an activity and a transport (legacy data may carry them): the next PATCH normalizes it. */
 export const draftFromPost = (post: Saved): PostDraft => ({ values: { description: post.description ?? "", mapsUrl: post.mapsUrl ?? "" },
   extras: { link: post.parentPostId ? { kind: "post", id: post.parentPostId } : post.activityId ? { kind: "activity", id: post.activityId } : null,
-    transportId: post.parentPostId ? null : post.transportId ?? null, newActivity: null, photos: [], expense: null, split: emptySplit() } });
+    transportId: post.parentPostId ? null : post.transportId ?? null, newActivity: null, photos: [], expense: null, split: emptySplit(), removePhotoIds: [], removeExpense: false } });
 /**
  * A child keeps no other direct relation: choosing a post drops the transport (the activity is the link itself).
  * The new activity shares the same control, so any choice (including «Sin vínculo») discards it.
@@ -51,6 +55,14 @@ export const setExpense = (draft: PostDraft, expense: ExpenseDraft | null): Post
 export const setSplit = (draft: PostDraft, split: SplitDraft): PostDraft => ({ ...draft, extras: { ...draft.extras, split } });
 /** Removes a new expense together with the payments and shares configured for it. */
 export const clearExpense = (draft: PostDraft): PostDraft => ({ ...draft, extras: { ...draft.extras, expense: null, split: emptySplit() } });
+/** Marks or unmarks a published photo for removal. */
+export const toggleRemovePhoto = (draft: PostDraft, photoId: string): PostDraft => ({ ...draft, extras: { ...draft.extras,
+  removePhotoIds: draft.extras.removePhotoIds.includes(photoId) ? draft.extras.removePhotoIds.filter((item) => item !== photoId) : [...draft.extras.removePhotoIds, photoId] } });
+/** Marking the removal of the saved expense drops any typed change to it (amount, payments and shares). */
+export const setRemoveExpense = (draft: PostDraft, value: boolean): PostDraft => {
+  const base = value ? clearExpense(draft) : draft;
+  return { ...base, extras: { ...base.extras, removeExpense: value } };
+};
 export const setTransport = (draft: PostDraft, transportId: string | null): PostDraft => ({ ...draft, extras: { ...draft.extras, transportId } });
 const withPhotos = (draft: PostDraft, photos: PhotoDraftItem[]): PostDraft => ({ ...draft, extras: { ...draft.extras, photos } });
 /** Appends up to the per-post limit; `dropped` counts what did not fit. */
@@ -82,7 +94,8 @@ export const isDraftDirty = (draft: PostDraft, base: PostDraft): boolean =>
   (draft.extras.link?.kind ?? null) !== (base.extras.link?.kind ?? null) || (draft.extras.link?.id ?? null) !== (base.extras.link?.id ?? null) ||
   draft.extras.transportId !== base.extras.transportId || !sameNewActivity(draft.extras.newActivity, base.extras.newActivity) ||
   !samePhotos(draft.extras.photos, base.extras.photos) || (draft.extras.expense !== null && !sameExpense(draft.extras.expense, base.extras.expense)) ||
-  !sameSplit(draft.extras.split, base.extras.split);
+  !sameSplit(draft.extras.split, base.extras.split) || draft.extras.removeExpense !== base.extras.removeExpense ||
+  draft.extras.removePhotoIds.length !== base.extras.removePhotoIds.length || draft.extras.removePhotoIds.some((item) => !base.extras.removePhotoIds.includes(item));
 const sameNewActivity = (a: NewActivityDraft | null, b: NewActivityDraft | null) => a === b ||
   (a !== null && b !== null && a.title === b.title && a.date === b.date && a.time === b.time && a.durationHours === b.durationHours && a.durationMinutes === b.durationMinutes);
 /**
@@ -98,6 +111,9 @@ const photosInput = (draft: PostDraft): Pick<PostInput, "photos"> => {
   const keys = draft.extras.photos.flatMap((item) => item.status === "uploaded" && item.key !== undefined ? [{ key: item.key }] : []);
   return keys.length > 0 ? { photos: keys } : {};
 };
+/** Only an edit sends the published photos marked for removal. */
+const removePhotosInput = (draft: PostDraft): Pick<PostInput, "removePhotos"> =>
+  draft.extras.removePhotoIds.length > 0 ? { removePhotos: draft.extras.removePhotoIds.map((id) => ({ id })) } : {};
 /**
  * Only when the draft carries a new activity and the caller resolved it: description and maps do not travel with it (T67),
  * the day is derived by the server and a null duration is omitted. Only a PATCH carries the retry id of the activity (`withId`): a POST ignores it.
@@ -113,6 +129,7 @@ const newActivityInput = (draft: PostDraft, resolved?: ResolvedNewActivity, with
  * need an effective expense: a stored one, or a new one with amount and currency (never a split alone for a post without expense).
  */
 const expenseInput = (draft: PostDraft, saved?: SavedExpense, view?: SavedExpenseView): Pick<PostInput, "expense"> => {
+  if (draft.extras.removeExpense) return saved !== undefined ? { expense: null } : {};
   const expense = draft.extras.expense === null ? {} : diffExpense(draft.extras.expense, saved);
   const lists = saved !== undefined || expense.totalAmount !== undefined ? splitInput(draft.extras.split, view) : {};
   const merged = { ...expense, ...lists };
@@ -136,7 +153,7 @@ export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: Reso
   return { ...(description !== clean(original.description ?? "") ? { description } : {}), ...(mapsUrl !== clean(original.mapsUrl ?? "") ? { mapsUrl } : {}),
     ...(links.parentPostId !== (original.parentPostId ?? null) ? { parentPostId: links.parentPostId } : {}),
     ...(!withActivity && links.activityId !== (original.activityId ?? null) ? { activityId: links.activityId } : {}),
-    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved, true), ...photosInput(draft), ...expenseInput(draft, savedExpense, savedView) };
+    ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved, true), ...photosInput(draft), ...removePhotosInput(draft), ...expenseInput(draft, savedExpense, savedView) };
 };
 
 /** An edit by someone who is not the author (T124): only the expense travels, never content, links, photos or a new activity. `{}` means nothing to save. */
