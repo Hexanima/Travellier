@@ -15,6 +15,7 @@ import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { capacitorAppLifecycle, type AppLifecycle } from './native/app-lifecycle.js'
 import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
 import { ExternalLinkContext } from './trips/external-link-context.js'
+import { createBrowserImageCodec } from './native/image-codec.js'
 import { createPhotoFileReader } from './native/photo-file.js'
 import { NotificationsScreen } from './notifications/NotificationsScreen.js'
 import { createNotificationOpener, type NotificationOpener, type SessionStatus } from './notifications/notification-opener.js'
@@ -281,7 +282,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     return {
       api: { reserve, ...(activePhotos.countForPost ? { countForPost: activePhotos.countForPost } : {}), ...(activePhotos.listForPost ? { listForPost: activePhotos.listForPost } : {}) },
       source: devicePhotos?.source ?? (device.source ??= createCapacitorCapabilities().photos),
-      reader: devicePhotos?.reader ?? (device.reader ??= createPhotoFileReader({ fetch: (url) => globalThis.fetch(url), convertFileSrc: (reference) => Capacitor.convertFileSrc(reference) })),
+      reader: devicePhotos?.reader ?? (device.reader ??= createPhotoFileReader({ fetch: (url) => globalThis.fetch(url), convertFileSrc: (reference) => Capacitor.convertFileSrc(reference),
+        codec: createBrowserImageCodec({ createImageBitmap: (blob, options) => globalThis.createImageBitmap(blob, options), createCanvas: () => document.createElement('canvas') }) })),
       transfer: devicePhotos?.transfer ?? (device.transfer ??= createDirectUpload({ createXhr: () => new XMLHttpRequest() })),
       ...(devicePhotos?.now ? { now: devicePhotos.now } : {}),
     }

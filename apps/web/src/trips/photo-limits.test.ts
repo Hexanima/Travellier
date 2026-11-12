@@ -21,10 +21,9 @@ describe("photo limits", () => {
     expect(validatePhoto("png", 1)).toEqual({ ok: true, contentType: "image/png" });
     expect(validatePhoto("image/webp", 5)).toEqual({ ok: true, contentType: "image/webp" });
   });
-  it("rejects HEIC and HEIF locally with their own reason", () => {
-    expect(validatePhoto("image/heic", 5)).toEqual({ ok: false, reason: "heic" });
-    expect(validatePhoto("heif", 5)).toEqual({ ok: false, reason: "heic" });
-    expect(photoRejectionMessage("heic")).toContain("HEIC");
+  it("rejects HEIC and HEIF as a final output", () => {
+    expect(validatePhoto("image/heic", 5)).toEqual({ ok: false, reason: "type" });
+    expect(photoRejectionMessage("convert")).toBe("No pudimos convertir o reducir esta foto. Quitala o elegí otra.");
   });
   it("rejects other types, unknown types, empty and oversized files", () => {
     expect(validatePhoto("image/gif", 5)).toEqual({ ok: false, reason: "type" });
