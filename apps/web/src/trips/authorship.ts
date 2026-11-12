@@ -8,7 +8,7 @@ export const canEditContent = (people: Pick<PhotoPeople, "loaded" | "currentUser
   !people.loaded || (!former && authorId === people.currentUserId);
 
 /**
- * Whether «Eliminar» is offered for a memory or comment: its author or an admin of the Trip (T126). Without the member list
+ * Whether Â«EliminarÂ» is offered for a memory or comment: its author or an admin of the Trip (T126). Without the member list
  * it is offered and a 403 informs (same fail-open as `canEditContent`).
  */
 export const canDeleteContent = (people: Pick<PhotoPeople, "loaded" | "currentUserId" | "role">, authorId: string, former = false): boolean =>
