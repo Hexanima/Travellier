@@ -37,19 +37,22 @@ export const createMongoTripMemberAdministrationRepository = (database: Db): Tri
             const ownerId = createObjectId(trip.ownerId.toHexString());
             return ownerId.ok ? ok(ownerId.value) : ok(undefined);
           },
-          setRole: async (userId, role) => {
+          listMemberIds: () => createOutboxStore(database, tripId, session).listMemberIds(),
+          setRole: async (userId, role, notifications) => {
             const updated = await members.updateOne({ tripId: mongoTripId, userId: new MongoObjectId(userId) }, { $set: { role } }, options);
             if (updated.matchedCount !== 1) throw new TripMemberAdministrationConflict();
-            return ok(undefined);
+            // Last write, same transaction: the notice exists only if the role was really changed, and a failure here rolls the role back.
+            return createOutboxStore(database, tripId, session).appendNotifications(notifications);
           },
-          transferOwnership: async (fromUserId, toUserId) => {
+          transferOwnership: async (fromUserId, toUserId, notifications) => {
             const moved = await trips.updateOne({ _id: mongoTripId, ownerId: new MongoObjectId(fromUserId) },
               { $set: { ownerId: new MongoObjectId(toUserId) } }, options);
             if (moved.matchedCount !== 1) throw new TripMemberAdministrationConflict();
             // The previous owner keeps admin: it is not touched.
             const promoted = await members.updateOne({ tripId: mongoTripId, userId: new MongoObjectId(toUserId) }, { $set: { role: "admin" } }, options);
             if (promoted.matchedCount !== 1) throw new TripMemberAdministrationConflict();
-            return ok(undefined);
+            // Last write, same transaction (owner and role roll back with it).
+            return createOutboxStore(database, tripId, session).appendNotifications(notifications);
           },
           removeMember: async (membershipId, userId, notifications, at) => {
             const deleted = await members.deleteOne({ _id: new MongoObjectId(membershipId), tripId: mongoTripId, userId: new MongoObjectId(userId) }, options);

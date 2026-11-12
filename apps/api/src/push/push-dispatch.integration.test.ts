@@ -107,7 +107,8 @@ describe("push dispatch of persisted events", () => {
       expect((await edit(a, { scheduledAt: at("14:30") })).ok).toBe(true);
       expect(await tick()).toEqual({ batchItemFailures: [] });
       expect(pushesTo(u1)).toHaveLength(1);
-      expect(pushesTo(u1)[0]).toMatchObject({ body: "Cambió el horario y se superpone con otro plan. Se retiró tu participación; revisá la actividad y elegí de nuevo.",
+      // One text contract with the inbox (T135): the PRD phrase is the title and the body holds only lines without a time zone.
+      expect(pushesTo(u1)[0]).toMatchObject({ title: "Cambió el horario y se superpone con otro plan. Se retiró tu participación; revisá la actividad y elegí de nuevo.", body: "Duración: 1 h",
         data: { type: "activity.participant_unlinked", tripId: f.trip.toHexString(), activityId: a.toHexString(), scheduledAt: "2026-09-25T14:30:00.000Z", durationMinutes: "60",
           notificationId: (await eventOf("activity.participant_unlinked", u1))._id.toHexString() } });
       for (const user of [u2, u3]) expect(pushesTo(user).map((push) => push.data.type)).toEqual(["activity.updated"]);
@@ -181,6 +182,76 @@ describe("push dispatch of persisted events", () => {
     await tick();
     expect(published).toHaveLength(1);
     expect(pushesTo(f.actor)[0]!.data).toEqual({ notificationId: (await eventOf("member.expelled", f.actor))._id.toHexString(), type: "member.expelled", tripId: f.trip.toHexString() });
+  });
+
+  describe("leaving, role changes and ownership transfers (T135)", () => {
+    const trip = () => domainId(f.trip);
+    const typesOf = (user: ObjectId) => pushesTo(user).map((push) => push.data.type);
+
+    it("a voluntary leave pushes member.left to the members who stay with the shared headline, and never to the one who left", async () => {
+      const leaver = await addMember(), stays = await addMember();
+      expect(await f.api.leaveTrip!({ tripId: trip(), actorUserId: domainId(leaver) })).toMatchObject({ ok: true });
+      await tick();
+      for (const user of [f.actor, stays]) {
+        expect(pushesTo(user)).toHaveLength(1);
+        expect(pushesTo(user)[0]).toMatchObject({ title: "Un integrante salió del viaje", body: "",
+          data: { type: "member.left", tripId: f.trip.toHexString(), memberId: expect.any(String) } });
+        expect(pushesTo(user)[0]!.data.notificationId).toBe((await eventOf("member.left", user))._id.toHexString());
+      }
+      expect(pushesTo(leaver)).toEqual([]);
+      expect(JSON.stringify(published)).not.toContain(leaver.toHexString());
+      expect(await events({ type: "member.left" })).toHaveLength(2);
+    });
+
+    it("a role change pushes only to the affected member, with the text of the new role", async () => {
+      const target = await addMember(), bystander = await addMember();
+      expect((await f.api.changeMemberRole!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(target), role: "admin" })).ok).toBe(true);
+      await tick();
+      expect(pushesTo(target)).toHaveLength(1);
+      expect(pushesTo(target)[0]).toMatchObject({ title: "Ahora sos admin de este viaje", body: "", data: { type: "member.role_changed", tripId: f.trip.toHexString() } });
+      expect(published).toHaveLength(1);
+      published = [];
+      expect((await f.api.changeMemberRole!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(target), role: "participant" })).ok).toBe(true);
+      // The same role again is a no-op without notice.
+      expect((await f.api.changeMemberRole!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(target), role: "participant" })).ok).toBe(true);
+      await tick();
+      expect(pushesTo(target)).toHaveLength(1);
+      expect(pushesTo(target)[0]).toMatchObject({ title: "Ya no sos admin de este viaje" });
+      expect(pushesTo(bystander)).toEqual([]);
+      expect(pushesTo(f.actor)).toEqual([]);
+    });
+
+    it("an ownership transfer pushes only to the new owner", async () => {
+      const next = await addMember("admin"), bystander = await addMember("admin");
+      expect((await f.api.transferOwnership!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(next) })).ok).toBe(true);
+      await tick();
+      expect(pushesTo(next)).toHaveLength(1);
+      expect(pushesTo(next)[0]).toMatchObject({ title: "Ahora sos el titular de este viaje", body: "", data: { type: "trip.ownership_transferred", tripId: f.trip.toHexString() } });
+      expect(published).toHaveLength(1);
+      expect(typesOf(bystander)).toEqual([]);
+      expect(typesOf(f.actor)).toEqual([]);
+    });
+
+    it("a recipient who is no longer a member when the push runs is skipped, for all three types", async () => {
+      const leaver = await addMember(), target = await addMember(), next = await addMember();
+      expect((await f.api.leaveTrip!({ tripId: trip(), actorUserId: domainId(leaver) })).ok).toBe(true);
+      expect((await f.api.changeMemberRole!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(target), role: "admin" })).ok).toBe(true);
+      expect((await f.api.transferOwnership!({ tripId: trip(), actorUserId: domainId(f.actor), targetUserId: domainId(next) })).ok).toBe(true);
+      await f.db.collection("tripMembers").deleteMany({ tripId: f.trip, userId: { $in: [target, next, f.actor] } });
+      await tick();
+      expect(published).toEqual([]);
+      const all = await events({ type: { $in: ["member.left", "member.role_changed", "trip.ownership_transferred"] } });
+      expect(all.length).toBeGreaterThanOrEqual(4);
+      expect(all.every((event) => event.status === "skipped" && event.outcome === "not_member")).toBe(true);
+    });
+
+    it("does not push twice when the worker runs again", async () => {
+      const leaver = await addMember(), stays = await addMember();
+      await f.api.leaveTrip!({ tripId: trip(), actorUserId: domainId(leaver) });
+      await tick(); await tick();
+      expect(typesOf(stays)).toEqual(["member.left"]);
+      expect(typesOf(f.actor)).toEqual(["member.left"]);
+    });
   });
 
   it("an expulsion is not pushed when the user already rejoined", async () => {

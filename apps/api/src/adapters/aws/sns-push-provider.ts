@@ -26,10 +26,12 @@ const apnsKey = (applicationArn: string): "APNS" | "APNS_SANDBOX" => (applicatio
  */
 const buildSnsMessage = (platform: PushPlatform, applicationArn: string, { title, body, data }: PushMessage): string => {
   const alert = { title, body };
+  // The body can be empty (T135: it only carries lines without a time zone); the fallback text of SNS never is.
+  const fallback = body === "" ? title : body;
   if (platform === "android") {
-    return JSON.stringify({ default: body, GCM: JSON.stringify({ fcmV1Message: { message: { notification: alert, data } } }) });
+    return JSON.stringify({ default: fallback, GCM: JSON.stringify({ fcmV1Message: { message: { notification: alert, data } } }) });
   }
-  return JSON.stringify({ default: body, [apnsKey(applicationArn)]: JSON.stringify({ aps: { alert, sound: "default" }, data }) });
+  return JSON.stringify({ default: fallback, [apnsKey(applicationArn)]: JSON.stringify({ aps: { alert, sound: "default" }, data }) });
 };
 
 const NETWORK_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "EPIPE", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_SOCKET"]);

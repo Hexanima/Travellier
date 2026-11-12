@@ -43,6 +43,18 @@ describe("SNS push provider", () => {
     expect(gcm.fcmV1Message.message.data).toEqual(message.data);
   });
 
+  it("keeps a non-empty fallback text for a message with an empty body", async () => {
+    const { client, provider } = setup();
+    expect(message.body).toBe("");
+    await provider.send({ device: fcmDevice, message, dedupeId: "e:d" });
+    await provider.send({ device: apnsDevice, message, dedupeId: "e:d" });
+    for (const call of client.publish.mock.calls) {
+      const body = JSON.parse(call[0].Message ?? "") as Record<string, string>;
+      expect(body.default).toBe(message.title);
+      expect(body.default).not.toBe("");
+    }
+  });
+
   it("uses the iOS application and an APNS payload carrying the alert and the data", async () => {
     const { client, provider } = setup();
     await provider.send({ device: apnsDevice, message, dedupeId: "e:d" });
