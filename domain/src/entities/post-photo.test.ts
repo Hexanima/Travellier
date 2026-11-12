@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPostPhotos, checkPhotoObject, createObjectId, createPhotoUploadKey, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_BATCH,
-  MAX_PHOTOS_PER_POST, parsePhotoReferences, parsePhotoUploadKey, validatePhotoUploadRequest, ValidationError,
+  MAX_PHOTOS_PER_POST, parsePhotoReferences, parsePhotoRemovals, parsePhotoUploadKey, planPhotoRemoval, validatePhotoUploadRequest, ValidationError,
   type ObjectId, type PostPhoto,
 } from "../index.js";
 
@@ -127,5 +127,55 @@ describe("buildPostPhotos", () => {
     const existing = Array.from({ length: 9 }, (_, i) => stored(i + 1, key(i + 1)));
     expect(build([key(20)], existing)).toMatchObject({ ok: true, value: { toInsert: [{ order: 10 }] } });
     expect(issues(build([key(20), key(21)], existing))).toEqual(["photos/too_many"]);
+  });
+});
+
+describe("parsePhotoRemovals (T127)", () => {
+  it("returns the ids in request order", () => {
+    expect(parsePhotoRemovals([{ id: id(101) }, { id: id(100) }])).toEqual({ ok: true, value: [id(101), id(100)] });
+  });
+  it.each<[string, unknown, string[]]>([
+    ["not a list", { id: id(1) }, ["removePhotos/invalid"]],
+    ["null", null, ["removePhotos/invalid"]],
+    ["empty", [], ["removePhotos/invalid"]],
+    ["more than 10", Array.from({ length: 11 }, (_, i) => ({ id: id(100 + i) })), ["removePhotos/too_many"]],
+    ["invalid id", [{ id: "nope" }, { id: id(100) }, {}, "x", { id: 5 }], ["removePhotos[0].id/invalid", "removePhotos[2].id/invalid", "removePhotos[3].id/invalid", "removePhotos[4].id/invalid"]],
+    ["duplicates", [{ id: id(100) }, { id: id(101) }, { id: id(100) }], ["removePhotos[2].id/duplicate"]],
+  ])("rejects %s", (_, input, expected) => {
+    expect(issues(parsePhotoRemovals(input))).toEqual(expected);
+  });
+});
+
+describe("planPhotoRemoval (T127)", () => {
+  const stored = (order: number, k = key(order)): PostPhoto => ({ id: id(100 + order), postId, tripId, uploaderId: userId, s3Key: k, order, uploadedAt: new Date(0) });
+  const three = [stored(1), stored(2), stored(3)];
+
+  it("removes the photo and renumbers the rest from 1 keeping the relative order", () => {
+    const plan = planPhotoRemoval({ existing: three, ids: [id(101)] });
+    expect(plan.removed.map((p) => p.s3Key)).toEqual([key(1)]);
+    expect(plan.remaining.map((p) => [p.id, p.order])).toEqual([[id(102), 1], [id(103), 2]]);
+    expect(plan.orderUpdates).toEqual([{ id: id(102), order: 1 }, { id: id(103), order: 2 }]);
+  });
+  it("only updates the photos whose order changes", () => {
+    const plan = planPhotoRemoval({ existing: three, ids: [id(103)] });
+    expect(plan.remaining.map((p) => p.order)).toEqual([1, 2]);
+    expect(plan.orderUpdates).toEqual([]);
+    expect(planPhotoRemoval({ existing: three, ids: [id(102)] }).orderUpdates).toEqual([{ id: id(103), order: 2 }]);
+  });
+  it("ignores unknown ids and removes every photo when asked", () => {
+    const none = planPhotoRemoval({ existing: three, ids: [id(999)] });
+    expect(none.removed).toEqual([]); expect(none.orderUpdates).toEqual([]); expect(none.remaining).toEqual(three);
+    const all = planPhotoRemoval({ existing: three, ids: [id(101), id(102), id(103)] });
+    expect(all.removed).toHaveLength(3); expect(all.remaining).toEqual([]);
+  });
+  it("renumbers a non contiguous post and sorts by order", () => {
+    const plan = planPhotoRemoval({ existing: [stored(7), stored(2), stored(5)], ids: [id(102)] });
+    expect(plan.remaining.map((p) => [p.id, p.order])).toEqual([[id(105), 1], [id(107), 2]]);
+    expect(plan.orderUpdates).toEqual([{ id: id(105), order: 1 }, { id: id(107), order: 2 }]);
+  });
+  it("lets buildPostPhotos continue after the renumbered photos", () => {
+    const { remaining } = planPhotoRemoval({ existing: three, ids: [id(101)] });
+    const built = buildPostPhotos({ postId, tripId, uploaderId: userId, keys: [key(9)], existing: remaining, createId: () => id(300), uploadedAt: new Date(0) });
+    expect(built).toMatchObject({ ok: true, value: { toInsert: [{ order: 3 }], photos: [{ id: id(102), order: 1 }, { id: id(103), order: 2 }, { id: id(300), order: 3 }] } });
   });
 });

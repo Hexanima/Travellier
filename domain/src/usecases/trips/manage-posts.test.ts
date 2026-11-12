@@ -75,6 +75,20 @@ describe("Trip post use cases", () => {
       },
       deleteExpense: async (post) => { writeLog.push("deleteExpense"); expenseRecords = expenseRecords.filter((e) => e.postId !== post); return domain.ok(undefined); },
       deletePostEngagement: async (post) => { writeLog.push("deletePostEngagement"); engagement.push(post); return domain.ok(undefined); },
+      deletePhotosByIds: async (post, ids) => {
+        writeLog.push("deletePhotosByIds");
+        photoRecords = photoRecords.filter((p) => !(p.postId === post && p.tripId === tripId && ids.includes(p.id)));
+        return domain.ok(undefined);
+      },
+      setPhotoOrders: async (post, updates) => {
+        writeLog.push("setPhotoOrders");
+        for (const update of updates) {
+          // Mirrors the unique index postId_order_unique: a collision fails.
+          if (photoRecords.some((p) => p.postId === post && p.order === update.order && p.id !== update.id)) return domain.err(new domain.UnknownError("duplicate order"));
+          photoRecords = photoRecords.map((p) => p.id === update.id && p.postId === post ? { ...p, order: update.order } : p);
+        }
+        return domain.ok(undefined);
+      },
       deletePhotos: async (post) => { writeLog.push("deletePhotos"); photoRecords = photoRecords.filter((p) => p.postId !== post); return domain.ok(undefined); },
       enqueueStorageDeletion: async (keys, at) => { writeLog.push("enqueueStorageDeletion"); jobs.push({ keys: [...keys], createdAt: at }); return domain.ok(undefined); },
       deletePost: async (post) => {
@@ -962,7 +976,7 @@ describe("Trip post use cases", () => {
           ["completeness", { totalAmount: 5, currency: "ARS", completeness: {} }, "expense.completeness/unsupported"],
           ["null payments", { totalAmount: 5, currency: "ARS", payments: null }, "expense.payments/invalid"],
           ["paidBy", { totalAmount: 5, currency: "ARS", paidBy: id(2) }, "expense.paidBy/unsupported"],
-          ["null", null, "expense/invalid"], ["an empty object", {}, "expense/invalid"], ["a list", [], "expense/invalid"], ["text", "10", "expense/invalid"],
+          ["an empty object", {}, "expense/invalid"], ["a list", [], "expense/invalid"], ["text", "10", "expense/invalid"],
         ])("rejects %s and writes nothing on create, link or update", async (_, bad, expected) => {
           uploaded(1); records = [];
           const spies = writers();
@@ -1844,5 +1858,227 @@ describe("Trip post use cases", () => {
         expect({ records, photoRecords, expenseRecords }).toEqual(before);
         expect(jobs).toEqual([]); expect(engagement).toEqual([]);
       });
+  });
+
+  describe("removing photos and expense while editing (T127)", () => {
+    const author = id(9), other = id(10);
+    const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
+    const keyOf = (n: number, user = actor) => `trips/${tripId}/photos/${user}/${uuid(n)}.jpg`;
+    const stored = (n: number, order: number, post = postId, trip = tripId): PostPhoto =>
+      ({ id: id(100 + n), postId: post, tripId: trip, uploaderId: actor, s3Key: keyOf(n), order, uploadedAt: createdAt });
+    const refs = (...ns: number[]) => ns.map((n) => ({ id: id(100 + n) }));
+    const agreed = { totalAmount: 100, currency: "ARS", payments: [{ userId: id(41), unit: "percent", value: 100 }],
+      shares: [{ userId: id(41), unit: "percent", value: 50 }, { userId: id(42), unit: "remainder", value: null }] };
+    const savedExpense = (): PostExpense => ({ id: id(70), postId, tripId, currency: "ARS", totalAmount: 100, breakdown: null,
+      payments: agreed.payments, shares: [], createdAt } as unknown as PostExpense);
+    let headObject: ReturnType<typeof vi.fn>;
+    const deps = () => {
+      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000 }));
+      const storage: domain.ObjectStoragePort = { createUploadTarget: async () => domain.err(new domain.UnknownError("unused")),
+        createDownloadTarget: async () => domain.err(new domain.UnknownError("unused")), headObject };
+      return { ...dependencies(), storage };
+    };
+    const patch = (fields = {}, userId: ObjectId = actor) => domain.updateTripPost.execute(deps(), { ...context, authenticatedUserId: userId, postId, ...fields });
+    const state = () => structuredClone({ records, photoRecords, expenseRecords, jobs, notifications, activities, participations });
+    const validation = (...expected: string[]) => ({ ok: false, error: { tag: "ValidationError", issues: expected.map((e) => ({ field: e.split("/")[0], code: e.split("/")[1] })) } });
+    const forbidden = { ok: false, error: { tag: "UnauthorizedError" } };
+    const orders = () => photoRecords.filter((p) => p.postId === postId).sort((a, b) => a.order - b.order).map((p) => [p.id, p.order]);
+    beforeEach(() => { records = [seedPost()]; members = [actor, author, other, id(41), id(42)]; photoRecords = [stored(1, 1), stored(2, 2), stored(3, 3)]; });
+
+    it("removes one of three, queues only that key in one job, renumbers and answers the remaining photos", async () => {
+      expect(await patch({ removePhotos: refs(2) })).toEqual(domain.ok({ ...seedPost(), photos: [{ id: id(101), order: 1 }, { id: id(103), order: 2 }] }));
+      expect(jobs).toEqual([{ keys: [keyOf(2)], createdAt }]);
+      expect(orders()).toEqual([[id(101), 1], [id(103), 2]]);
+      expect(writeLog).toEqual(["enqueueStorageDeletion", "deletePhotosByIds", "setPhotoOrders"]);
+      expect(headObject).not.toHaveBeenCalled();
+    });
+
+    it("renumbers without colliding when the first of three is removed, and removes several in one job", async () => {
+      expect(await patch({ removePhotos: refs(1) })).toMatchObject({ ok: true });
+      expect(orders()).toEqual([[id(102), 1], [id(103), 2]]);
+      photoRecords = [stored(1, 1), stored(2, 2), stored(3, 3)]; jobs = [];
+      expect(await patch({ removePhotos: refs(3, 1) })).toMatchObject({ ok: true, value: { photos: [{ id: id(102), order: 1 }] } });
+      expect(jobs).toEqual([{ keys: [keyOf(1), keyOf(3)], createdAt }]);
+    });
+
+    it("removing the last photo does not renumber", async () => {
+      expect(await patch({ removePhotos: refs(3) })).toMatchObject({ ok: true });
+      expect(writeLog).toEqual(["enqueueStorageDeletion", "deletePhotosByIds"]);
+    });
+
+    it("removes and appends in the same PATCH, continuing after the renumbered photos", async () => {
+      const added = { key: keyOf(9) };
+      expect(await patch({ removePhotos: refs(1), photos: [added] })).toMatchObject({ ok: true,
+        value: { photos: [{ id: id(102), order: 1 }, { id: id(103), order: 2 }, { id: id(20), order: 3 }] } });
+      expect(jobs).toEqual([{ keys: [keyOf(1)], createdAt }]);
+      expect(orders()).toEqual([[id(102), 1], [id(103), 2], [id(20), 3]]);
+    });
+
+    it("answers an empty list of photos when the author removes them all, having text or location", async () => {
+      expect(await patch({ removePhotos: refs(1, 2, 3) })).toMatchObject({ ok: true, value: { photos: [] } });
+      expect(photoRecords).toEqual([]); expect(jobs[0]!.keys).toHaveLength(3);
+      records = [seedPost({ description: null, mapsUrl: "maps" })]; photoRecords = [stored(1, 1)];
+      expect(await patch({ removePhotos: refs(1) })).toMatchObject({ ok: true });
+    });
+
+    describe("minimum content", () => {
+      const bare = () => { records = [seedPost({ description: null, mapsUrl: null })]; photoRecords = [stored(1, 1), stored(2, 2)]; };
+      it("rejects removing the last photo of a post without text or location, with no writes and no job", async () => {
+        bare();
+        expect(await patch({ removePhotos: refs(1) })).toMatchObject({ ok: true });
+        const before = state(); writeLog = [];
+        expect(await patch({ removePhotos: refs(2) })).toMatchObject(validation("description/required"));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]); expect(jobs).toHaveLength(1);
+      });
+      it("rejects removing every photo at once and accepts removing one of two", async () => {
+        bare(); const before = state();
+        expect(await patch({ removePhotos: refs(1, 2) })).toMatchObject(validation("description/required"));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+        expect(await patch({ removePhotos: refs(1) })).toMatchObject({ ok: true });
+      });
+      it("a replacement photo in the same PATCH keeps the content", async () => {
+        bare(); photoRecords = [stored(1, 1)];
+        expect(await patch({ removePhotos: refs(1), photos: [{ key: keyOf(9) }] })).toMatchObject({ ok: true, value: { photos: [{ id: id(20), order: 1 }] } });
+      });
+      it("clearing the text while removing the last photo is rejected, removing one of two is not", async () => {
+        photoRecords = [stored(1, 1)]; records = [seedPost({ description: "Texto", mapsUrl: null })];
+        const before = state();
+        expect(await patch({ description: null, removePhotos: refs(1) })).toMatchObject(validation("description/required"));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+        photoRecords = [stored(1, 1), stored(2, 2)];
+        expect(await patch({ description: null, removePhotos: refs(1) })).toMatchObject({ ok: true, value: { description: null } });
+      });
+      it("expense and links do not count as content", async () => {
+        records = [seedPost({ description: null, mapsUrl: null, parentPostId: links.parentPostId })]; photoRecords = [stored(1, 1)];
+        expenseRecords = [savedExpense()]; const before = state();
+        expect(await patch({ removePhotos: refs(1) })).toMatchObject(validation("description/required"));
+        expect(state()).toEqual(before);
+      });
+      it("a no-op removal does not revalidate the content", async () => {
+        bare(); photoRecords = []; expect(await patch({ removePhotos: refs(999) })).toMatchObject({ ok: true });
+      });
+    });
+
+    describe("authorization", () => {
+      beforeEach(() => { records = [seedPost({ authorId: author })]; });
+      it.each(["participant", "admin"] as const)("denies a %s who is not the author without writes", async (memberRole) => {
+        role = memberRole; expenseRecords = [savedExpense()]; const before = state();
+        expect(await patch({ removePhotos: refs(1) })).toMatchObject(forbidden);
+        expect(await patch({ removePhotos: refs(1), expense: null })).toMatchObject(forbidden);
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("answers 403 to a non author before validating removePhotos", async () => {
+        expect(await patch({ removePhotos: "nope" })).toMatchObject(forbidden);
+      });
+      it("answers 404 to a non member or former member", async () => {
+        role = undefined; const before = state();
+        expect(await patch({ removePhotos: refs(1) })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(await patch({ expense: null })).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("answers 404 for a missing post", async () => {
+        expect(await patch({ postId: id(98), removePhotos: refs(1) })).toMatchObject({ ok: false, error: { tag: "PostNotFoundError" } });
+      });
+    });
+
+    describe("ids", () => {
+      it("rejects a photo of another post of this Trip without writes", async () => {
+        photoRecords = [...photoRecords, stored(4, 1, id(500))]; const before = state();
+        expect(await patch({ removePhotos: refs(4, 1) })).toMatchObject(validation("removePhotos[0].id/not_in_post"));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("ignores an unknown id or one of another Trip: no job, no writes", async () => {
+        photoRecords = [...photoRecords, stored(4, 1, id(500), id(999))]; const before = state();
+        expect(await patch({ removePhotos: refs(4, 77) })).toMatchObject({ ok: true, value: { photos: [{ id: id(101), order: 1 }, { id: id(102), order: 2 }, { id: id(103), order: 3 }] } });
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]); expect(jobs).toEqual([]);
+      });
+      it("rejects removing a photo that the same PATCH adds back", async () => {
+        const before = state();
+        expect(await patch({ removePhotos: refs(1), photos: [{ key: keyOf(1) }] })).toMatchObject(validation("removePhotos[0].id/conflict"));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it.each<[string, unknown, string[]]>([["not a list", "x", ["removePhotos/invalid"]], ["empty", [], ["removePhotos/invalid"]],
+        ["bad id", [{ id: "x" }], ["removePhotos[0].id/invalid"]], ["duplicate", refs(1, 1), ["removePhotos[1].id/duplicate"]],
+        ["too many", Array.from({ length: 11 }, (_, i) => ({ id: id(200 + i) })), ["removePhotos/too_many"]]])("rejects %s before the transaction", async (_, value, expected) => {
+        const before = state();
+        expect(await patch({ removePhotos: value })).toMatchObject(validation(...expected));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("requires createId and now to be configured", async () => {
+        expect(await domain.updateTripPost.execute({ posts }, { ...context, postId, removePhotos: refs(1) })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+        expect(writeLog).toEqual([]);
+      });
+    });
+
+    describe("expense: null", () => {
+      it.each(["participant", "admin"] as const)("lets any current %s who is not the author remove the expense", async (memberRole) => {
+        role = memberRole; records = [seedPost({ authorId: author })]; expenseRecords = [savedExpense()];
+        const result = await patch({ expense: null });
+        expect(result).toEqual(domain.ok(seedPost({ authorId: author })));
+        expect(result.ok && "expense" in result.value).toBe(false);
+        expect(expenseRecords).toEqual([]); expect(writeLog).toEqual(["deleteExpense"]);
+      });
+      it("is a no-op without a stored expense", async () => {
+        const before = state();
+        expect(await patch({ expense: null })).toEqual(domain.ok(seedPost()));
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("only touches the expense of this post", async () => {
+        expenseRecords = [savedExpense(), { ...savedExpense(), id: id(71), postId: id(500) }];
+        expect(await patch({ expense: null })).toMatchObject({ ok: true });
+        expect(expenseRecords.map((e) => e.postId)).toEqual([id(500)]);
+      });
+      it("denies the content of a non author mixed with expense: null without writes", async () => {
+        records = [seedPost({ authorId: author })]; expenseRecords = [savedExpense()]; const before = state();
+        expect(await patch({ expense: null, description: "Otro" })).toMatchObject(forbidden);
+        expect(state()).toEqual(before); expect(writeLog).toEqual([]);
+      });
+      it("combines with an added photo and rolls back everything when a write fails", async () => {
+        expenseRecords = [savedExpense()];
+        expect(await patch({ expense: null, photos: [{ key: keyOf(9) }] })).toMatchObject({ ok: true, value: { photos: expect.any(Array) } });
+        expect(expenseRecords).toEqual([]); expect(photoRecords).toHaveLength(4);
+        for (const step of ["insertPhotos", "deleteExpense", "deletePhotosByIds", "setPhotoOrders", "enqueueStorageDeletion"] as const) {
+          expenseRecords = [savedExpense()]; photoRecords = [stored(1, 1), stored(2, 2), stored(3, 3)]; jobs = [];
+          const before = state();
+          vi.spyOn(scope, step).mockResolvedValueOnce(domain.err(new domain.UnknownError("boom")));
+          expect(await patch({ expense: null, removePhotos: refs(1), photos: [{ key: keyOf(9) }] })).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
+          expect(state()).toEqual(before);
+        }
+      });
+    });
+
+    describe("retry (T87)", () => {
+      it("repeating a PATCH that removed photos, the expense and edited the text is an idempotent success", async () => {
+        expenseRecords = [savedExpense()];
+        const body = { description: "Nuevo", removePhotos: refs(2), expense: null };
+        expect(await patch(body)).toMatchObject({ ok: true });
+        const before = state(), first = jobs.length;
+        expect(await patch(body)).toMatchObject({ ok: true, value: { description: "Nuevo", photos: [{ id: id(101), order: 1 }, { id: id(103), order: 2 }] } });
+        expect(state()).toEqual(before); expect(first).toBe(1); expect(jobs).toHaveLength(1);
+      });
+      it("a PATCH with a key already registered is a no-op after another photo was removed", async () => {
+        expect(await patch({ removePhotos: refs(3) })).toMatchObject({ ok: true });
+        const before = state();
+        expect(await patch({ photos: [{ key: keyOf(1) }] })).toMatchObject({ ok: true, value: { photos: [{ id: id(101), order: 1 }, { id: id(102), order: 2 }] } });
+        expect(state()).toEqual(before);
+      });
+      it("keeps rejecting an empty PATCH", async () => {
+        expect(await patch({})).toMatchObject(validation("post/required"));
+        expect(await patch({ removePhotos: undefined, expense: undefined })).toMatchObject(validation("post/required"));
+      });
+    });
+
+    describe("creation and link do not accept expense: null", () => {
+      it("createTripPost", async () => {
+        expect(await domain.createTripPost.execute(deps(), { ...context, dayId, description: "Recuerdo", expense: null })).toMatchObject(validation("expense/invalid"));
+        expect(records).toHaveLength(1); expect(expenseRecords).toEqual([]);
+      });
+      it("linkTripPostToNewActivity", async () => {
+        const before = state();
+        expect(await domain.linkTripPostToNewActivity.execute(deps(), { ...context, postId, newActivity: { ...newActivity, durationMinutes: 60 }, expense: null }))
+          .toMatchObject(validation("expense/invalid"));
+        expect(state()).toEqual(before);
+      });
+    });
   });
 });

@@ -135,3 +135,42 @@ export const buildPostPhotos = (input: { postId: ObjectId; tripId: ObjectId; upl
   const photos = [...input.existing, ...toInsert].sort((a, b) => a.order - b.order).map(({ id, order }) => ({ id, order }));
   return ok({ toInsert, photos });
 };
+
+/** Pure validation of the photo ids a save wants to remove (1..10, ObjectId, no repeats); returns them in request order and lists every failure. */
+export const parsePhotoRemovals = (removePhotos: unknown): Result<ObjectId[], ValidationError> => {
+  if (!Array.isArray(removePhotos) || removePhotos.length === 0) {
+    return failure([issue("removePhotos", "invalid", "Photos to remove must be a non-empty list.")]);
+  }
+  if (removePhotos.length > MAX_PHOTOS_PER_POST) {
+    return failure([issue("removePhotos", "too_many", `At most ${MAX_PHOTOS_PER_POST} photos can be removed at once.`)]);
+  }
+  const issues: ValidationIssue[] = [], ids: ObjectId[] = [], seen = new Set<string>();
+  removePhotos.forEach((entry: unknown, index) => {
+    const raw = record(entry)?.id;
+    const parsed = typeof raw === "string" ? createObjectId(raw) : undefined;
+    if (parsed === undefined || !parsed.ok) {
+      issues.push(issue(`removePhotos[${index}].id`, "invalid", "Photo id is not valid."));
+    } else if (seen.has(parsed.value)) {
+      issues.push(issue(`removePhotos[${index}].id`, "duplicate", "Photo id is repeated."));
+    } else {
+      seen.add(parsed.value);
+      ids.push(parsed.value);
+    }
+  });
+  return issues.length > 0 ? failure(issues) : ok(ids);
+};
+
+/**
+ * Removal of photos from a post: `removed` are the stored photos matched by id (unknown ids are ignored), `remaining` the rest renumbered
+ * contiguously from 1 keeping their relative order, and `orderUpdates` only the ones whose `order` changes, in ascending order of the old `order`.
+ */
+export const planPhotoRemoval = (input: { existing: readonly PostPhoto[]; ids: readonly ObjectId[] }):
+  { removed: PostPhoto[]; remaining: PostPhoto[]; orderUpdates: { id: ObjectId; order: number }[] } => {
+  const wanted = new Set<ObjectId>(input.ids);
+  const sorted = [...input.existing].sort((a, b) => a.order - b.order);
+  const removed = sorted.filter((photo) => wanted.has(photo.id));
+  const remaining = sorted.filter((photo) => !wanted.has(photo.id)).map((photo, index): PostPhoto => ({ ...photo, order: index + 1 }));
+  const previous = new Map(sorted.map((photo) => [photo.id, photo.order]));
+  const orderUpdates = remaining.filter((photo) => previous.get(photo.id) !== photo.order).map(({ id, order }) => ({ id, order }));
+  return { removed, remaining, orderUpdates };
+};

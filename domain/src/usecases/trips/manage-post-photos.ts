@@ -89,13 +89,15 @@ export const verifyOptionalPhotoUploads = (storage: ObjectStoragePort | undefine
  * no-op (retry); one registered in another post is a conflict; the post total is capped. Writes nothing.
  */
 export const planPostPhotos = async (scope: TripPostScope, input: { tripId: ObjectId; postId: ObjectId; uploaderId: ObjectId;
-  keys: readonly string[]; createId: () => ObjectId; uploadedAt: Date }): AsyncResult<PostPhotoPlan> => {
-  const existing = await scope.listPhotos(input.postId);
-  if (!existing.ok) return existing;
+  keys: readonly string[]; createId: () => ObjectId; uploadedAt: Date;
+  /** Photos of the post as they will be after the save's removals (already renumbered); read from the scope when omitted. */
+  existing?: readonly PostPhoto[] }): AsyncResult<PostPhotoPlan> => {
+  const listed = input.existing === undefined ? await scope.listPhotos(input.postId) : ok(input.existing);
+  if (!listed.ok) return listed;
   const registered = await scope.findPhotosByKeys(input.keys);
   if (!registered.ok) return registered;
   if (registered.value.some((photo) => photo.postId !== input.postId)) return err(new PhotoConflictError());
-  return buildPostPhotos({ ...input, existing: existing.value });
+  return buildPostPhotos({ ...input, existing: listed.value });
 };
 
 /** Writes the planned photos; call it after the post itself is stored in the same transaction. */
