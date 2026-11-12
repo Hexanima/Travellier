@@ -17,16 +17,67 @@ describe("post persistence and transactions", () => {
     return result.value;
   };
 
-  it("persists BSON references and dates and preserves authorship during another member's edit", async () => {
+  it("persists BSON references and dates and preserves authorship and publication time when the author edits", async () => {
     const { post } = await create();
     const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) });
     expect(stored).toMatchObject({ tripId: f.trip, authorId: f.actor, activityId: null, parentPostId: null, transportId: null });
     expect(stored).not.toHaveProperty("dayId");
     expect(stored!.createdAt).toBeInstanceOf(Date);
-    const editor = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: editor, role: "admin" });
-    expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: domainId(editor), postId: post.id, description: "Editado" }))
+    expect(await f.api.updatePost!({ ...f.context(), postId: post.id, description: "Editado" }))
       .toEqual({ ok: true, value: { ...post, description: "Editado" } });
     expect(await f.api.getPost!({ ...f.context(), postId: post.id })).toMatchObject({ ok: true, value: { authorId: post.authorId, createdAt: post.createdAt } });
+  });
+
+  describe("content editing is reserved to the author (T124)", () => {
+    const joinAs = async (role: "admin" | "participant") => {
+      const user = new ObjectId(); await f.db.collection("tripMembers").insertOne({ tripId: f.trip, userId: user, role, joinedAt: new Date() });
+      return domainId(user);
+    };
+    const photoKey = (n: number) => `trips/${f.trip.toHexString()}/photos/${f.actor.toHexString()}/00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}.jpg`;
+    const dump = async () => Promise.all(["posts", "postPhotos", "postExpenses", "activities", "activityParticipations", "outboxEvents"]
+      .map((name) => f.db.collection(name).find().sort({ _id: 1 }).toArray()));
+
+    it.each(["admin", "participant"] as const)("answers 403 to a %s who is not the author, in content and in a mixed PATCH, leaving everything intact", async (role) => {
+      const { post } = await create(); const other = await joinAs(role);
+      await f.db.collection("postPhotos").insertOne({ tripId: f.trip, postId: new ObjectId(post.id), s3Key: "kept", order: 1, uploaderId: f.actor });
+      const before = await dump(), snapshot = await f.snapshot();
+      const expense = { totalAmount: 100, currency: "ARS" };
+      for (const fields of [{ description: "Editado" }, { mapsUrl: "m" }, { description: "Editado", expense }, { photos: [{ key: photoKey(1) }] },
+        { activityId: null }]) {
+        expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: other, postId: post.id, ...fields }))
+          .toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+      }
+      expect(await dump()).toEqual(before); expect(await f.snapshot()).toEqual(snapshot);
+    });
+
+    it("lets another member edit only the expense, and a non member keeps getting 404", async () => {
+      const { post } = await create(); const other = await joinAs("participant");
+      const expense = { totalAmount: 100, currency: "ARS" };
+      expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: other, postId: post.id, expense }))
+        .toMatchObject({ ok: true, value: { expense: { totalAmount: 100, currency: "ARS" } } });
+      expect(await f.db.collection("postExpenses").countDocuments({ postId: new ObjectId(post.id) })).toBe(1);
+      expect(await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) })).toMatchObject({ description: "Recuerdo" });
+      expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: domainId(new ObjectId()), postId: post.id, description: "No" }))
+        .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+    });
+
+    it("lets the author keep retrying the same save without new writes (T87)", async () => {
+      const { post } = await create(); const body = { ...f.context(), postId: post.id, description: "Editado", expense: { totalAmount: 100, currency: "ARS" } };
+      expect(await f.api.updatePost!(body)).toMatchObject({ ok: true });
+      const before = await dump();
+      expect(await f.api.updatePost!(body)).toMatchObject({ ok: true });
+      expect(await dump()).toEqual(before);
+    });
+
+    it("nobody edits the content of a former member's memory, who gets 404", async () => {
+      const { post } = await create(); const other = await joinAs("admin");
+      await f.db.collection("tripMembers").deleteOne({ tripId: f.trip, userId: f.actor });
+      expect(await f.api.updatePost!({ ...f.context(), authenticatedUserId: other, postId: post.id, description: "Editado" }))
+        .toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+      expect(await f.api.updatePost!({ ...f.context(), postId: post.id, description: "Editado" }))
+        .toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
+      expect(await f.db.collection("posts").findOne({ _id: new ObjectId(post.id) })).toMatchObject({ description: "Recuerdo" });
+    });
   });
 
   it.each([false, true])("stores joint creation with voting=%s and UTC milliseconds", async (votingEnabled) => {
@@ -220,7 +271,7 @@ describe("post persistence and transactions", () => {
   it.each(["existing", "missing"])("reads, edits and preserves a legacy dayId pointing to an %s day", async (kind) => {
     const legacyDay = kind === "existing" ? f.day : new ObjectId(), legacy = new ObjectId();
     const createdAt = new Date("2026-09-20T10:00:00.987Z");
-    await f.db.collection("posts").insertOne({ _id: legacy, tripId: f.trip, dayId: legacyDay, authorId: new ObjectId(), description: "Viejo",
+    await f.db.collection("posts").insertOne({ _id: legacy, tripId: f.trip, dayId: legacyDay, authorId: f.actor, description: "Viejo",
       mapsUrl: null, activityId: null, parentPostId: null, transportId: null, createdAt });
     const id = domainId(legacy);
     const read = await f.api.getPost!({ ...f.context(), postId: id });

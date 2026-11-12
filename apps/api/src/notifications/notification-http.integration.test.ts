@@ -201,8 +201,8 @@ describe("notification inbox HTTP API", () => {
     expect((await like("PUT", `/trips/${trip}/posts/${created.post.id}/like`)).statusCode).toBe(200);
     expect((await like("PUT", `/trips/${trip}/posts/${created.post.id}/comments/${comment.value.id}/like`)).statusCode).toBe(200);
     expect((await like("DELETE", `/trips/${trip}/posts/${created.post.id}/like`)).statusCode).toBe(200);
-    expect((await api.updatePost!({ tripId: domainId(trip), authenticatedUserId: domainId(reader), postId: created.post.id, description: "Editado" })).ok).toBe(true);
-    expect((await api.updateComment!({ tripId: domainId(trip), authenticatedUserId: domainId(reader), postId: created.post.id, commentId: comment.value.id, text: "Editado" })).ok).toBe(true);
+    expect((await api.updatePost!({ tripId: domainId(trip), authenticatedUserId: domainId(author), postId: created.post.id, description: "Editado" })).ok).toBe(true);
+    expect((await api.updateComment!({ tripId: domainId(trip), authenticatedUserId: domainId(author), postId: created.post.id, commentId: comment.value.id, text: "Editado" })).ok).toBe(true);
     const vote = await like("PUT", `/trips/${trip}/activities/${new ObjectId()}/vote`);
     expect(vote.statusCode).toBe(404);
     expect(await outboxState()).toEqual(before);

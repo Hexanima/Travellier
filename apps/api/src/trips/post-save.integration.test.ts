@@ -92,17 +92,29 @@ describe("joint post save and idempotent retry", () => {
       expect(await counts()).toMatchObject({ posts: 4, activities: 1, postPhotos: 3, postExpenses: 4 });
     });
 
-    it("a combined PATCH by another member keeps authorId and createdAt, the earlier photos and the payments and shares it omits", async () => {
+    it("a combined PATCH by another member is 403 and writes nothing; only the expense stays open to them (T124)", async () => {
       const [ana, beto] = [await addMember("participant"), await addMember("participant")];
       const editor = await addMember("admin");
       const first = JSON.parse((await post({ description: "Original", photos: photoRefs(1), expense: await expenseOf([ana, beto]) })).body);
-      const response = await patch(first.post.id, { description: "Editado", newActivity: withDuration(), photos: photoRefs(1, editor), expense: { breakdown: "agua" } }, editor);
+      const before = await data();
+      const denied = await patch(first.post.id, { description: "Editado", newActivity: withDuration(), photos: photoRefs(1, editor), expense: { breakdown: "agua" } }, editor);
+      expect(denied.statusCode, denied.body).toBe(403);
+      expect(await data()).toEqual(before);
+      const onlyExpense = await patch(first.post.id, { expense: { breakdown: "agua" } }, editor);
+      expect(onlyExpense.statusCode, onlyExpense.body).toBe(200);
+      expect(JSON.parse(onlyExpense.body).expense).toMatchObject({ breakdown: "agua", payments: first.expense.payments, shares: first.expense.shares });
+    });
+
+    it("a combined PATCH by the author keeps authorId and createdAt, the earlier photos and the payments and shares it omits", async () => {
+      const [ana, beto] = [await addMember("participant"), await addMember("participant")];
+      const first = JSON.parse((await post({ description: "Original", photos: photoRefs(1), expense: await expenseOf([ana, beto]) })).body);
+      const response = await patch(first.post.id, { description: "Editado", newActivity: withDuration(), photos: photoRefs(1), expense: { breakdown: "agua" } });
       expect(response.statusCode, response.body).toBe(200);
       const saved = JSON.parse(response.body);
       expect(saved.post).toMatchObject({ id: first.post.id, authorId: first.post.authorId, createdAt: first.post.createdAt, description: "Editado",
         activityId: saved.activity.id });
-      expect(saved.activity.createdBy).toBe(hex(editor));
-      expect(saved.participation).toMatchObject({ userId: hex(editor), status: "going" });
+      expect(saved.activity.createdBy).toBe(hex(f.actor));
+      expect(saved.participation).toMatchObject({ userId: hex(f.actor), status: "going" });
       expect(saved.photos).toHaveLength(2);
       expect(saved.expense).toMatchObject({ breakdown: "agua", payments: first.expense.payments, shares: first.expense.shares });
       const stored = await f.db.collection("posts").findOne({ _id: new ObjectId(first.post.id) });
@@ -248,11 +260,11 @@ describe("joint post save and idempotent retry", () => {
       expect(await data()).toEqual(before);
     });
 
-    it("a retry after another member edited the saved post is 409 already_saved with the post id (own post, own Trip), without writes", async () => {
+    it("a retry after another member edited the saved expense is 409 already_saved with the post id (own post, own Trip), without writes", async () => {
       const editor = await addMember("admin");
-      const body = { id: newId(), description: "Cena", photos: photoRefs(1) };
+      const body = { id: newId(), description: "Cena", photos: photoRefs(1), expense: { totalAmount: 1000, currency: "ARS" } };
       expect((await post(body)).statusCode).toBe(201);
-      expect((await patch(body.id, { description: "Editado por otro" }, editor)).statusCode).toBe(200);
+      expect((await patch(body.id, { expense: { totalAmount: 2000 } }, editor)).statusCode).toBe(200);
       const before = await data();
       const retry = await post(body);
       expect(retry.statusCode, retry.body).toBe(409);
@@ -260,12 +272,12 @@ describe("joint post save and idempotent retry", () => {
       expect(await data()).toEqual(before);
     });
 
-    it("a PATCH retry after another member edited the post is 409 already_saved with the post id, without writes", async () => {
+    it("a PATCH retry after another member edited the expense is 409 already_saved with the post id, without writes", async () => {
       const editor = await addMember("admin");
       const created = JSON.parse((await post({ description: "Original" })).body).post;
-      const body = { description: "Editado", newActivity: { ...withDuration(), id: newId() } };
+      const body = { description: "Editado", newActivity: { ...withDuration(), id: newId() }, expense: { totalAmount: 1000, currency: "ARS" } };
       expect((await patch(created.id, body)).statusCode).toBe(200);
-      expect((await patch(created.id, { description: "Cambiado por otro" }, editor)).statusCode).toBe(200);
+      expect((await patch(created.id, { expense: { totalAmount: 2000 } }, editor)).statusCode).toBe(200);
       const before = await data();
       const retry = await patch(created.id, body);
       expect(retry.statusCode, retry.body).toBe(409);
@@ -447,14 +459,14 @@ describe("joint post save and idempotent retry", () => {
         const created = JSON.parse((await post({ description: "Original" })).body).post;
         const body = { newActivity: { ...withDuration(), id: newId() } };
         expect((await patch(created.id, body)).statusCode).toBe(200);
-        const relinked = await patch(created.id, { newActivity: { title: "Otra", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: 60 } }, editor);
+        const relinked = await patch(created.id, { newActivity: { title: "Otra", scheduledAt: "2026-09-25T15:00:00.000Z", durationMinutes: 60 } });
         expect(relinked.statusCode, relinked.body).toBe(200);
         const before = await data();
         const retry = await patch(created.id, body);
         expect(retry.statusCode, retry.body).toBe(409);
         expect(JSON.parse(retry.body).error).toMatchObject({ code: "PostRequestConflictError", reason: "already_saved", postId: created.id });
         expect(await data()).toEqual(before);
-        const second = JSON.parse((await post({ description: "Segundo" })).body).post;
+        const second = JSON.parse((await post({ description: "Segundo" }, editor)).body).post;
         const foreign = { newActivity: { ...withDuration(), id: newId(), title: "Del editor" } };
         expect((await patch(second.id, foreign, editor)).statusCode).toBe(200);
         const beforeForeign = await data();
@@ -468,7 +480,7 @@ describe("joint post save and idempotent retry", () => {
       it("a post already linked to an activity with that id created by ANOTHER member is a generic 409 without reason and without writes", async () => {
         const editor = await addMember("admin");
         const created = JSON.parse((await post({ description: "Original" })).body).post;
-        const second = JSON.parse((await post({ description: "Segundo" })).body).post;
+        const second = JSON.parse((await post({ description: "Segundo" }, editor)).body).post;
         const foreign = { newActivity: { ...withDuration(), id: newId(), title: "Del editor" } };
         const made = await patch(second.id, foreign, editor);
         expect(made.statusCode, made.body).toBe(200);

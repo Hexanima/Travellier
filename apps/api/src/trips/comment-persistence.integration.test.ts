@@ -44,18 +44,26 @@ describe("comment persistence and transactions", () => {
   const snapshot = () => Promise.all(["trips", "posts", "comments", "tripMembers"]
     .map((name) => f.db.collection(name).find().sort({ _id: 1 }).toArray()));
 
-  it("stores exactly the PRD fields with ObjectId and Date and keeps authorship when another member edits", async () => {
+  it("stores exactly the PRD fields with ObjectId and Date and keeps authorship and date when the author edits", async () => {
     const post = await createPost();
     const created = await comment(post.id, "  Qué lindo  ");
     const stored = await f.db.collection("comments").findOne({ _id: new ObjectId(created.id) });
     expect(Object.keys(stored!).sort()).toEqual(["_id", "authorId", "createdAt", "postId", "text", "tripId"]);
     expect(stored).toMatchObject({ tripId: f.trip, postId: new ObjectId(post.id), authorId: f.actor, text: "Qué lindo" });
     expect(stored!.createdAt).toBeInstanceOf(Date);
-    const editor = await addMember("admin");
-    const edited = await f.api.updateComment!({ ...payload(post.id, editor), commentId: created.id, text: "Editado" });
+    const edited = await f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Editado" });
     expect(edited).toEqual({ ok: true, value: { ...created, text: "Editado", authorIsFormerMember: false } });
     const after = await f.db.collection("comments").findOne({ _id: new ObjectId(created.id) });
     expect(after).toEqual({ ...stored, text: "Editado" });
+  });
+
+  it.each(["admin", "participant"] as const)("answers 403 to a %s who is not the author and leaves the text intact (T124)", async (role) => {
+    const post = await createPost(); const created = await comment(post.id); const other = await addMember(role);
+    const before = await snapshot();
+    expect(await f.api.updateComment!({ ...payload(post.id, other), commentId: created.id, text: "Ajeno" }))
+      .toMatchObject({ ok: false, error: { tag: "UnauthorizedError" } });
+    expect(await snapshot()).toEqual(before);
+    expect(await f.db.collection("comments").findOne({ _id: new ObjectId(created.id) })).toMatchObject({ text: "Hola" });
   });
 
   it("rolls back and keeps the Trip revision when insertOne fails", async () => {
@@ -254,11 +262,12 @@ describe("comment persistence and transactions", () => {
     expect(await f.db.collection("comments").countDocuments({ tripId: f.trip })).toBe(0);
   });
 
-  it("applies two simultaneous edits without corrupting author, date or text", async () => {
+  it("applies two simultaneous edits of the author without corrupting author, date or text, and denies the other member's", async () => {
     const post = await createPost(); const created = await comment(post.id); const other = await addMember("participant");
-    const [first, second] = await Promise.all([f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Uno" }),
-      f.api.updateComment!({ ...payload(post.id, other), commentId: created.id, text: "Dos" })]);
-    expect([first.ok, second.ok]).toEqual([true, true]);
+    const [first, second, third] = await Promise.all([f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Uno" }),
+      f.api.updateComment!({ ...payload(post.id), commentId: created.id, text: "Dos" }),
+      f.api.updateComment!({ ...payload(post.id, other), commentId: created.id, text: "Ajeno" })]);
+    expect([first.ok, second.ok, third.ok]).toEqual([true, true, false]);
     const stored = await f.db.collection("comments").findOne({ _id: new ObjectId(created.id) });
     expect(["Uno", "Dos"]).toContain(stored!.text);
     expect(stored).toMatchObject({ authorId: f.actor, createdAt: new Date(created.createdAt) });
