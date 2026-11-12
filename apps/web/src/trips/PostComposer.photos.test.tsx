@@ -133,7 +133,7 @@ describe("PostComposer photos: selection", () => {
     await choose(container, mocks, 1, 2, 3);
     expect(srcs(container)).toEqual(["1.jpg", "3.jpg"]);
     const text = section(container).querySelector('[role="alert"]')?.textContent ?? "";
-    expect(text).toContain("Foto 2 de 3");
+    expect(text).toContain("2.ª foto elegida");
     expect(text).toContain("No se agregó");
     expect(text).toContain("No pudimos convertir o reducir esta foto");
     await submit(container);
@@ -148,7 +148,7 @@ describe("PostComposer photos: selection", () => {
     await choose(container, mocks, 1, 2);
     expect(container.querySelector("ul")).toBeNull();
     const text = section(container).querySelector('[role="alert"]')?.textContent ?? "";
-    expect(text).toContain("Foto 1 de 2"); expect(text).toContain("Foto 2 de 2");
+    expect(text).toContain("1.ª foto elegida"); expect(text).toContain("2.ª foto elegida");
   });
   it("shows «Preparando fotos…» while the reader is pending", async () => {
     const mocks = makeDeps();

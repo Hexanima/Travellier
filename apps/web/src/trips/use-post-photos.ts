@@ -105,7 +105,7 @@ export function usePostPhotos({ deps, tripId, getDraft, applyDraft, blobs, isSav
         if (attempted >= room) break;
         attempted += 1;
         const read = await deps.reader.read(photo);
-        if (!read.ok) { notes.add(`Foto ${index + 1} de ${picked.value.length}: ${read.error.reason === "read" ? readMessage : photoRejectionMessage(read.error.reason)} No se agregó.`); continue; }
+        if (!read.ok) { notes.add(`${index + 1}.ª foto elegida: ${read.error.reason === "read" ? readMessage : photoRejectionMessage(read.error.reason)} No se agregó.`); continue; }
         const localId = nextId();
         blobs.set(localId, read.value);
         accepted.push({ localId, reference: photo.reference, ...(photo.previewUrl !== undefined ? { previewUrl: photo.previewUrl } : {}),
