@@ -396,3 +396,37 @@ describe("TransportForm", () => {
     await act(async () => resolveSave({ ok: true, value: saved }));
   });
 });
+
+describe("TransportForm cost amounts", () => {
+  const costField = (container: HTMLElement) => container.querySelector('[name="costPerPerson"]') as HTMLInputElement;
+  it("uses a text field with decimal keyboard", async () => {
+    const { container } = await render();
+    expect(costField(container).type).toBe("text");
+    expect(costField(container).getAttribute("inputmode")).toBe("decimal");
+    expect(container.textContent).toContain("999.999.999.999,99");
+  });
+  it.each([["0", "Ingresá un costo mayor a cero"], ["1000000000000", "El costo no puede superar 999.999.999.999,99"]])("does not send %s and shows the error on the field", async (cost, message) => {
+    const { container, createTransport } = await render();
+    await fillRoute(container);
+    await setField(container, "costPerPerson", cost);
+    await setField(container, "costCurrency", "ARS");
+    await submit(container);
+    expect(createTransport).not.toHaveBeenCalled();
+    expect(costField(container).getAttribute("aria-invalid")).toBe("true");
+    expect(container.textContent).toContain(message);
+    expect(costField(container).value).toBe(cost);
+  });
+  it.each([["exceeds_max", "El costo no puede superar 999.999.999.999,99"], ["invalid", "Ingresá un costo mayor a cero"]])("shows a 422 %s on the field, keeps values and allows retrying", async (code, message) => {
+    const { container, createTransport } = await render();
+    await fillRoute(container);
+    await setField(container, "costPerPerson", "120");
+    await setField(container, "costCurrency", "ARS");
+    createTransport.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "costPerPerson", code, message: "raw" }] } });
+    await submit(container);
+    expect(costField(container).getAttribute("aria-invalid")).toBe("true");
+    expect(container.textContent).toContain(message);
+    expect(costField(container).value).toBe("120");
+    await submit(container);
+    expect(createTransport).toHaveBeenCalledTimes(2);
+  });
+});

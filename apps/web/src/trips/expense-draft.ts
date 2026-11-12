@@ -1,4 +1,5 @@
 import { toCents } from "app-domain";
+import { exceedsMaxAmount } from "./amount-limits.js";
 import { breakdownTooLong } from "./post-text-limits.js";
 import type { ExpenseInput } from "./trip-post-api.js";
 
@@ -8,7 +9,7 @@ export const expenseCurrencies: readonly ExpenseCurrency[] = ["ARS", "EUR", "USD
 export type ExpenseDraft = { amount: string; currency: "" | ExpenseCurrency; breakdown: string };
 /** The expense already stored for the post, as read from the itinerary (the currency can be missing in legacy data). */
 export type SavedExpense = { totalAmount: number; currency: ExpenseCurrency | null; breakdown: string | null };
-export type AmountError = "required" | "invalid" | "precision";
+export type AmountError = "required" | "invalid" | "precision" | "exceeds_max";
 export type ParsedAmount = { ok: true; cents: number; amount: number } | { ok: false; code: AmountError };
 export type ExpenseErrors = { amount?: AmountError; currency?: "required"; breakdown?: "too_long" };
 export type ValidExpense = { totalAmount: number; currency: ExpenseCurrency; breakdown: string | null };
@@ -27,6 +28,7 @@ export const parseAmount = (raw: string, options: { allowZero?: boolean } = {}):
   // Exact cents from the text (never from a float), and the number that travels must give them back: otherwise it would silently be another amount.
   const exact = BigInt(match[1]!) * 100n + BigInt(fraction.padEnd(2, "0") || "0");
   if (exact === 0n && options.allowZero === true) return { ok: true, cents: 0, amount: 0 };
+  if (exceedsMaxAmount(exact)) return { ok: false, code: "exceeds_max" };
   if (exact <= 0n || exact > BigInt(Number.MAX_SAFE_INTEGER)) return { ok: false, code: "invalid" };
   const cents = Number(exact);
   const amount = Number(`${match[1]}.${fraction.padEnd(2, "0")}`);
@@ -51,13 +53,15 @@ export const validateExpense = (draft: ExpenseDraft):
 export const sameExpense = (a: ExpenseDraft | null, b: ExpenseDraft | null): boolean => a === b ||
   (a !== null && b !== null && a.amount === b.amount && a.currency === b.currency && a.breakdown === b.breakdown);
 
-/** Exact text of an amount for the form (no float noise); empty when it cannot be represented. */
-export const expenseDraftFromSaved = (saved: SavedExpense): ExpenseDraft => {
-  const cents = toCents(saved.totalAmount);
-  const amount = !cents.ok ? "" : cents.value % 100 === 0 ? String(cents.value / 100)
+/** Exact text of an amount (no float noise, no exponent): `12,50`, `150`; empty when it cannot be represented. */
+export const amountText = (value: number): string => {
+  const cents = toCents(value);
+  return !cents.ok ? "" : cents.value % 100 === 0 ? String(cents.value / 100)
     : `${Math.floor(cents.value / 100)},${String(cents.value % 100).padStart(2, "0")}`;
-  return { amount, currency: saved.currency ?? "", breakdown: saved.breakdown ?? "" };
 };
+
+export const expenseDraftFromSaved = (saved: SavedExpense): ExpenseDraft =>
+  ({ amount: amountText(saved.totalAmount), currency: saved.currency ?? "", breakdown: saved.breakdown ?? "" });
 
 /**
  * Merge-patch of the expense: only the keys that change. Without a saved expense it is the whole creation (breakdown only when written).

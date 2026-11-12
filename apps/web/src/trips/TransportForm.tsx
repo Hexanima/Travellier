@@ -2,8 +2,13 @@ import { useId, useRef, useState, type FormEvent } from "react";
 
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi } from "./trip-journey-api.js";
-import { formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues, type UrbanStepFormValues } from "./transport-form-state.js";
+import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
+import { costMessages, formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues, type UrbanStepFormValues } from "./transport-form-state.js";
 import { currentTimeZone } from "./transport-local-time.js";
+
+/** The server code decides the text of the cost error when it is one the form knows; otherwise the server message stays. */
+const serverCostMessage = (code: string | undefined, message: string): string =>
+  code === "invalid" || code === "exceeds_max" ? costMessages[code] : message;
 
 export type TransportSaveCoordinator = {
   busy: boolean;
@@ -74,7 +79,7 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
       } else if (result.error.kind === "itinerary-conflict") {
         setSaveError("Este cambio deja actividades fuera de su horario o elimina días con actividades o posts. Revisá los datos vinculados antes de cambiar el transporte.");
       } else if (result.error.kind === "validation" && result.error.fields?.length) {
-        setErrors(Object.fromEntries(result.error.fields.map(({ field, message }) => [field.replace(/\.estimatedAt$/, ".estimatedTime"), message])));
+        setErrors(Object.fromEntries(result.error.fields.map(({ field, code, message }) => [field.replace(/\.estimatedAt$/, ".estimatedTime"), field === "costPerPerson" ? serverCostMessage(code, message) : message])));
         setSaveError("Revisá los datos del transporte e intentá nuevamente.");
       } else {
         setSaveError("No pudimos guardar el transporte. Intentá nuevamente.");
@@ -128,7 +133,8 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
         error={errors["details.flightNumber"]} loading={saving} onChange={(event) => update("flightNumber", event.target.value)} /> : null}
       {isLongBus ? <TextField label="Empresa (opcional)" name="company" value={values.company}
         error={errors["details.company"]} loading={saving} onChange={(event) => update("company", event.target.value)} /> : null}
-      {hasCost ? <TextField label="Costo por persona (opcional)" name="costPerPerson" type="number" step="any"
+      {hasCost ? <TextField label="Costo por persona (opcional)" name="costPerPerson" type="text" inputMode="decimal" autoComplete="off"
+        helpText={`Hasta 2 decimales, por ejemplo 12,50. Máximo ${MAX_AMOUNT_TEXT}.`}
         value={values.costPerPerson} error={errors.costPerPerson} loading={saving}
         onChange={(event) => update("costPerPerson", event.target.value)} /> : null}
       {hasCost ? <SelectField label="Moneda del costo" name="costCurrency" aria-describedby={hasCost && missingCurrency ? currencyNoticeId : undefined} value={values.costCurrency}

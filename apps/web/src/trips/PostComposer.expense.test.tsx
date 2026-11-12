@@ -167,6 +167,7 @@ describe("PostComposer expense (create)", () => {
   it.each([
     [[{ field: "expense.totalAmount", code: "invalid", message: "x" }], "Revisá el importe del gasto."],
     [[{ field: "expense.totalAmount", code: "required", message: "x" }], "Revisá el importe del gasto."],
+    [[{ field: "expense.totalAmount", code: "exceeds_max", message: "x" }], "El importe no puede superar 999.999.999.999,99. No lo redondeamos por vos."],
     [[{ field: "expense.currency", code: "required", message: "x" }], "Elegí la moneda del gasto."],
     [[{ field: "expense.currency", code: "invalid", message: "x" }], "Elegí la moneda del gasto."],
     [[{ field: "expense.breakdown", code: "invalid", message: "x" }], "No pudimos guardar el gasto. Revisá sus datos."],
@@ -528,6 +529,20 @@ describe("PostComposer payments and shares (T84)", () => {
     await click(button(container, "Aceptar"));
     await click(button(container, "Cancelar"));
     expect(document.body.textContent).toContain("Descartar cambios");
+  });
+
+  it.each(["payments", "shares"] as const)("a 422 exceeds_max on %s[1].value marks that row with the limit and keeps the draft", async (list) => {
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: `expense.${list}[1].value`, code: "exceeds_max", message: "x" }] } });
+    const sharesTwo = [{ userId: me, unit: "amount" as const, value: 1 }, { userId: beto, unit: "amount" as const, value: 1 }];
+    const { container } = await render(editPath(withExpenseId), { storedExpense: stored(list === "shares" ? { shares: sharesTwo } : {}), update });
+    await click(splitButton(container));
+    if (list === "payments") { await pick(container, "payments-add", beto); await click(button(container, "Agregar pago")); }
+    await setValue(valueIn(rowsOf(container, list)[1]!), "5");
+    await click(button(container, "Aceptar"));
+    await submit(container);
+    await click(button(container, "Ajustar pagos y reparto"));
+    expect(container.textContent).toContain("El importe no puede superar 999.999.999.999,99");
+    expect(rowsOf(container, list)).toHaveLength(2);
   });
 });
 

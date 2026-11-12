@@ -326,3 +326,30 @@ describe("ExpenseForm breakdown limit", () => {
     expect(document.activeElement).toBe(field(container, "amount"));
   });
 });
+
+describe("ExpenseForm amount limit", () => {
+  const limitText = "El importe no puede superar 999.999.999.999,99. No lo redondeamos por vos.";
+  it("above the limit shows the notice, marks the field, keeps the text and writes nothing", async () => {
+    const { container } = await open();
+    await type(field(container, "amount"), "1000000000000"); await choose(field(container, "currency"), "ARS");
+    await click(button(container, "Aceptar"));
+    const alerts = container.querySelectorAll('[role="alert"]');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.textContent).toBe(limitText);
+    expect(field(container, "amount").getAttribute("aria-invalid")).toBe("true");
+    expect((field(container, "amount") as HTMLInputElement).value).toBe("1000000000000");
+    await click(button(container, "Cancelar"));
+    expect(probe(container).draft).toEqual(seeded());
+  });
+  it("the exact limit has no error", async () => {
+    const { container } = await open();
+    await type(field(container, "amount"), "999999999999,99"); await choose(field(container, "currency"), "ARS");
+    await click(button(container, "Aceptar"));
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(probe(container).draft?.extras.expense).toEqual({ amount: "999999999999,99", currency: "ARS", breakdown: "" });
+  });
+  it("tells the limit in the help text", async () => {
+    const { container } = await open();
+    expect(container.textContent).toContain("999.999.999.999,99");
+  });
+});

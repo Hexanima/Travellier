@@ -268,3 +268,27 @@ describe("server errors by row", () => {
     expect(mapSplitFieldErrors([{ field: "expense.shares[3].value", code: "invalid_value", message: "x" }], keys).handled).toBe(false);
   });
 });
+
+describe("amount limit in rows", () => {
+  const limitText = "El importe no puede superar 999.999.999.999,99. No lo redondeamos por vos.";
+  it("parseRowValue flags a value above the limit and accepts the edge; percent keeps range", () => {
+    expect(parseRowValue("amount", "1000000000000", false)).toEqual({ ok: false, code: "exceeds_max" });
+    expect(parseRowValue("amount", "999999999999,99", false)).toEqual({ ok: true, value: 999_999_999_999.99 });
+    expect(parseRowValue("percent", "1000000000000", false)).toEqual({ ok: false, code: "exceeds_max" });
+    expect(parseRowValue("percent", "100,01", false)).toEqual({ ok: false, code: "range" });
+  });
+  it("checkSplit marks the row with the limit message", () => {
+    const check = checkSplit(total(10000), { payments: [pay("a", ana, "amount", "1000000000000")], shares: [share("b", ana, "amount", "1000000000000")] });
+    expect(check.payments.rowErrors.a).toBe(limitText);
+    expect(check.shares.rowErrors.b).toBe(limitText);
+  });
+  it("maps a 422 exceeds_max to the limit message on the right row", () => {
+    const keys = { payments: ["p0"], shares: ["s0", "s1"] };
+    const mapped = mapSplitFieldErrors([
+      { field: "expense.payments[0].value", code: "exceeds_max", message: "x" },
+      { field: "expense.shares[1].value", code: "exceeds_max", message: "x" },
+    ], keys);
+    expect(mapped.rowErrors).toEqual({ p0: limitText, s1: limitText });
+    expect(mapped.handled).toBe(true);
+  });
+});
