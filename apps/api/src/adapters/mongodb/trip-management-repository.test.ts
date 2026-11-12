@@ -187,12 +187,16 @@ describe("Mongo Trip management repository", () => {
 
   describe("derived trip dates in the listing", () => {
     const at = (value: string) => new Date(value);
-    const seedTransport = async (tripId: string, destinationId: string, departureAt: unknown, arrivalAt: unknown) => {
-      const taken = await database.collection("transports").countDocuments({ destinationId: new ObjectId(destinationId) });
+    const seedTransport = async (tripId: string, destinationId: string, direction: "outbound" | "return", departureAt: unknown, arrivalAt: unknown) => {
       await database.collection("transports").insertOne({
         _id: new ObjectId(), tripId: new ObjectId(tripId), destinationId: new ObjectId(destinationId),
-        direction: taken === 0 ? "outbound" : "return", type: "plane", departureAt, arrivalAt, createdAt: new Date(),
+        direction, type: "plane", departureAt, arrivalAt, createdAt: new Date(),
       });
+    };
+    const seedDestination = async (tripId: string, name: string, order: number) => {
+      const id = new ObjectId();
+      await database.collection("destinations").insertOne({ _id: id, tripId: new ObjectId(tripId), name, order, createdAt: new Date() });
+      return id.toHexString();
     };
     const seedTrip = async (code: string, creator = new ObjectId(), createdAt?: Date) => {
       const repository = createMongoTripManagementRepository(database);
@@ -216,37 +220,38 @@ describe("Mongo Trip management repository", () => {
     it("derives min and max across several destinations and unordered transports", async () => {
       const owner = new ObjectId();
       const input = await seedTrip("VIAJE-A2", owner);
-      const second = new ObjectId();
-      await database.collection("destinations").insertOne({ _id: second, tripId: new ObjectId(input.trip.id), name: "Ushuaia", order: 2, createdAt: new Date() });
-      await seedTransport(input.trip.id, second.toHexString(), at("2026-10-20T08:00:00.000Z"), at("2026-10-20T10:00:00.000Z"));
-      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
-      await seedTransport(input.trip.id, second.toHexString(), at("2026-10-25T08:00:00.000Z"), at("2026-10-25T18:00:00.000Z"));
+      const second = await seedDestination(input.trip.id, "Ushuaia", 2);
+      await seedTransport(input.trip.id, second, "return", at("2026-10-25T08:00:00.000Z"), at("2026-10-25T18:00:00.000Z"));
+      await seedTransport(input.trip.id, second, "outbound", at("2026-10-20T08:00:00.000Z"), at("2026-10-20T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-15T08:00:00.000Z"), at("2026-10-15T10:00:00.000Z"));
       const [item] = await listed(owner);
       expect(item!.startAt).toEqual(at("2026-10-05T08:00:00.000Z"));
       expect(item!.endAt).toEqual(at("2026-10-25T18:00:00.000Z"));
     });
 
-    it("keeps only known dates for incomplete or legacy transports", async () => {
+    it("keeps only known dates for incomplete or legacy transports and leaves the end empty", async () => {
       const owner = new ObjectId();
       const input = await seedTrip("VIAJE-A3", owner);
-      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), null);
-      await seedTransport(input.trip.id, input.primaryDestination.id, "2026-09-01T00:00:00.000Z", undefined);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-05T08:00:00.000Z"), null);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", "2026-09-01T00:00:00.000Z", undefined);
       const [item] = await listed(owner);
       expect(item!.startAt).toEqual(at("2026-10-05T08:00:00.000Z"));
-      expect(item!.endAt).toEqual(at("2026-10-05T08:00:00.000Z"));
+      expect(item!.endAt).toBeNull();
     });
 
     it("returns null bounds when every stored date is unusable", async () => {
       const owner = new ObjectId();
       const input = await seedTrip("VIAJE-A4", owner);
-      await seedTransport(input.trip.id, input.primaryDestination.id, null, "2026-09-01");
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", null, "2026-09-01");
       expect(await listed(owner)).toMatchObject([{ startAt: null, endAt: null }]);
     });
 
     it("preserves millisecond precision", async () => {
       const owner = new ObjectId();
       const input = await seedTrip("VIAJE-A5", owner);
-      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.123Z"), at("2026-10-09T08:00:00.999Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-05T08:00:00.123Z"), at("2026-10-05T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-09T06:00:00.000Z"), at("2026-10-09T08:00:00.999Z"));
       const [item] = await listed(owner);
       expect(item!.startAt?.toISOString()).toBe("2026-10-05T08:00:00.123Z");
       expect(item!.endAt?.toISOString()).toBe("2026-10-09T08:00:00.999Z");
@@ -255,9 +260,11 @@ describe("Mongo Trip management repository", () => {
     it("reflects edited transport dates on the next listing", async () => {
       const owner = new ObjectId();
       const input = await seedTrip("VIAJE-A6", owner);
-      await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-05T08:00:00.000Z"), at("2026-10-09T08:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-09T06:00:00.000Z"), at("2026-10-09T08:00:00.000Z"));
       expect(await listed(owner)).toMatchObject([{ endAt: at("2026-10-09T08:00:00.000Z") }]);
-      await database.collection("transports").updateOne({ tripId: new ObjectId(input.trip.id) }, { $set: { arrivalAt: at("2026-10-12T08:00:00.000Z"), departureAt: at("2026-10-01T08:00:00.000Z") } });
+      await database.collection("transports").updateOne({ tripId: new ObjectId(input.trip.id), direction: "return" }, { $set: { arrivalAt: at("2026-10-12T08:00:00.000Z") } });
+      await database.collection("transports").updateOne({ tripId: new ObjectId(input.trip.id), direction: "outbound" }, { $set: { departureAt: at("2026-10-01T08:00:00.000Z") } });
       expect(await listed(owner)).toMatchObject([{ startAt: at("2026-10-01T08:00:00.000Z"), endAt: at("2026-10-12T08:00:00.000Z") }]);
     });
 
@@ -266,20 +273,89 @@ describe("Mongo Trip management repository", () => {
       const older = await seedTrip("VIAJE-B1", owner, at("2026-09-01T00:00:00.000Z"));
       const newer = await seedTrip("VIAJE-B2", owner, at("2026-09-02T00:00:00.000Z"));
       const foreign = await seedTrip("VIAJE-B3", new ObjectId());
-      await seedTransport(older.trip.id, older.primaryDestination.id, at("2026-10-01T00:00:00.000Z"), at("2026-10-02T00:00:00.000Z"));
-      await seedTransport(foreign.trip.id, foreign.primaryDestination.id, at("2026-01-01T00:00:00.000Z"), at("2027-01-01T00:00:00.000Z"));
+      await seedTransport(older.trip.id, older.primaryDestination.id, "outbound", at("2026-10-01T00:00:00.000Z"), at("2026-10-01T02:00:00.000Z"));
+      await seedTransport(older.trip.id, older.primaryDestination.id, "return", at("2026-10-02T00:00:00.000Z"), at("2026-10-02T02:00:00.000Z"));
+      await seedTransport(foreign.trip.id, foreign.primaryDestination.id, "outbound", at("2026-01-01T00:00:00.000Z"), at("2026-01-01T02:00:00.000Z"));
+      await seedTransport(foreign.trip.id, foreign.primaryDestination.id, "return", at("2027-01-01T00:00:00.000Z"), at("2027-01-01T02:00:00.000Z"));
       const items = await listed(owner);
       expect(items.map((item) => item.id)).toEqual([newer.trip.id, older.trip.id]);
       expect(items[0]).toMatchObject({ startAt: null, endAt: null });
-      expect(items[1]).toMatchObject({ startAt: at("2026-10-01T00:00:00.000Z"), endAt: at("2026-10-02T00:00:00.000Z") });
+      expect(items[1]).toMatchObject({ startAt: at("2026-10-01T00:00:00.000Z"), endAt: at("2026-10-02T02:00:00.000Z") });
       expect(await listed(new ObjectId())).toEqual([]);
+    });
+
+    it("leaves the end empty with an outbound transport but no return", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-E1", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      expect(await listed(owner)).toMatchObject([{ startAt: at("2026-10-01T08:00:00.000Z"), endAt: null }]);
+    });
+
+    it("sets the end from the return arrival when outbound and return exist", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-E2", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-09T08:00:00.000Z"), at("2026-10-09T10:00:00.000Z"));
+      expect(await listed(owner)).toMatchObject([{ startAt: at("2026-10-01T08:00:00.000Z"), endAt: at("2026-10-09T10:00:00.000Z") }]);
+    });
+
+    it("leaves the end empty when the second destination has no return", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-E3", owner);
+      const second = await seedDestination(input.trip.id, "Ushuaia", 2);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
+      await seedTransport(input.trip.id, second, "outbound", at("2026-10-05T12:00:00.000Z"), at("2026-10-05T14:00:00.000Z"));
+      expect(await listed(owner)).toMatchObject([{ startAt: at("2026-10-01T08:00:00.000Z"), endAt: null }]);
+    });
+
+    it("leaves the end empty when a later destination has no transports at all", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-E4", owner);
+      await seedDestination(input.trip.id, "Ushuaia", 2);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-05T08:00:00.000Z"), at("2026-10-05T10:00:00.000Z"));
+      expect(await listed(owner)).toMatchObject([{ endAt: null }]);
+    });
+
+    it("treats a return with an invalid arrival as missing", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-E5", owner);
+      await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-09T08:00:00.000Z"), "2026-10-09T10:00:00.000Z");
+      expect(await listed(owner)).toMatchObject([{ endAt: null }]);
+    });
+
+    it("lists a trip without a primary destination with null dates and destination instead of failing", async () => {
+      const owner = new ObjectId();
+      const input = await seedTrip("VIAJE-F1", owner);
+      await database.collection("destinations").deleteMany({ tripId: new ObjectId(input.trip.id) });
+      const result = await createMongoTripManagementRepository(database).listForMember(domainId(owner));
+      expect(result).toMatchObject({ ok: true, value: [{ id: input.trip.id, primaryDestination: null, startAt: null, endAt: null }] });
+    });
+
+    it("lists complete and incomplete trips together", async () => {
+      const owner = new ObjectId();
+      const complete = await seedTrip("VIAJE-G1", owner, at("2026-09-01T00:00:00.000Z"));
+      const incomplete = await seedTrip("VIAJE-G2", owner, at("2026-09-02T00:00:00.000Z"));
+      const orphan = await seedTrip("VIAJE-G3", owner, at("2026-09-03T00:00:00.000Z"));
+      await database.collection("destinations").deleteMany({ tripId: new ObjectId(orphan.trip.id) });
+      await seedTransport(complete.trip.id, complete.primaryDestination.id, "outbound", at("2026-10-01T08:00:00.000Z"), at("2026-10-01T10:00:00.000Z"));
+      await seedTransport(complete.trip.id, complete.primaryDestination.id, "return", at("2026-10-09T08:00:00.000Z"), at("2026-10-09T10:00:00.000Z"));
+      await seedTransport(incomplete.trip.id, incomplete.primaryDestination.id, "outbound", at("2026-10-02T08:00:00.000Z"), at("2026-10-02T10:00:00.000Z"));
+      const items = await listed(owner);
+      expect(items.map((item) => item.id)).toEqual([orphan.trip.id, incomplete.trip.id, complete.trip.id]);
+      expect(items[0]).toMatchObject({ primaryDestination: null, startAt: null, endAt: null });
+      expect(items[1]).toMatchObject({ primaryDestination: { name: "Bariloche" }, startAt: at("2026-10-02T08:00:00.000Z"), endAt: null });
+      expect(items[2]).toMatchObject({ startAt: at("2026-10-01T08:00:00.000Z"), endAt: at("2026-10-09T10:00:00.000Z") });
     });
 
     it("reads transports with a single grouped aggregation for many trips", async () => {
       const owner = new ObjectId();
       for (const code of ["VIAJE-C1", "VIAJE-C2", "VIAJE-C3"]) {
         const input = await seedTrip(code, owner);
-        await seedTransport(input.trip.id, input.primaryDestination.id, at("2026-10-01T00:00:00.000Z"), at("2026-10-02T00:00:00.000Z"));
+        await seedTransport(input.trip.id, input.primaryDestination.id, "outbound", at("2026-10-01T00:00:00.000Z"), at("2026-10-01T02:00:00.000Z"));
+        await seedTransport(input.trip.id, input.primaryDestination.id, "return", at("2026-10-02T00:00:00.000Z"), at("2026-10-02T02:00:00.000Z"));
       }
       const original = database.collection.bind(database);
       const calls = { aggregate: 0, find: 0 };

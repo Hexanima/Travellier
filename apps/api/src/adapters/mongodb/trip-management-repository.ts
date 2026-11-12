@@ -2,7 +2,7 @@ import { MongoServerError, ObjectId as MongoObjectId, type Db } from "mongodb";
 
 import {
   createObjectId,
-  deriveTripBounds,
+  deriveTripSchedule,
   err,
   InviteCodeConflictError,
   ok,
@@ -62,24 +62,38 @@ const destinationDocument = (destination: TripDestination): DestinationDocument 
   createdAt: destination.createdAt,
 });
 
-const toView = (trip: TripDocument, destination: DestinationDocument): TripView => ({
+const toDestination = (destination: DestinationDocument): TripDestination => ({
+  id: domainId(destination._id),
+  tripId: domainId(destination.tripId),
+  name: destination.name,
+  order: destination.order,
+  createdAt: destination.createdAt,
+});
+
+const toBaseView = (trip: TripDocument): Trip => ({
   id: domainId(trip._id),
   name: trip.name,
   description: trip.description,
   visibility: trip.visibility,
   inviteCode: trip.inviteCode,
   expenseMode: trip.expenseMode,
-  // Solo lectura: un viaje sin migrar muestra createdBy; la autorizaciÃ³n de baja no usa este respaldo.
+  // Solo lectura: un viaje sin migrar muestra createdBy; la autorización de baja no usa este respaldo.
   ownerId: domainId(trip.ownerId ?? trip.createdBy),
   createdBy: domainId(trip.createdBy),
   createdAt: trip.createdAt,
-  primaryDestination: {
-    id: domainId(destination._id),
-    tripId: domainId(destination.tripId),
-    name: destination.name,
-    order: destination.order,
-    createdAt: destination.createdAt,
-  },
+});
+
+const toView = (trip: TripDocument, destination: DestinationDocument): TripView => ({
+  ...toBaseView(trip),
+  primaryDestination: toDestination(destination),
+});
+
+type TransportEntry = { destinationId?: unknown; direction?: unknown; departureAt?: unknown; arrivalAt?: unknown };
+
+/** Como toView, pero tolera un viaje sin destino primario (datos incompletos). */
+const toListView = (trip: TripDocument, destination: DestinationDocument | undefined): Omit<TripListItem, "startAt" | "endAt"> => ({
+  ...toBaseView(trip),
+  primaryDestination: destination === undefined ? null : toDestination(destination),
 });
 
 const toPublicPreview = (trip: TripDocument, destination: DestinationDocument): PublicTripPreview => ({
@@ -154,21 +168,33 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         if (memberships.length === 0) return ok([]);
         const tripIds = memberships.map((membership) => membership.tripId);
         const documents = await trips.find({ _id: { $in: tripIds } }).sort({ createdAt: -1, _id: -1 }).toArray();
-        // Una sola lectura agrupada: min/max de departureAt y arrivalAt (solo Date) por viaje.
-        const bounds = await transports.aggregate<{ _id: MongoObjectId; startAt: Date; endAt: Date }>([
-          { $match: { tripId: { $in: documents.map((trip) => trip._id) } } },
-          { $project: { tripId: 1, instants: ["$departureAt", "$arrivalAt"] } },
-          { $unwind: "$instants" },
-          { $match: { instants: { $type: "date" } } },
-          { $group: { _id: "$tripId", startAt: { $min: "$instants" }, endAt: { $max: "$instants" } } },
-        ]).toArray();
-        const boundsByTrip = new Map(bounds.map((entry) => [entry._id.toHexString(), entry]));
-        const items: TripListItem[] = [];
-        for (const trip of documents) {
-          const entry = boundsByTrip.get(trip._id.toHexString());
-          const derived = deriveTripBounds(entry === undefined ? [] : [{ departureAt: entry.startAt, arrivalAt: entry.endAt }]);
-          items.push({ ...toView(trip, await findDestination(trip._id)), startAt: derived.startAt, endAt: derived.endAt });
+        const tripObjectIds = documents.map((trip) => trip._id);
+        // Un solo find para todos los destinos y una sola aggregate para los transportes.
+        const allDestinations = await destinations.find({ tripId: { $in: tripObjectIds } }, { projection: { tripId: 1, name: 1, order: 1, createdAt: 1 } }).toArray();
+        const destinationsByTrip = new Map<string, DestinationDocument[]>();
+        for (const destination of allDestinations) {
+          const key = destination.tripId.toHexString();
+          destinationsByTrip.set(key, [...(destinationsByTrip.get(key) ?? []), destination]);
         }
+        const grouped = await transports.aggregate<{ _id: MongoObjectId; transports: TransportEntry[] }>([
+          { $match: { tripId: { $in: tripObjectIds } } },
+          { $group: { _id: "$tripId", transports: { $push: { destinationId: "$destinationId", direction: "$direction", departureAt: "$departureAt", arrivalAt: "$arrivalAt" } } } },
+        ]).toArray();
+        const transportsByTrip = new Map(grouped.map((entry) => [entry._id.toHexString(), entry.transports]));
+        const items: TripListItem[] = documents.map((trip) => {
+          const tripDestinations = destinationsByTrip.get(trip._id.toHexString()) ?? [];
+          const primary = tripDestinations.find((destination) => destination.order === 1);
+          const derived = deriveTripSchedule(
+            primary === undefined ? [] : tripDestinations.map((destination) => destination._id.toHexString()),
+            (transportsByTrip.get(trip._id.toHexString()) ?? []).map((entry) => ({
+              destinationId: entry.destinationId instanceof MongoObjectId ? entry.destinationId.toHexString() : "",
+              direction: typeof entry.direction === "string" ? entry.direction : "",
+              departureAt: entry.departureAt,
+              arrivalAt: entry.arrivalAt,
+            })),
+          );
+          return { ...toListView(trip, primary), startAt: derived.startAt, endAt: derived.endAt };
+        });
         return ok(items);
       } catch {
         return err(unknownError());
