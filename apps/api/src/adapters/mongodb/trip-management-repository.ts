@@ -20,7 +20,7 @@ import {
 
 type TripDocument = Omit<Trip, "id" | "createdBy" | "ownerId"> & {
   _id: MongoObjectId;
-  /** Ausente solo en viajes anteriores a la migración 0010. */
+  /** Titular real del viaje. Si falta, el documento es inconsistente: no se deriva de createdBy. */
   ownerId?: MongoObjectId;
   createdBy: MongoObjectId;
 };
@@ -70,18 +70,24 @@ const toDestination = (destination: DestinationDocument): TripDestination => ({
   createdAt: destination.createdAt,
 });
 
-const toBaseView = (trip: TripDocument): Trip => ({
-  id: domainId(trip._id),
-  name: trip.name,
-  description: trip.description,
-  visibility: trip.visibility,
-  inviteCode: trip.inviteCode,
-  expenseMode: trip.expenseMode,
-  // Solo lectura: un viaje sin migrar muestra createdBy; la autorización de baja no usa este respaldo.
-  ownerId: domainId(trip.ownerId ?? trip.createdBy),
-  createdBy: domainId(trip.createdBy),
-  createdAt: trip.createdAt,
-});
+const toBaseView = (trip: TripDocument): Trip => {
+  // Sin respaldo: createdBy es histórico y no define el titular. Un documento sin ownerId falla de forma explícita.
+  if (trip.ownerId === undefined) {
+    console.error("Trip document without ownerId", { tripId: trip._id.toHexString() });
+    throw new Error("Trip document without ownerId.");
+  }
+  return {
+    id: domainId(trip._id),
+    name: trip.name,
+    description: trip.description,
+    visibility: trip.visibility,
+    inviteCode: trip.inviteCode,
+    expenseMode: trip.expenseMode,
+    ownerId: domainId(trip.ownerId),
+    createdBy: domainId(trip.createdBy),
+    createdAt: trip.createdAt,
+  };
+};
 
 const toView = (trip: TripDocument, destination: DestinationDocument): TripView => ({
   ...toBaseView(trip),
