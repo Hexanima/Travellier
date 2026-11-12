@@ -9,7 +9,12 @@ export type TripSummary = {
 };
 
 /** Item of the Trip list: the dates derive from the transports and are ISO UTC instants or null (the list never reads each itinerary). */
-export type TripListItem = TripSummary & { startAt?: string | null; endAt?: string | null };
+export type TripListItem = Omit<TripSummary, "primaryDestination"> & {
+  /** Null when the Trip has no primary destination (incomplete data). */
+  primaryDestination: { name: string } | null;
+  startAt?: string | null;
+  endAt?: string | null;
+};
 
 export type CreateTripInput = { name: string; primaryDestination: string; description?: string };
 export type TripVisibility = "private" | "public";
@@ -45,10 +50,13 @@ export type TripManagementApi = {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const isTripSummary = (value: unknown): value is TripSummary & Record<string, unknown> =>
+const isListedTrip = (value: unknown): value is Omit<TripListItem, "startAt" | "endAt"> & Record<string, unknown> =>
   isRecord(value) && typeof value.id === "string" && typeof value.name === "string" &&
   (typeof value.description === "string" || value.description === null) &&
-  isRecord(value.primaryDestination) && typeof value.primaryDestination.name === "string";
+  (value.primaryDestination === null || (isRecord(value.primaryDestination) && typeof value.primaryDestination.name === "string"));
+
+const isTripSummary = (value: unknown): value is TripSummary & Record<string, unknown> =>
+  isListedTrip(value) && value.primaryDestination !== null;
 
 /** A missing, non-string or unparseable date is null: a bad date never fails the whole list. */
 const toInstant = (value: unknown): string | null => {
@@ -57,7 +65,7 @@ const toInstant = (value: unknown): string | null => {
   return Number.isNaN(ms) ? null : new Date(ms).toISOString();
 };
 
-const toListItem = (value: TripSummary & Record<string, unknown>): TripListItem => ({
+const toListItem = (value: Omit<TripListItem, "startAt" | "endAt"> & Record<string, unknown>): TripListItem => ({
   ...value, startAt: toInstant(value.startAt), endAt: toInstant(value.endAt),
 });
 
@@ -103,7 +111,7 @@ export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" 
   list: async () => {
     const result = await client.get<unknown>("/trips");
     if (!result.ok) return { ok: false, error: toFailure(result.error) };
-    return isRecord(result.value) && Array.isArray(result.value.trips) && result.value.trips.every(isTripSummary)
+    return isRecord(result.value) && Array.isArray(result.value.trips) && result.value.trips.every(isListedTrip)
       ? { ok: true, value: result.value.trips.map(toListItem) }
       : { ok: false, error: { kind: "server" } };
   },
