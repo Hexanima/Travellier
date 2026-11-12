@@ -23,6 +23,7 @@ export const galleryDeniedMessage = "No tenemos acceso a tus fotos. Habilitalo e
 export const unsupportedMessage = "Disponible solo en la app.";
 export const nativeMessage = "No pudimos abrir las fotos. Intentá nuevamente.";
 export const readMessage = "No pudimos leer una de las fotos. Intentá nuevamente.";
+export const preparingMessage = "Preparando fotos…";
 export const limitMessage = `Un recuerdo admite hasta ${MAX_PHOTOS} fotos; las demás no se agregaron.`;
 let sequence = 0;
 const nextId = () => { sequence += 1; return `photo-${sequence}`; };
@@ -99,11 +100,12 @@ export function usePostPhotos({ deps, tripId, getDraft, applyDraft, blobs, isSav
       const room = Math.max(0, MAX_PHOTOS - getDraft().extras.photos.length);
       const accepted: PhotoDraftItem[] = [], notes = new Set<string>();
       let attempted = 0;
-      for (const photo of picked.value) {
+      setSummary(preparingMessage);
+      for (const [index, photo] of picked.value.entries()) {
         if (attempted >= room) break;
         attempted += 1;
         const read = await deps.reader.read(photo);
-        if (!read.ok) { notes.add(read.error.reason === "read" ? readMessage : photoRejectionMessage(read.error.reason)); continue; }
+        if (!read.ok) { notes.add(`Foto ${index + 1} de ${picked.value.length}: ${read.error.reason === "read" ? readMessage : photoRejectionMessage(read.error.reason)} No se agregó.`); continue; }
         const localId = nextId();
         blobs.set(localId, read.value);
         accepted.push({ localId, reference: photo.reference, ...(photo.previewUrl !== undefined ? { previewUrl: photo.previewUrl } : {}),
@@ -116,7 +118,7 @@ export function usePostPhotos({ deps, tripId, getDraft, applyDraft, blobs, isSav
     } catch {
       setMessage(nativeMessage);
       return "failed";
-    } finally { selectingRef.current = false; setSelecting(false); }
+    } finally { selectingRef.current = false; setSelecting(false); setSummary(""); }
   };
   const remove = (localId: string) => {
     if (!idle()) return;

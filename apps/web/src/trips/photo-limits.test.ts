@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PHOTOS, MAX_PHOTO_BYTES, normalizeContentType, photoRejectionMessage, validatePhoto } from "./photo-limits.js";
+import { MAX_PHOTOS, isConvertibleInput, MAX_PHOTO_BYTES, normalizeContentType, photoRejectionMessage, validatePhoto } from "./photo-limits.js";
 
 describe("photo limits", () => {
   it("matches the server limits", () => {
@@ -21,10 +21,14 @@ describe("photo limits", () => {
     expect(validatePhoto("png", 1)).toEqual({ ok: true, contentType: "image/png" });
     expect(validatePhoto("image/webp", 5)).toEqual({ ok: true, contentType: "image/webp" });
   });
-  it("rejects HEIC and HEIF locally with their own reason", () => {
-    expect(validatePhoto("image/heic", 5)).toEqual({ ok: false, reason: "heic" });
-    expect(validatePhoto("heif", 5)).toEqual({ ok: false, reason: "heic" });
-    expect(photoRejectionMessage("heic")).toContain("HEIC");
+  it("accepts HEIC and HEIF as convertible input but not as a final output", () => {
+    expect(isConvertibleInput("image/heic")).toBe(true);
+    expect(isConvertibleInput("heif")).toBe(true);
+    expect(isConvertibleInput("image/png")).toBe(true);
+    expect(isConvertibleInput("image/gif")).toBe(false);
+    expect(isConvertibleInput(undefined)).toBe(false);
+    expect(validatePhoto("image/heic", 5)).toEqual({ ok: false, reason: "type" });
+    expect(photoRejectionMessage("convert")).toBe("No pudimos convertir o reducir esta foto. Quitala o elegí otra.");
   });
   it("rejects other types, unknown types, empty and oversized files", () => {
     expect(validatePhoto("image/gif", 5)).toEqual({ ok: false, reason: "type" });

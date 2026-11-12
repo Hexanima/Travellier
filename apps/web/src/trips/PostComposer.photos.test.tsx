@@ -125,13 +125,41 @@ describe("PostComposer photos: selection", () => {
     await click(button(container, "Quitar foto 1 de 3"));
     expect(srcs(container)).toEqual(["3.jpg", "2.jpg"]);
   });
-  it("rejects what the reader refuses with a message and adds nothing", async () => {
+  it("names the photo whose conversion failed, adds the others and never publishes the failed one", async () => {
     const mocks = makeDeps();
-    mocks.reader.read.mockResolvedValueOnce(err(new PhotoReadError("heic")) as never);
+    mocks.reader.read.mockImplementationOnce(async (photo: { reference: string }) => ok(new Blob([photo.reference], { type: "image/jpeg" })))
+      .mockResolvedValueOnce(err(new PhotoReadError("convert")) as never);
+    const { container, create } = await render(newPath, mocks);
+    await choose(container, mocks, 1, 2, 3);
+    expect(srcs(container)).toEqual(["1.jpg", "3.jpg"]);
+    const text = section(container).querySelector('[role="alert"]')?.textContent ?? "";
+    expect(text).toContain("Foto 2 de 3");
+    expect(text).toContain("No se agregó");
+    expect(text).toContain("No pudimos convertir o reducir esta foto");
+    await submit(container);
+    expect(mocks.api.reserve).toHaveBeenCalledExactlyOnceWith(tripId, [{ contentType: "image/jpeg", sizeBytes: 13 }, { contentType: "image/jpeg", sizeBytes: 13 }]);
+    expect(mocks.transfer.put).toHaveBeenCalledTimes(2);
+    expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { photos: [{ key: key(1) }, { key: key(2) }] });
+  });
+  it("shows an alert and no list when every photo fails", async () => {
+    const mocks = makeDeps();
+    mocks.reader.read.mockResolvedValue(err(new PhotoReadError("convert")) as never);
+    const { container } = await render(newPath, mocks);
+    await choose(container, mocks, 1, 2);
+    expect(container.querySelector("ul")).toBeNull();
+    const text = section(container).querySelector('[role="alert"]')?.textContent ?? "";
+    expect(text).toContain("Foto 1 de 2"); expect(text).toContain("Foto 2 de 2");
+  });
+  it("shows «Preparando fotos…» while the reader is pending", async () => {
+    const mocks = makeDeps();
+    const gate = deferred<unknown>();
+    mocks.reader.read.mockImplementationOnce(() => gate.promise as never);
     const { container } = await render(newPath, mocks);
     await choose(container, mocks, 1);
-    expect(container.querySelector("ul")).toBeNull();
-    expect(section(container).querySelector('[role="alert"]')?.textContent).toContain("HEIC");
+    expect(section(container).querySelector('[role="status"]')?.textContent).toBe("Preparando fotos…");
+    await act(async () => gate.resolve(ok(new Blob(["x"], { type: "image/jpeg" }))));
+    expect(section(container).querySelector('[role="status"]')?.textContent).toBe("");
+    expect(srcs(container)).toEqual(["1.jpg"]);
   });
   it("stops at 10 photos with a message", async () => {
     const mocks = makeDeps();
