@@ -175,4 +175,66 @@ describe("local destination and transport API", () => {
       await client.close();
     }
   }, 30_000);
+
+  it("limits the cost per person of a transport and still reads stored costs outside the rule (T133)", async () => {
+    const databaseName = "journey_cost_limits_api_test";
+    const client = new MongoClient(server.getUri());
+    await client.connect();
+    const database = client.db(databaseName);
+    await migrateMongoSchema(database);
+    const local = await createLocalApi({ MONGODB_URI: server.getUri(), MONGODB_DATABASE_NAME: databaseName, JWT_SECRET: "journey-secret" });
+    await new Promise<void>((resolve) => local.app.listen(0, resolve));
+    const base = `http://127.0.0.1:${(local.app.address() as AddressInfo).port}`;
+    const tokens = createAuthenticationTokenAdapter({ jwtSecret: "journey-secret", accessTokenLifetimeMs: 900_000 });
+    const parsed = createObjectId(new ObjectId().toHexString());
+    if (!parsed.ok) throw parsed.error;
+    const token = await tokens.createAccessToken(parsed.value);
+    if (!token.ok) throw token.error;
+    const headers = { authorization: `Bearer ${token.value}`, "content-type": "application/json" };
+    const send = (method: string, url: string, body?: unknown) => fetch(`${base}${url}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    try {
+      const created = await send("POST", "/trips", { name: "Limites", primaryDestination: "Limites principal" });
+      expect(created.status).toBe(201);
+      const trip = (await created.json() as { trip: { id: string; primaryDestination: { id: string } } }).trip;
+      const path = `/trips/${trip.id}/destinations/${trip.primaryDestination.id}/transports`;
+      const body = { direction: "outbound", type: "car", departurePlace: "Origen", departureAt: "2026-09-24T08:00:00Z",
+        arrivalPlace: "Destino", arrivalAt: "2026-09-24T09:00:00Z", costPerPerson: null, details: {} };
+      const count = () => database.collection("transports").countDocuments({});
+      const days = () => database.collection("itineraryDays").find({}).sort({ order: 1 }).toArray();
+
+      for (const cost of [0, -1, -0.01, 1000000000000, 1.001]) {
+        const rejected = await send("POST", path, { ...body, costPerPerson: cost, costCurrency: "USD" });
+        expect(rejected.status, String(cost)).toBe(422);
+        expect(await rejected.json()).toMatchObject({ error: { code: "ValidationError", fields: [{ field: "costPerPerson" }] } });
+      }
+      expect(await count()).toBe(0);
+      expect(await days()).toHaveLength(0);
+
+      const edge = await send("POST", path, { ...body, costPerPerson: 999999999999.99, costCurrency: "USD" });
+      expect(edge.status).toBe(201);
+      const id = (await edge.json() as { transport: { id: string; costPerPerson: number } }).transport.id;
+      const stored = () => database.collection("transports").findOne({ _id: new ObjectId(id) });
+      expect(await stored()).toMatchObject({ costPerPerson: 999999999999.99, costCurrency: "USD" });
+      const before = await stored(), daysBefore = await days();
+      for (const cost of [0, -1, 1000000000000, 1.001]) {
+        expect((await send("PATCH", `${path}/${id}`, { costPerPerson: cost })).status, String(cost)).toBe(422);
+      }
+      expect(await stored()).toEqual(before);
+      expect(await days()).toEqual(daysBefore);
+      expect((await send("PATCH", `${path}/${id}`, { costPerPerson: null })).status).toBe(200);
+      expect(await stored()).toMatchObject({ costPerPerson: null, costCurrency: null });
+
+      // Stored outside the rule: still listed, projected and editable in other fields.
+      await database.collection("transports").updateOne({ _id: new ObjectId(id) }, { $set: { costPerPerson: -5, costCurrency: "USD" } });
+      const listed = await (await send("GET", path)).json() as { transports: { costPerPerson: number }[] };
+      expect(listed.transports[0]).toMatchObject({ costPerPerson: -5 });
+      const itinerary = await (await send("GET", `/trips/${trip.id}/itinerary`)).json() as { itinerary: { transportCostTotals: unknown } };
+      expect(itinerary.itinerary.transportCostTotals).toEqual({ byCurrency: [], withoutCurrency: { transportCount: 1 } });
+      expect((await send("PATCH", `${path}/${id}`, { arrivalPlace: "Otro" })).status).toBe(200);
+      expect(await stored()).toMatchObject({ costPerPerson: -5, arrivalPlace: "Otro" });
+    } finally {
+      await local.close();
+      await client.close();
+    }
+  }, 30_000);
 });
