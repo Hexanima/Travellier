@@ -145,3 +145,26 @@ describe("CalendarSyncPanel", () => {
     expect(button(unknown.container, "Dejar de sincronizar")).toBeUndefined();
   });
 });
+
+describe("CalendarSyncPanel visual hooks", () => {
+  it("keeps native sync as the only primary action; the rest are secondary", async () => {
+    const off = await render({ state: "off" });
+    expect(button(off.container, "Mantener sincronizado con el calendario")!.classList.contains("ui-button--secondary")).toBe(false);
+    const synced = await render({ state: "synced", at: "2026-11-10T15:30:00.000Z" });
+    for (const label of ["Volver a agregar eventos borrados", "Dejar de sincronizar", "Quitar del calendario"]) expect(button(synced.container, label)!.classList.contains("ui-button--secondary"), label).toBe(true);
+    await click(button(synced.container, "Quitar del calendario")!);
+    for (const label of ["Quitar", "Cancelar"]) expect(button(synced.container, label)!.classList.contains("ui-button--secondary"), label).toBe(true);
+    const failed = await render({ state: "error" });
+    expect(button(failed.container, "Reintentar")!.classList.contains("ui-button--secondary")).toBe(true);
+    const removing = await render({ state: "removing-partial", remaining: 1 });
+    expect(button(removing.container, "Reintentar quitar")!.classList.contains("ui-button--secondary")).toBe(true);
+  });
+  it("exposes the state as data-state and keeps one status and alert only on error", async () => {
+    for (const status of every) {
+      const { container } = await render(status);
+      expect(container.querySelector(".calendar-sync")?.getAttribute("data-state")).toBe(status.state);
+      const alerts = container.querySelectorAll('[role="alert"]').length;
+      if (status.state !== "error" && status.state !== "needs-account") expect(alerts).toBe(0);
+    }
+  });
+});
