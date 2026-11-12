@@ -6,6 +6,7 @@ import { createParticipationStore, type ParticipationDocument } from "./activity
 import { createPostExpenseStore, type PostExpenseDocument } from "./post-expense-store.js";
 import { createOutboxStore } from "./outbox-store.js";
 import { createPostPhotoStore, type PostPhotoDocument } from "./post-photo-store.js";
+import { enqueueStorageDeletionJob } from "./storage-deletion-job-enqueue.js";
 import { createMongoTripJourneyRepository } from "./trip-journey-repository.js";
 
 /** `dayId` exists only in records created before T54; it is never required, read into a Post or written here. */
@@ -122,6 +123,37 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       .sort({ scheduledAt: 1, _id: 1 }).toArray()).map(toActivity)),
     listUserParticipations: store.listUserParticipations,
     saveParticipation: store.save,
+    relinkChildren: async (postId, newParentId) => {
+      await posts.updateMany({ ...query, parentPostId: new MongoObjectId(postId) }, { $set: { parentPostId: mongoId(newParentId) } }, options);
+      return ok(undefined);
+    },
+    deleteExpense: async (postId) => {
+      await database.collection("postExpenses").deleteMany({ ...query, postId: new MongoObjectId(postId) }, options);
+      return ok(undefined);
+    },
+    deletePostEngagement: async (postId) => {
+      const mongoPostId = new MongoObjectId(postId);
+      const commentIds = (await database.collection("comments").find({ ...query, postId: mongoPostId }, { ...options, projection: { _id: 1 } })
+        .toArray()).map((comment) => comment._id);
+      // commentLikes carries no postId: it is reached through the comments of this post.
+      if (commentIds.length > 0) await database.collection("commentLikes").deleteMany({ ...query, commentId: { $in: commentIds } }, options);
+      await database.collection("comments").deleteMany({ ...query, postId: mongoPostId }, options);
+      await database.collection("postLikes").deleteMany({ ...query, postId: mongoPostId }, options);
+      return ok(undefined);
+    },
+    deletePhotos: async (postId) => {
+      await database.collection("postPhotos").deleteMany({ ...query, postId: new MongoObjectId(postId) }, options);
+      return ok(undefined);
+    },
+    enqueueStorageDeletion: async (keys, createdAt) => {
+      await enqueueStorageDeletionJob(database, mongoTripId, keys, createdAt, session);
+      return ok(undefined);
+    },
+    deletePost: async (postId) => {
+      const result = await posts.deleteOne({ ...query, _id: new MongoObjectId(postId) }, options);
+      if (result.deletedCount !== 1) throw new PostNotFoundError();
+      return ok(undefined);
+    },
   };
 };
 

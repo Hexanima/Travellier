@@ -43,6 +43,8 @@ import {
   getTripPost,
   getTripPostChain,
   updateTripPost,
+  deleteTripPost,
+  deleteTripPostComment,
   linkTripPostToNewActivity,
   createTripPostComment,
   listTripPostComments,
@@ -116,6 +118,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     getPost: (payload) => getTripPost.execute(postDependencies, payload),
     getPostChain: (payload) => getTripPostChain.execute(postDependencies, payload),
     updatePost: (payload) => updateTripPost.execute(postDependencies, payload),
+    deletePost: (payload) => deleteTripPost.execute(postDependencies, payload),
     createPhotoUploads: (payload) => photoDependencies
       ? createTripPhotoUploads.execute({ ...photoDependencies, createUploadId: randomUUID }, payload) : missingStorage(),
     getPostPhotos: (payload) => photoDependencies
@@ -128,6 +131,7 @@ export const createTripApi = (database: Db, { storage }: TripApiOptions = {}): T
     listComments: (payload) => listTripPostComments.execute(commentDependencies, payload),
     createComment: (payload) => createTripPostComment.execute(commentDependencies, payload),
     updateComment: (payload) => updateTripPostComment.execute(commentDependencies, payload),
+    deleteComment: (payload) => deleteTripPostComment.execute(commentDependencies, payload),
     listNotifications: (payload) => listUserNotifications.execute(notificationDependencies, payload),
     likePost: (payload) => likeTripPost.execute(likeDependencies, payload),
     unlikePost: (payload) => unlikeTripPost.execute(likeDependencies, payload),

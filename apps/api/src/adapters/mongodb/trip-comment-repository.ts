@@ -63,6 +63,12 @@ const createScope = (database: Db, tripId: ObjectId, session: ClientSession): Tr
       if (result.matchedCount !== 1) throw new CommentNotFoundError();
       return ok(undefined);
     },
+    deleteComment: async (commentId, postId) => {
+      const result = await comments.deleteOne({ ...query, postId: new MongoObjectId(postId), _id: new MongoObjectId(commentId) }, options);
+      if (result.deletedCount !== 1) throw new CommentNotFoundError();
+      await database.collection("commentLikes").deleteMany({ ...query, commentId: new MongoObjectId(commentId) }, options);
+      return ok(undefined);
+    },
   };
 };
 
