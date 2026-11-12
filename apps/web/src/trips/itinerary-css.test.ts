@@ -130,6 +130,16 @@ describe("selector de destinos", () => {
     expect(body).toContain(ink);
     expect(body).toContain("border-radius: var(--ui-radius-control)");
   });
+  it("la parada actual suma una señal no cromática: borde de marca y check por pseudo-elemento", () => {
+    const current = ruleBody(`${stop}[aria-current="true"]`);
+    expect(current).toContain("box-shadow: inset 0 0 0 2px var(--ui-color-brand)");
+    expect(current).toContain("position: relative");
+    const check = ruleBody(`${stop}[aria-current="true"]::after`);
+    expect(check).toContain('content: "\\2713"');
+    expect(check).toContain("position: absolute");
+    expect(check).toContain("color: var(--ui-color-brand)");
+    expect(check).not.toMatch(/#[0-9a-f]{3,8}|opacity|clamp\(/i);
+  });
   it("la parada actual es soft; la incompleta usa disabled-surface y muted (sin opacity)", () => {
     expect(ruleBody(`${stop}[aria-current="true"]`)).toContain("background: var(--ui-color-soft)");
     expect(ruleBody(`${stop}[aria-current="true"] .destination-picker__order`)).toContain("background: var(--ui-color-surface)");
