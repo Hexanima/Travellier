@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router-dom";
 
 import { Button, Feedback, LoadingState, SelectField } from "../components/index.js";
+import { loadPeople } from "./photo-people.js";
+import type { TripMembersApi } from "./trip-members-api.js";
 import type { MemberTripDetail, TripConfigurationUpdate, TripDetail, TripManagementApi } from "./trip-management-api.js";
 
 type ConfigValues = Required<TripConfigurationUpdate>;
@@ -11,7 +13,10 @@ const valuesFromTrip = (trip: MemberTripDetail): ConfigValues => ({
   expenseMode: trip.expenseMode,
 });
 
-export function TripConfigurationScreen({ trips }: { trips: TripManagementApi }) {
+const modeLabel: Record<ConfigValues["expenseMode"], string> = { register: "Solo registro", balance: "Con balance" };
+const modeHelp = "Los gastos anteriores se conservan al cambiar de modo. En registro no se calculan deudas; en balance se calculan saldos.";
+
+export function TripConfigurationScreen({ trips, members }: { trips: TripManagementApi; members: Pick<TripMembersApi, "list"> }) {
   const { tripId } = useParams();
   const [detail, setDetail] = useState<TripDetail>();
   const [values, setValues] = useState<ConfigValues>();
@@ -20,15 +25,18 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
   const [saveError, setSaveError] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [forbiddenNotice, setForbiddenNotice] = useState(false);
+  const [noChanges, setNoChanges] = useState(false);
   const savingRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet = false) => {
     if (!tripId) {
       setLoadError("not-found");
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!quiet) setLoading(true);
     setLoadError(undefined);
     try {
       const result = await trips.get(tripId);
@@ -36,6 +44,8 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
         setLoadError(result.error.kind === "not-found" ? "not-found" : "other");
         return;
       }
+      // Unknown role (the list failed) means read-only: the mode is never editable by default.
+      setIsAdmin(result.value.kind === "member" ? (await loadPeople(members, tripId)).role === "admin" : false);
       setDetail(result.value);
       setValues(result.value.kind === "member" ? valuesFromTrip(result.value) : undefined);
     } catch {
@@ -43,7 +53,7 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
     } finally {
       setLoading(false);
     }
-  }, [tripId, trips]);
+  }, [tripId, trips, members]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -54,12 +64,28 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
     setSaving(true);
     setSaveError(false);
     setSaved(false);
+    setForbiddenNotice(false);
+    setNoChanges(false);
+    const changes: TripConfigurationUpdate = {
+      ...(values.visibility !== detail.visibility ? { visibility: values.visibility } : {}),
+      ...(isAdmin && values.expenseMode !== detail.expenseMode ? { expenseMode: values.expenseMode } : {}),
+    };
+    if (Object.keys(changes).length === 0) {
+      setNoChanges(true);
+      savingRef.current = false;
+      setSaving(false);
+      return;
+    }
     try {
-      const result = await trips.updateConfiguration(tripId, values);
+      const result = await trips.updateConfiguration(tripId, changes);
       if (result.ok) {
         setDetail(result.value);
         setValues(valuesFromTrip(result.value));
         setSaved(true);
+      } else if (result.error.kind === "forbidden") {
+        // The role changed: show the notice, reload role and detail, and drop the pending mode.
+        await load(true);
+        setForbiddenNotice(true);
       } else if (result.error.kind === "not-found" || result.error.kind === "unauthorized") {
         setDetail(undefined);
         setValues(undefined);
@@ -100,18 +126,24 @@ export function TripConfigurationScreen({ trips }: { trips: TripManagementApi })
                   <option value="private">Privado</option>
                   <option value="public">Público</option>
                 </SelectField>
-                <SelectField label="Modo de gastos" name="expenseMode" value={values.expenseMode} loading={saving}
-                  helpText="Los gastos anteriores se conservan al cambiar de modo. En registro no se calculan deudas; en balance se calculan saldos."
+                {isAdmin ? <SelectField label="Modo de gastos" name="expenseMode" value={values.expenseMode} loading={saving}
+                  helpText={modeHelp}
                   onChange={(event) => { const expenseMode = event.target.value as ConfigValues["expenseMode"]; setValues((current) => current && { ...current, expenseMode }); setSaved(false); }}>
                   <option value="register">Solo registro</option>
                   <option value="balance">Con balance</option>
-                </SelectField>
-                {detail.expenseMode !== values.expenseMode ? (
+                </SelectField> : <div className="trip-config-readonly">
+                  <p><strong>Modo de gastos</strong>: {modeLabel[detail.expenseMode]}</p>
+                  <p>{modeHelp}</p>
+                  <p>Solo los administradores pueden cambiarlo.</p>
+                </div>}
+                {isAdmin && detail.expenseMode !== values.expenseMode ? (
                   <Feedback>{values.expenseMode === "balance"
                     ? "Los gastos anteriores se conservan. Los que no tienen pagador siguen sin ese dato."
                     : "Los gastos anteriores se conservan. No se calcularán balances mientras esté activo el modo registro."}</Feedback>
                 ) : null}
                 {saveError ? <Feedback variant="error">No pudimos guardar la configuración. Intentá nuevamente.</Feedback> : null}
+                {forbiddenNotice ? <Feedback variant="error">Ya no tenés permiso para cambiar el modo de gastos.</Feedback> : null}
+                {noChanges ? <Feedback>No hay cambios para guardar.</Feedback> : null}
                 {saved ? <Feedback variant="success">Configuración guardada.</Feedback> : null}
                 <Button type="submit" loading={saving} loadingLabel="Guardando…">Guardar cambios</Button>
               </form>
