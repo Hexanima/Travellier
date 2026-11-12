@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 
 import { Button } from "../components/index.js";
 import type { PushStatus } from "./push-device-service.js";
+import "../components/integrations.css";
 
 type PushPermissionPanelProps = {
   status: PushStatus;
@@ -34,7 +35,7 @@ export function PushPermissionPanel({ status, onEnable, onDismiss }: PushPermiss
   if (state === "unsupported") return null;
   const busy = state === "requesting" || state === "registering";
   return (
-    <div className="push-panel" ref={panel} tabIndex={-1}>
+    <div className="push-panel" data-state={state} ref={panel} tabIndex={-1}>
       {state === "off" ? <p>Activá los avisos para enterarte de cambios en tus viajes. Es opcional: podés usar Travellier sin ellos.</p> : null}
       <div role="status">
         {state === "registered" ? <p>Avisos activados en este dispositivo.</p> : null}
@@ -56,7 +57,7 @@ export function PushPermissionPanel({ status, onEnable, onDismiss }: PushPermiss
           </button>
         )
         : null}
-      {onDismiss && (state === "off" || state === "denied") ? <Button onClick={onDismiss}>Ahora no</Button> : null}
+      {onDismiss && (state === "off" || state === "denied") ? <Button variant="secondary" onClick={onDismiss}>Ahora no</Button> : null}
     </div>
   );
 }

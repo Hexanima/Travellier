@@ -149,3 +149,24 @@ describe("ExportIcsButton", () => {
     expect(download.mock.calls[0][1]).toBe("travellier-viaje.ics");
   });
 });
+
+describe("ExportIcsButton visual hooks", () => {
+  it("the export button is secondary, next to the fixed static-copy notice", async () => {
+    const { container, render } = mount({ itinerary: fixture() });
+    await render();
+    expect(button(container)!.classList.contains("ui-button--secondary")).toBe(true);
+    expect(container.querySelector(".ics-export-notice")?.textContent).toBe(icsStaticCopyNotice);
+  });
+  it("a failed download never shows the success message and a successful one is a status", async () => {
+    const download = vi.fn<Download>(() => ({ ok: false }));
+    const { container, render } = mount({ itinerary: fixture(), download });
+    await render();
+    await click(container);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Se generó la exportación");
+    download.mockReturnValue({ ok: true });
+    await click(container);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Se generó la exportación");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+});

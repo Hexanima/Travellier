@@ -121,3 +121,24 @@ describe("PushPermissionPanel", () => {
     expect(button(registered.container, "Ahora no")).toBeUndefined();
   });
 });
+
+describe("PushPermissionPanel visual hooks", () => {
+  it("exposes the state as data-state", async () => {
+    const { container, update } = await render({ state: "off" });
+    for (const status of [{ state: "off" }, { state: "requesting" }, { state: "registered", tokenHint: "****1111" }, { state: "denied" }, { state: "error" }] as const) {
+      await update(status);
+      expect(container.querySelector(".push-panel")?.getAttribute("data-state")).toBe(status.state);
+    }
+  });
+  it("Ahora no is secondary while Activar avisos stays primary and keeps focus with aria-disabled", async () => {
+    const { container, update } = await render({ state: "off" }, { onDismiss: vi.fn() });
+    expect(button(container, "Ahora no")!.classList.contains("ui-button--secondary")).toBe(true);
+    const enable = button(container, "Activar avisos")!;
+    expect(enable.classList.contains("ui-button--secondary")).toBe(false);
+    enable.focus();
+    await update({ state: "requesting" });
+    expect(document.activeElement).toBe(enable);
+    expect(enable.getAttribute("aria-disabled")).toBe("true");
+    expect(enable.disabled).toBe(false);
+  });
+});

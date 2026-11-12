@@ -8,6 +8,7 @@ import { describeNotification, formatNoticeTime } from "./notification-text.js";
 import type { TripNotification, TripNotificationApi } from "./trip-notification-api.js";
 import { useNotifications } from "./use-notifications.js";
 import "../trips/itinerary.css";
+import "../components/integrations.css";
 
 export type NotificationsScreenProps = {
   notifications: TripNotificationApi;
@@ -89,8 +90,8 @@ export function NotificationsScreen({ notifications, refreshSignal, timeZone = I
         <h2>Todavía no tenés avisos</h2>
         <p>Cuando haya novedades en tus viajes, las vas a ver acá.</p>
       </section> : null}
-      {items.length > 0 ? <List aria-label="Avisos">
-        {items.map((notification) => <ListItem key={notification.id} data-notification={notification.id} tabIndex={-1}><Notice notification={notification} timeZone={timeZone} /></ListItem>)}
+      {items.length > 0 ? <List aria-label="Avisos" className="notice-list">
+        {items.map((notification) => <ListItem key={notification.id} className="notice" data-type={notification.type} data-notification={notification.id} tabIndex={-1}><Notice notification={notification} timeZone={timeZone} /></ListItem>)}
       </List> : null}
       {hasMore && phase !== "unauthorized" ? <Button aria-disabled={phase === "more-loading" || undefined} onClick={more}>Cargar más</Button> : null}
     </div>

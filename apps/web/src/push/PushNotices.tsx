@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react"
 
 import { PushPermissionPanel } from "./PushPermissionPanel.js";
 import type { PushDeviceService } from "./push-device-service.js";
+import "../components/integrations.css";
 
 type PushNoticesProps = {
   push: PushDeviceService;

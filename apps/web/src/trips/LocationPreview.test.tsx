@@ -147,3 +147,35 @@ describe("LocationPreview", () => {
     expect(container.querySelector("[role=status]")).not.toBeNull();
   });
 });
+
+describe("LocationPreview visual hooks", () => {
+  it("is a place card without map, image, iframe or canvas, in every form", async () => {
+    for (const port of [{ open: vi.fn() }, undefined]) {
+      const { container } = await render(placeUrl, port);
+      expect(container.querySelector("img, iframe, canvas, svg title, .map-grid, .map-point, .map-street")).toBeNull();
+      expect(container.querySelector(".location-preview")?.getAttribute("data-context")).toBe("activity");
+    }
+  });
+  it("Abrir en Maps is secondary with the accessible name, as a button and as an anchor", async () => {
+    const withPort = await render(placeUrl, { open: vi.fn() });
+    expect(openButton(withPort.container).classList.contains("ui-button--secondary")).toBe(true);
+    expect(openButton(withPort.container).getAttribute("aria-label")).toBe("Abrir en Maps: Torre Eiffel");
+    const anchor = (await render(placeUrl, undefined)).container.querySelector("a")!;
+    expect(anchor.classList.contains("ui-button")).toBe(true);
+    expect(anchor.classList.contains("ui-button--secondary")).toBe(true);
+    expect(anchor.classList.contains("activity-maps-link")).toBe(true);
+    expect(anchor.getAttribute("aria-label")).toBe("Abrir en Maps: Torre Eiffel");
+  });
+  it("marks opening and failed on the card without changing the aria contract", async () => {
+    const pending = deferred<OpenResult>();
+    const { container } = await render(placeUrl, { open: vi.fn(() => pending.promise) });
+    const preview = container.querySelector(".location-preview")!;
+    expect(preview.getAttribute("data-state")).toBe("idle");
+    await act(async () => openButton(container).click());
+    expect(preview.getAttribute("data-state")).toBe("opening");
+    expect(openButton(container).getAttribute("aria-disabled")).toBe("true");
+    await act(async () => { pending.resolve(err(new NativeCapabilityError("native"))); });
+    expect(preview.getAttribute("data-state")).toBe("failed");
+    expect(container.querySelector("[role=alert]")?.textContent).toBe("No pudimos abrir Maps. Probá de nuevo.");
+  });
+});
