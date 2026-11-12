@@ -139,6 +139,9 @@ export const prepareUpdate = (draft: PostDraft, original: Saved, resolved?: Reso
     ...(links.transportId !== (original.transportId ?? null) ? { transportId: links.transportId } : {}), ...newActivityInput(draft, resolved, true), ...photosInput(draft), ...expenseInput(draft, savedExpense, savedView) };
 };
 
+/** An edit by someone who is not the author (T124): only the expense travels, never content, links, photos or a new activity. `{}` means nothing to save. */
+export const prepareExpenseOnlyUpdate = (draft: PostDraft, savedExpense?: SavedExpense, savedView?: SavedExpenseView): PostInput => expenseInput(draft, savedExpense, savedView);
+
 const idParam = (search: string, name: string): string | undefined => {
   const value = new URLSearchParams(search).get(name);
   return value !== null && /^[0-9a-f]{24}$/.test(value) ? value : undefined;
