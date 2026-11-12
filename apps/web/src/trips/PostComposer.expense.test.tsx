@@ -529,3 +529,24 @@ describe("PostComposer payments and shares (T84)", () => {
     expect(document.body.textContent).toContain("Descartar cambios");
   });
 });
+
+describe("expense dates presentation", () => {
+  it("wraps the attributed date and the publication date in their own spans and keeps the line text", async () => {
+    const { container } = await render(editPath(withExpenseId), { itineraryGet: vi.fn().mockImplementation(async () => {
+      const value = itineraryFixture();
+      value.expenses[0] = { ...value.expenses[0]!, source: "activity", occurredAt: "2026-09-26T15:00:00.000Z", publishedAt: "2026-09-25T13:00:00.123Z" };
+      return { ok: true, value };
+    }) });
+    const line = container.querySelector<HTMLElement>("#post-expense-attribution")!;
+    const dates = Array.from(line.querySelectorAll(".expense-date")).map((item) => item.textContent ?? "");
+    expect(dates).toHaveLength(2);
+    expect(dates[0]).toMatch(/^26 .* 2026$/);
+    expect(dates[1]).toMatch(/^25 .* 2026$/);
+    expect(line.textContent).toMatch(/^Gasto atribuido al 26 .* 2026 \(actividad\) · Publicado el 25 .* 2026$/);
+  });
+  it("the expense and split buttons are secondary and keep their names", async () => {
+    const { container } = await render(editPath(withExpenseId));
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('section[aria-label="Gasto"] button'));
+    for (const name of ["expense", "split"]) expect(buttons.find((item) => item.name === name)?.classList.contains("ui-button--secondary"), name).toBe(true);
+  });
+});
