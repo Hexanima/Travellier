@@ -11,8 +11,11 @@ import { newObjectId } from "./new-object-id.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
-import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { commentLength } from "./comment-text.js";
+import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
+import { canEditContent } from "./authorship.js";
+import type { TripMembersApi } from "./trip-members-api.js";
 import { POST_DESCRIPTION_MAX, descriptionTooLong } from "./post-text-limits.js";
 import { linkSummary } from "./post-link-options.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
@@ -26,6 +29,8 @@ import "./expenses.css";
 
 /** `photos` is optional: without it the composer shows no photo section (nothing about photos reaches the form). */
 export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" | "get">; itinerary: Pick<TripItineraryApi, "get">; timeZone?: string; photos?: PostPhotoDeps;
+  /** Only read when editing: who the author is decides whether the content is editable (T125). Without it «Editar» is offered and the server decides. */
+  members?: Pick<TripMembersApi, "list">;
   /** Creates the retry id of a publication attempt (24 lowercase hex). Injectable for tests; defaults to `newObjectId`. */
   newId?: () => string };
 /** A conflict answer waits here for an explicit decision: the same entry is resent with the confirmation, or dropped on cancel. */
@@ -47,6 +52,8 @@ const expenseFieldMessage = (field: string, code: string): string | undefined =>
   if (field === "expense.currency" && (code === "invalid" || code === "required")) return "Elegí la moneda del gasto.";
   return field.startsWith("expense.") ? "No pudimos guardar el gasto. Revisá sus datos." : undefined;
 };
+const lockedNotice = "Solo el autor puede editar el contenido; podés editar el gasto y el reparto.";
+const authorOnlyMessage = "Solo el autor puede editar el contenido de este recuerdo. Tu borrador se conserva.";
 const missingContentMessage = "Escribí un texto o agregá una ubicación.";
 const missingContentWithPhotosMessage = "Escribí un texto, agregá una ubicación o elegí una foto.";
 const fieldMessages: Record<string, string> = { description: "Revisá el texto del recuerdo.", mapsUrl: "Revisá el link de la ubicación." };
@@ -73,12 +80,12 @@ const parentLabelOf = (state: unknown) => { const label = typeof state === "obje
 /** Presentation only: the title of the activity sent by its dialog (the id is what travels). */
 const activityLabelOf = (state: unknown) => { const label = typeof state === "object" && state !== null ? (state as { activityLabel?: unknown }).activityLabel : undefined; return typeof label === "string" && label.trim() !== "" ? label : undefined; };
 
-export function PostComposer({ posts, itinerary, photos, newId, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
+export function PostComposer({ posts, itinerary, photos, members, newId, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostComposerProps) {
   const { tripId, postId } = useParams();
-  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} photos={photos} newId={newId ?? newObjectId} timeZone={timeZone} />;
+  return <Composer key={`${tripId}/${postId ?? "new"}`} tripId={tripId} postId={postId} posts={posts} itinerary={itinerary} photos={photos} members={members} newId={newId ?? newObjectId} timeZone={timeZone} />;
 }
 
-function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }: Omit<PostComposerProps, "timeZone" | "newId"> & { timeZone: string; newId: () => string; tripId?: string; postId?: string }) {
+function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone, newId }: Omit<PostComposerProps, "timeZone" | "newId"> & { timeZone: string; newId: () => string; tripId?: string; postId?: string }) {
   const navigate = useNavigate();
   const location = useLocation();
   const handle = usePostDraft(draftKeyFor({ postId, search: location.search }));
@@ -120,6 +127,15 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
   const keepRef = useRef<HTMLButtonElement>(null);
   const listing = `/trips/${tripId}/memories`;
   const existing = loaded.kind === "ready" ? loaded.post : undefined;
+  // Editing only: the author decides who edits the content (T124). The form never waits for this read; a failed one leaves everything editable.
+  const [people, setPeople] = useState<PhotoPeople>(unknownPeople);
+  useEffect(() => {
+    if (!postId || !tripId || !members) return;
+    let cancelled = false;
+    void loadPeople(members, tripId).then((result) => { if (!cancelled) setPeople(result); });
+    return () => { cancelled = true; };
+  }, [postId, tripId, members]);
+  const contentLocked = existing !== undefined && people.loaded && !canEditContent(people, existing.authorId);
 
   useEffect(() => {
     if (!postId) return;
@@ -269,13 +285,15 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
     }
   };
   const unavailable = (kind: string) => kind === "not-found" || kind === "forbidden";
+  /** What a failed save blocks: when editing, a 403 is about authorship (the form stays with its draft), never «no longer available». */
+  const blocksSave = (kind: string) => kind === "not-found" || (kind === "forbidden" && !existing);
   /** What the person is told when the photos did not finish uploading; true means every photo is ready to be sent. */
   const settleUpload = (outcome: UploadOutcome, publishing: boolean): boolean => {
     if (outcome.kind === "ready") return true;
     if (outcome.kind === "aborted") return false;
     const unsaved = !publishing ? "" : existing ? " El recuerdo no cambió." : " El recuerdo no se publicó.";
     if (outcome.kind === "error") {
-      if (unavailable(outcome.error.kind) || outcome.error.kind === "unauthorized") fail(outcome.error);
+      if (blocksSave(outcome.error.kind) || outcome.error.kind === "forbidden" || outcome.error.kind === "unauthorized") fail(outcome.error);
       // A validation failure of the reservation already marked each photo it names (by its place in the reserved batch): point to them.
       else if (outcome.error.kind === "validation" && (outcome.error.fields?.length ?? 0) > 0) setPhotoError(`${invalidReservedMessage}${unsaved}`);
       else setPhotoError(`No pudimos subir las fotos. Revisá tu conexión e intentá nuevamente.${unsaved}`);
@@ -321,6 +339,14 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
     event.preventDefault();
     if (savingRef.current || photosCtl.isBusy() || !tripId) return;
     setMessage(""); setFailure(undefined); setErrors({}); setSplitErrors(undefined); setMissingContent(false); setNotice(""); setPhotoError(undefined);
+    // Not the author: only the expense travels; the content, links and photos of the draft are never read (T125).
+    if (existing && contentLocked) {
+      if ((draft.extras.expense !== null || splitTouched) && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
+      const input = prepareExpenseOnlyUpdate(draft, savedExpense, storedView);
+      if (Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
+      await send(input, undefined);
+      return;
+    }
     // Creating always needs text, a location or a photo; editing only when the text or the location changed and nothing is left, counting the
     // photos already published (an existing memory can be relinked without them).
     const textChanged = draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl;
@@ -440,7 +466,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;
 
-  const blocked = loaded.kind === "error" ? loaded.error : failure && (unavailable(failure.kind) || failure.kind === "unauthorized") ? failure : undefined;
+  const blocked = loaded.kind === "error" ? loaded.error : failure && (blocksSave(failure.kind) || failure.kind === "unauthorized") ? failure : undefined;
+  const authorOnly = failure?.kind === "forbidden" && existing !== undefined;
   // Creating always carries its id once an input was built; editing only when it creates an activity (a plain PATCH has no id and keeps the old hint).
   const safeRetry = existing ? newActivity !== null && draft.activityAttemptId !== undefined : draft.attemptId !== undefined;
   const photoConflict = failure?.code === "PhotoConflictError";
@@ -461,7 +488,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <header className="itinerary-header">
-        <h1>{postId ? "Editar recuerdo" : "Nuevo recuerdo"}</h1>
+        <h1>{contentLocked ? "Editar gasto del recuerdo" : postId ? "Editar recuerdo" : "Nuevo recuerdo"}</h1>
         <p>Contá lo que viviste. La fecha de publicación la asigna la app.</p>
       </header>
       {loaded.kind === "loading" ? <LoadingState label="Cargando recuerdo…" /> : null}
@@ -484,6 +511,11 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
       </div> : null}
       {loaded.kind === "ready" && !blocked ? <form ref={formRef} className="auth-form post-composer" onSubmit={(event) => void submit(event)} noValidate>
         {existing && published ? <p className="itinerary-secondary">Publicado el <time dateTime={existing.createdAt}>{published.format(new Date(existing.createdAt))}</time></p> : null}
+        {contentLocked ? <section className="activity-detail" aria-label="Contenido del recuerdo">
+          <Feedback>{lockedNotice}</Feedback>
+          <p className="itinerary-post-description">{existing?.description?.trim() ? existing.description : "Recuerdo sin texto."}</p>
+          <LocationPreview value={existing?.mapsUrl ?? null} context="memory" />
+        </section> : <>
         <TextAreaField label="Texto (opcional)" name="description" rows={6} value={draft.values.description} loading={saving} error={missingContent ? photos ? missingContentWithPhotosMessage : missingContentMessage : errors.description}
           onChange={(event) => update("description", event.target.value)} />
         <p className="comment-count">{commentLength(draft.values.description.trim())} / {POST_DESCRIPTION_MAX}</p>
@@ -514,6 +546,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
           {errors.link ? <p className="ui-field__error" id="post-link-error" role="alert">{errors.link}</p> : null}
           {notice ? <Feedback>{notice}</Feedback> : null}
         </section>
+        </>}
         <section className="post-expense-section" aria-label="Gasto">
           <p id="post-expense-summary">{expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
           {attributionStale ? <p id="post-expense-attribution" className="itinerary-secondary">Se recalcula al guardar</p> : null}
@@ -535,7 +568,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, timeZone, newId }:
           {splitErrors ? <Button disabled={saving} onClick={() => openSplit(splitErrors)}>Ajustar pagos y reparto</Button> : null}
         </section>
         {message ? <Feedback>{message}</Feedback> : null}
-        {failure && failure.kind !== "validation" && !photoConflict ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
+        {authorOnly ? <Feedback variant="error" role="alert">{authorOnlyMessage}</Feedback> : null}
+        {failure && failure.kind !== "validation" && !photoConflict && !authorOnly ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
           {(safeRetry || newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${safeRetry ? safeRetryHint : retryHint}` : ""}</Feedback> : null}
         {failure?.kind === "validation" && !missingContent && !errors.description && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>

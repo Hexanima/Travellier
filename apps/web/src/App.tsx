@@ -504,11 +504,11 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         } />
         <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
-          <Route index element={<TripMemoriesScreen posts={tripPosts} />} />
-          <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
+          <Route index element={<TripMemoriesScreen posts={tripPosts} members={tripMembers} />} />
+          <Route path="new" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} members={tripMembers} />} />
           <Route path="photos" element={<TripPhotosScreen members={tripMembers} />} />
           <Route path=":postId" element={<PostDetailScreen posts={tripPosts} members={tripMembers} comments={tripComments} likes={tripLikes} />} />
-          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} />} />
+          <Route path=":postId/edit" element={<PostComposer posts={tripPosts} itinerary={tripItinerary} photos={photoDeps} members={tripMembers} />} />
           <Route path="new/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />
           <Route path="new/activity" element={<SpontaneousActivityForm itinerary={tripItinerary} />} />
           <Route path=":postId/edit/link" element={<PostLinkPicker posts={tripPosts} itinerary={tripItinerary} spontaneousActivity />} />

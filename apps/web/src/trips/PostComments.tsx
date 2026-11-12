@@ -8,7 +8,9 @@ import type { LikeState } from "./trip-like-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import { commentKey, type LikeKey, type LikesController } from "./use-likes.js";
 import { useCommentDraft } from "./use-comment-drafts.js";
+import { canEditContent } from "./authorship.js";
 
+const authorOnlyMessage = "Solo el autor puede editar este comentario. Tu texto se conserva.";
 const sessionExpired = "Tu sesión venció. Volvé a iniciar sesión.";
 const validationText = (error: TripFailure) => {
   const code = error.fields?.find((item) => item.field === "text")?.code;
@@ -16,11 +18,12 @@ const validationText = (error: TripFailure) => {
 };
 type Message = { variant: "error" | "info" | "success"; text: string; login?: boolean };
 /** A failure the server answered definitively: the text is kept and nothing is assumed about what was stored. */
-const definiteFailure = (error: TripFailure, access: string): Message | undefined => {
+const definiteFailure = (error: TripFailure, access: string, forbidden = access): Message | undefined => {
   if (error.kind === "validation") return { variant: "error", text: validationText(error) };
   if (error.kind === "unauthorized") return { variant: "error", text: sessionExpired, login: true };
   if (error.kind === "not-found" && error.code === "CommentNotFoundError") return { variant: "error", text: "Este comentario ya no está disponible." };
-  if (error.kind === "forbidden" || error.kind === "not-found") return { variant: "error", text: access };
+  if (error.kind === "forbidden") return { variant: "error", text: forbidden };
+  if (error.kind === "not-found") return { variant: "error", text: access };
   return undefined;
 };
 /** The only assertive announcement of the panel is the form's own error: the rest (like notices, update warnings) are polite `status`, never `alert` + `aria-live`. */
@@ -77,15 +80,15 @@ export function CommentComposer({ name, label, text, onText, onSubmit, submitLab
   </form>;
 }
 
-type People = { currentUserId?: string; names: Readonly<Record<string, string>> };
+type People = { loaded: boolean; currentUserId?: string; names: Readonly<Record<string, string>> };
 const authorOf = (comment: CommentResponse, people: People) => comment.authorIsFormerMember ? "Ex integrante"
   : comment.authorId === people.currentUserId ? "Vos" : people.names[comment.authorId] ?? "Integrante";
 const focusField = (form: HTMLElement | null) => form?.querySelector("textarea")?.focus();
 
-type ItemProps = { comment: CommentResponse; author: string; format: (iso: string) => string; likes: LikesController;
+type ItemProps = { comment: CommentResponse; author: string; canEdit?: boolean; format: (iso: string) => string; likes: LikesController;
   update: (commentId: string, text: string) => Promise<TripResult<CommentResponse>>; onSaved: (comment: CommentResponse) => void };
 /** One comment with its inline edit: the draft (`edit:<id>`) outlives the component; the server decides who may edit. */
-export function CommentItem({ comment, author, format, likes, update, onSaved }: ItemProps) {
+export function CommentItem({ comment, author, canEdit = true, format, likes, update, onSaved }: ItemProps) {
   const draft = useCommentDraft(`edit:${comment.id}`);
   const [editing, setEditing] = useState(draft.text !== undefined);
   const [saving, setSaving] = useState(false);
@@ -121,7 +124,7 @@ export function CommentItem({ comment, author, format, likes, update, onSaved }:
         if (alive.current) { setMessage(undefined); focus.current = form.current?.contains(document.activeElement) ? "button" : undefined; setEditing(false); }
         return;
       }
-      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.") ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
+      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.", authorOnlyMessage) ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
     } catch {
       if (alive.current) setMessage({ variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
     } finally {
@@ -138,10 +141,10 @@ export function CommentItem({ comment, author, format, likes, update, onSaved }:
       <MessageView message={message} />
     </CommentComposer> : <>
       <p className="comment-text">{comment.text}</p>
-      <div className="comment-actions">
+      {canEdit ? <div className="comment-actions">
         <button type="button" className="ui-button" ref={editButton} aria-label={`Editar comentario de ${author}`}
           onClick={() => { focus.current = "field"; setEditing(true); }}>Editar</button>
-      </div>
+      </div> : null}
     </>}
     <LikeButton likeKey={key} state={state} busy={likes.busy(key)} disabled={likes.status !== "ready" || likes.blocked} notice={likes.notice(key)}
       onToggle={() => void likes.toggle(key)} />
@@ -158,7 +161,7 @@ const sorted = (items: readonly CommentResponse[]) => [...new Map(items.map((ite
  */
 export function CommentsPanel({ tripId, postId, comments, members, likes, format }: PanelProps) {
   const [list, setList] = useState<ListState>({ kind: "loading" });
-  const [people, setPeople] = useState<People>({ names: {} });
+  const [people, setPeople] = useState<People>({ loaded: false, names: {} });
   const [updating, setUpdating] = useState(false);
   const [updateFailed, setUpdateFailed] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -192,7 +195,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
     void (async () => {
       try {
         const result = await latest.current.members.list(tripId);
-        if (alive.current && result.ok) setPeople({ currentUserId: result.value.currentUserId, names: Object.fromEntries(result.value.members.flatMap((member) => member.name ? [[member.userId, member.name]] : [])) });
+        if (alive.current && result.ok) setPeople({ loaded: true, currentUserId: result.value.currentUserId, names: Object.fromEntries(result.value.members.flatMap((member) => member.name ? [[member.userId, member.name]] : [])) });
       } catch { /* a failed members list never blocks the comments */ }
     })();
     return () => { alive.current = false; };
@@ -256,7 +259,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
       {updateFailed ? <Feedback variant="error" role="status">No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.</Feedback> : null}
       <Button onClick={() => void reload()} disabled={updating}>Actualizar comentarios</Button>
       {list.items.length === 0 ? <p className="itinerary-secondary">Todavía no hay comentarios.</p> : <ul className="comment-list" aria-label="Comentarios">
-        {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} format={format} likes={likes} update={update} onSaved={saved} />)}
+        {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} canEdit={canEditContent(people, comment.authorId, comment.authorIsFormerMember)} format={format} likes={likes} update={update} onSaved={saved} />)}
       </ul>}
       <CommentComposer name="comment-new" label="Escribí un comentario" text={text} onText={draft.setText} onSubmit={() => void publish()} submitLabel="Comentar"
         busyLabel="Publicando…" busy={creating} emptyHint="Escribí un comentario para poder publicarlo." formRef={form}>

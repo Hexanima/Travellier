@@ -3,7 +3,7 @@ import { addPhotos, markPhoto, movePhoto, removePhoto, type PhotoDraftItem } fro
 import { MAX_PHOTOS } from "./photo-limits.js";
 import type { SplitDraft } from "./expense-split.js";
 import type { SavedExpenseView } from "./trip-post-api.js";
-import { clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareUpdate, setExpense, setLink, setSplit, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
+import { clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setSplit, setNewActivity, setTransport, type NewActivityDraft, type PostDraft, type PostLink } from "./post-draft.js";
 
 const P = "0000000000000000000000a1", A = "0000000000000000000000b1", T = "0000000000000000000000c1";
 const draft = (description: string, mapsUrl = "", link: PostLink | null = null, transportId: string | null = null, newActivity: NewActivityDraft | null = null): PostDraft =>
@@ -314,6 +314,14 @@ describe("post draft expense", () => {
     expect(prepareUpdate(withExpense(expense), original, undefined, stored)).toEqual({});
     // Untouched (null) never removes the saved expense.
     expect(prepareUpdate(withExpense(null), original, undefined, stored)).toEqual({});
+  });
+  it("prepares an expense-only update that never carries content, links, photos or a new activity (T125)", () => {
+    const stored = { totalAmount: 25.5, currency: "ARS" as const, breakdown: null };
+    const changed = { ...withExpense({ ...expense, amount: "30" }, draft("Texto cambiado", "https://maps.test/otro", post(), T)), };
+    const noisy: PostDraft = { ...changed, extras: { ...changed.extras, photos: [{ localId: "p1", status: "uploaded", key: "k1" } as PhotoDraftItem] } };
+    expect(prepareExpenseOnlyUpdate(noisy, stored, undefined)).toEqual({ expense: { totalAmount: 30 } });
+    expect(prepareExpenseOnlyUpdate(withExpense(expense, draft("Otro texto")), stored, undefined)).toEqual({});
+    expect(prepareExpenseOnlyUpdate(draft("Otro texto", "x", post()), undefined, undefined)).toEqual({});
   });
   it("combines the expense with text and a new activity in the same input", () => {
     const resolved = { scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: null };

@@ -10,6 +10,8 @@ import type { TripLikeApi } from "./trip-like-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { PostDetail, PostSummary, TripPostApi } from "./trip-post-api.js";
 import { useLikes } from "./use-likes.js";
+import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
+import { canEditContent } from "./authorship.js";
 import "./itinerary.css";
 
 export type PostDetailScreenProps = { posts: Pick<TripPostApi, "get">; members: Pick<TripMembersApi, "list">; comments: TripCommentApi;
@@ -115,6 +117,14 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
   const { post, parent, children, rootActivityId } = detail;
   const likes = useLikes(tripId, postId, interaction.likes);
   const [panel, setPanel] = useState<Panel>("children");
+  // Only the author edits the content; the others keep the expense. The detail never waits for this read (a failed one leaves «Editar»).
+  const [people, setPeople] = useState<PhotoPeople>(unknownPeople);
+  const { members } = interaction;
+  useEffect(() => {
+    let cancelled = false;
+    void loadPeople(members, tripId).then((loaded) => { if (!cancelled) setPeople(loaded); });
+    return () => { cancelled = true; };
+  }, [members, tripId]);
   const tabs = useRef<Record<Panel, HTMLButtonElement | null>>({ children: null, comments: null });
   const label = excerpt(post.description, 80);
   const here = `/trips/${tripId}/memories/${postId}`;
@@ -145,7 +155,9 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
       <div className="memory-actions">
         <Link className="trips-settings-link" to={`/trips/${tripId}/memories/new?parentPostId=${post.id}`}
           state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo"), ...(label ? { parentLabel: label } : {}) }}>Continuar recuerdo</Link>
-        <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo") }}>Editar</Link>
+        {canEditContent(people, post.authorId)
+          ? <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo") }}>Editar</Link>
+          : <Link className="trips-settings-link" to={`${here}/edit`} state={{ origin: buildOrigin({ pathname: here, search: "" }, "recuerdo"), focus: "expense" }}>Editar gasto</Link>}
       </div>
     </section>
     {parent || post.parentPostId ? <section className="activity-detail" aria-labelledby="memory-previous-title">

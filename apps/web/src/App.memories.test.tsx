@@ -466,3 +466,31 @@ describe("App memories detail route", () => {
     expect(container.querySelector("main h2")?.textContent).toBe("Itinerario");
   });
 });
+
+describe("App memories authorship (T125)", () => {
+  beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); window.scrollTo = vi.fn() as unknown as typeof window.scrollTo; });
+  const viewer = itineraryId(21);
+  const members = () => ({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: viewer, members: [
+    { id: itineraryId(60), userId: itineraryId(20), name: "Ana", role: "admin", joinedAt: "2026-01-01T00:00:00.000Z" },
+    { id: itineraryId(61), userId: viewer, name: "Beto", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } }) });
+  it("a member who is not the author goes from the list to «Editar gasto», saves only the expense and returns to the list", async () => {
+    const update = vi.fn().mockResolvedValue({ ok: true, value: saved() });
+    const list = vi.fn().mockResolvedValue({ ok: true, value: [saved()] });
+    const get = vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
+    const itinerary = { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) };
+    const container = await render(`/trips/${tripId}/memories`, { auth, sessionStorage: storage(true), members: members(), itinerary, posts: { list, get, update } });
+    const links = Array.from(container.querySelectorAll(`a[href="/trips/${tripId}/memories/${postId}/edit"]`));
+    expect(links.map((item) => item.textContent)).toEqual(["Editar gasto"]);
+    await click(links[0]!);
+    expect(container.querySelector("h1")?.textContent).toBe("Editar gasto del recuerdo");
+    expect(container.querySelector('[name="description"]')).toBeNull();
+    await click(container.querySelector('button[name="expense"]'));
+    await type(container, "amount", "10");
+    const select = container.querySelector('select[name="currency"]') as HTMLSelectElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, "USD"); select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Aceptar") ?? null);
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { expense: { totalAmount: 10, currency: "USD" } });
+    expect(container.querySelector("main h2")?.textContent).toBe("Recuerdos");
+  });
+});

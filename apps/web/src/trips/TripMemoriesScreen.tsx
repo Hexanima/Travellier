@@ -10,12 +10,16 @@ import { PostDraftsProvider } from "./use-post-drafts.js";
 import { CommentDraftsProvider } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
 import { useInTripShell } from "./trip-state.js";
+import type { TripMembersApi } from "./trip-members-api.js";
+import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
+import { canEditContent } from "./authorship.js";
 import { useTripRefreshLoader } from "./trip-refresh.js";
 import { sameValue } from "./same-value.js";
 import { Heading } from "./Heading.js";
 import "./itinerary.css";
 
-export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; timeZone?: string };
+/** `members` is optional: without it nobody is known and «Editar» is offered to all (the server decides). */
+export type TripMemoriesScreenProps = { posts: Pick<TripPostApi, "list">; members?: Pick<TripMembersApi, "list">; timeZone?: string };
 type LoadState = { kind: "loading" } | { kind: "ready"; posts: PostResponse[] } | { kind: "error"; error: TripFailure };
 /** `*-activity` means an activity was created together with the post; `going` is true only when the author's participation came back valid. */
 type Notice = "created" | "updated" | "created-activity" | "linked-activity";
@@ -57,12 +61,12 @@ const savedFrom = (state: unknown, tripId: string | undefined): Saved | undefine
   return { post: post as PostResponse, notice: notice as Notice, going: going === true };
 };
 
-export function TripMemoriesScreen({ posts, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripMemoriesScreenProps) {
+export function TripMemoriesScreen({ posts, members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripMemoriesScreenProps) {
   const { tripId } = useParams();
-  return <MemoriesContent key={tripId} tripId={tripId} posts={posts} timeZone={timeZone} />;
+  return <MemoriesContent key={tripId} tripId={tripId} posts={posts} members={members} timeZone={timeZone} />;
 }
 
-function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & { tripId?: string }) {
+function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScreenProps & { tripId?: string }) {
   const inShell = useInTripShell();
   const location = useLocation();
   const navigate = useNavigate();
@@ -72,6 +76,14 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
   const localPost = useRef(saved?.post);
   const [state, setState] = useState<LoadState>(saved ? { kind: "ready", posts: [saved.post] } : { kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  // Who the author is decides «Editar»; the listing never waits for it (a failed read leaves «Editar» for all).
+  const [people, setPeople] = useState<PhotoPeople>(unknownPeople);
+  useEffect(() => {
+    if (!tripId || !members) return;
+    let cancelled = false;
+    void loadPeople(members, tripId).then((loaded) => { if (!cancelled) setPeople(loaded); });
+    return () => { cancelled = true; };
+  }, [tripId, members]);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
   useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -163,7 +175,9 @@ function MemoriesContent({ tripId, posts, timeZone }: TripMemoriesScreenProps & 
           <p className="itinerary-post-description"><PostLink tripId={tripId ?? ""} postId={post.id} anchor={memoryAnchor(post.id)} label="diario">
             {post.description ?? "Recuerdo sin texto."}</PostLink></p>
           <p className="itinerary-secondary">Publicado <time dateTime={post.createdAt}>{publication.format(new Date(post.createdAt))}</time></p>
-          <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
+          {canEditContent(people, post.authorId)
+            ? <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`}>Editar</Link>
+            : <Link className="trips-settings-link" to={`/trips/${tripId}/memories/${post.id}/edit`} state={{ focus: "expense" }}>Editar gasto</Link>}
         </ListItem>)}
       </List> : null}
   </div>;

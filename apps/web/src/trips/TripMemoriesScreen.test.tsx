@@ -13,12 +13,12 @@ afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => 
 const tripId = itineraryId(1);
 const post = (n: number, createdAt: string, description: string | null = `Recuerdo ${n}`): PostResponse => ({ id: itineraryId(n), tripId, authorId: itineraryId(20),
   description, mapsUrl: null, activityId: null, parentPostId: null, transportId: null, createdAt });
-async function render(list: ReturnType<typeof vi.fn>, state?: unknown) {
+async function render(list: ReturnType<typeof vi.fn>, state?: unknown, members?: ReturnType<typeof vi.fn>) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[{ pathname: `/trips/${tripId}/memories`, state }]}><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
-      <Route index element={<TripMemoriesScreen posts={{ list }} timeZone="America/Argentina/Buenos_Aires" />} />
+      <Route index element={<TripMemoriesScreen posts={{ list }} {...(members ? { members: { list: members } } : {})} timeZone="America/Argentina/Buenos_Aires" />} />
     </Route>
   </Routes></MemoryRouter>));
   return container;
@@ -238,5 +238,30 @@ describe("TripMemoriesScreen detail links and restoration", () => {
       const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }), { notice: "other" });
       expect(container.textContent).not.toContain(text);
     });
+  });
+});
+
+describe("TripMemoriesScreen authorship (T125)", () => {
+  const author = itineraryId(20), someone = itineraryId(21);
+  const people = (currentUserId: string) => vi.fn().mockResolvedValue({ ok: true, value: { currentUserId, members: [{ userId: author, name: "Ana" }, { userId: someone, name: "Beto" }] } });
+  const editLink = (container: HTMLElement, n: number) => container.querySelector<HTMLAnchorElement>(`a[href="/trips/${tripId}/memories/${itineraryId(n)}/edit"]`);
+  const list = () => vi.fn().mockResolvedValue({ ok: true, value: [post(11, "2026-01-02T10:00:00.000Z")] });
+  it("offers «Editar» to the author", async () => {
+    const container = await render(list(), undefined, people(author));
+    expect(editLink(container, 11)?.textContent).toBe("Editar");
+  });
+  it("offers only «Editar gasto» (same route) to another member", async () => {
+    const container = await render(list(), undefined, people(someone));
+    expect(editLink(container, 11)?.textContent).toBe("Editar gasto");
+    expect(Array.from(container.querySelectorAll("a")).some((item) => item.textContent === "Editar")).toBe(false);
+  });
+  it("offers only «Editar gasto» to a former member of the trip (not listed)", async () => {
+    const container = await render(list(), undefined, people(itineraryId(22)));
+    expect(editLink(container, 11)?.textContent).toBe("Editar gasto");
+  });
+  it("keeps the listing usable and offers «Editar» when the member list fails", async () => {
+    const container = await render(list(), undefined, vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } }));
+    expect(texts(container)).toEqual(["Recuerdo 11"]);
+    expect(editLink(container, 11)?.textContent).toBe("Editar");
   });
 });

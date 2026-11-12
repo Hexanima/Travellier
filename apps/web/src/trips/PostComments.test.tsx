@@ -17,6 +17,8 @@ afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => 
 const tripId = itineraryId(1), postId = itineraryId(2), me = itineraryId(20), other = itineraryId(21), stranger = itineraryId(22);
 const comment = (n: number, extra: Partial<CommentResponse> = {}): CommentResponse => ({ id: itineraryId(n), tripId, postId, authorId: other, text: `Comentario ${n}`,
   createdAt: `2026-01-02T15:${String(n).padStart(2, "0")}:00.000Z`, authorIsFormerMember: false, ...extra });
+/** Edit tests act on the comments of the current user: «Editar» is offered only to the author (T125). */
+const own = (n: number, extra: Partial<CommentResponse> = {}): CommentResponse => comment(n, { authorId: me, ...extra });
 const ok = <T,>(value: T) => ({ ok: true as const, value });
 const fail = (kind: string, extra: object = {}) => ({ ok: false as const, error: { kind, ...extra } });
 const summary = (extra: Partial<LikesSummary> = {}): LikesSummary => ({ post: { count: 0, likedByMe: false }, comments: {}, ...extra });
@@ -336,8 +338,8 @@ describe("comments panel: create", () => {
 
 describe("comments panel: edit", () => {
   it("opens the field with the current text and replaces the comment in place keeping the order and the focus on Editar", async () => {
-    const update = vi.fn().mockResolvedValue(ok(comment(6, { text: "Corregido" })));
-    const api = apis([comment(5), comment(6), comment(7)], { comments: { update } });
+    const update = vi.fn().mockResolvedValue(ok(own(6, { text: "Corregido" })));
+    const api = apis([own(5), own(6), own(7)], { comments: { update } });
     const container = await render(api);
     await click(button(item(container, 6), "Editar"));
     const edit = field(container, `comment-edit-${itineraryId(6)}`);
@@ -352,7 +354,7 @@ describe("comments panel: edit", () => {
     expect(document.activeElement).toBe(button(item(container, 6), "Editar"));
   });
   it("discards the changes on cancel and reopens with the original text", async () => {
-    const api = apis([comment(5)]);
+    const api = apis([own(5)]);
     const container = await render(api);
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "otra cosa");
@@ -364,7 +366,7 @@ describe("comments panel: edit", () => {
     expect(api.comments.update).not.toHaveBeenCalled();
   });
   it("does not call the API when nothing changed", async () => {
-    const api = apis([comment(5)]);
+    const api = apis([own(5)]);
     const container = await render(api);
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "Comentario 5  ");
@@ -373,7 +375,7 @@ describe("comments panel: edit", () => {
     expect(field(container, `comment-edit-${itineraryId(5)}`)).toBeNull();
   });
   it("blocks saving an empty or too long text", async () => {
-    const container = await render(apis([comment(5)]));
+    const container = await render(apis([own(5)]));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "   ");
     expect(button(item(container, 5), "Guardar")?.disabled).toBe(true);
@@ -382,7 +384,7 @@ describe("comments panel: edit", () => {
   });
   it("keeps the edit draft and shows the validation on a 422", async () => {
     const update = vi.fn().mockResolvedValue(fail("validation", { fields: [{ field: "text", code: "too_long", message: "x" }] }));
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const container = await render(apis([own(5)], { comments: { update } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     await click(button(item(container, 5), "Guardar"));
@@ -391,7 +393,7 @@ describe("comments panel: edit", () => {
   });
   it("says the comment is no longer available on CommentNotFoundError", async () => {
     const update = vi.fn().mockResolvedValue(fail("not-found", { code: "CommentNotFoundError" }));
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const container = await render(apis([own(5)], { comments: { update } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     await click(button(item(container, 5), "Guardar"));
@@ -399,8 +401,8 @@ describe("comments panel: edit", () => {
     expect(field(container, `comment-edit-${itineraryId(5)}`)?.value).toBe("nuevo");
   });
   it("keeps the text and lets the same save be retried after a network failure", async () => {
-    const update = vi.fn().mockResolvedValueOnce(fail("network")).mockResolvedValueOnce(ok(comment(5, { text: "nuevo" })));
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const update = vi.fn().mockResolvedValueOnce(fail("network")).mockResolvedValueOnce(ok(own(5, { text: "nuevo" })));
+    const container = await render(apis([own(5)], { comments: { update } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     await click(button(item(container, 5), "Guardar"));
@@ -414,24 +416,24 @@ describe("comments panel: edit", () => {
   it("sends once when Guardar is pressed twice quickly", async () => {
     const pending = deferred<unknown>();
     const update = vi.fn().mockReturnValue(pending.promise);
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const container = await render(apis([own(5)], { comments: { update } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     await clickTwice(button(item(container, 5), "Guardar"));
     expect(update).toHaveBeenCalledTimes(1);
     expect(item(container, 5).querySelector("form button[type=submit]")?.getAttribute("aria-busy")).toBe("true");
-    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    await act(async () => pending.resolve(ok(own(5, { text: "nuevo" }))));
   });
   it("keeps the edit open with the text added while saving", async () => {
     const pending = deferred<unknown>();
     const update = vi.fn().mockReturnValue(pending.promise);
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const container = await render(apis([own(5)], { comments: { update } }));
     const name = `comment-edit-${itineraryId(5)}`;
     await click(button(item(container, 5), "Editar"));
     await type(container, name, "nuevo");
     await click(button(item(container, 5), "Guardar"));
     await type(container, name, "nuevo y más");
-    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    await act(async () => pending.resolve(ok(own(5, { text: "nuevo" }))));
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, itineraryId(5), "nuevo");
     expect(container.querySelectorAll("[data-comment]")).toHaveLength(1);
     expect(field(container, name)?.value).toBe("nuevo y más");
@@ -441,19 +443,19 @@ describe("comments panel: edit", () => {
   it("closes and clears the edit when nothing was typed while saving", async () => {
     const pending = deferred<unknown>();
     const update = vi.fn().mockReturnValue(pending.promise);
-    const container = await render(apis([comment(5)], { comments: { update } }));
+    const container = await render(apis([own(5)], { comments: { update } }));
     const name = `comment-edit-${itineraryId(5)}`;
     await click(button(item(container, 5), "Editar"));
     await type(container, name, "nuevo");
     await click(button(item(container, 5), "Guardar"));
-    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    await act(async () => pending.resolve(ok(own(5, { text: "nuevo" }))));
     expect(field(container, name)).toBeNull();
     expect(order(container)).toEqual(["nuevo"]);
     await click(button(item(container, 5), "Editar"));
     expect(field(container, name)?.value).toBe("nuevo");
   });
   it("allows editing several comments at once and keeps each draft", async () => {
-    const container = await render(apis([comment(5), comment(6)]));
+    const container = await render(apis([own(5), own(6)]));
     await click(button(item(container, 5), "Editar"));
     await click(button(item(container, 6), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "uno");
@@ -462,7 +464,7 @@ describe("comments panel: edit", () => {
     expect(field(container, `comment-edit-${itineraryId(6)}`)?.value).toBe("dos");
   });
   it("restores an open edit draft when the panel is remounted", async () => {
-    const container = await render(apis([comment(5)]));
+    const container = await render(apis([own(5)]));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "a medias");
     await click(container.querySelector('[data-action="toggle"]'));
@@ -568,7 +570,7 @@ describe("likes", () => {
 describe("focus stays on the pressed button while busy and afterwards", () => {
   const focused = (element: HTMLElement | undefined | null) => { expect(element).toBeTruthy(); element!.focus(); expect(document.activeElement).toBe(element); return element!; };
   const stays = (element: HTMLElement) => { expect(document.activeElement).toBe(element); expect(element.getAttribute("aria-disabled")).toBe("true"); expect(element.hasAttribute("disabled")).toBe(false); };
-  const withLikes = (over: Record<string, unknown>) => apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false },
+  const withLikes = (over: Record<string, unknown>) => apis([own(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false },
     comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }))), ...over } });
   it.each([["post", "setPostLike"], [`comment:${itineraryId(5)}`, "setCommentLike"]])("like %s: pending, error and confirmation", async (key, method) => {
     const pending = deferred<unknown>();
@@ -598,7 +600,7 @@ describe("focus stays on the pressed button while busy and afterwards", () => {
   });
   it("Guardar: pending and after a failure", async () => {
     const pending = deferred<unknown>();
-    const container = await render(apis([comment(5)], { comments: { update: vi.fn().mockReturnValueOnce(pending.promise) } }));
+    const container = await render(apis([own(5)], { comments: { update: vi.fn().mockReturnValueOnce(pending.promise) } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     const save = focused(button(item(container, 5), "Guardar"));
@@ -611,14 +613,14 @@ describe("focus stays on the pressed button while busy and afterwards", () => {
 });
 
 describe("the focus is only moved after a success when it was still inside the form", () => {
-  const withLike = (over: Record<string, unknown>) => apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false } }))) }, ...over });
+  const withLike = (over: Record<string, unknown>) => apis([own(5)], { likes: { summary: vi.fn().mockResolvedValue(ok(summary({ post: { count: 3, likedByMe: false } }))) }, ...over });
   it("publishing from Comentar leaves the focus in the field", async () => {
     const pending = deferred<unknown>();
     const container = await render(withLike({ comments: { create: vi.fn().mockReturnValue(pending.promise) } }));
     await type(container, NEW, "hola");
     button(container, "Comentar")!.focus();
     await click(button(container, "Comentar"));
-    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
+    await act(async () => pending.resolve(ok(own(9, { authorId: me, text: "hola" }))));
     expect(document.activeElement).toBe(field(container, NEW));
   });
   it("publishing does not steal the focus from a like the user moved to meanwhile", async () => {
@@ -628,7 +630,7 @@ describe("the focus is only moved after a success when it was still inside the f
     button(container, "Comentar")!.focus();
     await click(button(container, "Comentar"));
     likeOf(container, "post").focus();
-    await act(async () => pending.resolve(ok(comment(9, { authorId: me, text: "hola" }))));
+    await act(async () => pending.resolve(ok(own(9, { authorId: me, text: "hola" }))));
     expect(document.activeElement).toBe(likeOf(container, "post"));
   });
   it("saving an edit returns the focus to Editar when it was inside the edit", async () => {
@@ -638,7 +640,7 @@ describe("the focus is only moved after a success when it was still inside the f
     await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
     button(item(container, 5), "Guardar")!.focus();
     await click(button(item(container, 5), "Guardar"));
-    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    await act(async () => pending.resolve(ok(own(5, { text: "nuevo" }))));
     expect(document.activeElement).toBe(button(item(container, 5), "Editar"));
   });
   it("saving an edit does not steal the focus from a like the user moved to meanwhile", async () => {
@@ -649,7 +651,7 @@ describe("the focus is only moved after a success when it was still inside the f
     button(item(container, 5), "Guardar")!.focus();
     await click(button(item(container, 5), "Guardar"));
     likeOf(container, "post").focus();
-    await act(async () => pending.resolve(ok(comment(5, { text: "nuevo" }))));
+    await act(async () => pending.resolve(ok(own(5, { text: "nuevo" }))));
     expect(order(container)).toEqual(["nuevo"]);
     expect(document.activeElement).toBe(likeOf(container, "post"));
   });
@@ -659,14 +661,14 @@ describe("Cancelar is ignored while saving", () => {
   const name = `comment-edit-${itineraryId(5)}`;
   async function saving(result: unknown) {
     const pending = deferred<unknown>();
-    const container = await render(apis([comment(5)], { comments: { update: vi.fn().mockReturnValue(pending.promise) } }));
+    const container = await render(apis([own(5)], { comments: { update: vi.fn().mockReturnValue(pending.promise) } }));
     await click(button(item(container, 5), "Editar"));
     await type(container, name, "nuevo");
     await click(button(item(container, 5), "Guardar"));
     return { container, resolve: () => act(async () => pending.resolve(result)) };
   }
   it("is aria-disabled without a real disabled and pressing it keeps the edit and the draft", async () => {
-    const { container, resolve } = await saving(ok(comment(5, { text: "nuevo" })));
+    const { container, resolve } = await saving(ok(own(5, { text: "nuevo" })));
     const cancel = button(item(container, 5), "Cancelar")!;
     cancel.focus();
     expect(cancel.getAttribute("aria-disabled")).toBe("true");
@@ -687,7 +689,7 @@ describe("Cancelar is ignored while saving", () => {
     expect(button(item(container, 5), "Cancelar")?.getAttribute("aria-disabled")).toBeNull();
   });
   it("still cancels and clears when it is not busy", async () => {
-    const container = await render(apis([comment(5)]));
+    const container = await render(apis([own(5)]));
     await click(button(item(container, 5), "Editar"));
     await type(container, name, "otra cosa");
     expect(button(item(container, 5), "Cancelar")?.getAttribute("aria-disabled")).toBeNull();
@@ -765,5 +767,47 @@ describe("a summary read before a confirmed like does not undo it", () => {
     await click(button(container, "Actualizar comentarios"));
     await act(async () => second.resolve(ok(summary({ post: { count: 6, likedByMe: true } }))));
     expect(likeOf(container, "post").textContent).toBe("Quitar me gusta 6");
+  });
+});
+
+describe("comments panel: edit by authorship (T125)", () => {
+  const editButton = (container: HTMLElement, n: number) => Array.from(item(container, n).querySelectorAll("button")).find((node) => node.textContent === "Editar");
+  it("offers «Editar» only on the comments of the current user", async () => {
+    const container = await render(apis([own(5), comment(6), comment(7, { authorId: stranger }), comment(8, { authorIsFormerMember: true, authorId: other })]));
+    expect(editButton(container, 5)).toBeTruthy();
+    expect(editButton(container, 6)).toBeUndefined();
+    expect(editButton(container, 7)).toBeUndefined();
+    expect(editButton(container, 8)).toBeUndefined();
+    // Likes stay available to everyone.
+    expect(item(container, 6).querySelector("[data-like]")).not.toBeNull();
+  });
+  it("does not offer «Editar» on a comment marked as a former member even with the author's id", async () => {
+    const container = await render(apis([own(5, { authorIsFormerMember: true })]));
+    expect(editButton(container, 5)).toBeUndefined();
+  });
+  it("offers «Editar» while the member list is unknown (the server decides)", async () => {
+    const container = await render(apis([comment(5)], { members: { list: vi.fn().mockResolvedValue(fail("server")) } }));
+    expect(editButton(container, 5)).toBeTruthy();
+  });
+  it("on a 403 shows the authorship message as an alert, keeps the field and the text and allows retrying", async () => {
+    const update = vi.fn().mockResolvedValueOnce(fail("forbidden")).mockResolvedValueOnce(ok(own(5, { text: "nuevo" })));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    const alert = item(container, 5).querySelector('[role="alert"]');
+    expect(alert?.textContent).toBe("Solo el autor puede editar este comentario. Tu texto se conserva.");
+    expect(field(container, `comment-edit-${itineraryId(5)}`)?.value).toBe("nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(order(container)).toEqual(["nuevo"]);
+  });
+  it("keeps the previous message for a comment that no longer exists", async () => {
+    const update = vi.fn().mockResolvedValue(fail("not-found"));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(item(container, 5).querySelector('[role="alert"]')?.textContent).toBe("Ya no podés editar este comentario.");
   });
 });
