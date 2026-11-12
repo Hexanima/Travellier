@@ -8,6 +8,8 @@ export type UploadTarget = { key: string; uploadUrl: string; headers: Record<str
 export type TripPhotoApi = {
   /** Reserves one key per file (1 to 10). Unused keys stay orphaned on the server until its sweep removes them. */
   reserve: (tripId: string, files: readonly PhotoFileDescriptor[]) => Promise<TripResult<UploadTarget[]>>;
+  /** How many photos a post already has published. Only the amount is kept: the signed read urls are never stored. */
+  countForPost: (tripId: string, postId: string) => Promise<TripResult<number>>;
 };
 
 type Raw = { ok: true; value: unknown } | { ok: false; error: ApiClientError };
@@ -25,7 +27,7 @@ const parseTarget = (value: unknown, tripId: string): UploadTarget | undefined =
   return Number.isFinite(expiresAt) ? { key: value.key, uploadUrl: value.uploadUrl, headers: { ...value.headers }, expiresAt } : undefined;
 };
 
-export const createTripPhotoApi = (client: Pick<HttpClient, "post">): TripPhotoApi => ({
+export const createTripPhotoApi = (client: Pick<HttpClient, "post" | "get">): TripPhotoApi => ({
   reserve: async (tripId, files) => {
     const result: Raw = await client.post<unknown>(`/trips/${encodeURIComponent(tripId)}/photo-uploads`,
       { files: files.map(({ contentType, sizeBytes }) => ({ contentType, sizeBytes })) });
@@ -33,5 +35,12 @@ export const createTripPhotoApi = (client: Pick<HttpClient, "post">): TripPhotoA
     if (!isRecord(result.value) || !Array.isArray(result.value.uploads) || result.value.uploads.length !== files.length) return serverFailure;
     const targets = result.value.uploads.map((item) => parseTarget(item, tripId));
     return targets.every((item) => item !== undefined) && new Set(targets.map((item) => item.key)).size === targets.length ? { ok: true, value: targets } : serverFailure;
+  },
+  countForPost: async (tripId, postId) => {
+    const result: Raw = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}/posts/${encodeURIComponent(postId)}/photos`);
+    if (!result.ok) return interactionFailure(result.error);
+    if (!isRecord(result.value) || !Array.isArray(result.value.photos)) return serverFailure;
+    return result.value.photos.every((item) => isRecord(item) && typeof item.id === "string" && /^[0-9a-f]{24}$/.test(item.id))
+      ? { ok: true, value: result.value.photos.length } : serverFailure;
   },
 });
