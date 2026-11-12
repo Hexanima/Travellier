@@ -7,11 +7,13 @@ import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./exp
 import { mapSplitFieldErrors, sentSplitKeys, type ListErrors, type RowErrors } from "./expense-split.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey } from "./expense-format.js";
 import { PostPhotosSection } from "./PostPhotosSection.js";
+import { PublishedPhotosSection } from "./PublishedPhotosSection.js";
+import type { PublishedPhoto } from "./trip-photo-api.js";
 import { newObjectId } from "./new-object-id.js";
 import { newActivityLabel, parseNewActivity, resolveNewActivity } from "./new-activity-draft.js";
 import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
-import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setNewActivity, setTransport, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
+import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setNewActivity, setRemoveExpense, setTransport, toggleRemovePhoto, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { commentLength } from "./comment-text.js";
 import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
 import { canEditContent } from "./authorship.js";
@@ -38,7 +40,12 @@ type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfir
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse; expense?: SavedExpenseView } | { kind: "error"; error: TripFailure };
 /** The stored expense (and the dates it is attributed to) as read from the itinerary, which is where a post carries it. */
 type ExpenseLoad = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpense; attribution?: { source: "activity" | "publication"; occurredAt: string; publishedAt: string } };
-const expenseNotice = "El gasto guardado no se puede quitar: solo se puede editar.";
+const removedExpenseText = "Gasto: se quitará al guardar. Dejará de figurar en el registro y en el balance.";
+const notInPostMessage = "Una foto que querías quitar ya no pertenece a este recuerdo. Actualizamos la lista.";
+const removeWithActivityMessage = "No se pueden quitar fotos y crear una actividad nueva en el mismo guardado. Deshacé la quita de fotos o quitá la actividad nueva.";
+/** The published photos of the post being edited (author only): read once when editing, never kept in the draft. */
+type PublishedLoad = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; items: PublishedPhoto[] } | { kind: "error" };
+const objectId = (value: string) => /^[0-9a-f]{24}$/.test(value);
 const expenseWaitMessage = "Esperá a que cargue el gasto guardado para guardar los cambios.";
 const exceedsMessage = "El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en Pagos y reparto.";
 const splitRowsMessage = "Revisá pagos y reparto: no pudimos guardar algunas filas.";
@@ -118,6 +125,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
   const savingRef = useRef(false);
   /** The photo ids behind the `photos` of the input last sent, by position. */
   const sentPhotoIds = useRef<readonly string[]>([]);
+  /** The published photo ids behind the `removePhotos` of the input last sent, by position. */
+  const sentRemoveIds = useRef<readonly string[]>([]);
   /** The row keys behind the `payments` and `shares` of the input last sent, by position (as `sentPhotoIds`). */
   const sentSplit = useRef<{ payments: readonly string[]; shares: readonly string[] }>({ payments: [], shares: [] });
   /** Rows and lists the server rejected, to open the editor on them. */
@@ -136,6 +145,24 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     return () => { cancelled = true; };
   }, [postId, tripId, members]);
   const contentLocked = existing !== undefined && people.loaded && !canEditContent(people, existing.authorId);
+  const [publishedLoad, setPublishedLoad] = useState<PublishedLoad>({ kind: "idle" });
+  const [publishedAttempt, setPublishedAttempt] = useState(0);
+  const listPublished = photos?.api.listForPost;
+  const existingId = existing?.id;
+  // Only the author removes photos: a member limited to the expense never lists them.
+  const wantsPublished = existingId !== undefined && listPublished !== undefined && !contentLocked && tripId !== undefined;
+  useEffect(() => {
+    if (!wantsPublished || !existingId || !tripId || !listPublished) return;
+    let cancelled = false;
+    setPublishedLoad((current) => current.kind === "ready" ? current : { kind: "loading" });
+    void (async () => {
+      try {
+        const result = await listPublished(tripId, existingId);
+        if (!cancelled) setPublishedLoad(result.ok ? { kind: "ready", items: result.value } : { kind: "error" });
+      } catch { if (!cancelled) setPublishedLoad({ kind: "error" }); }
+    })();
+    return () => { cancelled = true; };
+  }, [wantsPublished, existingId, tripId, listPublished, publishedAttempt]);
 
   useEffect(() => {
     if (!postId) return;
@@ -243,6 +270,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
   };
   const fail = (error: TripFailure) => {
     setFailure(error);
+    // A 403 when editing means the role changed: read the members again so the form switches to the limited mode.
+    if (error.kind === "forbidden" && postId && tripId && members) void loadPeople(members, tripId).then(setPeople);
     if (error.kind === "validation") {
       const mapped: Record<string, string> = {};
       const splitFields: { field: string; code?: string }[] = [];
@@ -257,7 +286,13 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
           const sent = sentPhotoIds.current[Number(photoField[1])];
           if (sent !== undefined) photosCtl.markFailed(sent, code ?? "invalid");
           mapped.photos = badPhotoMessage; setFocusRetry((value) => value + 1);
-        } else if (field === "photos") mapped.photos ??= photosFieldMessage;
+        } else if (/^removePhotos\[(\d+)\]/.test(field)) {
+          // The photo belongs to another memory (or is not removable): it is dropped from the marks and the list is read again.
+          const sent = sentRemoveIds.current[Number(/^removePhotos\[(\d+)\]/.exec(field)![1])];
+          if (sent !== undefined) applyDraft((current) => ({ ...current, extras: { ...current.extras, removePhotoIds: current.extras.removePhotoIds.filter((item) => item !== sent) } }));
+          mapped.photos = notInPostMessage; setPublishedAttempt((value) => value + 1);
+        } else if (field === "removePhotos") mapped.photos ??= removeWithActivityMessage;
+        else if (field === "photos") mapped.photos ??= photosFieldMessage;
         else if (linkFields.includes(field)) mapped.link ??= linkMessage(code ?? "");
         else if (field === "description") {
           // The server decides the content rule and the limit: both stay on the field and the draft is kept.
@@ -333,6 +368,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     // Same selection as the input's `photos` (uploaded ones, in order): index i of a 422 `photos[i]` is the photo with this id.
     sentPhotoIds.current = source.extras.photos.filter((item) => item.status === "uploaded" && item.key !== undefined).map((item) => item.localId);
     sentSplit.current = sentSplitKeys(source.extras.split);
+    sentRemoveIds.current = source.extras.removePhotoIds.filter(objectId);
     return existing ? prepareUpdate(source, existing, resolved, savedExpense, storedView) : prepareCreate(source, resolved);
   };
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -341,7 +377,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     setMessage(""); setFailure(undefined); setErrors({}); setSplitErrors(undefined); setMissingContent(false); setNotice(""); setPhotoError(undefined);
     // Not the author: only the expense travels; the content, links and photos of the draft are never read (T125).
     if (existing && contentLocked) {
-      if ((draft.extras.expense !== null || splitTouched) && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
+      if ((draft.extras.expense !== null || splitTouched || draft.extras.removeExpense) && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
       const input = prepareExpenseOnlyUpdate(draft, savedExpense, storedView);
       if (Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
       await send(input, undefined);
@@ -351,21 +387,27 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     // photos already published (an existing memory can be relinked without them).
     const textChanged = draft.values.description !== base.values.description || draft.values.mapsUrl !== base.values.mapsUrl;
     if (descriptionTooLong(draft.values.description)) { setErrors({ description: descriptionLimitMessage }); focusPending.current = true; return; }
+    const removedIds = draft.extras.removePhotoIds;
+    // Removing published photos and creating an activity are two different requests: never chained (a failure would leave half of it applied).
+    if (existing && removedIds.length > 0 && draft.extras.newActivity !== null) { setErrors({ photos: removeWithActivityMessage }); return; }
     const empty = !hasContent(draft);
     if (empty && !existing) { setMissingContent(true); focusPending.current = true; return; }
-    // The published photos only count when this edit would leave neither text nor location: they are read now, lazily (nothing is loaded when opening).
-    // A failed read never blocks: the server applies the rule.
-    if (empty && existing && textChanged && photos?.api.countForPost) {
-      savingRef.current = true; setSaving(true);
-      let published: number | undefined;
-      try { const counted = await photos.api.countForPost(tripId, existing.id); published = counted.ok ? counted.value : undefined; } catch { published = undefined; }
-      finally { savingRef.current = false; setSaving(false); }
-      if (published === 0) { setMissingContent(true); focusPending.current = true; return; }
+    // The published photos only count when this edit would leave neither text nor location (the text was cleared or the last photos are removed).
+    // With the list loaded it is local, minus the marked ones; otherwise the count is read now, lazily. A failed read never blocks: the server applies the rule.
+    if (empty && existing && (textChanged || removedIds.length > 0)) {
+      let left: number | undefined;
+      if (wantsPublished && publishedLoad.kind === "ready") left = publishedLoad.items.filter((item) => !removedIds.includes(item.id)).length;
+      else if (textChanged && photos?.api.countForPost) {
+        savingRef.current = true; setSaving(true);
+        try { const counted = await photos.api.countForPost(tripId, existing.id); left = counted.ok ? counted.value : undefined; } catch { left = undefined; }
+        finally { savingRef.current = false; setSaving(false); }
+      }
+      if (left === 0) { setMissingContent(true); focusPending.current = true; return; }
     }
     const resolved = resolveActivity();
     if (resolved === "invalid") return;
     // A changed expense is a merge-patch against the stored one: it cannot be built until that is known.
-    if (existing && (draft.extras.expense !== null || splitTouched) && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
+    if (existing && (draft.extras.expense !== null || splitTouched || draft.extras.removeExpense) && expenseLoad.kind !== "ready") { setMessage(expenseWaitMessage); return; }
     if (!photos || draft.extras.photos.length === 0) {
       const input = buildInput(draft, resolved);
       if (existing && Object.keys(input).length === 0) { setMessage("No hay cambios para guardar."); return; }
@@ -431,6 +473,21 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     handle.setDraft(clearExpense(draft)); setSplitErrors(undefined); setNotice(""); setErrors((current) => { const next = { ...current }; delete next.expense; return next; });
     expenseRef.current?.focus();
   };
+  /** The saved expense is only marked: it is removed when the memory is saved, and «Conservar gasto» undoes it. */
+  const expenseSection = useRef<HTMLElement>(null);
+  const expenseFocus = useRef<"keep" | "remove" | undefined>(undefined);
+  const markRemoveSaved = () => {
+    handle.setDraft(setRemoveExpense(draft, true)); setSplitErrors(undefined); setNotice(""); expenseFocus.current = "keep";
+    setErrors((current) => { const next = { ...current }; delete next.expense; return next; });
+  };
+  const keepSaved = () => { handle.setDraft(setRemoveExpense(draft, false)); expenseFocus.current = "remove"; };
+  const removingExpense = draft.extras.removeExpense;
+  useEffect(() => {
+    const target = expenseFocus.current;
+    if (!target) return;
+    expenseFocus.current = undefined;
+    expenseSection.current?.querySelector<HTMLElement>(target === "keep" ? 'button[name="keepExpense"]' : 'button[name="removeExpense"]')?.focus();
+  }, [removingExpense]);
   const removeActivity = () => {
     handle.setDraft(setNewActivity(draft, null)); setNotice(""); setErrors((current) => { const next = { ...current }; delete next.activity; return next; });
     linkRef.current?.focus();
@@ -483,8 +540,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     || draft.extras.transportId !== saved.extras.transportId || draft.extras.newActivity !== null;
   const storedAttribution = expenseLoad.kind === "ready" && savedExpense && expenseLoad.attribution?.source === "activity"
     && localDayKey(expenseLoad.attribution.occurredAt, timeZone) !== localDayKey(expenseLoad.attribution.publishedAt, timeZone) ? expenseLoad.attribution : undefined;
-  const attribution = linkChanged ? undefined : storedAttribution;
-  const attributionStale = linkChanged && storedAttribution !== undefined;
+  const attribution = linkChanged || removingExpense ? undefined : storedAttribution;
+  const attributionStale = linkChanged && !removingExpense && storedAttribution !== undefined;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <header className="itinerary-header">
@@ -522,12 +579,27 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
         <TextField label="Ubicación (link de Google Maps, opcional)" name="mapsUrl" type="text" inputMode="url" value={draft.values.mapsUrl} loading={saving}
           error={errors.mapsUrl} onChange={(event) => update("mapsUrl", event.target.value)} />
         <LocationPreview value={draft.values.mapsUrl} context="composer" />
-        {photos ? <PostPhotosSection items={draft.extras.photos} active={photosCtl.active} progress={photosCtl.progress} summary={photosCtl.summary} alert={photoAlert}
+        {photos ? <>
+          {wantsPublished ? <>
+            {publishedLoad.kind === "loading" ? <LoadingState label="Cargando fotos publicadas…" /> : null}
+            {publishedLoad.kind === "error" ? <div className="trips-state">
+              <Feedback variant="error">No pudimos cargar las fotos publicadas. Podés seguir editando.</Feedback>
+              <Button aria-label="Reintentar fotos publicadas" onClick={() => setPublishedAttempt((value) => value + 1)}>Reintentar</Button>
+            </div> : null}
+            {publishedLoad.kind === "ready" ? <PublishedPhotosSection items={publishedLoad.items} marked={draft.extras.removePhotoIds} busy={saving || photosCtl.uploading || photosCtl.selecting}
+              onToggle={(photoId) => {
+                setPhotoError(undefined); setMissingContent(false); setNotice("");
+                setErrors((current) => { const next = { ...current }; delete next.photos; return next; });
+                applyDraft((current) => toggleRemovePhoto(current, photoId));
+              }} /> : null}
+          </> : null}
+          <PostPhotosSection items={draft.extras.photos} active={photosCtl.active} progress={photosCtl.progress} summary={photosCtl.summary} alert={photoAlert}
           busy={saving || photosCtl.uploading || photosCtl.selecting} focusRetry={focusRetry}
           onAdd={(source) => { setPhotoError(undefined); setMissingContent(false); setNotice(""); return photosCtl.add(source); }}
           onRemove={(localId) => { setPhotoError(undefined); photosCtl.remove(localId); }}
           onMove={(localId, delta) => photosCtl.move(localId, delta)}
-          onRetry={(localId) => { setPhotoError(undefined); void photosCtl.retry(localId).then((outcome) => { if (outcome !== "busy") settleUpload(outcome, false); }); }} /> : null}
+          onRetry={(localId) => { setPhotoError(undefined); void photosCtl.retry(localId).then((outcome) => { if (outcome !== "busy") settleUpload(outcome, false); }); }} />
+        </> : null}
         <section className="post-link-section" aria-label="Vínculo">
           {draft.extras.transportId ? <div className="post-link-transport">
             <p>Vinculado a un transporte</p>
@@ -547,23 +619,25 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
           {notice ? <Feedback>{notice}</Feedback> : null}
         </section>
         </>}
-        <section className="post-expense-section" aria-label="Gasto">
-          <p id="post-expense-summary">{expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
+        <section className="post-expense-section" aria-label="Gasto" ref={expenseSection}>
+          <p id="post-expense-summary">{removingExpense ? removedExpenseText : expenseText !== undefined ? `Gasto: ${expenseText}` : "Sin gasto"}</p>
           {attributionStale ? <p id="post-expense-attribution" className="itinerary-secondary">Se recalcula al guardar</p> : null}
           {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al <span className="expense-date">{formatLocalDate(attribution.occurredAt, timeZone)}</span> (actividad) · Publicado el <span className="expense-date">{formatLocalDate(attribution.publishedAt, timeZone)}</span></p> : null}
-          {existing && savedExpense ? <p className="itinerary-secondary">{expenseNotice}</p> : null}
           {expenseLoad.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
           {expenseLoad.kind === "error" ? <div className="trips-state">
             <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente. Podés seguir editando el texto.</Feedback>
             <Button onClick={() => setExpenseAttempt((value) => value + 1)}>Reintentar</Button>
           </div> : null}
-          <button ref={expenseRef} name="expense" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
-            aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution || attributionStale ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
-            {draft.extras.expense !== null || savedExpense ? "Editar gasto" : "Agregar gasto"}</button>
-          {draft.extras.expense !== null && !savedExpense ? <Button disabled={saving} onClick={removeExpense}>Quitar gasto</Button> : null}
-          <button ref={splitRef} name="split" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined}
-            aria-describedby={splitTouched ? "post-split-summary" : undefined} onClick={() => openSplit()}>Pagos y reparto</button>
-          {splitTouched ? <p id="post-split-summary" className="itinerary-secondary">Pagos y reparto con cambios sin guardar</p> : null}
+          {removingExpense ? <Button name="keepExpense" disabled={saving} onClick={keepSaved}>Conservar gasto</Button> : <>
+            <button ref={expenseRef} name="expense" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined} onClick={openExpense}
+              aria-describedby={[errors.expense ? "post-expense-summary post-expense-error" : "post-expense-summary", attribution || attributionStale ? "post-expense-attribution" : ""].filter(Boolean).join(" ")}>
+              {draft.extras.expense !== null || savedExpense ? "Editar gasto" : "Agregar gasto"}</button>
+            {draft.extras.expense !== null && !savedExpense ? <Button disabled={saving} onClick={removeExpense}>Quitar gasto</Button> : null}
+            {existing && savedExpense ? <Button name="removeExpense" disabled={saving} onClick={markRemoveSaved}>Quitar gasto</Button> : null}
+            <button ref={splitRef} name="split" type="button" className="ui-button ui-button--secondary" disabled={saving} aria-disabled={expenseLoad.kind !== "ready" || undefined}
+              aria-describedby={splitTouched ? "post-split-summary" : undefined} onClick={() => openSplit()}>Pagos y reparto</button>
+            {splitTouched ? <p id="post-split-summary" className="itinerary-secondary">Pagos y reparto con cambios sin guardar</p> : null}
+          </>}
           {errors.expense ? <p className="ui-field__error" id="post-expense-error" role="alert">{errors.expense}</p> : null}
           {splitErrors ? <Button disabled={saving} onClick={() => openSplit(splitErrors)}>Ajustar pagos y reparto</Button> : null}
         </section>

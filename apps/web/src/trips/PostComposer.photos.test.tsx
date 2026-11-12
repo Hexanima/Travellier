@@ -42,14 +42,14 @@ function makeDeps(log: Log = []) {
   return { deps, source, reader, api, transfer, log, offer: (...numbers: number[]) => queue.push(ok(numbers.map(selected))), offerError: (kind: "cancelled" | "denied" | "unsupported" | "native") => queue.push(err(new NativeCapabilityError(kind))) };
 }
 type Mocks = ReturnType<typeof makeDeps>;
-async function render(path: string, mocks: Mocks | undefined, overrides: Partial<Record<"create" | "update" | "get", ReturnType<typeof vi.fn>>> = {}) {
+async function render(path: string, mocks: Mocks | undefined, overrides: Partial<Record<"create" | "update" | "get", ReturnType<typeof vi.fn>>> = {}, members?: { list: ReturnType<typeof vi.fn> }) {
   const itinerary = { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) };
   const create = overrides.create ?? vi.fn().mockResolvedValue({ ok: true, value: saved() });
   const update = overrides.update ?? vi.fn().mockResolvedValue({ ok: true, value: saved({ description: "Editado" }) });
   const get = overrides.get ?? vi.fn().mockResolvedValue({ ok: true, value: { post: saved(), parent: null, children: [], rootActivityId: null } });
   const picker = <PostLinkPicker posts={{ list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn() }} itinerary={itinerary} timeZone={timeZone} spontaneousActivity />;
   const subform = <SpontaneousActivityForm itinerary={itinerary} timeZone={timeZone} />;
-  const composer = <PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone={timeZone} {...(mocks ? { photos: mocks.deps } : {})} />;
+  const composer = <PostComposer posts={ignoreRetryIds({ create, update, get })} itinerary={itinerary} timeZone={timeZone} {...(mocks ? { photos: mocks.deps } : {})} {...(members ? { members } : {})} />;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={[path]}>
@@ -61,6 +61,8 @@ async function render(path: string, mocks: Mocks | undefined, overrides: Partial
         <Route path=":postId/edit" element={composer} />
         <Route path="new/link" element={picker} />
         <Route path="new/activity" element={subform} />
+        <Route path=":postId/edit/link" element={picker} />
+        <Route path=":postId/edit/activity" element={subform} />
       </Route>
       <Route path="/login" element={<p>LOGIN</p>} />
     </Routes></MemoryRouter>));
@@ -590,5 +592,181 @@ describe("PostComposer photos: minimum content", () => {
     expect(count).toHaveBeenCalledTimes(1);
     await act(async () => gate.resolve({ ok: true, value: 1 }));
     expect(update).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PostComposer published photos (T128)", () => {
+  const P1 = itineraryId(81), P2 = itineraryId(82);
+  const publishedList = [{ id: P1, order: 1, url: "https://cdn.test/p1.jpg?sig=x" }, { id: P2, order: 2 }];
+  const withList = (mocks: Mocks, impl: (...args: unknown[]) => unknown = async () => ({ ok: true, value: publishedList })) => {
+    const listForPost = vi.fn(impl); Object.assign(mocks.api, { listForPost }); return listForPost;
+  };
+  const rows = (container: HTMLElement) => Array.from(container.querySelectorAll("[data-published-photo]")) as HTMLElement[];
+  const rowAction = (container: HTMLElement, id: string) => container.querySelector(`[data-published-photo="${id}"] button`) as HTMLButtonElement;
+  const withPost = (extra: Partial<PostResponse>) => vi.fn().mockResolvedValue({ ok: true, value: { post: saved(extra), parent: null, children: [], rootActivityId: null } });
+  const missing = "Escribí un texto, agregá una ubicación o elegí una foto.";
+  const author = itineraryId(20), other = itineraryId(21);
+  const membersFor = (currentUserId: string) => ({ list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId, members: [
+    { id: itineraryId(100), userId: author, name: "Ana", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" },
+    { id: itineraryId(101), userId: other, name: "Beto", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } }) });
+  it("lists the published photos when editing, and asks for them only when editing", async () => {
+    const mocks = makeDeps(), list = withList(mocks);
+    const { container } = await render(editPath, mocks);
+    expect(list).toHaveBeenCalledExactlyOnceWith(tripId, postId);
+    expect(rows(container)).toHaveLength(2);
+    expect(rows(container)[0]!.querySelector("img")?.getAttribute("src")).toBe("https://cdn.test/p1.jpg?sig=x");
+    const created = makeDeps(), createList = withList(created);
+    await render(newPath, created);
+    expect(createList).not.toHaveBeenCalled();
+  });
+  it("shows the published photos above the section to add new ones", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container } = await render(editPath, mocks);
+    const published = container.querySelector("[data-published-photos]")!;
+    const adding = container.querySelector("#post-photos-heading")!.closest("section")!;
+    expect(published.compareDocumentPosition(adding) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it("removing one and saving sends removePhotos with its id only", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container, update } = await render(editPath, mocks);
+    await click(rowAction(container, P2));
+    expect(container.querySelector(`[data-published-photo="${P2}"]`)!.textContent).toContain("Se quitará al guardar");
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { removePhotos: [{ id: P2 }] });
+    expect(container.querySelector('[data-testid="listing"]')?.textContent).toContain("updated");
+  });
+  it("undoing the removal sends nothing", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container, update } = await render(editPath, mocks);
+    await click(rowAction(container, P1)); await click(rowAction(container, P1));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("No hay cambios para guardar.");
+  });
+  it("combines the removal with new photos and text in one PATCH", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container, update } = await render(editPath, mocks);
+    await field(container, "description", "Otro"); await click(rowAction(container, P1)); await choose(container, mocks, 1);
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Otro", photos: [{ key: key(1) }], removePhotos: [{ id: P1 }] });
+  });
+  it("a pending removal counts as a change: Cancelar asks before discarding", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container } = await render(editPath, mocks);
+    await click(rowAction(container, P2));
+    await click(button(container, "Cancelar"));
+    expect(document.body.textContent).toContain("Descartar cambios");
+  });
+  it("removing the last photo without text or location shows the content message without asking the network", async () => {
+    const mocks = makeDeps(), count = vi.fn(); Object.assign(mocks.api, { countForPost: count });
+    withList(mocks, async () => ({ ok: true, value: [publishedList[0]] }));
+    const { container, update } = await render(editPath, mocks, { get: withPost({ description: null, mapsUrl: null }) });
+    await click(rowAction(container, P1));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+    expect(count).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toEqual([missing]);
+    expect(rows(container)).toHaveLength(1);
+  });
+  it("removing all the photos is allowed with text, or with a new photo", async () => {
+    const mocks = makeDeps(); withList(mocks, async () => ({ ok: true, value: [publishedList[0]] }));
+    const { container, update } = await render(editPath, mocks, { get: withPost({ description: null, mapsUrl: null }) });
+    await click(rowAction(container, P1)); await choose(container, mocks, 1);
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { photos: [{ key: key(1) }], removePhotos: [{ id: P1 }] });
+  });
+  it("removing a photo while others remain does not need text", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container, update } = await render(editPath, mocks, { get: withPost({ description: null, mapsUrl: null }) });
+    await click(rowAction(container, P1));
+    await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { removePhotos: [{ id: P1 }] });
+  });
+  it("falls back to counting the published photos when the list could not be loaded, and does not block saving", async () => {
+    const mocks = makeDeps(), count = vi.fn(async () => ({ ok: true as const, value: 0 })); Object.assign(mocks.api, { countForPost: count });
+    withList(mocks, async () => ({ ok: false, error: { kind: "network" } }));
+    const { container, update } = await render(editPath, mocks);
+    expect(container.textContent).toContain("No pudimos cargar las fotos publicadas");
+    expect(rows(container)).toHaveLength(0);
+    await field(container, "description", ""); await submit(container);
+    expect(count).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toContain(missing);
+    await field(container, "description", "Nuevo"); await submit(container);
+    expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Nuevo" });
+  });
+  it("retries the list from the failure message", async () => {
+    const mocks = makeDeps();
+    const list = withList(mocks, vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "server" } }).mockResolvedValue({ ok: true, value: publishedList }));
+    const { container } = await render(editPath, mocks);
+    await click(button(container, "Reintentar fotos publicadas"));
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(rows(container)).toHaveLength(2);
+    expect(container.textContent).not.toContain("No pudimos cargar las fotos publicadas");
+  });
+  it("a 422 not_in_post explains it, reloads the list and keeps the draft", async () => {
+    const mocks = makeDeps(), list = withList(mocks);
+    const update = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "removePhotos[0].id", code: "not_in_post", message: "x" }] } })
+      .mockResolvedValue({ ok: true, value: saved() });
+    const { container } = await render(editPath, mocks, { update });
+    await field(container, "description", "Otro"); await click(rowAction(container, P2));
+    await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["Una foto que querías quitar ya no pertenece a este recuerdo. Actualizamos la lista."]);
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(value(container, "description")).toBe("Otro");
+    await submit(container);
+    expect(update).toHaveBeenLastCalledWith(tripId, postId, { description: "Otro" });
+  });
+  it("a 422 description/required with the removal shows the content message and keeps the mark", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "description", code: "required", message: "x" }] } });
+    const { container } = await render(editPath, mocks, { update, get: withPost({ description: null, mapsUrl: null }) });
+    await click(rowAction(container, P1)); await click(rowAction(container, P2));
+    await submit(container);
+    expect(alerts(container).map((item) => item.textContent)).toEqual([missing]);
+    expect(container.querySelector(`[data-published-photo="${P1}"]`)!.textContent).toContain("Se quitará al guardar");
+  });
+  it("a 403 says only the author edits, re-reads the members and switches to the limited mode", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    let current = author;
+    const update = vi.fn().mockImplementation(async () => { current = other; return { ok: false, error: { kind: "forbidden" } }; });
+    const list = vi.fn().mockImplementation(async () => ({ ok: true, value: { currentUserId: current, members: [
+      { id: itineraryId(100), userId: author, name: "Ana", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" },
+      { id: itineraryId(101), userId: other, name: "Beto", role: "participant", joinedAt: "2026-01-01T00:00:00.000Z" }] } }));
+    const { container } = await render(editPath, mocks, { update }, { list });
+    expect(container.querySelector('[name="description"]')).not.toBeNull();
+    await click(rowAction(container, P1));
+    await submit(container);
+    expect(container.textContent).toContain("Solo el autor puede editar el contenido de este recuerdo");
+    expect(list.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector('[name="description"]')).toBeNull();
+    expect(container.querySelector("[data-published-photo]")).toBeNull();
+  });
+  it("with a new activity and a pending removal it says so and sends nothing", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const { container, update } = await render(editPath, mocks);
+    await addActivity(container);
+    await click(rowAction(container, P1));
+    await submit(container);
+    expect(update).not.toHaveBeenCalled();
+    expect(alerts(container).map((item) => item.textContent)).toEqual(["No se pueden quitar fotos y crear una actividad nueva en el mismo guardado. Deshacé la quita de fotos o quitá la actividad nueva."]);
+  });
+  it("a member who is not the author sees no photo section and never sends removePhotos", async () => {
+    const mocks = makeDeps(), list = withList(mocks);
+    const update = vi.fn().mockResolvedValue({ ok: true, value: saved() });
+    const { container } = await render(editPath, mocks, { update, get: withPost({ authorId: author }) }, membersFor(other));
+    expect(container.querySelector("[data-published-photo]")).toBeNull();
+    expect(container.querySelector("[data-published-photos]")).toBeNull();
+    expect(list.mock.calls.length).toBeLessThanOrEqual(1);
+  });
+  it("a network failure on save keeps the removal in the draft", async () => {
+    const mocks = makeDeps(); withList(mocks);
+    const update = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } });
+    const { container } = await render(editPath, mocks, { update });
+    await click(rowAction(container, P1));
+    await submit(container);
+    expect(container.querySelector(`[data-published-photo="${P1}"]`)!.textContent).toContain("Se quitará al guardar");
+    await submit(container);
+    expect(update).toHaveBeenCalledTimes(2);
   });
 });
