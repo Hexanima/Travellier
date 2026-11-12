@@ -221,6 +221,14 @@ export const createMongoTripManagementRepository = (database: Db): TripManagemen
         return err(unknownError());
       }
     },
+    findMemberRole: async (tripId, userId) => {
+      try {
+        const member = await members.findOne({ tripId: new MongoObjectId(tripId), userId: new MongoObjectId(userId) }, { projection: { role: 1 } });
+        return ok(member?.role);
+      } catch {
+        return err(unknownError());
+      }
+    },
     updateConfigurationForMember: async (tripId, userId, update: TripConfigurationUpdate) => {
       try {
         const mongoTripId = new MongoObjectId(tripId);

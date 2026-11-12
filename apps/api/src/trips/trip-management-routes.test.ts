@@ -169,6 +169,13 @@ describe("Trip management routes", () => {
     expect(JSON.parse(response.body)).toEqual({ trip: { ...trip, visibility: "public" } });
   });
 
+  it("answers 403 Forbidden when the use case rejects a non-admin expense mode change", async () => {
+    const updateConfiguration = vi.fn().mockResolvedValue({ ok: false, error: new UnauthorizedError() });
+    const response = await handleApiRequest({ method: "PATCH", url: `/trips/${tripId}/config`, authenticatedUserId: actorId as never, body: { expenseMode: "balance" } }, { trips: { updateConfiguration } } as never);
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain("Forbidden");
+  });
+
   it("rejects malformed creation, configuration and trip IDs", async () => {
     const create = vi.fn();
     const updateConfiguration = vi.fn().mockResolvedValue(ok(trip));

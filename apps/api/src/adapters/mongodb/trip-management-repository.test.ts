@@ -185,6 +185,17 @@ describe("Mongo Trip management repository", () => {
     });
   });
 
+  it("finds the member role: admin owner, participant, and none for outsiders", async () => {
+    const repository = createMongoTripManagementRepository(database);
+    const input = record();
+    await repository.createWithAdminAndDestination(input);
+    const participant = new ObjectId();
+    await database.collection("tripMembers").insertOne({ tripId: new ObjectId(input.trip.id), userId: participant, role: "participant", joinedAt: new Date() });
+    expect(await repository.findMemberRole(input.trip.id, input.trip.ownerId)).toEqual({ ok: true, value: "admin" });
+    expect(await repository.findMemberRole(input.trip.id, domainId(participant))).toEqual({ ok: true, value: "participant" });
+    expect(await repository.findMemberRole(input.trip.id, domainId(new ObjectId()))).toEqual({ ok: true, value: undefined });
+  });
+
   describe("derived trip dates in the listing", () => {
     const at = (value: string) => new Date(value);
     const seedTransport = async (tripId: string, destinationId: string, direction: "outbound" | "return", departureAt: unknown, arrivalAt: unknown) => {
