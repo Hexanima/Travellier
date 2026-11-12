@@ -78,8 +78,11 @@ describe("Hiding the Trip from non-members (T137)", () => {
 
   const some = () => new ObjectId().toHexString();
   /**
-   * Every route that operates on data of the Trip, with a body that passes validation where it has one.
-   * The photo routes are not here: the local API has no storage; photo-http.integration.test.ts covers them (stranger and former member).
+   * Every route of the Trip served by app.ts (itinerary, balance, posts, comments, likes, activities, participation, destinations,
+   * transports, members, ownership, leave, detail, config, join, delete), with a body that passes validation where it has one.
+   * Not here: the photo routes (the local API has no storage; photo-http.integration.test.ts covers them), and the routes that are
+   * not scoped to one Trip (POST /trips, GET /trips, GET /trips/public, POST /trips/join, invitations).
+   * GET /trips/:id and POST /trips/:id/join are listed, but only for a private Trip: a public Trip keeps its preview and join (see below).
    */
   const routes: Array<[string, string, (tripId: string) => string, unknown?]> = [
     ["GET", "itinerary", (t) => `/trips/${t}/itinerary`],
@@ -89,6 +92,7 @@ describe("Hiding the Trip from non-members (T137)", () => {
     ["GET", "post", (t) => `/trips/${t}/posts/${some()}`],
     ["PATCH", "post", (t) => `/trips/${t}/posts/${some()}`, { description: "hola" }],
     ["DELETE", "post", (t) => `/trips/${t}/posts/${some()}`],
+    ["GET", "comments", (t) => `/trips/${t}/posts/${some()}/comments`],
     ["POST", "comments", (t) => `/trips/${t}/posts/${some()}/comments`, { text: "hola" }],
     ["PATCH", "comment", (t) => `/trips/${t}/posts/${some()}/comments/${some()}`, { text: "hola" }],
     ["DELETE", "comment", (t) => `/trips/${t}/posts/${some()}/comments/${some()}`],
@@ -106,9 +110,11 @@ describe("Hiding the Trip from non-members (T137)", () => {
     ["PUT", "participation", (t) => `/trips/${t}/activities/${some()}/participation`, { status: "going" }],
     ["GET", "destinations", (t) => `/trips/${t}/destinations`],
     ["POST", "destinations", (t) => `/trips/${t}/destinations`, { name: "Ushuaia" }],
+    ["PATCH", "destination", (t) => `/trips/${t}/destinations/${some()}`, { name: "Otro" }],
     ["DELETE", "destination", (t) => `/trips/${t}/destinations/${some()}`],
     ["GET", "transports", (t) => `/trips/${t}/destinations/${some()}/transports`],
     ["POST", "transports", (t) => `/trips/${t}/destinations/${some()}/transports`, { direction: "outbound", type: "car", departurePlace: "Origen", departureAt: "2026-09-24T08:00:00.000Z", arrivalPlace: "Destino", arrivalAt: "2026-09-24T09:00:00.000Z", costPerPerson: null, details: {} }],
+    ["PATCH", "transport", (t) => `/trips/${t}/destinations/${some()}/transports/${some()}`, { departurePlace: "Otro" }],
     ["DELETE", "transport", (t) => `/trips/${t}/destinations/${some()}/transports/${some()}`],
     ["GET", "members", (t) => `/trips/${t}/members`],
     ["PUT", "member role", (t) => `/trips/${t}/members/${users.C.toHexString()}/role`, { role: "admin" }],
@@ -172,6 +178,18 @@ describe("Hiding the Trip from non-members (T137)", () => {
     expect(detail.trip.ownerId).toBe(users.A.toHexString());
     const list = JSON.parse((await send("A", "GET", "/trips")).text) as { trips: Array<{ id: string; ownerId: string }> };
     expect(list.trips.find((trip) => trip.id === tripId)?.ownerId).toBe(users.A.toHexString());
+  }, 30_000);
+
+  it("gives a former member the same public preview as a stranger on a public Trip", async () => {
+    const tripId = await newTrip("public");
+    const stranger = await send("X", "GET", `/trips/${tripId}`);
+    const former = await send("E", "GET", `/trips/${tripId}`);
+    expect(former.status, former.text).toBe(200);
+    expect(former.text).toBe(stranger.text);
+    const trip = (JSON.parse(former.text) as { trip: object }).trip;
+    expect(trip).not.toHaveProperty("ownerId");
+    expect(trip).not.toHaveProperty("members");
+    expect(former.text).not.toContain(users.A.toHexString());
   }, 30_000);
 
   it("keeps the public preview of a public Trip for outsiders, while a private one is hidden like a missing Trip", async () => {
