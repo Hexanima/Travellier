@@ -44,7 +44,7 @@ describe("Node HTTP CORS", () => {
     expect(logs[1]).toMatchObject({ event: "response", method: "OPTIONS", status: 204 });
   });
 
-  it.each(["http://localhost:5173", "capacitor://localhost", "http://localhost"])(
+  it.each(["http://localhost:5173", "capacitor://localhost", "https://localhost", "http://localhost"])(
     "allows the default development/native origin %s on real responses", async (origin) => {
       const baseUrl = await start(createApp());
       const response = await fetch(`${baseUrl}/health`, { headers: { origin } });

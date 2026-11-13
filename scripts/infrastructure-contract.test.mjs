@@ -16,6 +16,22 @@ const listFiles = (directory) =>
     return entry.isDirectory() ? listFiles(path) : [path]
   })
 
+const extractOrigins = (service, key) => {
+  const lines = service.split(/\r?\n/)
+  const start = lines.findIndex((line) => new RegExp(`^\\s*${key}:\\s*$`).test(line))
+  assert.notEqual(start, -1, `missing ${key}`)
+  const indent = lines[start].match(/^\s*/)[0].length
+  const origins = []
+  for (const line of lines.slice(start + 1)) {
+    const item = line.match(/^(\s*)-\s*(\S+)\s*$/)
+    if (!item || item[1].length < indent) break
+    origins.push(item[2])
+  }
+  return origins
+}
+
+const requiredOrigins = ['capacitor://localhost', 'https://localhost', 'http://localhost']
+
 describe('Serverless infrastructure contract', () => {
   it('defines the Travellier HTTP API Lambda for configurable stages', () => {
     assert.ok(existsSync(servicePath), 'missing Serverless service configuration')
@@ -41,12 +57,40 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*httpApi:\s*$/m)
     assert.match(service, /^\s*cors:\s*$/m)
     assert.match(service, /^\s*allowedOrigins:\s*$/m)
-    assert.match(service, /^\s*-\s*capacitor:\/\/localhost\s*$/m)
-    assert.match(service, /^\s*-\s*http:\/\/localhost\s*$/m)
     assert.match(service, /^\s*allowedHeaders:\s*$/m)
     assert.match(service, /^\s*-\s*Authorization\s*$/m)
     assert.match(service, /^\s*allowedMethods:\s*$/m)
     assert.match(service, /^\s*-\s*OPTIONS\s*$/m)
+  })
+
+  it('allows the same Capacitor origins (iOS and Android) in API Gateway and the bucket, without wildcards', () => {
+    const service = readFileSync(servicePath, 'utf8')
+    const apiOrigins = extractOrigins(service, 'allowedOrigins')
+    const bucketOrigins = extractOrigins(service, 'AllowedOrigins')
+
+    for (const origins of [apiOrigins, bucketOrigins]) {
+      for (const origin of requiredOrigins) {
+        assert.ok(origins.includes(origin), `missing origin ${origin}`)
+      }
+      assert.ok(!origins.some((origin) => origin.includes('*')), 'wildcard origin not allowed')
+    }
+    assert.deepEqual([...apiOrigins].sort(), [...bucketOrigins].sort())
+  })
+
+  it('keeps the Capacitor WebView origin covered by the allowed origins', () => {
+    const config = readFileSync(join(webDirectory, 'capacitor.config.ts'), 'utf8')
+    const service = readFileSync(servicePath, 'utf8')
+    const origins = extractOrigins(service, 'allowedOrigins')
+
+    assert.doesNotMatch(config, /androidScheme:\s*["']http["']/)
+    for (const match of config.matchAll(/hostname:\s*["']([^"']+)["']/g)) {
+      assert.equal(match[1], 'localhost')
+    }
+    // Defaults de Capacitor 8: Android https://localhost, iOS capacitor://localhost.
+    const android = config.match(/androidScheme:\s*["']([^"']+)["']/)?.[1] ?? 'https'
+    const ios = config.match(/iosScheme:\s*["']([^"']+)["']/)?.[1] ?? 'capacitor'
+    assert.ok(origins.includes(`${android}://localhost`))
+    assert.ok(origins.includes(`${ios}://localhost`))
   })
 
   it('keeps runtime secrets out of the template and scopes Lambda permissions', () => {
@@ -84,8 +128,6 @@ describe('Serverless infrastructure contract', () => {
     assert.match(service, /^\s*Type:\s*AWS::S3::Bucket$/m)
     assert.match(service, /^\s*CorsConfiguration:\s*$/m)
     assert.match(service, /^\s*AllowedOrigins:\s*$/m)
-    assert.match(service, /^\s*-\s*capacitor:\/\/localhost\s*$/m)
-    assert.match(service, /^\s*-\s*http:\/\/localhost\s*$/m)
     assert.match(service, /^\s*AllowedMethods:\s*$/m)
     assert.match(service, /^\s*-\s*PUT\s*$/m)
     assert.match(service, /^\s*-\s*AllowedHeaders:\s*$/m)

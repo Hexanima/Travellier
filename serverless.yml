@@ -28,8 +28,11 @@ provider:
   logRetentionInDays: ${param:logRetentionInDays}
   httpApi:
     cors:
+      # Debe ser idéntica a CorsConfiguration.AllowedOrigins del bucket; la comprueba
+      # scripts/infrastructure-contract.test.mjs. Android (Capacitor 8) usa https://localhost.
       allowedOrigins:
         - capacitor://localhost
+        - https://localhost
         - http://localhost
       allowedHeaders:
         - Content-Type
@@ -106,8 +109,10 @@ resources:
                   - Content-Type
                 AllowedMethods:
                   - PUT
+                # Idéntica a httpApi.cors.allowedOrigins (comprobado por el contrato).
                 AllowedOrigins:
                   - capacitor://localhost
+                  - https://localhost
                   - http://localhost
                 MaxAge: 3000
           OwnershipControls:
