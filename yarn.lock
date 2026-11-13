@@ -612,6 +612,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@capacitor/app-launcher@npm:8.0.1":
+  version: 8.0.1
+  resolution: "@capacitor/app-launcher@npm:8.0.1"
+  peerDependencies:
+    "@capacitor/core": ">=8.0.0"
+  checksum: 10c0/eb460eacf2e0896e31807bad48a4435924da4461867186fcb73c7ed28778da25178ffeea1c41508a713ce75932162a30522f2ddf8f2e19243446f683e58114b1
+  languageName: node
+  linkType: hard
+
 "@capacitor/app@npm:8.1.1":
   version: 8.1.1
   resolution: "@capacitor/app@npm:8.1.1"
@@ -5244,6 +5253,7 @@ __metadata:
   dependencies:
     "@capacitor/android": "npm:8.5.2"
     "@capacitor/app": "npm:8.1.1"
+    "@capacitor/app-launcher": "npm:8.0.1"
     "@capacitor/calendar": "npm:1.0.1"
     "@capacitor/camera": "npm:8.2.5"
     "@capacitor/cli": "npm:8.5.2"

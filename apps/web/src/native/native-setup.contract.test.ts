@@ -43,10 +43,10 @@ describe("native setup", () => {
     expect(definitions).not.toMatch(/interface ModifyEventOptions \{[^}]*\bid\b/s);
   });
 
-  it("syncs all three new plugins into Android and iOS SPM", () => {
+  it("syncs every added plugin into Android and iOS SPM", () => {
     const gradle = read("../../android/app/capacitor.build.gradle");
     const spm = read("../../ios/App/CapApp-SPM/Package.swift");
-    for (const name of ["camera", "push-notifications", "calendar", "filesystem", "share"]) {
+    for (const name of ["camera", "push-notifications", "calendar", "filesystem", "share", "app-launcher"]) {
       expect(gradle).toContain(`project(':capacitor-${name}')`);
       expect(spm).toContain(`node_modules/@capacitor/${name}`);
     }
@@ -61,6 +61,18 @@ describe("native setup", () => {
     for (const name of ["Cache = \"CACHE\"", "writeFile(options", "deleteFile(options"]) expect(filesystem).toContain(name);
     expect(read("../../android/app/src/main/res/xml/file_paths.xml")).toContain("<cache-path");
     expect(android).toContain("${applicationId}.fileprovider");
+  });
+
+  it("keeps the app launcher surface the maps opener relies on", () => {
+    const definitions = read("../../../../node_modules/@capacitor/app-launcher/dist/esm/definitions.d.ts");
+    expect(definitions).toContain("openUrl(options");
+    expect(definitions).toContain("completed: boolean");
+  });
+
+  it("opens https maps links without declaring package visibility or url scheme queries", () => {
+    expect(android).not.toContain("<queries>");
+    expect(plist).not.toContain("LSApplicationQueriesSchemes");
+    expect(read("../../../../node_modules/@capacitor/app-launcher/android/src/main/AndroidManifest.xml")).not.toContain("uses-permission");
   });
 
   it("keeps the cancellation rejection the .ics sharer classifies as cancelled", () => {

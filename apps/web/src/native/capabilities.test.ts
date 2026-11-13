@@ -35,7 +35,7 @@ function fixture(platform = "ios") {
       modifyEvent: vi.fn(async () => undefined),
       deleteEvent: vi.fn(async () => undefined),
     },
-    externalLink: { open: vi.fn(() => ({})) },
+    externalLink: { launcher: { openUrl: vi.fn(async () => ({ completed: true })) }, open: vi.fn(() => ({})) },
   };
   return { dependencies: dependencies as NativeDependencies, spies: dependencies, listeners, removed,
     setPermission: (value: NativePermissionState) => { permission = value; } };
