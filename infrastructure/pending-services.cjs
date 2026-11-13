@@ -2,7 +2,7 @@
 const ref = (name) => ({ Ref: name })
 const arn = (name) => ({ 'Fn::GetAtt': [name, 'Arn'] })
 const sub = (value) => ({ 'Fn::Sub': value })
-const allow = (Action, Resource) => ({ Effect: 'Allow', Action, Resource })
+const allow = (Action, Resource, Condition) => ({ Effect: 'Allow', Action, Resource, ...(Condition ? { Condition } : {}) })
 const policy = (Statement) => ({ Version: '2012-10-17', Statement })
 
 const createPendingServices = (stage, {
@@ -81,7 +81,10 @@ const createPendingServices = (stage, {
       allow(['logs:CreateLogStream', 'logs:PutLogEvents'], sub(`arn:\${AWS::Partition}:logs:\${AWS::Region}:\${AWS::AccountId}:log-group:/aws/lambda/travellier-api-${stage}-${suffix}:*`)),
       allow(['secretsmanager:GetSecretValue'], [ref('MongoConfigurationSecret'), ...(kind === 'Events' ? [ref('PushApplicationsSecret')] : [])]),
     ]
-    if (kind === 'StorageDeletion') workerStatements.push(allow(['s3:DeleteObject'], sub('${PhotoBucket.Arn}/trips/*')))
+    if (kind === 'StorageDeletion') workerStatements.push(
+      allow(['s3:DeleteObject'], sub('${PhotoBucket.Arn}/trips/*')),
+      // The sweep lists with a trips/ prefix; StringLikeIfExists keeps the same shape as the API role (see serverless.yml).
+      allow(['s3:ListBucket'], arn('PhotoBucket'), { StringLikeIfExists: { 's3:prefix': ['trips/*'] } }))
     else workerStatements.push(allow(['sns:Publish'], ['GCM', 'APNS', 'APNS_SANDBOX'].map((platform) =>
       sub(`arn:\${AWS::Partition}:sns:\${AWS::Region}:\${AWS::AccountId}:endpoint/${platform}/travellier-${stage}-${platform === 'GCM' ? 'android' : 'ios'}/*`))))
     const role = `${kind}WorkerRole`

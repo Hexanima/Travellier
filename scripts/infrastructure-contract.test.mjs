@@ -156,8 +156,15 @@ describe('Serverless infrastructure contract', () => {
     const avatarPolicy = policies.find((policy) => policy.includes("${PhotoBucket.Arn}/avatars/*"))
     assert.ok(tripPolicy)
     assert.ok(avatarPolicy)
-    assert.doesNotMatch(tripPolicy, /s3:GetObject/)
+    assert.match(tripPolicy, /s3:PutObject/)
+    assert.match(tripPolicy, /s3:GetObject/)
     assert.match(avatarPolicy, /s3:GetObject/)
+    const listPolicy = policies.find((policy) => policy.includes('s3:ListBucket'))
+    assert.ok(listPolicy, 'the API needs s3:ListBucket so a missing key answers 404 instead of 403')
+    assert.match(listPolicy, /Fn::GetAtt: \[PhotoBucket, Arn\]/)
+    assert.doesNotMatch(listPolicy, /\$\{PhotoBucket\.Arn\}\/\*/)
+    assert.match(listPolicy, /StringLikeIfExists:\s*\n\s*s3:prefix:\s*\n\s*- 'trips\/\*'/)
+    assert.doesNotMatch(service, /s3:\*/)
   })
 
   it('does not require callers to provide a photo bucket for stage commands', () => {
