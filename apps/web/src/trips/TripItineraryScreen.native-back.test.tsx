@@ -35,6 +35,8 @@ async function render(entry = `/trips/${tripId}/itinerary`) {
 }
 const dialog = () => document.querySelector('[role="dialog"]');
 const named = (text: string, root: ParentNode = document) => Array.from(root.querySelectorAll("button")).find((item) => item.textContent?.trim() === text);
+/** El candado del Atrás dura 250 ms: dos pulsaciones más rápidas cuentan como una sola. */
+const afterBackLock = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); }); };
 const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
 
 describe("itinerario y el Atrás nativo", () => {
@@ -65,6 +67,7 @@ describe("itinerario y el Atrás nativo", () => {
     await view.press();
     expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
     expect(dialog()?.textContent).toContain("Detalle de actividad");
+    await afterBackLock();
     await view.press();
     expect(dialog()).toBeNull();
     expect(where.pathname).toBe(`/trips/${tripId}/itinerary`);

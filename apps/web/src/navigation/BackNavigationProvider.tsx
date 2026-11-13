@@ -40,8 +40,15 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
   useEffect(() => {
     if (!backButton) return;
     return backButton.onBack(() => {
-      if (stack.handle()) return;
       if (navigating.current) return;
+      // The lock covers the whole press, closing a layer included: with two nested dialogs, two presses within the window
+      // close only the innermost one, which is what a single press must do.
+      const lock = () => {
+        navigating.current = true;
+        clearTimeout(release.current);
+        release.current = setTimeout(() => { navigating.current = false; }, backLockMs);
+      };
+      if (stack.handle()) { lock(); return; }
       const current = locationRef.current;
       const tripId = tripOfPath(current.pathname);
       const action = resolveBackAction({
@@ -51,9 +58,7 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
         fromNotices: readOrigin(current.state, tripId ?? "").label === "avisos",
       });
       if (action.kind === "exit") { backButton.exitApp(); return; }
-      navigating.current = true;
-      clearTimeout(release.current);
-      release.current = setTimeout(() => { navigating.current = false; }, backLockMs);
+      lock();
       if (action.kind === "back") navigateRef.current(-1);
       // The entry it replaces is left behind: it inherits `noBack` only when nothing was behind it, so the next press
       // neither resolves to a back that goes nowhere nor closes the app with history still behind.

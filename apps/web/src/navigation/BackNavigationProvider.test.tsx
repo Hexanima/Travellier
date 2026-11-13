@@ -85,15 +85,55 @@ describe("BackNavigationProvider", () => {
   });
 
   it("con dos capas anidadas cierra primero la última abierta", async () => {
-    const button = fakeButton();
-    await render(["/trips"], <Screen />, button.port);
-    await click(named("Abrir"));
-    await click(named("Confirmar"));
-    await button.press();
-    expect(document.querySelector("[data-confirm]")?.textContent).toBe("sin confirmar");
-    expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
-    await button.press();
-    expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await click(named("Confirmar"));
+      await button.press();
+      expect(document.querySelector("[data-confirm]")?.textContent).toBe("sin confirmar");
+      expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+      // El candado cubre también el cierre de una capa: la segunda pulsación cuenta aparte recién pasados los 250 ms.
+      await act(async () => { vi.advanceTimersByTime(250); });
+      await button.press();
+      expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("un rebote con dos capas anidadas cierra solo la más interna", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await click(named("Confirmar"));
+      await button.press();
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await button.press();
+      expect(document.querySelector("[data-confirm]")?.textContent).toBe("sin confirmar");
+      expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("un rebote al cerrar una capa no navega: el candado cubre toda la pulsación", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips", "/profile"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await button.press();
+      expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+      // Rebote del botón o del gesto: la pila ya está vacía, pero la segunda pulsación sigue siendo la misma.
+      await act(async () => { vi.advanceTimersByTime(249); });
+      await button.press();
+      expect(where()).toBe("/profile");
+      expect(button.exitApp).not.toHaveBeenCalled();
+      // Pasado el candado, la pulsación siguiente vuelve a responder.
+      await act(async () => { vi.advanceTimersByTime(1); });
+      await button.press();
+      expect(where()).toBe("/trips");
+    } finally { vi.useRealTimers(); }
   });
 
   it("una capa que está guardando se traga el Atrás sin cerrarse ni navegar", async () => {

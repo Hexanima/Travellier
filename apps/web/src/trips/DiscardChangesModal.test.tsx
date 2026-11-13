@@ -13,6 +13,8 @@ const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
 
 function Where() { return <output data-where>{useLocation().pathname}</output>; }
+/** El candado del Atrás dura 250 ms: dos pulsaciones más rápidas cuentan como una sola. */
+const afterBackLock = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); }); };
 const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
 const named = (text: string) => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === text);
 
@@ -71,6 +73,7 @@ describe("DiscardChangesModal", () => {
     const onDiscard = vi.fn();
     const view = await render(<DiscardChangesModal dirty message="Perdés los cambios." onDiscard={onDiscard} />);
     await view.press();
+    await afterBackLock();
     await view.press();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(onDiscard).not.toHaveBeenCalled();
