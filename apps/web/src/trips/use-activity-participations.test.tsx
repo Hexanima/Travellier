@@ -307,3 +307,91 @@ describe("useActivityParticipations.reload (silent refresh)", () => {
     expect(state().saved).toBe(true);
   });
 });
+
+describe("useActivityParticipations: confirmar un cambio de plan (T138)", () => {
+  const ids = (...ns: number[]) => ns.map((n) => itineraryId(n));
+  const multi = (conflicts: number[]): ParticipationConfirmation => ({ confirmedConflicts: conflicts.map((n) => ({ activityId: itineraryId(n), reason: "overlap" as const,
+    scheduledAt: "2026-09-25T12:00:00.000Z", durationMinutes: 60 })), confirmedActivity: { scheduledAt: "2026-09-25T12:30:00.000Z", durationMinutes: null } });
+  const multiConflict = (...conflicts: number[]): TripResult<never> => ({ ok: false, error: { kind: "participation-conflict", confirmation: multi(conflicts) } });
+  const going = (id: string): ParticipationResponse => ({ ...answered("going"), activityId: id });
+  /** Hook sobre varias actividades: la elegida (A), las incompatibles (9, 10, 11) y una ajena (12). Todas cargan «going» salvo A. */
+  async function many(set: TripParticipationApi["set"], initial: Record<string, ParticipationResponse | null> = {}) {
+    const get = vi.fn(async (_trip: string, id: string) => ({ ok: true as const, value: id in initial ? initial[id]! : id === A ? pending() : going(id) }));
+    const api = { get, set: vi.fn(set) } as unknown as TripParticipationApi & { set: ReturnType<typeof vi.fn> };
+    const all = [A, ...ids(9, 10, 11, 12)];
+    const ref: { current?: Hook } = {};
+    function Harness({ tripId }: { tripId: string }) { ref.current = useActivityParticipations(tripId, all, api); return null; }
+    const root = createRoot(document.body.appendChild(document.createElement("div"))); roots.push(root);
+    await act(async () => root.render(<Harness tripId={itineraryId(1)} />));
+    return { api, hook: () => ref.current!, at: (id: string) => ref.current!.states[id],
+      switchTrip: (tripId: string) => act(async () => root.render(<Harness tripId={tripId} />)) };
+  }
+  const notGoing = { kind: "ready", status: "not_going" };
+  const stillGoing = { kind: "ready", status: "going" };
+
+  it("confirmar con exito deja las incompatibles en «No voy» sin marca ni estado transitorio, y la elegida en «Voy»", async () => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9)).mockResolvedValueOnce({ ok: true, value: answered("going") }));
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    expect(t.at(itineraryId(9))).toEqual(notGoing);
+    expect(t.at(A)).toEqual({ kind: "ready", status: "going", saved: true });
+    expect(t.at(itineraryId(12))).toEqual(stillGoing);
+  });
+  it.each([[[9, 10]], [[9, 10, 11]]])("con varias incompatibles %j todas quedan «No voy» y la ajena al snapshot no cambia", async (list) => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(...list)).mockResolvedValueOnce({ ok: true, value: answered("going") }));
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    for (const n of list) expect(t.at(itineraryId(n))).toEqual(notGoing);
+    for (const n of [9, 10, 11, 12].filter((n) => !list.includes(n))) expect(t.at(itineraryId(n))).toEqual(stillGoing);
+    expect(t.at(A)).toMatchObject({ status: "going" });
+  });
+  it("una incompatible con marca decisionRequired queda sin marca", async () => {
+    const marked = { ...pending(), activityId: itineraryId(9) };
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9)).mockResolvedValueOnce({ ok: true, value: answered("going") }), { [itineraryId(9)]: marked });
+    expect(t.at(itineraryId(9))).toMatchObject({ decisionRequired: mark });
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    expect(t.at(itineraryId(9))).toEqual(notGoing);
+  });
+  it("cancelar no cambia ningun estado y no escribe de nuevo", async () => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9, 10)));
+    await act(async () => t.hook().change(A, "going"));
+    await act(async () => t.hook().cancelConfirmation(A));
+    for (const n of [9, 10, 11, 12]) expect(t.at(itineraryId(n))).toEqual(stillGoing);
+    expect(t.at(A)).toMatchObject({ status: "pending", decisionRequired: mark }); expect(t.at(A)).not.toHaveProperty("confirming");
+    expect(t.api.set).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ["network", { ok: false, error: { kind: "network" } }], ["server", { ok: false, error: { kind: "server" } }],
+    ["403", { ok: false, error: { kind: "forbidden" } }], ["404", { ok: false, error: { kind: "not-found" } }], ["401", { ok: false, error: { kind: "unauthorized" } }],
+  ] as const)("un fallo %s al confirmar no toca las incompatibles", async (_name, failure) => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9, 10)).mockResolvedValueOnce(failure));
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    for (const n of [9, 10]) expect(t.at(itineraryId(n))).toEqual(stillGoing);
+  });
+  it("un set rechazado al confirmar no toca las incompatibles", async () => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9)).mockRejectedValueOnce(new Error("Offline")));
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    expect(t.at(itineraryId(9))).toEqual(stillGoing);
+  });
+  it("un segundo 409 obsoleto no toca las incompatibles y queda confirming.stale", async () => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9)).mockResolvedValueOnce(multiConflict(9, 10)));
+    await act(async () => t.hook().change(A, "going")); await act(async () => t.hook().confirmChange(A));
+    for (const n of [9, 10]) expect(t.at(itineraryId(n))).toEqual(stillGoing);
+    expect(t.at(A)).toMatchObject({ confirming: { stale: true } });
+  });
+  it("una respuesta en vuelo tras cambiar de Trip no publica nada", async () => {
+    const second = deferred<TripResult<ParticipationResponse>>();
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9)).mockReturnValueOnce(second.promise));
+    await act(async () => t.hook().change(A, "going"));
+    await act(async () => { void t.hook().confirmChange(A); });
+    await t.switchTrip(itineraryId(99));
+    await act(async () => second.resolve({ ok: true, value: answered("going") }));
+    expect(t.at(itineraryId(9))).not.toEqual(notGoing);
+    expect(t.at(A)).not.toMatchObject({ status: "going" });
+  });
+  it("una actividad eliminada no reaparece al confirmar", async () => {
+    const t = await many(vi.fn().mockResolvedValueOnce(multiConflict(9, 10)).mockResolvedValueOnce({ ok: true, value: answered("going") }));
+    await act(async () => t.hook().change(A, "going"));
+    await act(async () => t.hook().remove(itineraryId(9)));
+    await act(async () => t.hook().confirmChange(A));
+    expect(t.at(itineraryId(9))).toBeUndefined(); expect(t.at(itineraryId(10))).toEqual(notGoing);
+  });
+});

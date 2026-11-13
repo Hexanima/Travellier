@@ -87,10 +87,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     expect(statusOf("Cena")).toBe("Voy");
   });
 
-  // BUG: tras confirmar el cambio de plan el servidor deja «No voy» en el plan anterior, pero la pantalla sigue mostrando «Voy» en esa actividad
-  // hasta el proximo refresco (use-activity-participations: `write` solo publica la actividad elegida). Reproduccion: un «Voy» con conflicto,
-  // confirmar en el modal y mirar de inmediato la tarjeta de la actividad anterior. Es un hallazgo de produccion: no se corrige en T104.
-  it.fails("BUG: confirmar el cambio de plan actualiza de inmediato el plan anterior en pantalla", async () => {
+  it("confirmar el cambio de plan actualiza de inmediato el plan anterior en pantalla (T138)", async () => {
     const misa = (await createActivity(group, group.owner, { title: "Misa", date: "2099-03-02", time: "09:00", durationMinutes: 60 })).id;
     const feria = (await createActivity(group, group.participant, { title: "Feria", date: "2099-03-02", time: "09:30", durationMinutes: 60 })).id;
     await open(group.owner, "2099-03-02");
@@ -102,6 +99,46 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     expect(await stored(misa, group.owner)).toMatchObject({ status: "not_going" });
     expect(await stored(feria, group.owner)).toMatchObject({ status: "going" });
     expect(statusOf("Misa")).toBe("No voy");
+  });
+
+  it("con varias actividades incompatibles, confirmar las deja todas en «No voy» en pantalla sin esperar el refresco", async () => {
+    const alfa = (await createActivity(group, group.owner, { title: "Alfa", date: "2099-03-06", time: "10:00", durationMinutes: 30 })).id;
+    const beta = (await createActivity(group, group.owner, { title: "Beta", date: "2099-03-06", time: "10:30", durationMinutes: 30 })).id;
+    const gama = (await createActivity(group, group.participant, { title: "Gama", date: "2099-03-06", time: "10:15", durationMinutes: 60 })).id;
+    await open(group.owner, "2099-03-06");
+    await ready("Gama");
+    expect(statusOf("Alfa")).toBe("Voy");
+    expect(statusOf("Beta")).toBe("Voy");
+    await click(inside("Gama", "Voy"), "Voy de Gama");
+    await waitFor(() => modal() !== null, "modal de conflicto");
+    expect(modal()!.textContent).toContain("Alfa");
+    expect(modal()!.textContent).toContain("Beta");
+    await clickButton("Cambiar de plan");
+    await waitFor(() => statusOf("Gama") === "Voy", "Gama en «Voy»");
+    expect(await stored(alfa, group.owner)).toMatchObject({ status: "not_going" });
+    expect(await stored(beta, group.owner)).toMatchObject({ status: "not_going" });
+    expect(await stored(gama, group.owner)).toMatchObject({ status: "going" });
+    expect(statusOf("Alfa")).toBe("No voy");
+    expect(statusOf("Beta")).toBe("No voy");
+  });
+
+  it("si falla el guardado al confirmar, las actividades incompatibles siguen en «Voy» en pantalla y sin cambios guardados", async () => {
+    const delta = (await createActivity(group, group.owner, { title: "Delta", date: "2099-03-06", time: "14:00", durationMinutes: 30 })).id;
+    await createActivity(group, group.participant, { title: "Zeta", date: "2099-03-06", time: "14:15", durationMinutes: 60 });
+    await open(group.owner, "2099-03-06");
+    await ready("Zeta");
+    await click(inside("Zeta", "Voy"), "Voy de Zeta");
+    await waitFor(() => modal() !== null, "modal de conflicto");
+    const before = await scheduleState();
+    const faults = injectFetchFaults([{ method: "PUT", path: /\/activities\/[0-9a-f]{24}\/participation$/, mode: "before" }]);
+    try {
+      await clickButton("Cambiar de plan");
+      await waitForText("No pudimos guardar tu participación");
+    } finally { faults.restore(); }
+    expect(await scheduleState()).toEqual(before);
+    expect(await stored(delta, group.owner)).toMatchObject({ status: "going" });
+    expect(statusOf("Delta")).toBe("Voy");
+    expect(statusOf("Zeta")).toBe("Sin responder");
   });
 
   it("crear una actividad en conflicto desde el compositor pide confirmar: cancelar no publica y confirmar guarda actividad, participacion y recuerdo juntos", async () => {
