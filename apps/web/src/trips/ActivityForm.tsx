@@ -134,7 +134,7 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
       : failure.kind === "not-found" || failure.kind === "forbidden" ? "La actividad o el día ya no están disponibles. Volvé a cargar el itinerario."
       : "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback> : null}
     <Button type="submit" loading={saving}>{existing ? "Guardar cambios" : "Guardar actividad"}</Button>
-    {onExit ? <DiscardChangesModal dirty={!saving && JSON.stringify(values) !== JSON.stringify(initial)}
+    {onExit ? <DiscardChangesModal dirty={JSON.stringify(values) !== JSON.stringify(initial)} saving={saving}
       message="Si salís ahora, vas a perder los cambios de esta actividad." onDiscard={onExit} /> : null}
     {pending ? createPortal(<div className="participation-conflict-layer"><ParticipationConflictModal conflicts={pending.confirmation.confirmedConflicts} activities={knownActivities}
       timeZone={timeZone} stale={pending.stale} saving={saving}

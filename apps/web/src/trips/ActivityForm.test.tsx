@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
-import type { ActivityResponse } from "./trip-activity-api.js";
+import type { ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import { itineraryFixture } from "./itinerary-test-fixture.js";
 import { MemoryRouter } from "react-router-dom";
@@ -315,7 +315,7 @@ describe("ActivityForm location preview", () => {
 });
 
 describe("ActivityForm y el Atrás nativo", () => {
-  async function renderWithBack(existing?: ActivityResponse) {
+  async function renderWithBack(existing?: ActivityResponse, create: TripActivityApi["create"] = vi.fn()) {
     const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
     const context: ActivityFormContext = { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
       selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
@@ -327,7 +327,7 @@ describe("ActivityForm y el Atrás nativo", () => {
     await act(async () => root.render(
       <MemoryRouter initialEntries={["/trips/000000000000000000000001/itinerary"]}>
         <BackNavigationProvider backButton={port}>
-          <ActivityForm context={context} activities={{ create: vi.fn(), update: vi.fn() }} knownActivities={itinerary.activities}
+          <ActivityForm context={context} activities={{ create, update: vi.fn() }} knownActivities={itinerary.activities}
             existing={existing} onSaved={vi.fn()} onBusyChange={vi.fn()} onExit={onExit} />
         </BackNavigationProvider>
       </MemoryRouter>));
@@ -348,6 +348,17 @@ describe("ActivityForm y el Atrás nativo", () => {
     expect(view.onExit).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Descartar cambios");
     expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios de esta actividad.");
+  });
+
+  it("mientras guarda, el Atrás no sale ni descarta los cambios", async () => {
+    const create = vi.fn().mockReturnValue(new Promise(() => undefined));
+    const view = await renderWithBack(undefined, create as unknown as TripActivityApi["create"]);
+    await field(view.container, "title", "Museo"); await field(view.container, "time", "09:00");
+    await submit(view.container);
+    expect(create).toHaveBeenCalledTimes(1);
+    await view.press();
+    expect(view.onExit).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("Descartar cambios");
   });
 
   it("sin onExit no toma el Atrás: lo resuelve la pantalla", async () => {

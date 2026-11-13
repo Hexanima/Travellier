@@ -77,6 +77,27 @@ describe("DiscardChangesModal", () => {
     expect(view.where()).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/memories/new/expense");
   });
 
+  it("mientras guarda, el Atrás no cierra ni pregunta: la pulsación queda retenida", async () => {
+    const onDiscard = vi.fn();
+    const onClose = vi.fn();
+    const view = await render(<Modal isOpen title="Editar actividad" onClose={onClose}>
+      <DiscardChangesModal dirty saving message="Perdés los cambios." onDiscard={onDiscard} />
+    </Modal>);
+    await view.press();
+    expect(onDiscard).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain("Descartar cambios");
+    expect(view.where()).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/memories/new/expense");
+  });
+
+  it("mientras guarda sin cambios tampoco sale del formulario", async () => {
+    const onDiscard = vi.fn();
+    const view = await render(<DiscardChangesModal dirty={false} saving message="Perdés los cambios." onDiscard={onDiscard} />);
+    await view.press();
+    expect(onDiscard).not.toHaveBeenCalled();
+    expect(view.where()).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/memories/new/expense");
+  });
+
   it("dentro de un diálogo, el Atrás pregunta antes de cerrarlo", async () => {
     const onClose = vi.fn();
     const onDiscard = vi.fn();
