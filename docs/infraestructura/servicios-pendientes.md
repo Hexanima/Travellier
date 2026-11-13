@@ -50,7 +50,7 @@ Si falla el SDK, el comando termina con error genérico sin imprimir el error or
 
 `infrastructure/pending-services.cjs` agrega dos circuitos separados: EventBridge → SQS → consumidor Lambda, para `events` y `storageDeletionJobs`.
 
-- EventBridge genera un tick por minuto: `{ kind: "events" | "storageDeletionJobs", stage: "dev" | "prod" }`. No contiene tokens, fotos, claves privadas ni payloads de negocio.
+- EventBridge genera un tick según el parámetro de stage (`eventsScheduleExpression`, por defecto `rate(1 minute)`; `storageDeletionScheduleExpression`, por defecto `rate(5 minutes)`): `{ kind: "events" | "storageDeletionJobs", stage: "dev" | "prod" }`. No contiene tokens, fotos, claves privadas ni payloads de negocio.
 - MongoDB conserva el trabajo durable. **T45 no lee ni consume esas colecciones**. El tick no equivale a un evento de negocio; el consumidor debe buscar trabajos elegibles en MongoDB. La expiración de un tick no elimina el trabajo durable.
 - Cada cola usa SSE administrado por SQS, retención de 1 día, visibilidad de 360 segundos y redrive tras 5 recepciones. La DLQ de procesamiento conserva mensajes 14 días y admite redrive solamente desde su cola de origen.
 - EventBridge tiene hasta 5 reintentos dentro de 1 hora y una DLQ de entrega de 14 días. Esa política cubre entrega a SQS, no ejecución del consumidor.
