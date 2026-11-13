@@ -210,11 +210,14 @@ describe('Serverless infrastructure contract', () => {
 
 const { createPendingServices } = createRequire(import.meta.url)('../infrastructure/pending-services.cjs')
 const source = (path) => readFileSync(join(rootDirectory, path), 'utf8')
-const constant = (path, name) => {
-  const match = source(path).match(new RegExp(String.raw`(?:const|let)\s+${name}\s*=\s*([0-9_]+)`))
-  assert.ok(match, `missing constant ${name} in ${path}`)
+const constantFrom = (text, name, where) => {
+  const declaration = text.match(new RegExp(String.raw`(?:const|let)\s+${name}\b[^;\n]*`))
+  assert.ok(declaration, `missing constant ${name} in ${where}`)
+  const match = declaration[0].match(/=\s*([0-9]+(?:_[0-9]+)*)\s*$/)
+  assert.ok(match, `constant ${name} in ${where} must be a plain numeric literal, found: ${declaration[0]}`)
   return Number(match[1].replaceAll('_', ''))
 }
+const constant = (path, name) => constantFrom(source(path), name, path)
 
 describe('Worker functions contract (T142)', () => {
   const service = load(source('serverless.yml'))
@@ -272,8 +275,20 @@ describe('Worker functions contract (T142)', () => {
     assert.equal(params.storageDeletionConsumerArn, '')
   })
 
+  it('reads constants only from plain numeric literals', () => {
+    assert.equal(constantFrom('export const A = 40_000;', 'A', 't'), 40000)
+    assert.equal(constantFrom('const B = 3000', 'B', 't'), 3000)
+    assert.throws(() => constantFrom('const C = 40 * 1000;', 'C', 't'), /plain numeric literal/)
+    assert.throws(() => constantFrom('const D = 3000 + 1000;', 'D', 't'), /plain numeric literal/)
+    assert.throws(() => constantFrom('const E = 1', 'F', 't'), /missing constant/)
+  })
+
   it('keeps every timeout under its lease and above its internal deadline plus the closing margin', () => {
-    const snsCall = constant('apps/api/src/adapters/aws/sns-client.ts', 'SNS_REQUEST_TIMEOUT_MS')
+    // Real per-call bound: the backstop abort (request timeout + 1 s), not the socket-inactivity requestTimeout.
+    const snsSource = source('apps/api/src/adapters/aws/sns-client.ts')
+    assert.match(snsSource, /export const SNS_CALL_BUDGET_MS = SNS_REQUEST_TIMEOUT_MS \+ 1000;/)
+    assert.match(snsSource, /controller\.abort\(\); \}, SNS_CALL_BUDGET_MS\)/)
+    const snsCall = constant('apps/api/src/adapters/aws/sns-client.ts', 'SNS_REQUEST_TIMEOUT_MS') + 1000
     const queueTimeout = 360
     const cases = [
       // Four SNS calls (create endpoint, publish, reactivate, publish) plus 5 s of closing writes.

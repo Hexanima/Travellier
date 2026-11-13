@@ -23,12 +23,12 @@ const setup = (over: Partial<EventsHandlerDependencies> = {}) => {
 };
 
 describe("events Lambda handler", () => {
-  it("runs the dispatch for a valid tick with the internal deadline of 40 seconds", async () => {
+  it("runs the dispatch for a valid tick with the internal deadline of 35 seconds", async () => {
     const { handler, run } = setup();
-    expect(EVENTS_DEADLINE_MS).toBe(40_000);
+    expect(EVENTS_DEADLINE_MS).toBe(35_000);
     expect(await handler({ Records: [record(tick)] })).toEqual({ batchItemFailures: [] });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith({ deadline: new Date(NOW.getTime() + 40_000) });
+    expect(run).toHaveBeenCalledWith({ deadline: new Date(NOW.getTime() + 35_000) });
   });
 
   it.each([

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CreatePlatformEndpointCommand, PublishCommand, SetEndpointAttributesCommand, SNSClient } from "@aws-sdk/client-sns";
 
-import { createSnsClient, SNS_CONNECTION_TIMEOUT_MS, SNS_REQUEST_TIMEOUT_MS } from "./sns-client.js";
+import { createSnsClient, SNS_CALL_BUDGET_MS, SNS_CONNECTION_TIMEOUT_MS, SNS_REQUEST_TIMEOUT_MS } from "./sns-client.js";
 
 const sender = () => {
   const send = vi.fn().mockResolvedValue({ EndpointArn: "arn:fake", MessageId: "m" });
@@ -14,6 +14,7 @@ describe("createSnsClient", () => {
   it("exposes the timeouts as constants", () => {
     expect(SNS_REQUEST_TIMEOUT_MS).toBe(3000);
     expect(SNS_CONNECTION_TIMEOUT_MS).toBe(1000);
+    expect(SNS_CALL_BUDGET_MS).toBe(SNS_REQUEST_TIMEOUT_MS + 1000);
   });
 
   it("sends CreatePlatformEndpoint with its input intact, a per-call timeout and an abort signal", async () => {
@@ -55,7 +56,23 @@ describe("createSnsClient", () => {
     const client = createSnsClient({ region: "us-east-1", sns: { send } as unknown as SNSClient });
     const pending = client.publish({ TargetArn: "arn:e", Message: "{}", MessageStructure: "json" });
     const assertion = expect(pending).rejects.toThrow("aborted");
-    await vi.advanceTimersByTimeAsync(SNS_REQUEST_TIMEOUT_MS + 1000);
+    await vi.advanceTimersByTimeAsync(SNS_CALL_BUDGET_MS);
+    await assertion;
+  });
+
+  it("fires the backstop abort exactly at SNS_CALL_BUDGET_MS, not before", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const send = vi.fn((_command: unknown, options: { abortSignal: AbortSignal }) => new Promise((_resolve, reject) => {
+      signal = options.abortSignal;
+      options.abortSignal.addEventListener("abort", () => { reject(new Error("aborted")); });
+    }));
+    const client = createSnsClient({ region: "us-east-1", sns: { send } as unknown as SNSClient });
+    const assertion = expect(client.publish({ TargetArn: "arn:e", Message: "{}", MessageStructure: "json" })).rejects.toThrow("aborted");
+    await vi.advanceTimersByTimeAsync(SNS_CALL_BUDGET_MS - 1);
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal?.aborted).toBe(true);
     await assertion;
   });
 
