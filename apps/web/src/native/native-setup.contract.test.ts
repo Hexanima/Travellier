@@ -46,10 +46,27 @@ describe("native setup", () => {
   it("syncs all three new plugins into Android and iOS SPM", () => {
     const gradle = read("../../android/app/capacitor.build.gradle");
     const spm = read("../../ios/App/CapApp-SPM/Package.swift");
-    for (const name of ["camera", "push-notifications", "calendar"]) {
+    for (const name of ["camera", "push-notifications", "calendar", "filesystem", "share"]) {
       expect(gradle).toContain(`project(':capacitor-${name}')`);
       expect(spm).toContain(`node_modules/@capacitor/${name}`);
     }
     expect(spm).toContain('exact: "8.5.2"');
+  });
+
+  it("keeps the share and filesystem options the .ics sharer uses, with the FileProvider covering the cache", () => {
+    const share = read("../../../../node_modules/@capacitor/share/dist/esm/definitions.d.ts");
+    expect(share).toMatch(/files\?: string\[\]/);
+    expect(share).toContain("canShare(): Promise<CanShareResult>");
+    const filesystem = read("../../../../node_modules/@capacitor/filesystem/dist/esm/definitions.d.ts");
+    for (const name of ["Cache = \"CACHE\"", "writeFile(options", "deleteFile(options"]) expect(filesystem).toContain(name);
+    expect(read("../../android/app/src/main/res/xml/file_paths.xml")).toContain("<cache-path");
+    expect(android).toContain("${applicationId}.fileprovider");
+  });
+
+  it("keeps the cancellation rejection the .ics sharer classifies as cancelled", () => {
+    const androidPlugin = read("../../../../node_modules/@capacitor/share/android/src/main/java/com/capacitorjs/plugins/share/SharePlugin.java");
+    expect(androidPlugin).toMatch(/RESULT_CANCELED[\s\S]{0,120}call\.reject\("Share canceled"\)/);
+    const iosPlugin = read("../../../../node_modules/@capacitor/share/ios/Sources/SharePlugin/SharePlugin.swift");
+    expect(iosPlugin).toContain('call.reject("Share canceled")');
   });
 });

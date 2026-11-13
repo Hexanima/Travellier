@@ -14,7 +14,7 @@ const defaultDeps = (): DownloadDeps => ({
 });
 
 /** Never trusts the name: only letters, digits, `_` and `-` survive, plus the fixed `.ics` extension. */
-function safeFileName(name: string): string {
+export function safeFileName(name: string): string {
   const base = name.replace(/\.ics$/i, "").replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 100).replace(/-+$/, "");
   return `${base || "travellier-viaje"}.ics`;
 }
