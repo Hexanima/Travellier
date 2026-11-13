@@ -6,6 +6,7 @@ import { itineraryFixture } from "../trips/itinerary-test-fixture.js";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
 import { ExportIcsButton, icsStaticCopyNotice } from "./ExportIcsButton.js";
 import type { DownloadResult } from "./download-ics.js";
+import type { IcsShareOutcome } from "../native/ics-share.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -13,7 +14,7 @@ afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => 
 
 const fixture = () => itineraryFixture() as TripItineraryResponse;
 const now = () => new Date("2026-11-10T12:34:56.789Z");
-type Download = (text: string, fileName: string) => DownloadResult | Promise<DownloadResult>;
+type Download = (text: string, fileName: string) => DownloadResult | IcsShareOutcome | Promise<DownloadResult | IcsShareOutcome>;
 function mount(initial: { itinerary?: TripItineraryResponse; tripName?: string; download?: Download; resolveTripName?: () => Promise<string | undefined> }) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
@@ -78,8 +79,8 @@ describe("ExportIcsButton", () => {
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
   });
   it("is aria-disabled while exporting without losing focus, and does not re-enter", async () => {
-    let finish!: (value: DownloadResult) => void;
-    const download = vi.fn<Download>(() => new Promise<DownloadResult>((resolve) => { finish = resolve; }));
+    let finish!: (value: DownloadResult | IcsShareOutcome) => void;
+    const download = vi.fn<Download>(() => new Promise<DownloadResult | IcsShareOutcome>((resolve) => { finish = resolve; }));
     const { container, render } = mount({ itinerary: fixture(), download });
     await render();
     const target = button(container)!;
@@ -147,6 +148,55 @@ describe("ExportIcsButton", () => {
     await click(container);
     expect(download.mock.calls[0][0]).toContain("X-WR-CALNAME:Viaje Travellier");
     expect(download.mock.calls[0][1]).toBe("travellier-viaje.ics");
+  });
+});
+
+describe("ExportIcsButton share outcomes", () => {
+  it("shared: success status that never claims the file was imported or saved", async () => {
+    const { container, render } = mount({ itinerary: fixture(), download: vi.fn<Download>(async () => ({ ok: true, via: "shared" })) });
+    await render();
+    await click(container);
+    const status = container.querySelectorAll('[role="status"]');
+    expect(status).toHaveLength(1);
+    expect(status[0].textContent).toBe("Se abrió la hoja para compartir o guardar el archivo.");
+    expect(status[0].textContent).not.toMatch(/import|Exportado/i);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+  it("downloaded: keeps the web message", async () => {
+    const { container, render } = mount({ itinerary: fixture(), download: vi.fn<Download>(async () => ({ ok: true, via: "downloaded" })) });
+    await render();
+    await click(container);
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("Se generó la exportación");
+  });
+  it("cancelled: neutral message, neither success status nor alert, and it can be retried", async () => {
+    const download = vi.fn<Download>(async () => ({ ok: false, reason: "cancelled" }));
+    const { container, render } = mount({ itinerary: fixture(), download });
+    await render();
+    await click(container);
+    expect(container.textContent).toContain("No se compartió el archivo. Podés volver a intentarlo.");
+    expect(container.querySelector('[role="status"],[role="alert"]')).toBeNull();
+    download.mockResolvedValue({ ok: true, via: "shared" });
+    await click(container);
+    expect(download).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("No se compartió");
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
+  });
+  it("failed or thrown: retryable alert without paths, button stays available", async () => {
+    const download = vi.fn<Download>(async () => ({ ok: false, reason: "failed" }));
+    const { container, render } = mount({ itinerary: fixture(), download });
+    await render();
+    await click(container);
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(container.textContent).not.toMatch(/file:|cache|\/data\//i);
+    expect(button(container)!.getAttribute("aria-disabled")).toBeNull();
+    download.mockRejectedValueOnce(new Error("file:///data/cache/x.ics"));
+    await click(container);
+    expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(container.textContent).not.toContain("file:///");
+    download.mockResolvedValue({ ok: true, via: "shared" });
+    await click(container);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);
   });
 });
 

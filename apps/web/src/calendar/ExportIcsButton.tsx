@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Button, Feedback } from "../components/index.js";
 import type { TripItineraryResponse } from "../trips/trip-itinerary-api.js";
+import type { IcsShareOutcome } from "../native/ics-share.js";
 import { downloadIcs, type DownloadResult } from "./download-ics.js";
 import { buildItineraryIcs, icsEventCount, icsFileName } from "./ics.js";
 import "../components/integrations.css";
@@ -14,11 +15,11 @@ type Props = {
   resolveTripName?: () => Promise<string | undefined>;
   /** Latest loaded itinerary; without it nothing is offered. It is read at click time, never cached. */
   itinerary: TripItineraryResponse | undefined;
-  download?: (text: string, fileName: string) => DownloadResult | Promise<DownloadResult>;
+  download?: (text: string, fileName: string) => DownloadResult | IcsShareOutcome | Promise<DownloadResult | IcsShareOutcome>;
   now?: () => Date;
   timeZone?: string;
 };
-type Outcome = { kind: "idle" } | { kind: "done"; at: Date } | { kind: "error" };
+type Outcome = { kind: "idle" } | { kind: "done"; at: Date; shared: boolean } | { kind: "cancelled" } | { kind: "error" };
 
 export function ExportIcsButton({ tripName = "", resolveTripName, itinerary, download = downloadIcs, now = () => new Date(), timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const [busy, setBusy] = useState(false);
@@ -38,7 +39,7 @@ export function ExportIcsButton({ tripName = "", resolveTripName, itinerary, dow
       }
       const exportedAt = now();
       const result = await download(buildItineraryIcs({ tripName: name, itinerary, exportedAt }), icsFileName(name));
-      setOutcome(result.ok ? { kind: "done", at: exportedAt } : { kind: "error" });
+      setOutcome(result.ok ? { kind: "done", at: exportedAt, shared: "via" in result && result.via === "shared" } : "reason" in result && result.reason === "cancelled" ? { kind: "cancelled" } : { kind: "error" });
     } catch {
       setOutcome({ kind: "error" });
     } finally {
@@ -50,7 +51,10 @@ export function ExportIcsButton({ tripName = "", resolveTripName, itinerary, dow
     {/* aria-disabled instead of disabled: the button keeps focus while exporting. */}
     <Button variant="secondary" onClick={() => void exportNow()} aria-disabled={busy || undefined}>Exportar a calendario (.ics)</Button>
     <p className="ics-export-notice">{icsStaticCopyNotice}</p>
-    {outcome.kind === "done" ? <Feedback variant="success">Se generó la exportación el {stamp}. Si no aparece el archivo, probá de nuevo.</Feedback> : null}
-    {outcome.kind === "error" ? <Feedback variant="error">No pudimos generar la descarga del archivo. Probá nuevamente.</Feedback> : null}
+    {outcome.kind === "done" && outcome.shared ? <Feedback variant="success">Se abrió la hoja para compartir o guardar el archivo.</Feedback> : null}
+    {outcome.kind === "done" && !outcome.shared ? <Feedback variant="success">Se generó la exportación el {stamp}. Si no aparece el archivo, probá de nuevo.</Feedback> : null}
+    {/* Dismissing the sheet is neither success nor failure: a polite note, not a status or an alert. */}
+    {outcome.kind === "cancelled" ? <Feedback variant="info" role="note" aria-live="polite">No se compartió el archivo. Podés volver a intentarlo.</Feedback> : null}
+    {outcome.kind === "error" ? <Feedback variant="error">No pudimos guardar ni compartir el archivo. Probá nuevamente.</Feedback> : null}
   </section>;
 }
