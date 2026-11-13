@@ -6,8 +6,8 @@ import type { PostResponse, TripPostApi } from "./trip-post-api.js";
 import { PostLink } from "./post-navigation.js";
 import { useRestorePosition } from "./use-restore-position.js";
 import { memoryAnchor } from "./post-origin.js";
-import { PostDraftsProvider } from "./use-post-drafts.js";
-import { CommentDraftsProvider } from "./use-comment-drafts.js";
+import { PostDraftsProvider, useHasPostDrafts } from "./use-post-drafts.js";
+import { CommentDraftsProvider, useHasCommentDrafts } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
 import { useInTripShell } from "./trip-state.js";
 import type { TripMembersApi } from "./trip-members-api.js";
@@ -36,12 +36,15 @@ const noticeText = ({ notice, going }: Saved) => notice === "created" ? "Recuerd
   : `${notice === "created-activity" ? "Recuerdo publicado" : "Cambios guardados"} y actividad creada.${going ? " Vas a ir." : ""}`;
 
 /**
- * Layout of `memories/*`: drafts and the gallery snapshots live here, keyed by Trip, so they are shared by the child routes and dropped
- * when leaving the Trip. Without `gallery` there is no gallery provider (the photos route needs it).
+ * Layout of `memories/*`. Under `TripContentLayout` the drafts already live above (they survive the journal, whose shell remounts this layout);
+ * without a provider above (this layout alone) it keeps them here, keyed by Trip. Without `gallery` there is no gallery provider (the photos route needs it).
  */
 export function MemoriesLayout({ gallery }: { gallery?: GalleryProviderProps } = {}) {
   const { tripId } = useParams();
-  const content = <PostDraftsProvider key={tripId}><CommentDraftsProvider key={tripId}><Outlet /></CommentDraftsProvider></PostDraftsProvider>;
+  const hasPostDrafts = useHasPostDrafts(), hasCommentDrafts = useHasCommentDrafts();
+  const outlet = <Outlet />;
+  const comments = hasCommentDrafts ? outlet : <CommentDraftsProvider key={tripId}>{outlet}</CommentDraftsProvider>;
+  const content = hasPostDrafts ? comments : <PostDraftsProvider key={tripId}>{comments}</PostDraftsProvider>;
   return gallery ? <GalleryProvider key={tripId} {...gallery}>{content}</GalleryProvider> : content;
 }
 

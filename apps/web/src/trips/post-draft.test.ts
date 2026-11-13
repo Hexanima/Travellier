@@ -193,7 +193,11 @@ describe("post draft with a new activity", () => {
   it("derives the draft key from the edited post or the valid continuation parent", () => {
     expect(draftKeyFor({ postId: P, search: `?parentPostId=${A}` })).toBe(`edit:${P}`);
     expect(draftKeyFor({ search: "" })).toBe("new");
-    expect(draftKeyFor({ search: `?transportId=${T}` })).toBe("new");
+    expect(draftKeyFor({ search: `?transportId=${T}` })).toBe(`new:transport:${T}`);
+    expect(draftKeyFor({ search: "?transportId=nope" })).toBe("new");
+    expect(draftKeyFor({ search: `?transportId=${T}` })).not.toBe(draftKeyFor({ search: "" }));
+    expect(draftKeyFor({ search: `?transportId=${T}` })).not.toBe(draftKeyFor({ search: `?transportId=${P}` }));
+    expect(draftKeyFor({ search: `?parentPostId=${A}&transportId=${T}` })).toBe(`new:parent:${A}`);
     expect(draftKeyFor({ search: `?parentPostId=${A}` })).toBe(`new:parent:${A}`);
     expect(draftKeyFor({ search: "?parentPostId=nope" })).toBe("new");
     expect(draftKeyFor({ search: `?parentPostId=${A}` })).not.toBe(draftKeyFor({ search: `?parentPostId=${P}` }));

@@ -2,7 +2,7 @@
 import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CommentDraftsProvider, useCommentDraft } from "./use-comment-drafts.js";
+import { CommentDraftsProvider, useCommentDraft, useHasCommentDrafts } from "./use-comment-drafts.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -81,5 +81,19 @@ describe("comment drafts context", () => {
       expect(thrown).toBeInstanceOf(Error);
       expect((thrown as Error).message).toBe("useCommentDraft requires a CommentDraftsProvider");
     }
+  });
+});
+
+describe("useHasCommentDrafts", () => {
+  function Has() { return <output>{String(useHasCommentDrafts())}</output>; }
+  const mount = async (element: React.ReactNode) => {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(element));
+    return container.querySelector("output")?.textContent;
+  };
+  it("is false without a provider and true under one", async () => {
+    expect(await mount(<Has />)).toBe("false");
+    expect(await mount(<CommentDraftsProvider><Has /></CommentDraftsProvider>)).toBe("true");
   });
 });

@@ -7,6 +7,9 @@ import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { TripContentLayout } from "./TripContentLayout.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
 import { useGalleryPages } from "./use-gallery.js";
+import { usePostDraft } from "./use-post-drafts.js";
+import { useCommentDraft } from "./use-comment-drafts.js";
+import type { PostDraft } from "./post-draft.js";
 import type { GalleryPhoto } from "./trip-gallery-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,5 +82,105 @@ describe("TripContentLayout", () => {
     const container = await mount(vi.fn(), false, `/trips/${tripId}/memories/${postId}`);
     await act(async () => go(`/trips/${tripId}/memories/${postId}`));
     expect(text(container, "detail")).toBe("detalle");
+  });
+});
+
+describe("TripContentLayout drafts", () => {
+  const edited = (description: string): PostDraft => ({ values: { description, mapsUrl: "" }, extras: { link: null, transportId: null, newActivity: null, photos: [],
+    expense: null, split: { payments: null, shares: null }, removePhotoIds: ["p1"], removeExpense: true } });
+  // Stand-ins for the composer (`new`, `edit:<id>`), the detail comment field and the journal; the real shell is in between, so the Outlet changes place.
+  function Composer({ name }: { name: string }) {
+    const handle = usePostDraft(name);
+    return <div data-composer={name}><output data-text>{handle.draft ? handle.draft.values.description : "none"}</output>
+      <output data-extras>{handle.draft ? `${handle.draft.extras.removePhotoIds.join(",")}|${handle.draft.extras.removeExpense}` : "none"}</output>
+      <output data-blobs>{handle.blobs.ids().join(",") || "none"}</output>
+      <button type="button" data-action="write" onClick={() => { handle.setDraft(edited(`texto ${name}`)); handle.blobs.set("foto", new Blob(["x"])); }}>write</button>
+      <button type="button" data-action="publish" onClick={handle.clear}>publish</button></div>;
+  }
+  function Comment() {
+    const handle = useCommentDraft("new:post");
+    return <div data-comment><output data-text>{handle.text ?? "none"}</output>
+      <button type="button" data-action="write" onClick={() => handle.setText("comentario a medias")}>write</button>
+      <button type="button" data-action="publish" onClick={handle.clear}>publish</button></div>;
+  }
+  async function open(start: string) {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={[start]}><Nav /><Routes>
+      <Route path="/trips/:tripId/config" element={<p data-config>config</p>} />
+      <Route element={<TripContentLayout />}>
+        <Route path="/trips/:tripId/members" element={<p data-members>grupo</p>} />
+        <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
+          <Route index element={<p data-journal>diario</p>} />
+          <Route path="new" element={<Composer name="new" />} />
+          <Route path="e/edit" element={<Composer name="edit:e" />} />
+          <Route path=":postId" element={<Comment />} />
+        </Route>
+      </Route>
+    </Routes></MemoryRouter>));
+    return container;
+  }
+  const click = (container: HTMLElement, selector: string) => act(async () => { container.querySelector<HTMLElement>(selector)?.click(); });
+  const memories = (path = "") => `/trips/${tripId}/memories${path}`;
+  const shown = (container: HTMLElement, selector: string) => container.querySelector(`${selector} [data-text]`)?.textContent;
+
+  it("keeps the memory draft, with its photo binaries, when going to the journal and back", async () => {
+    const container = await open(memories("/new"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await act(async () => go(memories()));
+    expect(container.querySelector("[data-journal]")).not.toBeNull();
+    await act(async () => go(memories("/new")));
+    expect(shown(container, "[data-composer]")).toBe("texto new");
+    expect(container.querySelector("[data-composer] [data-blobs]")?.textContent).toBe("foto");
+  });
+  it("keeps an edit draft (removePhotoIds and removeExpense) across the journal", async () => {
+    const container = await open(memories("/e/edit"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await act(async () => go(memories()));
+    await act(async () => go(memories("/e/edit")));
+    expect(shown(container, "[data-composer]")).toBe("texto edit:e");
+    expect(container.querySelector("[data-composer] [data-extras]")?.textContent).toBe("p1|true");
+  });
+  it("keeps the comment draft when going from the detail to the journal and back", async () => {
+    const container = await open(memories(`/${postId}`));
+    await click(container, '[data-comment] [data-action="write"]');
+    await act(async () => go(memories()));
+    await act(async () => go(memories(`/${postId}`)));
+    expect(shown(container, "[data-comment]")).toBe("comentario a medias");
+  });
+  it("keeps the drafts when visiting another screen of the same Trip under the layout", async () => {
+    const container = await open(memories("/new"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await act(async () => go(`/trips/${tripId}/members`));
+    await act(async () => go(memories("/new")));
+    expect(shown(container, "[data-composer]")).toBe("texto new");
+  });
+  it("discards the drafts when publishing (clear)", async () => {
+    const container = await open(memories("/new"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await click(container, '[data-composer] [data-action="publish"]');
+    expect(shown(container, "[data-composer]")).toBe("none");
+    expect(container.querySelector("[data-composer] [data-blobs]")?.textContent).toBe("none");
+    await act(async () => go(memories(`/${postId}`)));
+    await click(container, '[data-comment] [data-action="write"]');
+    await click(container, '[data-comment] [data-action="publish"]');
+    expect(shown(container, "[data-comment]")).toBe("none");
+  });
+  it("discards the drafts (and their binaries) when moving to another Trip", async () => {
+    const container = await open(memories("/new"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await act(async () => go(`/trips/${otherTripId}/memories/new`));
+    expect(shown(container, "[data-composer]")).toBe("none");
+    expect(container.querySelector("[data-composer] [data-blobs]")?.textContent).toBe("none");
+    await act(async () => go(memories("/new")));
+    expect(shown(container, "[data-composer]")).toBe("none");
+  });
+  it("discards the drafts when leaving the Trip routes and coming back", async () => {
+    const container = await open(memories("/new"));
+    await click(container, '[data-composer] [data-action="write"]');
+    await act(async () => go(`/trips/${tripId}/config`));
+    expect(container.querySelector("[data-config]")).not.toBeNull();
+    await act(async () => go(memories("/new")));
+    expect(shown(container, "[data-composer]")).toBe("none");
   });
 });

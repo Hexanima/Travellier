@@ -4,8 +4,8 @@ export type CommentDraftHandle = { text: string | undefined; setText: (text: str
 type Store = { drafts: Readonly<Record<string, string>>; set: (key: string, text: string) => void; clear: (key: string) => void };
 const Context = createContext<Store | undefined>(undefined);
 /**
- * Holds comment texts by key (`new:<postId>` or `edit:<commentId>`) at the level of the trip's memories layout, so they survive the remount of the detail,
- * going to another memory of the chain and coming back. They live only while the layout is mounted: leaving the Trip discards them, and they are never persisted.
+ * Holds comment texts by key (`new:<postId>` or `edit:<commentId>`) at the level of the Trip layout (`TripContentLayout`, keyed by Trip), so they survive the remount of the detail,
+ * going to another memory of the chain and coming back. They live only while that layout is mounted: leaving the Trip discards them, and they are never persisted.
  */
 export function CommentDraftsProvider({ children }: { children: ReactNode }) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({});
@@ -17,6 +17,9 @@ export function CommentDraftsProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ drafts, set, clear }), [drafts, set, clear]);
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
+// True when a provider is above: lets a nested layout reuse it instead of creating another one.
+// eslint-disable-next-line react-refresh/only-export-components
+export const useHasCommentDrafts = (): boolean => useContext(Context) !== undefined;
 // The provider and its hook belong together; the hook does not affect fast refresh of the provider component.
 // eslint-disable-next-line react-refresh/only-export-components
 export const useCommentDraft = (key: string): CommentDraftHandle => {

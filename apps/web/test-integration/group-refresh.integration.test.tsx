@@ -208,11 +208,7 @@ describe("T104 grupo, salida/transferencia, moneda de transportes y refresco (cl
       expect(await harness.db.collection("comments").countDocuments({ postId: new ObjectId(target) })).toBe(1);
     });
 
-    // BUG (a confirmar con el PRD): al pasar del compositor o del detalle al diario (pantalla raiz del Trip) y volver, MemoriesLayout se vuelve a montar
-    // (el Outlet de TripShell cambia de lugar en el arbol) y se pierden los borradores de recuerdo y de comentario, que viven en ese layout.
-    // Reproduccion: abrir /memories/new, escribir texto, ir a /memories (por historial) y volver a /memories/new: el campo queda vacio.
-    // Con subformularios (/memories/new/link) el borrador SI se conserva. Se deja en it.fails: pasa mientras el comportamiento siga igual.
-    it.fails("BUG: el borrador del recuerdo se conserva al ir al diario y volver al compositor", async () => {
+    it("el borrador del recuerdo se conserva al ir al diario y volver al compositor", async () => {
       await open(group.owner, `${memories()}/new`);
       await waitFor(() => document.querySelector('[name="description"]') !== null, "compositor");
       await type("description", "Borrador que viaja al diario");
@@ -223,8 +219,7 @@ describe("T104 grupo, salida/transferencia, moneda de transportes y refresco (cl
       expect(draftText()).toBe("Borrador que viaja al diario");
     });
 
-    // BUG (a confirmar con el PRD): mismo origen para el comentario en edicion al ir del detalle al diario y volver al detalle.
-    it.fails("BUG: el comentario en edicion se conserva al ir al diario y volver al recuerdo", async () => {
+    it("el comentario en edicion se conserva al ir al diario y volver al recuerdo", async () => {
       const target = await post(group.admin, "Recuerdo de ida y vuelta");
       await open(group.owner, `${memories()}/${target}`);
       await waitFor(() => document.querySelector('[name="comment-new"]') !== null, "campo de comentario");
