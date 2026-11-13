@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createHttpClient } from "./http-client.js";
 
@@ -37,6 +37,7 @@ describe("createHttpClient", () => {
     expect(fetch).toHaveBeenCalledWith("https://api.example.test/trips/trip-1", {
       headers: { Authorization: "Bearer access-token" },
       method: "GET",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -59,6 +60,7 @@ describe("createHttpClient", () => {
     expect(fetch).toHaveBeenCalledWith("https://api.example.test/health", {
       headers: {},
       method: "GET",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -89,6 +91,7 @@ describe("createHttpClient", () => {
       body: JSON.stringify({ email: "user@example.test", password: "secret" }),
       headers: { "content-type": "application/json" },
       method: "POST",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -117,6 +120,7 @@ describe("createHttpClient", () => {
         "content-type": "application/json",
       },
       method: "PUT",
+      signal: expect.any(AbortSignal),
     });
     expect(fetch).toHaveBeenNthCalledWith(2, "https://api.example.test/trips/trip-1", {
       body: JSON.stringify({ coverPhotoId: "photo-1" }),
@@ -125,10 +129,12 @@ describe("createHttpClient", () => {
         "content-type": "application/json",
       },
       method: "PATCH",
+      signal: expect.any(AbortSignal),
     });
     expect(fetch).toHaveBeenNthCalledWith(3, "https://api.example.test/trips/trip-1", {
       headers: { Authorization: "Bearer access-token" },
       method: "DELETE",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -196,6 +202,7 @@ describe("createHttpClient", () => {
         "content-type": "application/json",
       },
       method: "POST",
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -357,5 +364,66 @@ describe("createHttpClient", () => {
       expect(Object.keys(error.details ?? {}).sort()).toEqual(["activity", "conflicts"]);
       expect(error.reason).toBeUndefined(); expect(error.postId).toBeUndefined();
     });
+  });
+});
+
+describe("timeout (T146)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const clientWith = (fetch: ReturnType<typeof vi.fn>) =>
+    createHttpClient({
+      baseUrl: "https://api.example.test",
+      fetch,
+      getAccessToken: vi.fn().mockResolvedValue("access-token"),
+      onUnauthorized: vi.fn(),
+    });
+  const signalOf = (fetch: ReturnType<typeof vi.fn>) => (fetch.mock.calls[0]![1] as RequestInit).signal as AbortSignal;
+
+  it("fails with a retryable network timeout after 30 s", async () => {
+    const fetch = vi.fn().mockReturnValue(new Promise<Response>(() => {}));
+    const pending = clientWith(fetch).get("/trips");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(await pending).toMatchObject({
+      ok: false,
+      error: { kind: "network", code: "TimeoutError", message: expect.stringContaining("Intentá nuevamente") },
+    });
+  });
+
+  it("does not abort before the 30 s are over", async () => {
+    const fetch = vi.fn().mockReturnValue(new Promise<Response>(() => {}));
+    const pending = clientWith(fetch).get("/trips");
+    await vi.advanceTimersByTimeAsync(29_999);
+
+    expect(signalOf(fetch).aborted).toBe(false);
+    void pending.catch(() => undefined);
+  });
+
+  it("clears the timer when the response arrives in time", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "trip-1" }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const result = await clientWith(fetch).get<{ id: string }>("/trips/trip-1");
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(result).toEqual({ ok: true, value: { id: "trip-1" } });
+    expect(signalOf(fetch).aborted).toBe(false);
+  });
+
+  it("times out a slow body instead of reporting an invalid response", async () => {
+    const response = { status: 200, ok: true, json: () => new Promise(() => {}) } as unknown as Response;
+    const fetch = vi.fn().mockResolvedValue(response);
+    const pending = clientWith(fetch).get("/trips");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(await pending).toMatchObject({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+  });
+
+  it("keeps reporting other fetch failures as network errors", async () => {
+    const fetch = vi.fn().mockRejectedValue(new Error("offline"));
+    const result = await clientWith(fetch).get("/trips");
+
+    expect(result).toMatchObject({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });

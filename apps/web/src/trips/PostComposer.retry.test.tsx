@@ -131,6 +131,17 @@ describe("PostComposer retry key (T88)", () => {
     expect(body(create, 1).id).toBe(ID1);
     expect(itineraryGet).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
   });
+  // Un timeout del cliente llega al composer colapsado en `kind: "network"` porque los mapeadores de la API descartan `code`; por eso acá se fija que ese error conserva el hint de reintento y el id de T88.
+  it("a client timeout keeps the retry hint and the same id (T146)", async () => {
+    const create = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValue({ ok: true, value: saved() });
+    const { container } = await render(newPath, { create });
+    await type(container, "description", "Hola"); await submit(container);
+    expect(container.querySelector('[data-testid="listing"]')).toBeNull();
+    expect(container.textContent).toContain("Podés reintentar: el recuerdo no se va a publicar dos veces.");
+    await submit(container);
+    expect(ids(create)).toEqual([ID1, ID1]);
+    expect(body(create, 1)).toEqual(body(create, 0));
+  });
   it("a double tap sends a single create while the first one is pending", async () => {
     const pending = deferred<unknown>();
     const create = vi.fn().mockReturnValue(pending.promise);
