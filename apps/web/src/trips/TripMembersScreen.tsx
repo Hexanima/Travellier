@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState, Modal, SelectField } from "../components/index.js";
 import { displayName } from "../profile/display-name.js";
 import { canDeleteTrip, canLeaveDirectly, memberActions } from "./member-permissions.js";
-import { noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
+import { inheritNoBack, noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
 import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberList, TripMemberRole, TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 import { useInTripShell } from "./trip-state.js";
@@ -298,14 +298,14 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const confirmLeave = () => {
     if (!tripId || dialog?.kind !== "leave" || !canLeaveDirectly(actor, ownerId)) return;
     void run("No pudimos sacarte del viaje. Intentá nuevamente.", async () => toOutcome(await members.leave(tripId)), () => {
-      navigate("/trips", { replace: true });
+      navigate("/trips", { replace: true, ...inheritNoBack(location) });
     });
   };
 
   const confirmDelete = () => {
     if (!tripId || dialog?.kind !== "delete" || !mayDelete) return;
     void run("No pudimos eliminar el viaje. Intentá nuevamente.", async () => toOutcome(await trips.deleteTrip(tripId)), () => {
-      navigate("/trips", { replace: true });
+      navigate("/trips", { replace: true, ...inheritNoBack(location) });
     });
   };
 

@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components -- the hooks live next to their provider on purpose (same pattern as use-gallery) */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { AppLifecycle } from "../native/app-lifecycle.js";
+import { inheritNoBack } from "./post-origin.js";
 
 /** Same interval as the notices/balance refresh (T85); the PRD asks for 30–60 s. */
 export const tripRefreshIntervalMs = 45_000;
@@ -29,6 +30,9 @@ export function TripRefreshProvider({ tripId, lifecycle, intervalMs = tripRefres
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
+  const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const loaders = useRef(new Map<string, Registered>());
   const paused = useRef(0);
   const skipped = useRef(false);
@@ -41,7 +45,7 @@ export function TripRefreshProvider({ tripId, lifecycle, intervalMs = tripRefres
     for (const [id, loader] of loaders.current) {
       if (inflight.has(id)) continue;
       const task = Promise.resolve().then(() => loader.current({ signal })).then((outcome) => {
-        if (!signal.aborted && outcome.status === "gone") navigateRef.current("/trips", { replace: true, state: { tripGone: true } });
+        if (!signal.aborted && outcome.status === "gone") navigateRef.current("/trips", { replace: true, ...inheritNoBack(locationRef.current, { tripGone: true }) });
       }, () => undefined).finally(() => { if (inflight.get(id) === task) inflight.delete(id); });
       inflight.set(id, task);
     }

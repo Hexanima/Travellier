@@ -167,7 +167,8 @@ describe("TripRefreshProvider", () => {
     await mount(<Probe load={load} />);
     await tick(45_000);
     expect(shown("Mis viajes")).toBe(true);
-    expect(document.querySelector("[data-testid=where]")!.textContent).toBe('/trips|{"tripGone":true}');
+    // Reemplaza la entrada del Trip: sin historial detrás hereda `noBack`, para que el Atrás no quede muerto sobre Mis viajes.
+    expect(document.querySelector("[data-testid=where]")!.textContent).toBe('/trips|{"tripGone":true,"noBack":true}');
   });
 
   it("un fallo secundario o de sesión no navega", async () => {

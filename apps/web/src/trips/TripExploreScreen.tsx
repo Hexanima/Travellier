@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
+import { inheritNoBack } from "./post-origin.js";
 import type { PublicTripDetail, TripDetail, TripManagementApi } from "./trip-management-api.js";
 
 export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "listPublic"> }) {
@@ -74,6 +75,7 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
 export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManagementApi, "get" | "joinPublic"> }) {
   const { tripId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [detail, setDetail] = useState<TripDetail>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<"unavailable" | "other">();
@@ -116,7 +118,7 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
     try {
       const result = await trips.joinPublic(tripId);
       if (result.ok) {
-        navigate("/trips", { replace: true });
+        navigate("/trips", { replace: true, ...inheritNoBack(location) });
       } else if (result.error.kind === "not-found") {
         setDetail(undefined);
         setLoadError("unavailable");

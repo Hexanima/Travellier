@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App.js";
 import type { AppBackButton } from "./native/app-back-button.js";
+import type { NativeAppUrlApi } from "./navigation/app-url-listener.js";
 import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
 import { noticesOrigin } from "./trips/post-origin.js";
 
@@ -21,6 +22,11 @@ const backButton = () => {
   const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp };
   return { port, exitApp, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
 };
+/** Arranque en frío con deep link: el WebView nativo siempre arranca en `/` y la URL llega por `getLaunchUrl`. */
+const launcher = (url: string): NativeAppUrlApi => ({
+  addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+  getLaunchUrl: vi.fn().mockResolvedValue({ url }),
+});
 /** El provider mantiene el candado del Atrás unos 250 ms: dos pulsaciones del usuario van separadas por más que eso. */
 const afterBackLock = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); }); };
 const storage = () => ({ read: vi.fn().mockResolvedValue({ accessToken: "old", refreshToken: "refresh" }), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) });
@@ -224,5 +230,39 @@ describe("App back button integration", () => {
     await button.press();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(container.querySelector(`[data-photo="${photo.id}"]`)).not.toBeNull();
+  });
+
+  it("tras un arranque en frío con deep link, el Atrás no cae en la pantalla pública", async () => {
+    const button = backButton();
+    const nativeApp = launcher("com.travellier.app://invite/VIAJE-X7K2");
+    const container = await render("/", props({ backButton: button.port, nativeApp }));
+    expect(container.textContent).toContain("Confirmar unión");
+    await button.press();
+    expect(container.textContent).not.toContain("El viaje empieza con ustedes.");
+    expect(container.textContent).toContain("Mis viajes");
+  });
+
+  it("al salir del viaje desde la entrada inicial, el Atrás no queda muerto sobre Mis viajes", async () => {
+    const button = backButton();
+    const leave = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const members = {
+      list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: "ana", ownerId: "owner", members: [
+        { id: "m1", userId: "owner", name: "Nico", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
+        { id: "m2", userId: "ana", name: "Ana", role: "participant", isOwner: false, joinedAt: "2026-09-24T12:00:00.000Z" },
+      ] } }),
+      leave,
+    };
+    const trips = {
+      list: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+      get: vi.fn().mockResolvedValue({ ok: true, value: { kind: "member", id: tripId, name: "Córdoba", description: null, primaryDestination: { name: "Córdoba" }, visibility: "private", expenseMode: "register" } }),
+    };
+    const container = await render(`/trips/${tripId}/members`, props({ backButton: button.port, members, trips }));
+    const press = (label: string) => act(async () => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === label)?.click());
+    await press("Salir del viaje");
+    await press("Confirmar salida");
+    expect(leave).toHaveBeenCalledWith(tripId);
+    expect(container.textContent).toContain("Mis viajes");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
 });

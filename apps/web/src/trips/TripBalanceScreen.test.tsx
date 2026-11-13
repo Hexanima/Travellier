@@ -340,7 +340,8 @@ describe("TripBalanceScreen: refresh", () => {
     const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind } });
     const { container } = await render({ get });
     await act(async () => { window.dispatchEvent(new Event("focus")); });
-    expect(container.querySelector('[data-testid="trips"]')?.textContent).toBe('MIS VIAJES {"tripGone":true}');
+    // La salida reemplaza la entrada del balance: sin historial detrás hereda `noBack`, para que el Atrás no quede muerto sobre Mis viajes.
+    expect(container.querySelector('[data-testid="trips"]')?.textContent).toBe('MIS VIAJES {"tripGone":true,"noBack":true}');
     expect(container.textContent).not.toContain("Pesos (ARS)");
   });
   it("a pull down at the top refreshes the balance (the «Actualizar balance» button stays as the alternative)", async () => {

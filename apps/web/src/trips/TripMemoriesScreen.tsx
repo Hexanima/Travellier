@@ -5,7 +5,7 @@ import type { TripFailure } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
 import { PostLink } from "./post-navigation.js";
 import { useRestorePosition } from "./use-restore-position.js";
-import { memoryAnchor } from "./post-origin.js";
+import { inheritNoBack, memoryAnchor } from "./post-origin.js";
 import { PostDraftsProvider, useHasPostDrafts } from "./use-post-drafts.js";
 import { CommentDraftsProvider, useHasCommentDrafts } from "./use-comment-drafts.js";
 import { GalleryProvider, type GalleryProviderProps } from "./use-gallery.js";
@@ -89,7 +89,7 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
   }, [tripId, members]);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState(false);
-  useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, ...inheritNoBack(location, null) }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Silent refresh (T121): no `refreshing`/`refreshError`; a load that starts meanwhile bumps `epoch` and the older answer is dropped. The detail of a memory
   // (comments, likes) is not refreshed here: it would step over a comment draft.
   const epoch = useRef(0);

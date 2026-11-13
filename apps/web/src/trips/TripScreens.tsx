@@ -5,6 +5,7 @@ import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, Te
 import { classifyTrips, nextBoundaryMs, parseFilter, type TripFilter } from "./trip-list-filter.js";
 import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
 import { formatTripRange } from "./trip-range.js";
+import { inheritNoBack } from "./post-origin.js";
 import { getRememberedFilter, rememberFilter } from "./trips-filter-memory.js";
 import { useTripRefresh } from "./use-trip-refresh.js";
 
@@ -37,7 +38,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
   const location = useLocation();
   const navigate = useNavigate();
   const [tripGone] = useState(() => (location.state as { tripGone?: unknown } | null)?.tripGone === true);
-  useEffect(() => { if (tripGone) navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tripGone) navigate({ pathname: location.pathname, search: location.search }, { replace: true, ...inheritNoBack(location, null) }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [nowMs, setNowMs] = useState(() => now());
   const nowRef = useRef(now);
   nowRef.current = now;
@@ -180,6 +181,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
 
 export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "create"> }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -208,7 +210,7 @@ export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "cr
         ...(description ? { description } : {}),
       });
       if (result.ok) {
-        navigate("/trips", { replace: true });
+        navigate("/trips", { replace: true, ...inheritNoBack(location) });
         return;
       }
       if (result.error.kind === "validation") {

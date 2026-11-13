@@ -8,6 +8,7 @@ import { authorLabel, loadPeople, type PhotoPeople } from "./photo-people.js";
 import { draftKeyFor, setSplit, type PostDraft } from "./post-draft.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { SavedExpenseView, TripPostApi } from "./trip-post-api.js";
+import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
@@ -23,11 +24,12 @@ const serverAlertMessage = "No pudimos guardar pagos y reparto. Revisá las fila
 
 export function ExpenseSplitForm(props: ExpenseSplitFormProps) {
   const { tripId, postId } = useParams();
-  const { search } = useLocation();
+  const location = useLocation();
+  const { search } = location;
   const handle = usePostDraft(draftKeyFor({ postId, search }));
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
-  if (!handle.draft) return <Navigate to={composer} replace />;
+  if (!handle.draft) return <Navigate to={composer} replace {...inheritNoBack(location)} />;
   return <Shell {...props} tripId={tripId} postId={postId} draft={handle.draft} commit={handle.setDraft} setReturned={handle.setReturned} composer={composer} />;
 }
 
