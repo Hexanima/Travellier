@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
+import { BackLayerDepth } from "../navigation/BackNavigationProvider.js";
+import { useBackLayer } from "../navigation/back-layer-context.js";
+
 const focusableSelector = [
   "a[href]",
   "button:not([disabled])",
@@ -41,6 +44,9 @@ export function Modal({
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const cannotClose = loading || !onClose;
+  // The native back press closes the open dialog before touching the navigation. While it cannot close (saving, or no way out)
+  // it keeps the press instead of leaving the screen behind the dialog.
+  useBackLayer(isOpen, () => { if (!loading && onClose) onClose(); return true; });
 
   useEffect(() => {
     if (!isOpen) {
@@ -133,7 +139,7 @@ export function Modal({
         </header>
         {error ? <p className="ui-modal__error" role="alert">{error}</p> : null}
         <fieldset className="ui-modal__content" disabled={disabled || loading} inert={disabled || loading || undefined}>
-          {children}
+          <BackLayerDepth>{children}</BackLayerDepth>
         </fieldset>
       </section>
     </div>

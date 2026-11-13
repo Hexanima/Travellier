@@ -6,6 +6,7 @@ import { activityOptionLabel, excludedPostIds, linkSummary, postOptionLabel } fr
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import type { TripResult } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
+import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import "./itinerary.css";
 
@@ -35,11 +36,12 @@ function useLazy<T>(wanted: boolean, load: () => Promise<TripResult<T>>): [Lazy<
 
 export function PostLinkPicker(props: PostLinkPickerProps) {
   const { tripId, postId } = useParams();
-  const { search } = useLocation();
+  const location = useLocation();
+  const { search } = location;
   const handle = usePostDraft(draftKeyFor({ postId, search }));
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
-  if (!handle.draft) return <Navigate to={composer} replace />;
+  if (!handle.draft) return <Navigate to={composer} replace {...inheritNoBack(location)} />;
   return <Picker {...props} tripId={tripId} postId={postId} draft={handle.draft} commit={handle.setDraft} setReturned={handle.setReturned} composer={composer} />;
 }
 

@@ -7,7 +7,9 @@ import { commentLength } from "./comment-text.js";
 import { EXPENSE_BREAKDOWN_MAX } from "./post-text-limits.js";
 import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
+import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
+import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
 import "./expenses.css";
 
@@ -27,11 +29,12 @@ const empty: ExpenseDraft = { amount: "", currency: "", breakdown: "" };
 
 export function ExpenseForm(props: ExpenseFormProps) {
   const { tripId, postId } = useParams();
-  const { search } = useLocation();
+  const location = useLocation();
+  const { search } = location;
   const handle = usePostDraft(draftKeyFor({ postId, search }));
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
-  if (!handle.draft) return <Navigate to={composer} replace />;
+  if (!handle.draft) return <Navigate to={composer} replace {...inheritNoBack(location)} />;
   return <Shell {...props} tripId={tripId} postId={postId} draft={handle.draft} commit={handle.setDraft} setReturned={handle.setReturned} composer={composer} />;
 }
 
@@ -86,6 +89,8 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
 function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commit: (draft: PostDraft) => void; saved?: SavedExpense; leaving: { current: boolean }; back: () => void }) {
   const savedDraft = saved ? expenseDraftFromSaved(saved) : undefined;
   const [values, setValues] = useState<ExpenseDraft>(() => draft.extras.expense ?? savedDraft ?? empty);
+  // Snapshot of what was loaded (the draft or the stored expense): a change is measured against it, never against an empty form.
+  const [initial] = useState(values);
   const [error, setError] = useState<{ field: string; message: string }>();
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -122,5 +127,8 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
     <p className="comment-count">{commentLength(values.breakdown.trim())} / {EXPENSE_BREAKDOWN_MAX}</p>
     <Button type="submit">Aceptar</Button>
     <Button variant="secondary" onClick={back}>Cancelar</Button>
+    {/* The native back press is the same exit as «Cancelar»: with changes it asks before losing them. */}
+    <DiscardChangesModal dirty={JSON.stringify(values) !== JSON.stringify(initial)}
+      message="Si salís ahora, vas a perder los cambios de este gasto." onDiscard={back} />
   </form>;
 }

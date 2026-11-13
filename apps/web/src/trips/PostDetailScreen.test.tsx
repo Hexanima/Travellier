@@ -599,7 +599,7 @@ describe("PostDetailScreen delete (T128)", () => {
     await click(deleteButton(container));
     await click(confirm());
     expect(last().pathname).toBe(`/trips/${tripId}/itinerary`);
-    expect(last().state).toEqual({ restore: { anchor, scrollY: 250 } });
+    expect(last().state).toEqual({ restore: { anchor, scrollY: 250 }, noBack: true });
   });
   it("without origin or history goes to the diary", async () => {
     const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockResolvedValue({ ok: true, value: undefined })));

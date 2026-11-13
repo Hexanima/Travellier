@@ -64,6 +64,12 @@ export const canGoBack = (location: { key: string; state: unknown }): boolean =>
   location.key !== "default" && !(record(location.state) && location.state.noBack === true);
 /** State for an entry that replaces the first one: nothing is behind it. */
 export const withNoBack = (state?: unknown): Record<string, unknown> => ({ ...(record(state) ? state : {}), noBack: true });
+/**
+ * Navigation options for a `replace`: the new entry inherits `noBack` only when the one it replaces has nothing behind it.
+ * Marking it always would kill a legitimate back; never marking it would leave the back press dead over the initial entry.
+ */
+export const inheritNoBack = (location: { key: string; state: unknown }, state?: unknown): { state?: unknown } =>
+  canGoBack(location) ? (state === undefined ? {} : { state }) : { state: withNoBack(state) };
 
 export const readRestore = (state: unknown): RestoreState | undefined => {
   const restore = record(state) ? state.restore : undefined;

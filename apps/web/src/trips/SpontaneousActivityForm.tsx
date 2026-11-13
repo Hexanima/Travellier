@@ -4,7 +4,9 @@ import { Button, Feedback, LoadingState, TextField } from "../components/index.j
 import { initialNewActivity, newActivityWhen, resolveNewActivity } from "./new-activity-draft.js";
 import { draftKeyFor, setNewActivity, type NewActivityDraft, type PostDraft } from "./post-draft.js";
 import type { ItineraryDayResponse, TripItineraryApi } from "./trip-itinerary-api.js";
+import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
+import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
 
 export type SpontaneousActivityFormProps = { itinerary: Pick<TripItineraryApi, "get">; timeZone?: string };
@@ -14,11 +16,12 @@ const errorOrder = ["title", "date", "time", "scheduledAt", "durationHours", "du
 
 export function SpontaneousActivityForm(props: SpontaneousActivityFormProps) {
   const { tripId, postId } = useParams();
-  const { search } = useLocation();
+  const location = useLocation();
+  const { search } = location;
   const handle = usePostDraft(draftKeyFor({ postId, search }));
   const composer = `/trips/${tripId}/memories/${postId ? `${postId}/edit` : "new"}${search}`;
   // Opened by URL without a draft (or after a discard): the composer is the only entry point.
-  if (!handle.draft) return <Navigate to={composer} replace />;
+  if (!handle.draft) return <Navigate to={composer} replace {...inheritNoBack(location)} />;
   return <Form {...props} tripId={tripId} draft={handle.draft} commit={handle.setDraft} setReturned={handle.setReturned} composer={composer} />;
 }
 
@@ -29,6 +32,8 @@ function Form({ itinerary, timeZone: zone, tripId, draft, commit, setReturned, c
   const navigate = useNavigate();
   const [timeZone] = useState(() => zone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [values, setValues] = useState<NewActivityDraft>(() => draft.extras.newActivity ?? initialNewActivity(timeZone));
+  // Snapshot of what was loaded (the draft or the preloaded now): a change is measured against it, never against an empty form.
+  const [initial] = useState(values);
   const [error, setError] = useState<{ field: string; message: string }>();
   const [loaded, setLoaded] = useState<Days>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -101,6 +106,9 @@ function Form({ itinerary, timeZone: zone, tripId, draft, commit, setReturned, c
         </div> : null}
         <Button type="submit" disabled={loaded.kind !== "ready"}>Aceptar</Button>
         <Button onClick={() => back()}>Cancelar</Button>
+        {/* The native back press is the same exit as «Cancelar»: with changes it asks before losing them. */}
+        <DiscardChangesModal dirty={JSON.stringify(values) !== JSON.stringify(initial)}
+          message="Si salís ahora, vas a perder los cambios de esta actividad." onDiscard={() => back()} />
       </form>
     </div>
   </main>;

@@ -1,0 +1,228 @@
+// @vitest-environment jsdom
+import { act, useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter, NavigationType, Route, Routes, Router, useLocation, useNavigate } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { BackNavigationProvider } from "./BackNavigationProvider.js";
+import { useBackLayer } from "./back-layer-context.js";
+import type { AppBackButton } from "../native/app-back-button.js";
+import { withNoBack } from "../trips/post-origin.js";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const roots: ReturnType<typeof createRoot>[] = [];
+afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); });
+
+const fakeButton = () => {
+  const listeners = new Set<() => void>();
+  const exitApp = vi.fn();
+  const onBack = vi.fn((listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); });
+  const port: AppBackButton = { onBack, exitApp };
+  return { port, exitApp, onBack, count: () => listeners.size, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+};
+
+function Where() { const location = useLocation(); return <output data-where>{location.pathname}</output>; }
+const where = () => document.querySelector("[data-where]")?.textContent;
+const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
+const named = (text: string) => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === text);
+
+/** Arranque que reemplaza la entrada inicial, como hace la app al restaurar la sesión. */
+function Start() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => { if (location.pathname === "/") navigate("/trips", { replace: true, state: withNoBack() }); }, [location.pathname, navigate]);
+  return <Screen />;
+}
+
+/** A screen with an optional dialog and, inside it, an optional confirmation: two nested layers. */
+function Screen({ saving = false }: { saving?: boolean }) {
+  const [open, setOpen] = useState(false);
+  useBackLayer(open, () => { if (saving) return true; setOpen(false); return true; });
+  return <>
+    <button onClick={() => setOpen(true)}>Abrir</button>
+    {open ? <Inner /> : null}
+    <output data-open>{open ? "abierto" : "cerrado"}</output>
+  </>;
+}
+function Inner() {
+  const [confirming, setConfirming] = useState(false);
+  useBackLayer(confirming, () => setConfirming(false));
+  return <>
+    <button onClick={() => setConfirming(true)}>Confirmar</button>
+    <output data-confirm>{confirming ? "confirmando" : "sin confirmar"}</output>
+  </>;
+}
+
+async function render(entries: string[], node: React.ReactNode, button?: AppBackButton) {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
+      <BackNavigationProvider backButton={button}>
+        <Where />
+        <Routes><Route path="*" element={node} /></Routes>
+      </BackNavigationProvider>
+    </MemoryRouter>,
+  ));
+  return container;
+}
+
+describe("BackNavigationProvider", () => {
+  it("sin puerto nativo no se suscribe a nada: el Atrás del navegador queda intacto", async () => {
+    await render(["/trips"], <Screen />);
+    await click(named("Abrir"));
+    expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+  });
+
+  it("una capa abierta se cierra con el Atrás y no navega", async () => {
+    const button = fakeButton();
+    await render([`/trips/${"a".repeat(24)}/journey`], <Screen />, button.port);
+    expect(button.onBack).toHaveBeenCalledTimes(1);
+    await click(named("Abrir"));
+    await button.press();
+    expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+    expect(where()).toBe(`/trips/${"a".repeat(24)}/journey`);
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("con dos capas anidadas cierra primero la última abierta", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await click(named("Confirmar"));
+      await button.press();
+      expect(document.querySelector("[data-confirm]")?.textContent).toBe("sin confirmar");
+      expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+      // El candado cubre también el cierre de una capa: la segunda pulsación cuenta aparte recién pasados los 250 ms.
+      await act(async () => { vi.advanceTimersByTime(250); });
+      await button.press();
+      expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("un rebote con dos capas anidadas cierra solo la más interna", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await click(named("Confirmar"));
+      await button.press();
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await button.press();
+      expect(document.querySelector("[data-confirm]")?.textContent).toBe("sin confirmar");
+      expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("un rebote al cerrar una capa no navega: el candado cubre toda la pulsación", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips", "/profile"], <Screen />, button.port);
+      await click(named("Abrir"));
+      await button.press();
+      expect(document.querySelector("[data-open]")?.textContent).toBe("cerrado");
+      // Rebote del botón o del gesto: la pila ya está vacía, pero la segunda pulsación sigue siendo la misma.
+      await act(async () => { vi.advanceTimersByTime(249); });
+      await button.press();
+      expect(where()).toBe("/profile");
+      expect(button.exitApp).not.toHaveBeenCalled();
+      // Pasado el candado, la pulsación siguiente vuelve a responder.
+      await act(async () => { vi.advanceTimersByTime(1); });
+      await button.press();
+      expect(where()).toBe("/trips");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("una capa que está guardando se traga el Atrás sin cerrarse ni navegar", async () => {
+    const button = fakeButton();
+    await render(["/trips"], <Screen saving />, button.port);
+    await click(named("Abrir"));
+    await button.press();
+    expect(document.querySelector("[data-open]")?.textContent).toBe("abierto");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("sin capas abiertas aplica la resolución: raíz del Trip vuelve a Mis viajes", async () => {
+    const button = fakeButton();
+    await render([`/trips/${"a".repeat(24)}/itinerary`], <Screen />, button.port);
+    await button.press();
+    expect(where()).toBe("/trips");
+  });
+
+  it("sin capas abiertas y sin historial en Mis viajes cierra la app", async () => {
+    const button = fakeButton();
+    await render(["/trips"], <Screen />, button.port);
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+    expect(where()).toBe("/trips");
+  });
+
+  it("con historial vuelve a la entrada anterior", async () => {
+    const button = fakeButton();
+    await render(["/trips", "/profile"], <Screen />, button.port);
+    await button.press();
+    expect(where()).toBe("/trips");
+  });
+
+  it("tras reemplazar la entrada inicial el Atrás cierra la app en vez de quedar muerto", async () => {
+    const button = fakeButton();
+    await render(["/"], <Start />, button.port);
+    expect(where()).toBe("/trips");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("una pulsación que no cambia la entrada no deja el Atrás bloqueado", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      const go = vi.fn();
+      const container = document.createElement("div"); document.body.append(container);
+      const root = createRoot(container); roots.push(root);
+      // Un `navigate(-1)` que no hace nada, como en la WebView sin entrada previa: la entrada queda igual.
+      const navigator = { createHref: (to: unknown) => String(to), push: vi.fn(), replace: vi.fn(), go, encodeLocation: undefined };
+      const location = { pathname: "/profile", search: "", hash: "", state: null, key: "entrada" };
+      await act(async () => root.render(
+        <Router location={location} navigator={navigator as never} navigationType={NavigationType.Push}>
+          <BackNavigationProvider backButton={button.port}><Where /><Screen /></BackNavigationProvider>
+        </Router>));
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(1);
+      // Dentro del retardo el candado sigue puesto: una segunda pulsación no hace doble pop.
+      await act(async () => { vi.advanceTimersByTime(249); });
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(1); });
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("dos pulsaciones seguidas con una entrada detrás no hacen doble pop", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips", "/notifications", "/profile"], <Screen />, button.port);
+      await button.press();
+      expect(where()).toBe("/notifications");
+      // Rebote del botón físico: la segunda pulsación llega antes de liberar el candado y no debe saltar una entrada.
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await button.press();
+      expect(where()).toBe("/notifications");
+      await act(async () => { vi.advanceTimersByTime(250); });
+      await button.press();
+      expect(where()).toBe("/trips");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("al desmontar se desuscribe del puerto", async () => {
+    const button = fakeButton();
+    await render(["/trips"], <Screen />, button.port);
+    expect(button.count()).toBe(1);
+    await act(async () => roots.splice(0).forEach((root) => root.unmount()));
+    expect(button.count()).toBe(0);
+  });
+});

@@ -138,3 +138,58 @@ describe("itinerary: one day at a time with a date strip", () => {
     expect(ba.container.textContent).toContain("Cena de despedida");
   });
 });
+
+/** The day the screen opens on (T145): «hoy» in the shown time zone when the Trip has it, else its first day. */
+describe("día inicial del itinerario", () => {
+  async function openAt(now: string, timeZone = "UTC", entry = `/trips/${tripId}/itinerary`) {
+    const value = multiDay();
+    const get = vi.fn().mockImplementation(async (id: string) => ({ ok: true, value: { ...structuredClone(value), tripId: id } }));
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(<MemoryRouter initialEntries={["/trips", entry]} initialIndex={1}><Probe />
+      <Routes><Route path="/trips" element={<p>mis viajes</p>} />
+        <Route path="/trips/:tripId/itinerary" element={<TripItineraryScreen itinerary={{ get }} timeZone={timeZone} now={() => new Date(now)} />} /></Routes>
+    </MemoryRouter>));
+    return container;
+  }
+
+  it("abre en hoy cuando el día pertenece al viaje, sin reescribir la URL", async () => {
+    const container = await openAt("2026-09-27T09:00:00.000Z");
+    expect(current(container)).toEqual(["2026-09-27"]);
+    expect(shownDates(container)).toEqual(["2026-09-27"]);
+    expect(where.search).toBe("");
+  });
+
+  it("abre en el primer día cuando hoy es anterior al viaje", async () => {
+    const container = await openAt("2026-09-01T09:00:00.000Z");
+    expect(current(container)).toEqual(["2026-09-25"]);
+  });
+
+  it("abre en el primer día cuando hoy es posterior al viaje", async () => {
+    const container = await openAt("2026-12-01T09:00:00.000Z");
+    expect(current(container)).toEqual(["2026-09-25"]);
+  });
+
+  it("un ?day válido manda sobre hoy", async () => {
+    const container = await openAt("2026-09-27T09:00:00.000Z", "UTC", `/trips/${tripId}/itinerary?day=2026-09-26`);
+    expect(current(container)).toEqual(["2026-09-26"]);
+  });
+
+  it("un ?day inválido cae en hoy sin reescribir la URL", async () => {
+    const container = await openAt("2026-09-27T09:00:00.000Z", "UTC", `/trips/${tripId}/itinerary?day=2030-01-01`);
+    expect(current(container)).toEqual(["2026-09-27"]);
+    expect(where.search).toBe("?day=2030-01-01");
+  });
+
+  it("el mismo instante resuelve días locales distintos según la zona", async () => {
+    const utc = await openAt("2026-09-28T02:00:00.000Z");
+    expect(current(utc)).toEqual(["2026-09-28"]);
+    const local = await openAt("2026-09-28T02:00:00.000Z", "America/Argentina/Buenos_Aires");
+    expect(current(local)).toEqual(["2026-09-27"]);
+  });
+
+  it("hoy fuera del primer día revela su chip en la tira", async () => {
+    await openAt("2026-09-27T09:00:00.000Z");
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+});

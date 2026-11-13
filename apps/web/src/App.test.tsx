@@ -75,13 +75,14 @@ describe("App", () => {
     expect(markup).not.toContain("Mi perfil");
   });
 
-  it("renders a fallback for an unknown route", () => {
+  it("has no screen for an unknown route: it waits for the session instead of a dead end", () => {
     const markup = renderToStaticMarkup(
       <MemoryRouter initialEntries={["/missing"]}>
         <App apiBaseUrl={apiBaseUrl} />
       </MemoryRouter>,
     );
 
-    expect(markup).toContain("Página no encontrada");
+    expect(markup).not.toContain("Página no encontrada");
+    expect(markup).toContain("Restaurando sesión…");
   });
 });

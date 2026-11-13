@@ -11,6 +11,8 @@ import type { PostDraft } from "./post-draft.js";
 import type { SplitDraft } from "./expense-split.js";
 import type { SavedExpenseView } from "./trip-post-api.js";
 import { usePostDraft } from "./use-post-drafts.js";
+import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
+import type { AppBackButton } from "../native/app-back-button.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -44,17 +46,22 @@ function Probe() {
 type Probed = { draft: PostDraft | null; state: { focus?: string } | null; path: string; returned: { focus?: string } | null };
 const probe = (container: HTMLElement) => JSON.parse(container.querySelector('[data-testid="probe"]')!.textContent!) as Probed;
 type Deps = { get: ReturnType<typeof vi.fn>; list: ReturnType<typeof vi.fn> };
-async function render(path: string, deps: Deps) {
+async function render(path: string, deps: Deps, backButton?: AppBackButton) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const form = <ExpenseSplitForm posts={{ get: deps.get }} members={{ list: deps.list }} />;
-  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><Routes>
+  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><BackNavigationProvider backButton={backButton}><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route path="new" element={<Probe />} /><Route path="new/expense/split" element={form} />
       <Route path=":postId/edit" element={<Probe />} /><Route path=":postId/edit/expense/split" element={form} />
-    </Route></Routes></MemoryRouter>));
+    </Route></Routes></BackNavigationProvider></MemoryRouter>));
   return container;
 }
+const fakeBack = () => {
+  const listeners = new Set<() => void>();
+  const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp: vi.fn() };
+  return { port, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+};
 const button = (container: ParentNode, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
 const type = async (element: HTMLInputElement, value: string) => {
@@ -438,5 +445,34 @@ describe("ExpenseSplitForm amount limit", () => {
     expect(valueOf(rows(container, "shares")[0]!).getAttribute("aria-invalid")).toBe("true");
     expect((valueOf(rows(container, "shares")[0]!) as HTMLInputElement).value).toBe("1000000000000");
     expect(container.querySelector("[data-section]")).not.toBeNull();
+  });
+});
+
+describe("ExpenseSplitForm y el Atrás nativo", () => {
+  const openWithBack = async () => {
+    const back = fakeBack();
+    seed = seeded();
+    const deps = { get: vi.fn().mockResolvedValue(detail()), list: vi.fn().mockResolvedValue(members()) };
+    const container = await render(newPath, deps, back.port);
+    await click(button(container, "sembrar")); await click(button(container, "ir"));
+    return { container, back };
+  };
+
+  it("sin cambios vuelve al compositor sin preguntar", async () => {
+    const { container, back } = await openWithBack();
+    expect(container.textContent).toContain("Pagos y reparto");
+    await back.press();
+    expect(document.body.textContent).not.toContain("Descartar cambios");
+    expect(container.textContent).not.toContain("Pagos y reparto");
+  });
+
+  it("con cambios pide confirmación antes de perderlos", async () => {
+    const { container, back } = await openWithBack();
+    const row = rows(container, "shares")[0];
+    expect(row).toBeTruthy();
+    await choose(unitOf(row), "amount");
+    await back.press();
+    expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios del reparto.");
+    expect(container.textContent).toContain("Pagos y reparto");
   });
 });

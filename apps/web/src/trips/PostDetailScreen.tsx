@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
 import { LocationPreview } from "./LocationPreview.js";
-import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, type PostOrigin } from "./post-origin.js";
+import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, withNoBack, type PostOrigin } from "./post-origin.js";
 import { CommentsPanel, PostLikeControl } from "./PostComments.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { TripCommentApi } from "./trip-comment-api.js";
@@ -81,8 +81,9 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
   const origin = readOrigin(location.state, tripId ?? "");
   // Back is the immediately previous level when the app has history; a deep link falls back to the origin (or the diary).
   const goBack = () => { if (canGoBack(location)) navigate(-1); else navigate(originHref(origin), { state: restoreOf(origin) }); };
-  // After deleting there is nothing to come back to: with history it is the previous level, otherwise the origin replaces this entry.
-  const afterDelete = () => { if (canGoBack(location)) navigate(-1); else navigate(originHref(origin), { replace: true, state: restoreOf(origin) }); };
+  // After deleting there is nothing to come back to: with history it is the previous level, otherwise the origin replaces this entry and
+  // inherits `noBack` (this branch only runs with nothing behind), so the next back press does not go nowhere.
+  const afterDelete = () => { if (canGoBack(location)) navigate(-1); else navigate(originHref(origin), { replace: true, state: withNoBack(restoreOf(origin)) }); };
   const publication = new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const unavailable = state.kind === "error" && ["not-found", "forbidden"].includes(state.error.kind);
   return <main className="app-shell trips-shell itinerary-shell">

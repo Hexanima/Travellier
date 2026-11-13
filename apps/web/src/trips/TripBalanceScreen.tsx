@@ -6,7 +6,7 @@ import type { ExpenseCurrency } from "./expense-draft.js";
 import { formatCents } from "./expense-format.js";
 import { openEditFrom } from "./open-post.js";
 import { loadPeople, type PhotoPeople } from "./photo-people.js";
-import { balanceAnchor } from "./post-origin.js";
+import { balanceAnchor, inheritNoBack } from "./post-origin.js";
 import type { TripBalance, TripBalanceApi } from "./trip-balance-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { TripFailure } from "./trip-management-api.js";
@@ -57,7 +57,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       if (mine !== generation.current) return;
       if (!result.ok) {
         // An automatic refresh (the screen already had data) that finds the Trip gone or the access revoked leaves for Mis viajes, with no data left on screen (T121).
-        if (silent && ["not-found", "forbidden"].includes(result.error.kind)) { navigate("/trips", { replace: true, state: { tripGone: true } }); return; }
+        if (silent && ["not-found", "forbidden"].includes(result.error.kind)) { navigate("/trips", { replace: true, ...inheritNoBack(location, { tripGone: true }) }); return; }
         fail(result.error); return;
       }
       const value = result.value;

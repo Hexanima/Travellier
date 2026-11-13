@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
 import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
+import { useBackLayer } from "../navigation/back-layer-context.js";
 import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./expense-draft.js";
 import { mapSplitFieldErrors, sentSplitKeys, type ListErrors, type RowErrors } from "./expense-split.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey } from "./expense-format.js";
@@ -523,6 +524,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     else navigate(originHref(origin), { replace: true, state: withNoBack() });
   };
   const cancel = () => { if (dirty) setConfirmingDiscard(true); else leave(); };
+  // The native back press is the same exit as «Cancelar»: with changes it asks before losing them, and never leaves while saving.
+  useBackLayer(true, () => { if (!saving) cancel(); return true; });
   const published = existing ? new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }) : undefined;
 
   const blocked = loaded.kind === "error" ? loaded.error : failure && (blocksSave(failure.kind) || failure.kind === "unauthorized") ? failure : undefined;

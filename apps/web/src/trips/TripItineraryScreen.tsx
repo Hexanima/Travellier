@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure, TripManagementApi } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
-import { projectItineraryView, type ItineraryViewItem } from "./trip-itinerary-view.js";
+import { localDateKey, projectItineraryView, type ItineraryViewItem } from "./trip-itinerary-view.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey, type ExpenseTotals } from "./expense-format.js";
 import { formatDuration } from "./activity-duration.js";
 import { formatActivityClock, formatActivityRange } from "./activity-time-format.js";
@@ -42,7 +42,9 @@ type Props = { itinerary: TripItineraryApi; activities?: TripActivityApi; partic
   /** Test seam for the export clock and download. */
   icsExport?: Pick<ComponentProps<typeof ExportIcsButton>, "download" | "now">;
   /** Native calendar sync. Absent on the web: nothing is rendered and nothing runs. */
-  calendarSync?: CalendarSyncService };
+  calendarSync?: CalendarSyncService;
+  /** Clock used to decide which day the itinerary opens on (test seam). */
+  now?: () => Date };
 type LoadState = { kind: "loading" } | { kind: "ready"; value: TripItineraryResponse } | { kind: "error"; error: TripFailure };
 const bandLabels = { transit_out: "Tránsito de ida", activity: "Actividades", transit_return: "Tránsito de vuelta" };
 const chipLabel = new Intl.DateTimeFormat("es-AR", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" });
@@ -62,12 +64,12 @@ function ExpenseLines({ totals, empty }: { totals: ExpenseTotals; empty?: string
   </>;
 }
 
-export function TripItineraryScreen({ itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
+export function TripItineraryScreen({ itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, now, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
-  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} tripName={tripName} trips={trips} icsExport={icsExport} calendarSync={calendarSync} timeZone={timeZone} />;
+  return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} tripName={tripName} trips={trips} icsExport={icsExport} calendarSync={calendarSync} timeZone={timeZone} now={now} />;
 }
 
-function ItineraryContent({ tripId, itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, timeZone }: Props & { tripId?: string; timeZone: string }) {
+function ItineraryContent({ tripId, itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, timeZone, now }: Props & { tripId?: string; timeZone: string }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   // Inside the Trip shell the frame (main, way back, Trip heading, tabs) is the shell's; the Trip name is already known there.
@@ -257,7 +259,11 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   // One local day is read at a time: `?day=YYYY-MM-DD` when it is valid and the Trip has it, else the first day (the URL is not rewritten).
   // Tapping another day replaces the entry (Back still leaves the itinerary) and moves neither the page nor the focus; tapping the selected one does nothing.
   const dayParam = new URLSearchParams(location.search).get("day");
-  const selectedDate = dayParam !== null && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((day) => day.date === dayParam) ? dayParam : days[0]?.date;
+  // Today in the shown time zone, fixed when the screen opens: crossing midnight or refreshing does not move the day being read.
+  const [today] = useState(() => localDateKey(now ? now() : new Date(), timeZone));
+  // Without `?day` the itinerary opens on today when the Trip has it, and on its first day when it does not.
+  const defaultDate = days.some((day) => day.date === today) ? today : days[0]?.date;
+  const selectedDate = dayParam !== null && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((day) => day.date === dayParam) ? dayParam : defaultDate;
   const shownDays = days.filter((day) => day.date === selectedDate);
   const chipRefs = useRef(new Map<string, HTMLElement>());
   const tapped = useRef(false);
@@ -291,6 +297,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
     // A tap leaves the strip where it is; a day that comes from outside (a restored URL) is brought into view. The default first day needs nothing.
     const byTap = tapped.current;
     tapped.current = false;
+    // Only the very first day needs no reveal: today (when it is another chip) is brought into view like a restored URL.
     const initialDefault = revealed.current === undefined && selectedDate === days[0]?.date;
     revealed.current = selectedDate;
     if (!byTap && !initialDefault && selectedDate) chipRefs.current.get(selectedDate)?.scrollIntoView?.({ block: "nearest", inline: "center" });

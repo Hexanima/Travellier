@@ -27,7 +27,8 @@ describe("Mis viajes: Trip lost", () => {
     const notice = container.querySelector('[role="status"], [role="alert"]');
     expect(container.textContent).toContain("Ya no tenés acceso a ese viaje.");
     expect(notice).not.toBeNull();
-    expect(state).toBeNull();
+    // La limpieza del aviso conserva solo `noBack`: la entrada es la inicial y el Atrás no debe quedar muerto.
+    expect(state).toEqual({ noBack: true });
   });
   it("shows nothing special without the mark or with a different one", async () => {
     expect((await render()).textContent).not.toContain("Ya no tenés acceso");

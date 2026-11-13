@@ -50,6 +50,12 @@ const chronologicalSegments = (segments: ItinerarySegment[]): ItinerarySegment[]
 export type ItineraryView = { days: LocalItineraryDay[]; outsidePosts: ItineraryPostResponse[];
   outsideExpensePosts: ItineraryPostResponse[]; outsideExpenses: ExpenseTotals; tripExpenses: ExpenseTotals };
 
+/** Local calendar day (`YYYY-MM-DD`) of an instant in a time zone: the same key the day projection uses. */
+export const localDateKey = (instant: number | Date, timeZone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(instant);
+  return ["year", "month", "day"].map((part) => parts.find((value) => value.type === part)!.value).join("-");
+};
+
 const byPublication = (a: ItineraryPostResponse, b: ItineraryPostResponse) =>
   Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id);
 
@@ -64,11 +70,7 @@ export const projectTripItinerary = (itinerary: TripItineraryResponse,
  */
 export const projectItineraryView = (itinerary: TripItineraryResponse,
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone): ItineraryView => {
-  const calendar = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" });
-  const dateKey = (instant: number) => {
-    const parts = calendar.formatToParts(instant);
-    return ["year", "month", "day"].map((part) => parts.find((value) => value.type === part)!.value).join("-");
-  };
+  const dateKey = (instant: number) => localDateKey(instant, timeZone);
   const destinations = new Map(itinerary.destinations.map((d) => [d.id, d.name]));
   const days = new Map<string, LocalItineraryDay>();
   const segmentsBySource = new Map<string, ItinerarySegment[]>();
