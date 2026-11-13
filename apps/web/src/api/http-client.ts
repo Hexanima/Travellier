@@ -50,6 +50,8 @@ export type HttpClientDependencies = {
   getAccessToken: () => Promise<string | null>;
   /** Receives the bearer the failed request carried (null when none), so a late 401 can be told apart from the active session. */
   onUnauthorized: (requestAccessToken: string | null) => void | Promise<void>;
+  /** Aborts a request (including a slow body) once it takes this long; defaults to 30 s. */
+  timeoutMs?: number;
 };
 
 type RequestOptions = {
@@ -69,6 +71,22 @@ export type HttpClient = {
 const genericRequestError = "No pudimos completar la solicitud. Intentá nuevamente.";
 const networkError = "No pudimos conectarnos. Verificá tu conexión e intentá nuevamente.";
 const clientRequestError = "No pudimos preparar la solicitud. Intentá nuevamente.";
+const timeoutError = "La solicitud tardó demasiado. Intentá nuevamente.";
+const defaultTimeoutMs = 30_000;
+
+/** Rejects as soon as the signal aborts, so a response that never finishes arriving does not hang the request. */
+const untilAborted = <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error("TimeoutError"));
+        return;
+      }
+
+      signal.addEventListener("abort", () => reject(new Error("TimeoutError")), { once: true });
+    }),
+  ]);
 
 const joinUrl = (baseUrl: string, path: string): string =>
   `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
@@ -156,6 +174,7 @@ export const createHttpClient = ({
   fetch,
   getAccessToken,
   onUnauthorized,
+  timeoutMs = defaultTimeoutMs,
 }: HttpClientDependencies): HttpClient => {
   const request = async <TResponse>(
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
@@ -182,45 +201,64 @@ export const createHttpClient = ({
       headers["content-type"] = "application/json";
     }
 
-    let response: Response;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      response = await fetch(joinUrl(baseUrl, path), {
-        method,
-        headers,
-        ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-      });
-    } catch {
-      return err(new ApiClientError("network", "NetworkError", networkError));
-    }
+      let response: Response;
 
-    let payload: unknown;
-
-    try {
-      payload = response.status === 204 ? undefined : await response.json();
-    } catch {
-      if (response.ok) {
-        return err(toInvalidResponseError(response.status));
-      }
-
-      payload = undefined;
-    }
-
-    if (response.ok) {
-      return ok(payload as TResponse);
-    }
-
-    const error = toApiClientError(response.status, payload);
-
-    if (error.kind === "unauthorized") {
       try {
-        await onUnauthorized(headers.Authorization?.replace(/^Bearer /, "") ?? null);
+        response = await untilAborted(
+          fetch(joinUrl(baseUrl, path), {
+            method,
+            headers,
+            ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+            signal: controller.signal,
+          }),
+          controller.signal,
+        );
       } catch {
-        return err(error);
+        return err(
+          controller.signal.aborted
+            ? new ApiClientError("network", "TimeoutError", timeoutError)
+            : new ApiClientError("network", "NetworkError", networkError),
+        );
       }
-    }
 
-    return err(error);
+      let payload: unknown;
+
+      try {
+        payload = response.status === 204 ? undefined : await untilAborted(response.json(), controller.signal);
+      } catch {
+        if (controller.signal.aborted) {
+          return err(new ApiClientError("network", "TimeoutError", timeoutError));
+        }
+
+        if (response.ok) {
+          return err(toInvalidResponseError(response.status));
+        }
+
+        payload = undefined;
+      }
+
+      if (response.ok) {
+        return ok(payload as TResponse);
+      }
+
+      const error = toApiClientError(response.status, payload);
+
+      if (error.kind === "unauthorized") {
+        try {
+          await onUnauthorized(headers.Authorization?.replace(/^Bearer /, "") ?? null);
+        } catch {
+          return err(error);
+        }
+      }
+
+      return err(error);
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   return {
