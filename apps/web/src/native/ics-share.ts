@@ -4,7 +4,7 @@ import { safeFileName, type DownloadResult } from "../calendar/download-ics.js";
 import type { NativePlatform } from "./capabilities.js";
 
 /**
- * `shared`: the share sheet was launched (Android resolves on launch, iOS on close): it does not prove the user chose a destination or that an app imported the file.
+ * `shared`: `Share.share` resolved, so the user picked a destination (on Android it may also mean the OS stopped the app mid-flow): dismissing the sheet rejects with `Share canceled` on both platforms, and resolving never proves the target app imported the file.
  * `downloaded`: web/dev fallback through Blob. The reason never carries paths or uris.
  */
 export type IcsShareOutcome = { ok: true; via: "shared" | "downloaded" } | { ok: false; reason: "cancelled" | "failed" };
