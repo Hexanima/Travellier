@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Modal } from "../components/index.js";
-import { useBackLayer } from "../navigation/BackNavigationProvider.js";
+import { useBackLayer } from "../navigation/back-layer-context.js";
 
 export type DiscardChangesModalProps = {
   /** The form has changes that leaving would lose. */

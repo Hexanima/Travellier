@@ -3,7 +3,8 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BackNavigationProvider, useBackLayer } from "./BackNavigationProvider.js";
+import { BackNavigationProvider } from "./BackNavigationProvider.js";
+import { useBackLayer } from "./back-layer-context.js";
 import type { AppBackButton } from "../native/app-back-button.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

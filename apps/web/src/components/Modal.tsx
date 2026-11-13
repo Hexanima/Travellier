@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
-import { BackLayerDepth, useBackLayer } from "../navigation/BackNavigationProvider.js";
+import { BackLayerDepth } from "../navigation/BackNavigationProvider.js";
+import { useBackLayer } from "../navigation/back-layer-context.js";
 
 const focusableSelector = [
   "a[href]",

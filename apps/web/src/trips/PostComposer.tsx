@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { Button, Feedback, LoadingState, Modal, TextAreaField, TextField } from "../components/index.js";
 import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
-import { useBackLayer } from "../navigation/BackNavigationProvider.js";
+import { useBackLayer } from "../navigation/back-layer-context.js";
 import { expenseDraftFromSaved, validateExpense, type SavedExpense } from "./expense-draft.js";
 import { mapSplitFieldErrors, sentSplitKeys, type ListErrors, type RowErrors } from "./expense-split.js";
 import { formatCents, formatExpenseAmount, formatLocalDate, localDayKey } from "./expense-format.js";

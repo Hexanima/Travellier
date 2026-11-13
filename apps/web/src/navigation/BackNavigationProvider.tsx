@@ -1,14 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { capacitorAppBackButton, type AppBackButton } from "../native/app-back-button.js";
 import { canGoBack, readOrigin } from "../trips/post-origin.js";
-import { createBackLayerStack, type BackLayerStack } from "./back-layers.js";
+import { createBackLayerStack } from "./back-layers.js";
+import { BackDepthContext, BackLayerContext } from "./back-layer-context.js";
 import { resolveBackAction } from "./back-navigation.js";
 
-const BackLayerContext = createContext<BackLayerStack | undefined>(undefined);
-/** How nested the layers of this subtree are: every dialog opens one level, so its content answers the back press before the dialog itself. */
-const BackDepthContext = createContext(0);
 const tripOfPath = (pathname: string) => /^\/trips\/([^/]+)\//.exec(pathname)?.[1];
 
 type Props = {
@@ -54,21 +52,6 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
   }, [backButton, stack]);
 
   return <BackLayerContext.Provider value={stack}>{children}</BackLayerContext.Provider>;
-}
-
-/**
- * Registers a layer of the back press while `active`. The innermost layer answers first and, among siblings, the last one
- * activated; returning `false` delegates to the one below. Without the provider (web) it does nothing.
- */
-export function useBackLayer(active: boolean, handler: () => boolean | void) {
-  const stack = useContext(BackLayerContext);
-  const depth = useContext(BackDepthContext);
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
-  useEffect(() => {
-    if (!stack || !active) return;
-    return stack.register(() => handlerRef.current() !== false, depth);
-  }, [stack, active, depth]);
 }
 
 /** Content of a dialog: its own layers (a dirty form, a nested confirmation) answer the back press before the dialog closes. */

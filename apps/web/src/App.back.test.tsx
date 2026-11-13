@@ -69,7 +69,7 @@ describe("App back button integration", () => {
 
   it("en una pantalla interna sin historial vuelve a Mis viajes", async () => {
     const button = backButton();
-    const container = await render(`/trips/${tripId}/journey`, props({ backButton: button.port, journey: { get: vi.fn().mockResolvedValue({ ok: true, value: { destinations: [], transports: [] } }) } }));
+    const container = await render(`/trips/${tripId}/journey`, props({ backButton: button.port, journey: { listDestinations: vi.fn().mockResolvedValue({ ok: true, value: [] }) } }));
     await button.press();
     expect(container.textContent).toContain("Mis viajes");
     expect(button.exitApp).not.toHaveBeenCalled();
