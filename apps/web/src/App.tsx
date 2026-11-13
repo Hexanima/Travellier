@@ -11,6 +11,8 @@ import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/a
 import { createNativeSessionStorage, type NativeSessionStorage } from './auth/native-session-storage.js'
 import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
+import { BackNavigationProvider } from './navigation/BackNavigationProvider.js'
+import type { AppBackButton } from './native/app-back-button.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { capacitorAppLifecycle, type AppLifecycle } from './native/app-lifecycle.js'
 import { createCapacitorCapabilities, createCapacitorIcsSharer } from './native/capacitor-capabilities.js'
@@ -97,6 +99,8 @@ type AppProps = {
   calendarSync?: CalendarSyncService
   /** Resume signal of the app for the Trip refresh (T121); by default the Capacitor `appStateChange` on a native platform, nothing on the web (it uses `visibilitychange`/`focus`). */
   lifecycle?: AppLifecycle
+  /** Native back press (T145); by default the Capacitor `backButton` on a native platform, nothing on the web (there the browser back already works). */
+  backButton?: AppBackButton
 }
 
 const invitationDestination = (state: unknown): string | null => {
@@ -119,7 +123,7 @@ const isHttpApiBaseUrl = (value: string | undefined): value is string => {
   }
 }
 
-function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync, lifecycle }: AppProps) {
+function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStorage, nativeApp, trips, journey, members, itinerary, activities, participations, posts, comments, likes, balance, photos, gallery, devicePhotos, push, pushDevices, notifications, noticePort, externalLink, calendarSync, lifecycle, backButton }: AppProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const latestLocation = useRef(location)
@@ -459,6 +463,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         ? <Feedback variant="info">Tenés un aviso nuevo. <Link to="/notifications">Ver avisos</Link> <Button onClick={() => setNoticeAnnounced(false)}>Descartar</Button></Feedback>
         : null}
       <ExternalLinkContext.Provider value={linkPort}>
+      <BackNavigationProvider {...(backButton ? { backButton } : {})}>
       <Routes>
         <Route path="/" element={<PublicHome />} />
         <Route path="/login" element={<AuthScreen auth={activeAuth} mode="login" onAuthenticated={onAuthenticated} sessionExpired={sessionExpired} />} />
@@ -542,6 +547,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         <Route path="/verify/*" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
         <Route path="*" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
       </Routes>
+      </BackNavigationProvider>
       </ExternalLinkContext.Provider>
     </>
   )

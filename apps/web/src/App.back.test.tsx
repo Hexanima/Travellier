@@ -1,0 +1,91 @@
+// @vitest-environment jsdom
+import { act, type ComponentProps } from "react";
+import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App from "./App.js";
+import type { AppBackButton } from "./native/app-back-button.js";
+import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
+import { noticesOrigin } from "./trips/post-origin.js";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const roots: ReturnType<typeof createRoot>[] = [];
+beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });
+afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+const tripId = itineraryId(1);
+const me = itineraryId(20);
+const backButton = () => {
+  const listeners = new Set<() => void>();
+  const exitApp = vi.fn();
+  const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp };
+  return { port, exitApp, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+};
+const storage = () => ({ read: vi.fn().mockResolvedValue({ accessToken: "old", refreshToken: "refresh" }), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) });
+const auth = { refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "access", refreshToken: "refresh" } }) };
+const props = (over: Partial<ComponentProps<typeof App>> = {}): ComponentProps<typeof App> => ({
+  auth, sessionStorage: storage(),
+  trips: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), get: vi.fn().mockResolvedValue({ ok: true, value: { id: tripId, name: "Córdoba", description: null, expenseMode: "register" } }) },
+  members: { list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [] } }) },
+  itinerary: { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture() }) },
+  participations: { get: vi.fn().mockResolvedValue({ ok: true, value: null }) },
+  posts: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) },
+  ...over,
+});
+type Entry = string | { pathname: string; search?: string; state?: unknown };
+async function render(entry: Entry | Entry[], app: ComponentProps<typeof App>) {
+  const entries = Array.isArray(entry) ? entry : [entry];
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  await act(async () => root.render(<MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}><App {...app} /></MemoryRouter>));
+  return container;
+}
+
+describe("App back button integration", () => {
+  it("desde una raíz del Trip vuelve a Mis viajes", async () => {
+    const button = backButton();
+    const container = await render(`/trips/${tripId}/itinerary`, props({ backButton: button.port }));
+    expect(container.textContent).toContain("Itinerario");
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("desde una raíz del Trip abierta por un aviso vuelve a avisos, igual que su enlace Volver", async () => {
+    const button = backButton();
+    const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
+    const container = await render({ pathname: `/trips/${tripId}/itinerary`, state: { origin: noticesOrigin } }, props({ backButton: button.port, notifications }));
+    expect(container.querySelector("a.trips-back")?.textContent).toBe("Volver a avisos");
+    await button.press();
+    expect(container.textContent).toContain("Avisos");
+  });
+
+  it("en Mis viajes sin historial cierra la app en vez de dejar el Atrás muerto", async () => {
+    const button = backButton();
+    await render("/trips", props({ backButton: button.port }));
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("en una pantalla interna sin historial vuelve a Mis viajes", async () => {
+    const button = backButton();
+    const container = await render(`/trips/${tripId}/journey`, props({ backButton: button.port, journey: { get: vi.fn().mockResolvedValue({ ok: true, value: { destinations: [], transports: [] } }) } }));
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("en una pantalla interna con historial vuelve a la anterior", async () => {
+    const button = backButton();
+    const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
+    const container = await render(["/trips", "/notifications"], props({ backButton: button.port, notifications }));
+    expect(container.textContent).toContain("Avisos");
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+  });
+
+  it("sin puerto nativo no se toca nada: la app sigue funcionando con el Atrás del navegador", async () => {
+    const container = await render(`/trips/${tripId}/itinerary`, props());
+    expect(container.textContent).toContain("Itinerario");
+  });
+});
