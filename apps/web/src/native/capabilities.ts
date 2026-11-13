@@ -30,6 +30,6 @@ export function createNativeCapabilities(dependencies: NativeDependencies): Nati
     push: createPushRegistration(dependencies.push, dependencies.platform),
     calendar: createCalendarAccess(dependencies.calendar, dependencies.platform),
     calendarEvents: createCalendarEvents(dependencies.calendar, dependencies.platform),
-    externalLink: createExternalLink(dependencies.externalLink),
+    externalLink: createExternalLink(dependencies.externalLink, dependencies.platform),
   };
 }

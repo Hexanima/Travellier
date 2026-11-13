@@ -10,12 +10,14 @@ const native = vi.hoisted(() => ({
   calendar: { requestPermissions: vi.fn(), checkPermissions: vi.fn(), findEvents: vi.fn(), createEvent: vi.fn(), modifyEvent: vi.fn(), deleteEvent: vi.fn() },
   filesystem: { writeFile: vi.fn(), deleteFile: vi.fn() },
   share: { canShare: vi.fn(), share: vi.fn() },
+  appLauncher: { openUrl: vi.fn() },
 }));
 vi.mock("@capacitor/camera", async (original) => ({ ...await original<typeof import("@capacitor/camera")>(), Camera: native.camera }));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: native.push }));
 vi.mock("@capacitor/calendar", () => ({ Calendar: native.calendar }));
 vi.mock("@capacitor/filesystem", async (original) => ({ ...await original<typeof import("@capacitor/filesystem")>(), Filesystem: native.filesystem }));
 vi.mock("@capacitor/share", () => ({ Share: native.share }));
+vi.mock("@capacitor/app-launcher", () => ({ AppLauncher: native.appLauncher }));
 vi.mock("@capacitor/core", async (original) => {
   const module = await original<typeof import("@capacitor/core")>();
   return { ...module, Capacitor: { ...module.Capacitor, getPlatform: () => "ios" } };
@@ -49,6 +51,15 @@ describe("Capacitor composition", () => {
     native.share.share.mockResolvedValueOnce({});
     expect(await sharer.save("BEGIN:VCALENDAR", "travellier-viaje.ics")).toEqual({ ok: true, via: "shared" });
     expect(native.share.share).toHaveBeenCalledWith({ title: "travellier-viaje.ics", files: ["file:///cache/travellier-viaje.ics"] });
+  });
+
+  it("opens a validated maps link through the native launcher without calling it at creation", async () => {
+    const services = createCapacitorCapabilities();
+    expect(native.appLauncher.openUrl).not.toHaveBeenCalled();
+    native.appLauncher.openUrl.mockResolvedValueOnce({ completed: true });
+    expect(await services.externalLink.open("https://maps.google.com/?q=Torre+Eiffel")).toEqual({ ok: true, value: undefined });
+    expect(native.appLauncher.openUrl).toHaveBeenCalledTimes(1);
+    expect(native.appLauncher.openUrl).toHaveBeenCalledWith({ url: "https://maps.google.com/?q=Torre+Eiffel" });
   });
 
   it("mounts and remounts the app under StrictMode without native permission dialogs", async () => {
