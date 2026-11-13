@@ -46,12 +46,6 @@ provider:
         - OPTIONS
   environment:
     APP_ENV: ${sls:stage}
-    MONGODB_SECRET_ARN:
-      Ref: MongoConfigurationSecret
-    JWT_SECRET_ARN:
-      Ref: JwtSigningSecret
-    S3_BUCKET_NAME:
-      Ref: PhotoBucket
   iam:
     role:
       statements:
@@ -92,10 +86,43 @@ provider:
 functions:
   api:
     handler: apps/api/src/lambda.handler
+    # Variables per function (least privilege): the workers never receive JWT_SECRET_ARN.
+    environment:
+      MONGODB_SECRET_ARN:
+        Ref: MongoConfigurationSecret
+      JWT_SECRET_ARN:
+        Ref: JwtSigningSecret
+      S3_BUCKET_NAME:
+        Ref: PhotoBucket
     events:
       - httpApi:
           path: /{proxy+}
           method: '*'
+  # Workers (T142). No `events`: the SQS mapping, queues, rules, roles and log groups come from infrastructure/pending-services.cjs, which
+  # enables them only when param:eventsConsumerArn / param:storageDeletionConsumerArn carry this function's ARN (second authorized deploy).
+  # timeout (60 s) < lease (120 s) and > internal deadline + closing margin; scripts/infrastructure-contract.test.mjs computes it from the code.
+  events:
+    handler: apps/api/src/events-lambda.handler
+    role: EventsWorkerRole
+    timeout: 60
+    memorySize: 256
+    disableLogs: true
+    environment:
+      MONGODB_SECRET_ARN:
+        Ref: MongoConfigurationSecret
+      PUSH_APPLICATIONS_SECRET_ARN:
+        Ref: PushApplicationsSecret
+  storage-deletion:
+    handler: apps/api/src/storage-deletion-lambda.handler
+    role: StorageDeletionWorkerRole
+    timeout: 60
+    memorySize: 256
+    disableLogs: true
+    environment:
+      MONGODB_SECRET_ARN:
+        Ref: MongoConfigurationSecret
+      S3_BUCKET_NAME:
+        Ref: PhotoBucket
 
 stages:
   default:
@@ -103,6 +130,9 @@ stages:
       logRetentionInDays: 14
       eventsConsumerArn: ''
       storageDeletionConsumerArn: ''
+      # EventBridge schedule of each worker (rate(1 minute), rate(N minutes|hours|days) or cron of 6 fields); dev and prod may override them.
+      eventsScheduleExpression: rate(1 minute)
+      storageDeletionScheduleExpression: rate(5 minutes)
   dev:
     params:
       logRetentionInDays: 14
@@ -111,6 +141,16 @@ stages:
       logRetentionInDays: 90
 
 resources:
+  # The log groups are created by pending-services.cjs; the functions wait for them so Lambda does not create them first.
+  # Logical names assumed from the Serverless normalization (events -> EventsLambdaFunction, storage-deletion -> StorageDashdeletionLambdaFunction):
+  # NOT verified without `serverless package` (needs AWS credentials).
+  - extensions:
+      EventsLambdaFunction:
+        DependsOn:
+          - EventsWorkerLogGroup
+      StorageDashdeletionLambdaFunction:
+        DependsOn:
+          - StorageDeletionWorkerLogGroup
   - Resources:
       PhotoBucket:
         Type: AWS::S3::Bucket
