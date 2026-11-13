@@ -182,11 +182,14 @@ Comprobaciones manuales en un dispositivo de prueba, sin datos ajenos:
 
 Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/environment-setup), [Camera](https://capacitorjs.com/docs/apis/camera), [Push Notifications](https://capacitorjs.com/docs/apis/push-notifications), [Calendar](https://capacitorjs.com/docs/apis/calendar).
 
-## Apertura de enlaces de ubicación T94
+## Apertura de enlaces de ubicación T94 / T144
 
-- `ExternalLinkPort.open(url)` (adaptador `src/native/external-link.ts`) revalida el enlace con `parseMapsLink` (solo `https:` y lista exacta de hosts de Maps) y abre `window.open(url, "_blank", "noopener,noreferrer")`. Construcción sin efectos y sin registrar la URL.
-- `@capacitor/app` 8.1.1 no incluye `openUrl` y `@capacitor/browser` no está instalado; no se agregaron dependencias ni cambios en `android/` o `ios/`.
-- No verificado: cómo el WebView de Capacitor maneja `window.open` hacia Google Maps o Apple Maps (intents de Android, universal links de iOS) ni la apertura real en dispositivos. Detalle y decisiones pendientes (mapa estático/WebView, credenciales, privacidad) en `docs/REVISION_PENDIENTE.md` (T94).
+- `ExternalLinkPort.open(url)` (adaptador `src/native/external-link.ts`) revalida el enlace con `parseMapsLink` (solo `https:` y lista exacta de hosts de Maps) y solo pasa adelante el href normalizado. Construcción sin efectos y sin registrar la URL; un enlace no válido devuelve `unsupported` sin tocar ningún abridor.
+- Android/iOS (T144): `AppLauncher.openUrl({ url })` de `@capacitor/app-launcher` 8.0.1 (MIT, peer `@capacitor/core >=8.0.0`), inyectado por `createCapacitorCapabilities()`. `completed: false` y cualquier excepción se informan como `NativeCapabilityError("native")` sin filtrar el mensaje original. Se eligió este plugin porque `@capacitor/app` 8.1.1 ya no expone `openUrl`/`canOpenUrl` y `@capacitor/browser` abriría un navegador in-app en vez de la app de mapas.
+- Fallback web/dev: se mantiene `window.open(url, "_blank", "noopener,noreferrer")`; con `noopener` el navegador devuelve `null` incluso al abrir, así que una ventana nula no es fallo (solo lo es un abridor que lanza).
+- Sin permisos ni capacidades de más: no se usa `canOpenUrl`, por eso no se declaran `<queries>` en el `AndroidManifest.xml` ni `LSApplicationQueriesSchemes` en el `Info.plist`. Para `https:`, `startActivity(ACTION_VIEW)` en Android y `UIApplication.open` en iOS funcionan sin esas declaraciones; usar `canOpenUrl` o esquemas propios (`comgooglemaps:`) en el futuro sí exigiría declararlos. El plugin no agrega `uses-permission`.
+- Alcance de `completed: true`: significa que el SO aceptó abrir el enlace, no que Google Maps o Apple Maps hayan mostrado el lugar. En Android, si `ACTION_VIEW` falla el plugin reintenta con `getLaunchIntentForPackage` y con la URL como action; con `https:` ambos caminos solo devuelven `false`.
+- No verificado en dispositivo (T113): la apertura real en Android e iOS, y cómo resuelven intents y universal links hacia Google Maps o Apple Maps. Decisiones pendientes (mapa estático/WebView, credenciales, privacidad) en `docs/REVISION_PENDIENTE.md` (T94 y T144).
 
 ## Guardar y compartir el `.ics` T143
 
