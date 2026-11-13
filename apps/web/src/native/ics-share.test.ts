@@ -5,11 +5,11 @@ const URI = "file:///data/user/0/app/cache/travellier-viaje.ics";
 type Overrides = Partial<{ platform: string; write: () => Promise<{ uri: string }>; canShare: () => Promise<{ value: boolean }>; share: () => Promise<unknown>; del: () => Promise<unknown> }>;
 function setup(overrides: Overrides = {}) {
   const calls: string[] = [];
-  const writeFile = vi.fn(async (_options: unknown) => { calls.push("write"); return overrides.write ? overrides.write() : { uri: URI }; });
-  const deleteFile = vi.fn(async (_options: unknown) => { calls.push("delete"); return overrides.del ? overrides.del() : {}; });
+  const writeFile = vi.fn<(options: unknown) => Promise<{ uri: string }>>(async () => { calls.push("write"); return overrides.write ? overrides.write() : { uri: URI }; });
+  const deleteFile = vi.fn<(options: unknown) => Promise<unknown>>(async () => { calls.push("delete"); return overrides.del ? overrides.del() : {}; });
   const canShare = vi.fn(async () => { calls.push("canShare"); return overrides.canShare ? overrides.canShare() : { value: true }; });
-  const share = vi.fn(async (_options: unknown) => { calls.push("share"); return overrides.share ? overrides.share() : {}; });
-  const fallback = vi.fn((_text: string, _name: string) => ({ ok: true as boolean }));
+  const share = vi.fn<(options: unknown) => Promise<unknown>>(async () => { calls.push("share"); return overrides.share ? overrides.share() : {}; });
+  const fallback = vi.fn<(text: string, name: string) => { ok: boolean }>(() => ({ ok: true }));
   const deps = { filesystem: { writeFile, deleteFile }, share: { canShare, share }, platform: () => overrides.platform ?? "android", fallback } as unknown as IcsSharerDeps;
   return { sharer: createNativeIcsSharer(deps), writeFile, deleteFile, canShare, share, fallback, calls };
 }
