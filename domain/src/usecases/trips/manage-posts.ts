@@ -19,6 +19,7 @@ import { err, ok, type AsyncResult, type Result } from "../../types/result.js";
 import type { UseCase } from "../../types/usecase.js";
 import { createObjectId, type ObjectId } from "../../value-objects/object-id.js";
 import { applyAuthorPlan, evaluatePlanChange } from "./agenda-plan-change.js";
+import { parsePhotoReferences } from "../../entities/post-photo.js";
 import { planPostPhotos, registerPostPhotos, verifyOptionalPhotoUploads } from "./manage-post-photos.js";
 import { emitToMembers, type MemberNotification } from "./notification-emission.js";
 
@@ -256,7 +257,7 @@ const expenseMatchesStored = (raw: unknown, stored: PostExpense | undefined, mod
     && rowsKey(expense.payments) === rowsKey(stored.payments) && rowsKey(expense.shares) === rowsKey(stored.shares);
 };
 /** What the first successful save left stored for this post, read inside the transaction (a retry never writes). */
-const readSavedPost = async (scope: TripPostScope, post: Post, userId: ObjectId) => {
+const readSavedPost = async (scope: TripPostReadScope, post: Post, userId: ObjectId) => {
   const photos = await scope.listPhotos(post.id);
   if (!photos.ok) return photos;
   const expense = await scope.findExpense(post.id);
@@ -281,7 +282,7 @@ const readSavedPost = async (scope: TripPostScope, post: Post, userId: ObjectId)
  * result, reconstructed from what is persisted, without writing); a post of another Trip or author, or a different body, is the same
  * generic conflict. Nothing here writes.
  */
-const answerPostRetry = async (scope: TripPostScope, payload: CreateTripPostPayload, owner: { id: ObjectId; tripId: ObjectId; authorId: ObjectId },
+const answerPostRetry = async (scope: TripPostReadScope, payload: CreateTripPostPayload, owner: { id: ObjectId; tripId: ObjectId; authorId: ObjectId },
   keys: string[] | undefined): AsyncResult<CreateTripPostResult> => {
   if (owner.tripId !== payload.tripId || owner.authorId !== payload.authenticatedUserId) return requestConflict();
   const post = await scope.find(owner.id);
@@ -302,7 +303,7 @@ const answerPostRetry = async (scope: TripPostScope, payload: CreateTripPostPayl
     ...(expense ? { expense } : {}) });
 };
 /** The PATCH with `newActivity.id` whose activity is already linked to the post: same save when the content is the stored one. */
-const answerLinkRetry = async (scope: TripPostScope, payload: LinkTripPostToNewActivityPayload, post: Post, keys: string[] | undefined):
+const answerLinkRetry = async (scope: TripPostReadScope, payload: LinkTripPostToNewActivityPayload, post: Post, keys: string[] | undefined):
   AsyncResult<LinkTripPostToNewActivityResult> => {
   const saved = await readSavedPost(scope, post, payload.authenticatedUserId);
   if (!saved.ok) return saved;
@@ -335,11 +336,49 @@ const savedNotifications = (input: { tripId: ObjectId; actorId: ObjectId; post?:
 const conflictingActivityLink = () => err(new ValidationError([{ field: "activityId", code: "conflict",
   message: "Choose an existing activity or create a new one." }]));
 
+/**
+ * Retry of a save already stored, answered BEFORE the storage check: the photos of the first save may be older than the upload limit by now,
+ * and a retry must answer what was stored, not `upload_too_old`. Read-only snapshot (membership/authorship first, same answers as the
+ * transaction); `undefined` means no such retry and the save goes on as a new one (with the storage check).
+ */
+const answerCreateRetryBeforeStorage = async (posts: TripPostPort, payload: CreateTripPostPayload): AsyncResult<CreateTripPostResult | undefined> => {
+  const postId = payload.postId;
+  if (postId === undefined || payload.photos === undefined) return ok(undefined);
+  const parsed = parsePhotoReferences({ tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
+  if (!parsed.ok) return ok(undefined);
+  return posts.withReadSnapshot(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const owner = await scope.findPostOwner(postId);
+    if (!owner.ok) return owner;
+    return owner.value === undefined ? ok(undefined) : answerPostRetry(scope, payload, owner.value, parsed.value);
+  });
+};
+/** Same for the PATCH with `newActivity.id` whose activity the post already points to (author only, like the transaction). */
+const answerLinkRetryBeforeStorage = async (posts: TripPostPort, payload: LinkTripPostToNewActivityPayload): AsyncResult<LinkTripPostToNewActivityResult | undefined> => {
+  const wanted = payload.newActivity.id;
+  if (wanted === undefined || payload.photos === undefined || payload.activityId != null) return ok(undefined);
+  const parsed = parsePhotoReferences({ tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
+  if (!parsed.ok) return ok(undefined);
+  return posts.withReadSnapshot(payload.tripId, async (scope) => {
+    const trip = await authorize(scope, payload);
+    if (!trip.ok) return trip;
+    const post = await find(scope, payload);
+    if (!post.ok) return post;
+    const author = requireAuthor(post.value, payload);
+    if (!author.ok) return author;
+    return post.value.activityId === wanted ? answerLinkRetry(scope, payload, post.value, parsed.value) : ok(undefined);
+  });
+};
+
 export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload, CreateTripPostResult, TaggedError> = {
   execute: async ({ posts, createId, now, storage }, payload) => {
     // Storage I/O happens before the transaction: the Trip lock is never held while S3 answers.
     const member = await requireMemberBeforeStorage(posts, payload);
     if (!member.ok) return member;
+    const retried = await answerCreateRetryBeforeStorage(posts, payload);
+    if (!retried.ok) return retried;
+    if (retried.value !== undefined) return ok(retried.value);
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos }, now);
     if (!verified.ok) return verified;
     const keys = verified.value;
@@ -418,6 +457,9 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
   execute: async ({ posts, createId, now, storage }, payload) => {
     const member = await requireAuthorBeforeStorage(posts, payload);
     if (!member.ok) return member;
+    const retried = await answerLinkRetryBeforeStorage(posts, payload);
+    if (!retried.ok) return retried;
+    if (retried.value !== undefined) return ok(retried.value);
     const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos }, now);
     if (!verified.ok) return verified;
     const keys = verified.value;

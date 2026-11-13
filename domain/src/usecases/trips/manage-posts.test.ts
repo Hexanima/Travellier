@@ -1407,11 +1407,43 @@ describe("Trip post use cases", () => {
           expect(await createWith(body())).toEqual(first);
         });
 
-        it("a retry only verifies the photos in the storage before the transaction", async () => {
+        it("a retry of a saved post answers from a read-only snapshot without touching the storage, while a new post verifies before the transaction", async () => {
           await createWith(body()); headCalls = [];
           await createWith(body());
+          expect(headCalls).toEqual([]);
+          await createWith(body({ postId: id(501) }));
           expect(headCalls.sort()).toEqual([key(1), key(2)]);
           expect(headInsideTransaction).toBe(false);
+        });
+
+        it("a retry more than 23 h after the upload answers the saved result (not 422) and writes nothing", async () => {
+          const first = await createWith(body());
+          expect(first).toMatchObject({ ok: true });
+          uploadedHoursAgo(24, 1, 2); headCalls = [];
+          const before = everything(), spies = writers();
+          expect(await createWith(body())).toEqual(first);
+          expect(headCalls).toEqual([]); expect(calls(spies)).toBe(0); expect(everything()).toEqual(before);
+        });
+
+        it("a retry with another body after 23 h keeps the generic conflict instead of 422", async () => {
+          expect(await createWith(body())).toMatchObject({ ok: true });
+          uploadedHoursAgo(24, 1, 2);
+          expect(await createWith(body({ photos: refs(1) }))).toMatchObject(conflict);
+        });
+
+        it("a NEW post with photos older than 23 h is still 422 upload_too_old without writes", async () => {
+          uploadedHoursAgo(24, 1, 2);
+          const before = everything(), spies = writers();
+          expect(failures(await createWith(body()))).toEqual(["photos[0].key/upload_too_old", "photos[1].key/upload_too_old"]);
+          expect(calls(spies)).toBe(0); expect(everything()).toEqual(before);
+        });
+
+        it("a retry of another author's post after 23 h is the generic conflict and reveals nothing", async () => {
+          records = [seedPost({ id: clientId, authorId: id(9) })];
+          uploadedHoursAgo(24, 1, 2);
+          const result = await createWith(body());
+          expect(result).toMatchObject(conflict);
+          expect(!result.ok && Object.keys(result.error).sort()).toEqual(["tag"]);
         });
 
         describe("PATCH with newActivity.id", () => {
@@ -1432,6 +1464,22 @@ describe("Trip post use cases", () => {
             expect(calls(spies)).toBe(0);
             expect(everything()).toEqual(before);
             expect(activities).toHaveLength(1); expect(participations).toHaveLength(1);
+          });
+
+          it("an exact PATCH retry more than 23 h after the upload answers the saved result (not 422) without storage calls or writes", async () => {
+            const first = await linkWithId({ photos: refs(1) });
+            expect(first).toMatchObject({ ok: true, value: { outcome: "linked" } });
+            uploadedHoursAgo(24, 1); headCalls = [];
+            const before = everything(), spies = writers();
+            expect(await linkWithId({ photos: refs(1) })).toEqual(first);
+            expect(headCalls).toEqual([]); expect(calls(spies)).toBe(0); expect(everything()).toEqual(before);
+          });
+
+          it("a NEW PATCH with newActivity and photos older than 23 h is 422 upload_too_old without writes", async () => {
+            uploadedHoursAgo(24, 1);
+            const before = everything(), spies = writers();
+            expect(failures(await linkWithId({ photos: refs(1) }))).toEqual(["photos[0].key/upload_too_old"]);
+            expect(calls(spies)).toBe(0); expect(everything()).toEqual(before);
           });
 
           it.each<[string, Record<string, unknown>]>([
