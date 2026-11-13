@@ -69,6 +69,15 @@ describe("createNativeIcsSharer", () => {
     expect(await sharer.save("é".repeat(600_000), "a.ics")).toEqual({ ok: false, reason: "failed" });
     expect(writeFile).not.toHaveBeenCalled();
   });
+  it("takes the native path on iOS instead of the download fallback", async () => {
+    const { sharer, writeFile, canShare, share, fallback, calls } = setup({ platform: "ios" });
+    expect(await sharer.save("x", "a.ics")).toEqual({ ok: true, via: "shared" });
+    expect(writeFile).toHaveBeenCalledTimes(1);
+    expect(canShare).toHaveBeenCalledTimes(1);
+    expect((share.mock.calls[0][0] as { files: string[] }).files).toEqual([URI]);
+    expect(fallback).not.toHaveBeenCalled();
+    expect(calls).toEqual(["write", "canShare", "share"]);
+  });
   it("delegates to the download fallback outside Android and iOS", async () => {
     const { sharer, writeFile, fallback } = setup({ platform: "web" });
     expect(await sharer.save("x", "a.ics")).toEqual({ ok: true, via: "downloaded" });
