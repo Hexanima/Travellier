@@ -124,4 +124,21 @@ describe("App back button integration", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(container.querySelector("[aria-current=date]")?.getAttribute("data-day")).toBe("2026-09-25");
   });
+
+  it("con el compositor de recuerdos sucio el Atrás pide confirmación y Descartar sale", async () => {
+    const button = backButton();
+    const container = await render([`/trips/${tripId}/memories`, `/trips/${tripId}/memories/new`], props({ backButton: button.port }));
+    const description = container.querySelector("[name=description]") as HTMLTextAreaElement;
+    expect(description).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(description, "Un recuerdo");
+      description.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await button.press();
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Descartar cambios");
+    expect(container.querySelector("[name=description]")).not.toBeNull();
+    const discard = Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Descartar");
+    await act(async () => discard?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(container.querySelector("[name=description]")).toBeNull();
+  });
 });
