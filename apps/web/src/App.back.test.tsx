@@ -88,4 +88,40 @@ describe("App back button integration", () => {
     const container = await render(`/trips/${tripId}/itinerary`, props());
     expect(container.textContent).toContain("Itinerario");
   });
+
+  it("con el detalle de una actividad abierto, el Atrás lo cierra y deja el itinerario igual", async () => {
+    const button = backButton();
+    const activityId = itineraryId(8);
+    const activities = { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture().activities.find((activity) => activity.id === activityId) }) };
+    const container = await render({ pathname: `/trips/${tripId}/itinerary`, search: `?activity=${activityId}&day=2026-09-25` }, props({ backButton: button.port, activities }));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await button.press();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Itinerario");
+  });
+
+  it("con el detalle abierto desde el itinerario (entrada propia) el Atrás vuelve al itinerario tal cual estaba", async () => {
+    const button = backButton();
+    const activityId = itineraryId(8);
+    const activities = { get: vi.fn().mockResolvedValue({ ok: true, value: itineraryFixture().activities.find((activity) => activity.id === activityId) }) };
+    const container = await render(`/trips/${tripId}/itinerary`, props({ backButton: button.port, activities }));
+    const open = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes("Paseo por el centro"));
+    await act(async () => open?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await button.press();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Itinerario");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("con el selector de destinos abierto el Atrás lo cierra sin cambiar el día", async () => {
+    const button = backButton();
+    const container = await render({ pathname: `/trips/${tripId}/itinerary`, search: "?day=2026-09-25" }, props({ backButton: button.port }));
+    const banner = Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.includes("Ver destinos"));
+    await act(async () => banner?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("Destinos del viaje");
+    await button.press();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector("[aria-current=date]")?.getAttribute("data-day")).toBe("2026-09-25");
+  });
 });

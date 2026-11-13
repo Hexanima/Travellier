@@ -5,7 +5,13 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { MemoryRouter, useLocation } from "react-router-dom";
+
 import { Modal } from "./Modal.js";
+import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
+import type { AppBackButton } from "../native/app-back-button.js";
+
+function Where() { return <output data-where>{useLocation().pathname}</output>; }
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -168,6 +174,56 @@ describe("Modal", () => {
       const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}>Ok</Modal>);
       await press(container);
       expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Atrás nativo", () => {
+    const mountWithBack = async (modal: React.ReactElement) => {
+      const listeners = new Set<() => void>();
+      const exitApp = vi.fn();
+      const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp };
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      mountedRoots.push(root);
+      await act(async () => { root.render(
+        <MemoryRouter initialEntries={["/trips/aaaaaaaaaaaaaaaaaaaaaaaa/journey"]}>
+          <BackNavigationProvider backButton={port}><Where />{modal}</BackNavigationProvider>
+        </MemoryRouter>,
+      ); });
+      return { container, exitApp, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+    };
+    const where = (container: HTMLElement) => container.querySelector("[data-where]")?.textContent;
+
+    it("cierra el diálogo abierto sin navegar", async () => {
+      const onClose = vi.fn();
+      const back = await mountWithBack(<Modal isOpen title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await back.press();
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(where(back.container)).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/journey");
+      expect(back.exitApp).not.toHaveBeenCalled();
+    });
+
+    it("mientras guarda se traga el Atrás: no cierra ni navega", async () => {
+      const onClose = vi.fn();
+      const back = await mountWithBack(<Modal isOpen loading title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await back.press();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(where(back.container)).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/journey");
+    });
+
+    it("un diálogo sin cierre retiene el Atrás en vez de dejar la pantalla", async () => {
+      const back = await mountWithBack(<Modal isOpen title="Cambiar">Ok</Modal>);
+      await back.press();
+      expect(where(back.container)).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/journey");
+    });
+
+    it("cerrado no toma el Atrás: la pantalla navega", async () => {
+      const onClose = vi.fn();
+      const back = await mountWithBack(<Modal isOpen={false} title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await back.press();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(where(back.container)).toBe("/trips");
     });
   });
 });
