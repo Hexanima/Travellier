@@ -14,9 +14,10 @@ import { isTick, parseBody, type SqsBatchResponse, type SqsEvent } from "./sqs-t
 
 /**
  * Push dispatch worker (T92, wired in T142). The deadline leaves room, inside the 60 s timeout of the function, for up to four SNS calls of
- * `SNS_REQUEST_TIMEOUT_MS` (create endpoint, publish, reactivate, publish) plus the closing writes; serverless.yml and its contract test depend on it.
+ * `SNS_CALL_BUDGET_MS` = 4 s each (create endpoint, publish, reactivate, publish) plus 5 s of closing writes: 35 + 16 + 5 = 56 s.
+ * serverless.yml and its contract test depend on it.
  */
-export const EVENTS_DEADLINE_MS = 40_000;
+export const EVENTS_DEADLINE_MS = 35_000;
 
 export interface EventsHandlerDependencies {
   /** Stage of this deployment (`APP_ENV`); a tick for another stage is a failure of the item. */

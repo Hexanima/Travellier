@@ -2,9 +2,14 @@ import { CreatePlatformEndpointCommand, PublishCommand, SetEndpointAttributesCom
 
 import type { SnsPushClient } from "./sns-push-provider.js";
 
-/** Per-call limit of every SNS request. The events worker budget (4 calls per send) is derived from it; see serverless.yml and the contract test. */
+/** Socket-inactivity limit of every SNS request; it does not bound the whole call (the connection timeout is added apart). */
 export const SNS_REQUEST_TIMEOUT_MS = 3000;
 export const SNS_CONNECTION_TIMEOUT_MS = 1000;
+/**
+ * Effective upper bound of one SNS call: the backstop abort fires at this instant. The events worker budget (4 calls per send,
+ * 4 x 4 s = 16 s) is derived from it; see serverless.yml and the contract test.
+ */
+export const SNS_CALL_BUDGET_MS = SNS_REQUEST_TIMEOUT_MS + 1000;
 
 /**
  * Real SNS client. `maxAttempts: 1`: `Publish` is not idempotent, so retries are governed by the dispatcher, not by the SDK.
@@ -19,7 +24,7 @@ export const createSnsClient = ({ region, sns }: { region: string; sns?: SNSClie
   // The abort signal is a backstop above the handler timeout so a stuck call can never outlive the deadline of the worker.
   const call = async <T>(run: (options: { requestTimeout: number; abortSignal: AbortSignal }) => Promise<T>): Promise<T> => {
     const controller = new AbortController();
-    const timer = setTimeout(() => { controller.abort(); }, SNS_REQUEST_TIMEOUT_MS + 1000);
+    const timer = setTimeout(() => { controller.abort(); }, SNS_CALL_BUDGET_MS);
     try {
       return await run({ requestTimeout: SNS_REQUEST_TIMEOUT_MS, abortSignal: controller.signal });
     } finally {
