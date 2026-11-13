@@ -8,6 +8,7 @@ import { MemoriesLayout } from "./TripMemoriesScreen.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
 import type { PostDraft } from "./post-draft.js";
 import type { PostResponse } from "./trip-post-api.js";
+import { draftKeyFor } from "./post-draft.js";
 import { usePostDraft } from "./use-post-drafts.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,7 +26,7 @@ const seeded = (link: PostDraft["extras"]["link"] = null, transport: string | nu
   ({ values: { description: "Texto tipeado", mapsUrl: "https://maps.example/x" }, extras: { link, transportId: transport, newActivity: null, photos: [], expense: null, split: { payments: null, shares: null }, removePhotoIds: [], removeExpense: false } });
 let seed: PostDraft = seeded();
 function Probe() {
-  const { postId } = useParams(); const handle = usePostDraft(postId ? `edit:${postId}` : "new");
+  const { postId } = useParams(); const handle = usePostDraft(draftKeyFor({ postId: postId, search: useLocation().search }));
   const location = useLocation(); const navigate = useNavigate();
   return <div>
     <p data-testid="probe">{JSON.stringify({ draft: handle.draft ?? null, state: location.state, search: location.search, path: location.pathname })}</p>

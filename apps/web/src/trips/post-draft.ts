@@ -168,12 +168,14 @@ export const activityParam = (search: string): string | undefined => idParam(sea
 
 /**
  * Key of the shared draft: one per edited post, one per continuation parent (valid `?parentPostId=`), one per activity to share
- * (valid `?activityId=`), and a generic one for the rest of creations.
+ * (valid `?activityId=`), one per transport to share (valid `?transportId=`), and a generic one for the rest of creations.
  */
 export const draftKeyFor = ({ postId, search }: { postId?: string; search: string }): string => {
   if (postId) return `edit:${postId}`;
   const parent = idParam(search, "parentPostId");
   if (parent !== undefined) return `new:parent:${parent}`;
   const activity = activityParam(search);
-  return activity !== undefined ? `new:activity:${activity}` : "new";
+  if (activity !== undefined) return `new:activity:${activity}`;
+  const transport = idParam(search, "transportId");
+  return transport !== undefined ? `new:transport:${transport}` : "new";
 };

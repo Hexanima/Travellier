@@ -50,7 +50,7 @@ async function render(path: Entry | Entry[] = `/trips/${tripId}/memories/new`, o
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   await act(async () => root.render(<MemoryRouter initialEntries={Array.isArray(path) ? path : [path]}>
-    <Back /><Forward /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link></nav><Routes>
+    <Back /><Forward /><nav><Link to={`/trips/${tripId}/memories/new`}>nav-new</Link><Link to={`/trips/${tripId}/memories/${postId}/edit`}>nav-edit</Link><Link to={`/trips/${otherTripId}/memories/new`}>nav-other</Link><Link to={`/trips/${tripId}/memories/new?transportId=${transportId}`}>nav-transport</Link></nav><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route index element={<Listing />} />
       <Route path=":postId" element={<Detail />} />
@@ -1028,6 +1028,62 @@ describe("PostComposer (share a memory of a transport)", () => {
     await click(button(container, "Cancelar"));
     expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="activity-origin"]')).toBeNull();
+  });
+  describe("drafts", () => {
+    const genericEntry = { pathname: newPath, search: "" };
+    const listingEntry = { pathname: `/trips/${tripId}/memories`, search: "" };
+    const otherTransport = itineraryId(51);
+    const otherEntry = { pathname: newPath, search: `?transportId=${otherTransport}`, state: { origin } };
+    const forward = async () => click(button(document.body, "adelante"));
+    it("shows the transport preload, not the generic text, when the generic draft already exists", async () => {
+      const { container, create } = await render([entry(), genericEntry]);
+      await field(container, "description", "texto genérico");
+      expect(container.textContent).not.toContain("Vinculado a un transporte");
+      await click(button(document.body, "atras"));
+      expect(value(container, "description")).toBe("");
+      expect(container.textContent).toContain("Vinculado a un transporte");
+      await submit(container);
+      expect(create).not.toHaveBeenCalled();
+    });
+    it("does not show a transport draft, nor its link, in the generic creation", async () => {
+      const { container } = await render([entry(), genericEntry]);
+      await click(button(document.body, "atras"));
+      await field(container, "description", "desde el transporte");
+      await forward();
+      expect(value(container, "description")).toBe("");
+      expect(container.textContent).not.toContain("Vinculado a un transporte");
+    });
+    it("keeps the transport draft going through the diary and back, and publishing clears it", async () => {
+      const { container, create } = await render([listingEntry, entry()]);
+      await field(container, "description", "En el micro");
+      await click(button(document.body, "atras"));
+      expect(container.querySelector('[data-testid="listing"]')).not.toBeNull();
+      await forward();
+      expect(value(container, "description")).toBe("En el micro");
+      expect(container.textContent).toContain("Vinculado a un transporte");
+      await submit(container);
+      expect(create).toHaveBeenCalledExactlyOnceWith(tripId, { description: "En el micro", transportId });
+      await click(button(document.body, "atras"));
+      expect(value(container, "description")).toBe("");
+    });
+    it("discarding clears the transport draft", async () => {
+      const { container } = await render([entry(null)]);
+      await field(container, "description", "Borrador");
+      await click(button(container, "Cancelar"));
+      await click(button(container.querySelector('[role="dialog"]') as HTMLElement, "Descartar"));
+      await click(Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "nav-transport"));
+      expect(container.textContent).toContain("Vinculado a un transporte");
+      expect(value(container, "description")).toBe("");
+    });
+    it("keeps the drafts of two transports apart", async () => {
+      const { container } = await render([otherEntry, entry()]);
+      await field(container, "description", "del transporte A");
+      await click(button(document.body, "atras"));
+      expect(value(container, "description")).toBe("");
+      await field(container, "description", "del transporte B");
+      await forward();
+      expect(value(container, "description")).toBe("del transporte A");
+    });
   });
 });
 
