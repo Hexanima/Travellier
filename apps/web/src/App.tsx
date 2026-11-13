@@ -13,7 +13,7 @@ import { Button, Feedback, LoadingState } from './components/index.js'
 import { AppUrlListener } from './navigation/AppUrlListener.js'
 import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { capacitorAppLifecycle, type AppLifecycle } from './native/app-lifecycle.js'
-import { createCapacitorCapabilities } from './native/capacitor-capabilities.js'
+import { createCapacitorCapabilities, createCapacitorIcsSharer } from './native/capacitor-capabilities.js'
 import { ExternalLinkContext } from './trips/external-link-context.js'
 import { createBrowserImageCodec } from './native/image-codec.js'
 import { createPhotoFileReader } from './native/photo-file.js'
@@ -272,6 +272,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     update: activePosts?.update ?? (async () => ({ ok: false, error: { kind: 'server' } })),
     remove: activePosts?.remove ?? (async () => ({ ok: false, error: { kind: 'server' } })),
   }), [activePosts])
+  // Native only: the web build keeps the Blob download. Stable reference; building the sharer calls no plugin.
+  const icsExport = useMemo(() => Capacitor.isNativePlatform() ? { download: createCapacitorIcsSharer().save } : undefined, [])
   const linkPort = useMemo(() => externalLink ?? createCapacitorCapabilities().externalLink, [externalLink])
   const appLifecycle = Capacitor.isNativePlatform() ? capacitorAppLifecycle : undefined
   // Without a reservation api there is no photo section. Device defaults are built on first need and request nothing at startup.
@@ -504,7 +506,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
         }>
         <Route path="/trips/:tripId/members" element={<TripMembersScreen trips={tripManagement} members={tripMembers} apiBaseUrl={apiBaseUrl} />} />
         <Route path="/trips/:tripId/itinerary" element={
-          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} calendarSync={activeCalendarSync} />
+          <TripItineraryScreen itinerary={tripItinerary} activities={tripActivities} participations={tripParticipations} members={tripMembers} trips={tripManagement} calendarSync={activeCalendarSync} icsExport={icsExport} />
         } />
         <Route path="/trips/:tripId/balance" element={<TripBalanceScreen balance={tripBalance} posts={tripPosts} members={tripMembers} />} />
         <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
