@@ -141,4 +141,18 @@ describe("App back button integration", () => {
     await act(async () => discard?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
     expect(container.querySelector("[name=description]")).toBeNull();
   });
+
+  it("en las fotos, el Atrás cierra el visor y deja la galería donde estaba", async () => {
+    const button = backButton();
+    const photo = { id: itineraryId(40), postId: itineraryId(540), order: 0, uploadedAt: "2026-09-26T10:00:00.000Z", uploaderId: me,
+      url: "https://s3.test/40?sig=x", expiresAtMs: Date.parse("2100-01-01T00:00:00.000Z"),
+      post: { createdAt: "2026-09-26T09:00:00.000Z", authorId: me, rootActivityId: null, rootTransportId: null } };
+    const gallery = { list: vi.fn().mockResolvedValue({ ok: true, value: { photos: [photo], nextCursor: null } }) };
+    const container = await render(`/trips/${tripId}/memories/photos`, props({ backButton: button.port, gallery }));
+    await act(async () => container.querySelector(`[data-photo="${photo.id}"] button`)?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    await button.press();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.querySelector(`[data-photo="${photo.id}"]`)).not.toBeNull();
+  });
 });
