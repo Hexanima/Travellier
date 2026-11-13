@@ -8,11 +8,12 @@ import type { AppBackButton } from "./native/app-back-button.js";
 import type { NativeAppUrlApi } from "./navigation/app-url-listener.js";
 import { itineraryFixture, itineraryId } from "./trips/itinerary-test-fixture.js";
 import { noticesOrigin } from "./trips/post-origin.js";
+import { resetRememberedFilter } from "./trips/trips-filter-memory.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
 beforeEach(() => { Element.prototype.scrollIntoView = vi.fn(); });
-afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => roots.splice(0).forEach((root) => root.unmount())); document.body.replaceChildren(); vi.unstubAllGlobals(); resetRememberedFilter(); });
 
 const tripId = itineraryId(1);
 const me = itineraryId(20);
@@ -264,5 +265,39 @@ describe("App back button integration", () => {
     expect(container.textContent).toContain("Mis viajes");
     await button.press();
     expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+  it("en Mis viajes como entrada inicial, cambiar de pestaña no deja el Atrás muerto", async () => {
+    const button = backButton();
+    const container = await render("/trips", props({ backButton: button.port }));
+    const finished = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find((item) => item.textContent === "Finalizados");
+    await act(async () => finished?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(finished?.getAttribute("aria-selected")).toBe("true");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("al borrar un recuerdo abierto desde otro recuerdo sin historial, el Atrás siguiente no queda muerto", async () => {
+    const button = backButton();
+    const parentId = itineraryId(30), postId = itineraryId(31);
+    const path = (id: string) => `/trips/${tripId}/memories/${id}`;
+    const post = (id: string) => ({ id, tripId, authorId: me, description: `Recuerdo ${id}`, mapsUrl: null, activityId: null, parentPostId: null, transportId: null,
+      createdAt: "2026-09-26T09:00:00.000Z" });
+    const posts = {
+      list: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+      get: vi.fn().mockImplementation(async (_trip: string, id: string) => ({ ok: true, value: { post: post(id), parent: null, children: [], rootActivityId: null } })),
+      remove: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    };
+    const members = { list: vi.fn().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [{ userId: me, name: "Ana", role: "participant" }] } }) };
+    const comments = { list: vi.fn().mockResolvedValue({ ok: true, value: [] }), create: vi.fn(), update: vi.fn(), remove: vi.fn() };
+    const likes = { summary: vi.fn().mockResolvedValue({ ok: true, value: { post: { count: 0, likedByMe: false }, comments: {} } }), setPostLike: vi.fn(), setCommentLike: vi.fn() };
+    const container = await render({ pathname: path(postId), state: { origin: { path: path(parentId), label: "recuerdo" } } },
+      props({ backButton: button.port, posts, members, comments, likes }));
+    const press = (label: string) => act(async () => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === label)?.click());
+    await press("Eliminar recuerdo");
+    await press("Eliminar");
+    expect(posts.remove).toHaveBeenCalledWith(tripId, postId);
+    expect(container.textContent).toContain(`Recuerdo ${parentId}`);
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
   });
 });
