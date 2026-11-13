@@ -2,10 +2,13 @@ import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { capacitorAppBackButton, type AppBackButton } from "../native/app-back-button.js";
-import { canGoBack, readOrigin, withNoBack } from "../trips/post-origin.js";
+import { canGoBack, inheritNoBack, readOrigin } from "../trips/post-origin.js";
 import { createBackLayerStack } from "./back-layers.js";
 import { BackDepthContext, BackLayerContext } from "./back-layer-context.js";
 import { resolveBackAction } from "./back-navigation.js";
+
+/** How long a back press keeps the lock: enough for the asynchronous `popstate` and for the bounce of the button or the gesture. */
+const backLockMs = 250;
 
 const tripOfPath = (pathname: string) => /^\/trips\/([^/]+)\//.exec(pathname)?.[1];
 
@@ -27,11 +30,10 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
   navigateRef.current = navigate;
   const locationRef = useRef(location);
   locationRef.current = location;
-  // A second press while the navigation is still pending would pop twice: it is ignored until the entry changes.
+  // A second press while the navigation is still pending would pop twice: `popstate` arrives asynchronously, so the lock
+  // is held for a short window (the physical button and the gesture bounce within tens of milliseconds) and released after it,
+  // whether or not the entry changed (a `back` with nothing behind in the WebView never changes it).
   const navigating = useRef(false);
-  useEffect(() => { navigating.current = false; }, [location]);
-  // Backup: a navigation that does not change the entry (a `back` with nothing behind in the WebView) never runs that effect,
-  // so the flag is released on the next task and the following presses keep working.
   const release = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(release.current), []);
 
@@ -51,10 +53,11 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
       if (action.kind === "exit") { backButton.exitApp(); return; }
       navigating.current = true;
       clearTimeout(release.current);
-      release.current = setTimeout(() => { navigating.current = false; }, 0);
+      release.current = setTimeout(() => { navigating.current = false; }, backLockMs);
       if (action.kind === "back") navigateRef.current(-1);
-      // The entry it replaces is left behind: without `noBack` the next press would resolve to a back that goes nowhere.
-      else navigateRef.current(action.to, { replace: true, state: withNoBack() });
+      // The entry it replaces is left behind: it inherits `noBack` only when nothing was behind it, so the next press
+      // neither resolves to a back that goes nowhere nor closes the app with history still behind.
+      else navigateRef.current(action.to, { replace: true, ...inheritNoBack(current) });
     });
   }, [backButton, stack]);
 

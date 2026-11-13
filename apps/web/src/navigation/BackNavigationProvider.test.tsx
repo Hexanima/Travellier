@@ -151,9 +151,30 @@ describe("BackNavigationProvider", () => {
         </Router>));
       await button.press();
       expect(go).toHaveBeenCalledTimes(1);
+      // Dentro del retardo el candado sigue puesto: una segunda pulsación no hace doble pop.
+      await act(async () => { vi.advanceTimersByTime(249); });
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(1);
       await act(async () => { vi.advanceTimersByTime(1); });
       await button.press();
       expect(go).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("dos pulsaciones seguidas con una entrada detrás no hacen doble pop", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips", "/notifications", "/profile"], <Screen />, button.port);
+      await button.press();
+      expect(where()).toBe("/notifications");
+      // Rebote del botón físico: la segunda pulsación llega antes de liberar el candado y no debe saltar una entrada.
+      await act(async () => { vi.advanceTimersByTime(10); });
+      await button.press();
+      expect(where()).toBe("/notifications");
+      await act(async () => { vi.advanceTimersByTime(250); });
+      await button.press();
+      expect(where()).toBe("/trips");
     } finally { vi.useRealTimers(); }
   });
 
