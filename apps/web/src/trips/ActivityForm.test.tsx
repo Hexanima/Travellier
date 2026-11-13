@@ -8,6 +8,9 @@ import type { ActivityFormContext } from "./activity-form-state.js";
 import type { ActivityResponse } from "./trip-activity-api.js";
 import type { TripItineraryResponse } from "./trip-itinerary-api.js";
 import { itineraryFixture } from "./itinerary-test-fixture.js";
+import { MemoryRouter } from "react-router-dom";
+import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
+import type { AppBackButton } from "../native/app-back-button.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -308,5 +311,61 @@ describe("ActivityForm location preview", () => {
     await field(container, "title", "Museo"); await field(container, "time", "09:00");
     await field(container, "mapsUrl", " https://MAPS.GOOGLE.COM/?q=a "); await submit(container);
     expect(create).toHaveBeenCalledWith(itineraryFixture().tripId, expect.objectContaining({ mapsUrl: "https://MAPS.GOOGLE.COM/?q=a" }));
+  });
+});
+
+describe("ActivityForm y el Atrás nativo", () => {
+  async function renderWithBack(existing?: ActivityResponse) {
+    const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
+    const context: ActivityFormContext = { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
+      selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
+    const listeners = new Set<() => void>();
+    const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp: vi.fn() };
+    const onExit = vi.fn();
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/trips/000000000000000000000001/itinerary"]}>
+        <BackNavigationProvider backButton={port}>
+          <ActivityForm context={context} activities={{ create: vi.fn(), update: vi.fn() }} knownActivities={itinerary.activities}
+            existing={existing} onSaved={vi.fn()} onBusyChange={vi.fn()} onExit={onExit} />
+        </BackNavigationProvider>
+      </MemoryRouter>));
+    return { container, onExit, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+  }
+
+  it("sin cambios sale directo", async () => {
+    const view = await renderWithBack();
+    await view.press();
+    expect(view.onExit).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("con cambios pide confirmación antes de perderlos", async () => {
+    const view = await renderWithBack();
+    await field(view.container, "title", "Museo");
+    await view.press();
+    expect(view.onExit).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Descartar cambios");
+    expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios de esta actividad.");
+  });
+
+  it("sin onExit no toma el Atrás: lo resuelve la pantalla", async () => {
+    const itinerary = itineraryFixture() as TripItineraryResponse, day = itinerary.days[1];
+    const context: ActivityFormContext = { tripId: itinerary.tripId, days: itinerary.days, timeZone: "America/Argentina/Buenos_Aires",
+      selection: { ...day, date: "2026-09-25", sourceDayIds: [day.id] } };
+    const listeners = new Set<() => void>();
+    const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp: vi.fn() };
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/trips/000000000000000000000001/itinerary"]}>
+        <BackNavigationProvider backButton={port}>
+          <ActivityForm context={context} activities={{ create: vi.fn(), update: vi.fn() }} knownActivities={itinerary.activities}
+            onSaved={vi.fn()} onBusyChange={vi.fn()} />
+        </BackNavigationProvider>
+      </MemoryRouter>));
+    await act(async () => listeners.forEach((listener) => listener()));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });

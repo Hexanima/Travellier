@@ -9,16 +9,21 @@ import { LocationPreview } from "./LocationPreview.js";
 import { ParticipationConflictModal } from "./ParticipationConflictModal.js";
 import type { ParticipationResponse } from "./trip-participation-api.js";
 import { toLocalDateTime } from "./transport-local-time.js";
+import { DiscardChangesModal } from "./DiscardChangesModal.js";
 
 type Props = { context: ActivityFormContext; activities: Pick<TripActivityApi, "create" | "update">; existing?: ActivityResponse;
   /** Activities of the loaded itinerary, used only to name the incompatible plans in the confirmation. */
   knownActivities?: readonly ActivityResponse[];
-  onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void; onBusyChange: (busy: boolean) => void };
+  onSaved: (activity: ActivityResponse, participation: ParticipationResponse | null) => void; onBusyChange: (busy: boolean) => void;
+  /** Exit of the form used by the native back press (the dialog close). Without it the form does not take the press. */
+  onExit?: () => void };
 type PendingConfirmation = { changes: ActivityInput; confirmation: ParticipationConfirmation; stale: boolean };
-export function ActivityForm({ context, activities, existing, knownActivities = [], onSaved, onBusyChange }: Props) {
+export function ActivityForm({ context, activities, existing, knownActivities = [], onSaved, onBusyChange, onExit }: Props) {
   const [timeZone] = useState(context.timeZone);
   const localContext = { ...context, timeZone };
   const [values, setValues] = useState(() => initialActivityValues(localContext, existing));
+  // Snapshot of what was loaded: a change is measured against it, never against an empty form (that would always look dirty).
+  const [initial] = useState(values);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [failure, setFailure] = useState<TripFailure>();
   const [message, setMessage] = useState("");
@@ -129,6 +134,8 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
       : failure.kind === "not-found" || failure.kind === "forbidden" ? "La actividad o el día ya no están disponibles. Volvé a cargar el itinerario."
       : "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback> : null}
     <Button type="submit" loading={saving}>{existing ? "Guardar cambios" : "Guardar actividad"}</Button>
+    {onExit ? <DiscardChangesModal dirty={!saving && JSON.stringify(values) !== JSON.stringify(initial)}
+      message="Si salís ahora, vas a perder los cambios de esta actividad." onDiscard={onExit} /> : null}
     {pending ? createPortal(<div className="participation-conflict-layer"><ParticipationConflictModal conflicts={pending.confirmation.confirmedConflicts} activities={knownActivities}
       timeZone={timeZone} stale={pending.stale} saving={saving}
       onCancel={() => setPending(undefined)} onConfirm={() => { if (!savingRef.current) void send(pending.changes, pending.confirmation); }} /></div>, document.body) : null}

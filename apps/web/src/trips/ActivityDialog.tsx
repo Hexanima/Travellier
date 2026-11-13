@@ -79,7 +79,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
   const cancelRemoval = () => { if (!removingRef.current) { setRemoval("idle"); setRemovalError(undefined); } };
   return <><div className="activity-dialog"><Modal isOpen title={request.kind === "create" ? "Nueva actividad" : state.kind === "edit" ? "Editar actividad" : "Detalle de actividad"}
     loading={saving || removal === "deleting"} onClose={onClose}>
-    {request.kind === "create" && context ? <ActivityForm context={context} activities={activities} knownActivities={itinerary.activities} onSaved={onSaved} onBusyChange={setSaving} /> : null}
+    {request.kind === "create" && context ? <ActivityForm context={context} activities={activities} knownActivities={itinerary.activities} onSaved={onSaved} onBusyChange={setSaving} onExit={onClose} /> : null}
     {request.kind === "detail" ? <>
       {state.kind === "loading" ? <LoadingState label="Cargando actividad…" /> : null}
       {state.kind === "error" ? <div className="activity-detail">
@@ -101,7 +101,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
         <Button error disabled={busy} onClick={(event) => { removeTrigger.current = event.currentTarget; setRemoval("confirming"); setRemovalError(undefined); }}>Eliminar actividad</Button>
         {memories}
       </div> : null}
-      {state.kind === "edit" && context ? <ActivityForm context={context} activities={activities} existing={state.value} onSaved={onSaved} onBusyChange={setSaving} /> : null}
+      {state.kind === "edit" && context ? <ActivityForm context={context} activities={activities} existing={state.value} onSaved={onSaved} onBusyChange={setSaving} onExit={onClose} /> : null}
     </> : null}
   </Modal></div>
   {removal !== "idle" && existing ? <div className="activity-confirm-layer"><Modal isOpen closeOnEscape title="Eliminar actividad"
