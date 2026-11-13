@@ -288,4 +288,20 @@ describe("MemoriesLayout under draft providers", () => {
     await act(async () => root.render(tree(true)));
     expect(container.querySelector("[data-probe]")?.textContent).toBe("postc");
   });
+  it.each([["only the posts provider", true], ["only the comments provider", false]])("with %s above, it creates the missing one and keeps the existing", async (_name, postsOnly) => {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const routes = <MemoryRouter initialEntries={[`/trips/${tripId}/memories/x`]}><Routes>
+      <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}><Route path=":id" element={<Probe />} /></Route>
+    </Routes></MemoryRouter>;
+    const tree = (shown: boolean) => postsOnly ? <PostDraftsProvider>{shown ? routes : <p>vacío</p>}</PostDraftsProvider>
+      : <CommentDraftsProvider>{shown ? routes : <p>vacío</p>}</CommentDraftsProvider>;
+    await act(async () => root.render(tree(true)));
+    await act(async () => { container.querySelector<HTMLElement>("[data-probe]")?.click(); });
+    expect(container.querySelector("[data-probe]")?.textContent).toBe("postc");
+    await act(async () => root.render(tree(false)));
+    await act(async () => root.render(tree(true)));
+    // The provider above is the one that survives; the one the layout created starts empty.
+    expect(container.querySelector("[data-probe]")?.textContent).toBe(postsOnly ? "post-" : "-c");
+  });
 });
