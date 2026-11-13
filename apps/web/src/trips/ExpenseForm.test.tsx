@@ -10,6 +10,8 @@ import type { ExpenseDraft } from "./expense-draft.js";
 import type { PostDraft } from "./post-draft.js";
 import { draftKeyFor } from "./post-draft.js";
 import { usePostDraft } from "./use-post-drafts.js";
+import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
+import type { AppBackButton } from "../native/app-back-button.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -32,17 +34,22 @@ function Probe() {
 }
 type Probed = { draft: PostDraft | null; state: { focus?: string; notice?: string } | null; search: string; path: string; returned: { focus?: string } | null };
 const probe = (container: HTMLElement) => JSON.parse(container.querySelector('[data-testid="probe"]')!.textContent!) as Probed;
-async function render(path: string, itineraryGet: ReturnType<typeof vi.fn>) {
+async function render(path: string, itineraryGet: ReturnType<typeof vi.fn>, backButton?: AppBackButton) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const form = <ExpenseForm itinerary={{ get: itineraryGet }} />;
-  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><Routes>
+  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><BackNavigationProvider backButton={backButton}><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route path="new" element={<Probe />} /><Route path="new/expense" element={form} />
       <Route path=":postId/edit" element={<Probe />} /><Route path=":postId/edit/expense" element={form} />
-    </Route></Routes></MemoryRouter>));
+    </Route></Routes></BackNavigationProvider></MemoryRouter>));
   return container;
 }
+const fakeBack = () => {
+  const listeners = new Set<() => void>();
+  const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp: vi.fn() };
+  return { port, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+};
 const button = (container: ParentNode, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
 const field = (container: ParentNode, name: string) => container.querySelector(`[name="${name}"]`) as HTMLInputElement & HTMLSelectElement & HTMLTextAreaElement;
@@ -352,5 +359,31 @@ describe("ExpenseForm amount limit", () => {
   it("tells the limit in the help text", async () => {
     const { container } = await open();
     expect(container.textContent).toContain("999.999.999.999,99");
+  });
+});
+
+describe("ExpenseForm y el Atrás nativo", () => {
+  const openWithBack = async (draft: PostDraft = seeded()) => {
+    const back = fakeBack();
+    seed = draft;
+    const container = await render(newPath, vi.fn().mockResolvedValue(itineraryOf()), back.port);
+    await click(button(container, "sembrar")); await click(button(container, "ir directo"));
+    return { container, back };
+  };
+
+  it("sin cambios vuelve al compositor sin preguntar", async () => {
+    const { container, back } = await openWithBack();
+    expect(container.textContent).toContain("Agregar gasto");
+    await back.press();
+    expect(document.body.textContent).not.toContain("Descartar cambios");
+    expect(container.textContent).not.toContain("Agregar gasto");
+  });
+
+  it("con cambios pide confirmación antes de perderlos", async () => {
+    const { container, back } = await openWithBack();
+    await type(field(container, "amount"), "25,50");
+    await back.press();
+    expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios de este gasto.");
+    expect(container.textContent).toContain("Agregar gasto");
   });
 });

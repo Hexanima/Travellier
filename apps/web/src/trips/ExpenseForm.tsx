@@ -8,6 +8,7 @@ import { EXPENSE_BREAKDOWN_MAX } from "./post-text-limits.js";
 import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
+import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
 import "./expenses.css";
 
@@ -86,6 +87,8 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
 function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commit: (draft: PostDraft) => void; saved?: SavedExpense; leaving: { current: boolean }; back: () => void }) {
   const savedDraft = saved ? expenseDraftFromSaved(saved) : undefined;
   const [values, setValues] = useState<ExpenseDraft>(() => draft.extras.expense ?? savedDraft ?? empty);
+  // Snapshot of what was loaded (the draft or the stored expense): a change is measured against it, never against an empty form.
+  const [initial] = useState(values);
   const [error, setError] = useState<{ field: string; message: string }>();
   const formRef = useRef<HTMLFormElement>(null);
   useEffect(() => {
@@ -122,5 +125,8 @@ function Form({ draft, commit, saved, leaving, back }: { draft: PostDraft; commi
     <p className="comment-count">{commentLength(values.breakdown.trim())} / {EXPENSE_BREAKDOWN_MAX}</p>
     <Button type="submit">Aceptar</Button>
     <Button variant="secondary" onClick={back}>Cancelar</Button>
+    {/* The native back press is the same exit as «Cancelar»: with changes it asks before losing them. */}
+    <DiscardChangesModal dirty={JSON.stringify(values) !== JSON.stringify(initial)}
+      message="Si salís ahora, vas a perder los cambios de este gasto." onDiscard={back} />
   </form>;
 }

@@ -9,6 +9,8 @@ import { itineraryFixture, itineraryId } from "./itinerary-test-fixture.js";
 import type { NewActivityDraft, PostDraft } from "./post-draft.js";
 import { draftKeyFor } from "./post-draft.js";
 import { usePostDraft } from "./use-post-drafts.js";
+import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
+import type { AppBackButton } from "../native/app-back-button.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -32,17 +34,22 @@ function Probe() {
 }
 const probe = (container: HTMLElement) => JSON.parse(container.querySelector('[data-testid="probe"]')!.textContent!) as
   { draft: PostDraft | null; state: { focus?: string; notice?: string } | null; search: string; path: string; returned: { focus?: string; notice?: string } | null };
-async function render(path: string, itineraryGet: ReturnType<typeof vi.fn>) {
+async function render(path: string, itineraryGet: ReturnType<typeof vi.fn>, backButton?: AppBackButton) {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); roots.push(root);
   const form = <SpontaneousActivityForm itinerary={{ get: itineraryGet }} timeZone={zone} />;
-  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><Routes>
+  await act(async () => root.render(<MemoryRouter initialEntries={[path]}><BackNavigationProvider backButton={backButton}><Routes>
     <Route path="/trips/:tripId/memories" element={<MemoriesLayout />}>
       <Route path="new" element={<Probe />} /><Route path="new/activity" element={form} />
       <Route path=":postId/edit" element={<Probe />} /><Route path=":postId/edit/activity" element={form} />
-    </Route></Routes></MemoryRouter>));
+    </Route></Routes></BackNavigationProvider></MemoryRouter>));
   return container;
 }
+const fakeBack = () => {
+  const listeners = new Set<() => void>();
+  const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp: vi.fn() };
+  return { port, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
+};
 const button = (container: ParentNode, label: string) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (element: Element | undefined | null) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))); };
 const field = (container: ParentNode, name: string) => container.querySelector(`[name="${name}"]`) as HTMLInputElement;
@@ -273,5 +280,32 @@ describe("SpontaneousActivityForm", () => {
       expect(where(container)).toBe(newPath);
       expect(container.querySelector('[data-testid="activity"]')!.textContent).toBe("null");
     });
+  });
+});
+
+describe("SpontaneousActivityForm y el Atrás nativo", () => {
+  it("sin cambios vuelve al compositor sin preguntar", async () => {
+    const back = fakeBack();
+    const container = await render(newPath, vi.fn().mockResolvedValue(itineraryOf()), back.port);
+    await act(async () => (container.querySelector("button")!).dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => (Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "ir directo"))!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(container.textContent).toContain("Crear actividad espontánea");
+    await back.press();
+    expect(container.textContent).not.toContain("Crear actividad espontánea");
+  });
+
+  it("con cambios pide confirmación antes de perderlos", async () => {
+    const back = fakeBack();
+    const container = await render(newPath, vi.fn().mockResolvedValue(itineraryOf()), back.port);
+    await act(async () => (container.querySelector("button")!).dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    await act(async () => (Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "ir directo"))!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const title = container.querySelector('[name="title"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(title, "Feria");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await back.press();
+    expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios de esta actividad.");
+    expect(container.textContent).toContain("Crear actividad espontánea");
   });
 });

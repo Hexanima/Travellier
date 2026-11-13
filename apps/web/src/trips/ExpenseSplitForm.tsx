@@ -9,6 +9,7 @@ import { draftKeyFor, setSplit, type PostDraft } from "./post-draft.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { SavedExpenseView, TripPostApi } from "./trip-post-api.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
+import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
 import "./expenses.css";
 
@@ -244,5 +245,8 @@ function Editor({ draft, commit, saved, people, totals, entry, leaving, back }: 
     {showAlert ? <p className="ui-field__error" role="alert" data-focus="alert" tabIndex={-1}>{submitted && !check.valid ? alertMessage : serverAlertMessage}</p> : null}
     <Button type="submit">Aceptar</Button>
     <Button variant="secondary" onClick={back}>Cancelar</Button>
+    {/* The native back press is the same exit as «Cancelar»: with changes it asks before losing them. Compared against what was loaded, not against an empty split. */}
+    <DiscardChangesModal dirty={JSON.stringify({ payments, shares }) !== JSON.stringify({ payments: initial.payments, shares: initial.shares })}
+      message="Si salís ahora, vas a perder los cambios del reparto." onDiscard={back} />
   </form>;
 }
