@@ -48,7 +48,9 @@ export const createS3ObjectStorage = ({
   headObject: async ({ objectKey }) => {
     try {
       const head = await client.send(new HeadObjectCommand({ Bucket: bucketName, Key: objectKey }));
-      return ok({ contentType: head.ContentType ?? null, sizeBytes: head.ContentLength ?? 0 });
+      // S3 always reports it; without it the age of the upload cannot be judged against the cleanup sweep.
+      if (head.LastModified === undefined) return err(new UnknownError("Stored object has no modification time."));
+      return ok({ contentType: head.ContentType ?? null, sizeBytes: head.ContentLength ?? 0, lastModified: head.LastModified });
     } catch (error) {
       return isMissingObject(error) ? ok(undefined) : err(new UnknownError("Unable to inspect stored object."));
     }

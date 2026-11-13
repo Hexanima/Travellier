@@ -64,16 +64,16 @@ export const createTripPhotoUploads: UseCase<UploadDependencies, PhotoUploadPayl
  * It runs BEFORE the transaction so the Trip lock is never held during storage I/O; membership is revalidated under the lock later.
  */
 export const verifyPhotoUploads = async (storage: ObjectStoragePort | undefined,
-  input: { tripId: ObjectId; userId: ObjectId; photos: unknown }): AsyncResult<string[]> => {
+  input: { tripId: ObjectId; userId: ObjectId; photos: unknown }, now: () => Date): AsyncResult<string[]> => {
   const keys = parsePhotoReferences(input);
   if (!keys.ok) return keys;
   if (storage === undefined) return err(new UnknownError("Object storage is not configured."));
   const heads = await Promise.all(keys.value.map((key) => storage.headObject({ objectKey: key })));
-  const issues: ValidationIssue[] = [];
+  const issues: ValidationIssue[] = [], checkedAt = now();
   for (const [index, head] of heads.entries()) {
     if (!head.ok) return head;
     const parsed = parsePhotoUploadKey(keys.value[index]);
-    const code = parsed === undefined ? "invalid" : checkPhotoObject(parsed.extension, head.value);
+    const code = parsed === undefined ? "invalid" : checkPhotoObject(parsed.extension, head.value, checkedAt);
     if (code !== undefined) issues.push({ field: `photos[${index}].key`, code, message: `Photo upload is not usable (${code}).` });
   }
   return issues.length > 0 ? err(new ValidationError(issues)) : ok(keys.value);
@@ -81,8 +81,8 @@ export const verifyPhotoUploads = async (storage: ObjectStoragePort | undefined,
 
 /** Same as `verifyPhotoUploads`, but a save without `photos` skips the storage entirely. */
 export const verifyOptionalPhotoUploads = (storage: ObjectStoragePort | undefined,
-  input: { tripId: ObjectId; userId: ObjectId; photos?: unknown }): AsyncResult<string[] | undefined> =>
-  input.photos === undefined ? Promise.resolve(ok(undefined)) : verifyPhotoUploads(storage, { ...input, photos: input.photos });
+  input: { tripId: ObjectId; userId: ObjectId; photos?: unknown }, now: () => Date): AsyncResult<string[] | undefined> =>
+  input.photos === undefined ? Promise.resolve(ok(undefined)) : verifyPhotoUploads(storage, { ...input, photos: input.photos }, now);
 
 /**
  * Inside the post transaction: decides which photos are new for this post. A key already registered in the same post is a

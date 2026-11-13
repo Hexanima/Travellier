@@ -13,7 +13,9 @@ export class FakeObjectStorage implements ObjectStoragePort {
   /** Runs right after each `headObject` answered (e.g. to change the world between the check and the save). */
   afterHead: (() => void | Promise<void>) | undefined;
 
-  put(key: string, contentType: string | null = "image/jpeg", sizeBytes = 1000) { this.objects.set(key, { contentType, sizeBytes }); }
+  put(key: string, contentType: string | null = "image/jpeg", sizeBytes = 1000, lastModified: Date = new Date()) {
+    this.objects.set(key, { contentType, sizeBytes, lastModified });
+  }
 
   createUploadTarget: ObjectStoragePort["createUploadTarget"] = async (input) => {
     this.uploads.push(input);

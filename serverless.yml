@@ -64,8 +64,24 @@ provider:
         - Effect: Allow
           Action:
             - s3:PutObject
+            - s3:GetObject
           Resource:
             Fn::Sub: '${PhotoBucket.Arn}/trips/*'
+        # HeadObject on a missing key needs ListBucket (otherwise S3 answers 403 instead of 404). HeadObject evaluates it without
+        # s3:prefix, so StringLikeIfExists; a real ListObjectsV2 must use a trips/* prefix. Scope, NOT verified against real AWS:
+        # (a) StringLikeIfExists passes when s3:prefix is absent (HeadObject on a missing key: 404 instead of 403); (b) per the S3 IAM
+        # docs examples a listing without Prefix sends s3:prefix as an empty string, which would NOT match trips/* (whole-bucket
+        # listing denied); (c) residual: a HeadObject (404) on keys outside trips/ is covered by the condition; (d) the code never
+        # lists without a prefix; (e) real verification is pending a deployment.
+        - Effect: Allow
+          Action:
+            - s3:ListBucket
+          Resource:
+            Fn::GetAtt: [PhotoBucket, Arn]
+          Condition:
+            StringLikeIfExists:
+              s3:prefix:
+                - 'trips/*'
         - Effect: Allow
           Action:
             - s3:PutObject

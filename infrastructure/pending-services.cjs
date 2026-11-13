@@ -2,7 +2,7 @@
 const ref = (name) => ({ Ref: name })
 const arn = (name) => ({ 'Fn::GetAtt': [name, 'Arn'] })
 const sub = (value) => ({ 'Fn::Sub': value })
-const allow = (Action, Resource) => ({ Effect: 'Allow', Action, Resource })
+const allow = (Action, Resource, Condition) => ({ Effect: 'Allow', Action, Resource, ...(Condition ? { Condition } : {}) })
 const policy = (Statement) => ({ Version: '2012-10-17', Statement })
 
 const createPendingServices = (stage, {
@@ -81,7 +81,14 @@ const createPendingServices = (stage, {
       allow(['logs:CreateLogStream', 'logs:PutLogEvents'], sub(`arn:\${AWS::Partition}:logs:\${AWS::Region}:\${AWS::AccountId}:log-group:/aws/lambda/travellier-api-${stage}-${suffix}:*`)),
       allow(['secretsmanager:GetSecretValue'], [ref('MongoConfigurationSecret'), ...(kind === 'Events' ? [ref('PushApplicationsSecret')] : [])]),
     ]
-    if (kind === 'StorageDeletion') workerStatements.push(allow(['s3:DeleteObject'], sub('${PhotoBucket.Arn}/trips/*')))
+    if (kind === 'StorageDeletion') workerStatements.push(
+      allow(['s3:DeleteObject'], sub('${PhotoBucket.Arn}/trips/*')),
+      // The sweep lists with a trips/ prefix; StringLikeIfExists keeps the same shape as the API role (see serverless.yml).
+      // Scope, NOT verified against real AWS: StringLikeIfExists passes when s3:prefix is absent (HeadObject on a missing key: 404 instead
+      // of 403); per the S3 IAM docs examples a listing without Prefix sends s3:prefix as an empty string, which would NOT match
+      // trips/* (whole-bucket listing denied); residual: a HeadObject (404) on keys outside trips/ is covered; the code never lists
+      // without a prefix; real verification is pending a deployment.
+      allow(['s3:ListBucket'], arn('PhotoBucket'), { StringLikeIfExists: { 's3:prefix': ['trips/*'] } }))
     else workerStatements.push(allow(['sns:Publish'], ['GCM', 'APNS', 'APNS_SANDBOX'].map((platform) =>
       sub(`arn:\${AWS::Partition}:sns:\${AWS::Region}:\${AWS::AccountId}:endpoint/${platform}/travellier-${stage}-${platform === 'GCM' ? 'android' : 'ios'}/*`))))
     const role = `${kind}WorkerRole`

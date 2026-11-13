@@ -16,6 +16,10 @@ export interface TripPostReadScope {
   findMemberRole: (userId: ObjectId) => AsyncResult<TripRole | undefined>;
   findTrip: () => AsyncResult<Pick<Trip, "id"> | undefined>;
   listDays: () => AsyncResult<ItineraryDay[]>;
+  /** Complete activities of the Trip, to review the author's agenda or read a stored save in the same snapshot. */
+  listActivities: () => AsyncResult<Activity[]>;
+  /** Every participation of this user in the Trip. */
+  listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
   findActivity: (activityId: ObjectId) => AsyncResult<Pick<Activity, "id" | "tripId"> | undefined>;
   findTransport: (transportId: ObjectId) => AsyncResult<Pick<Transport, "id" | "tripId"> | undefined>;
   /** Ids of the activities of this Trip (existing now), to validate post links in the same snapshot. */
@@ -57,10 +61,6 @@ export interface TripPostScope extends TripPostReadScope, NotificationScope {
   /** `$set` of only these fields of an existing expense; never replaces the record (the legacy `paidBy`, `createdAt` and the lists not listed are kept). */
   updateExpenseFields: (expense: PostExpense, fields: readonly PostExpenseField[]) => AsyncResult<void>;
   insertActivity: (activity: Activity) => AsyncResult<void>;
-  /** Complete activities of the Trip, to review the author's agenda in the same snapshot. */
-  listActivities: () => AsyncResult<Activity[]>;
-  /** Every participation of this user in the Trip. */
-  listUserParticipations: (userId: ObjectId) => AsyncResult<ActivityParticipation[]>;
   /** Upsert only this activity/user pair in the same transaction. */
   saveParticipation: (participation: ActivityParticipation) => AsyncResult<ActivityParticipation>;
   /** Moves the direct children of a post of this Trip under `newParentId` (`null` = independent); only `parentPostId` changes. */
