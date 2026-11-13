@@ -2,7 +2,7 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.js";
@@ -43,16 +43,23 @@ function CurrentPath() {
   return <output data-testid="path">{location.pathname}{location.search}</output>;
 }
 
-async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStorage(), auth: Record<string, unknown> = {}, trips: Record<string, unknown> = {}) {
+/** Atrás del historial, para comprobar qué entrada quedó detrás del deep link. */
+function GoBack() {
+  const navigate = useNavigate();
+  return <button data-testid="go-back" onClick={() => navigate(-1)}>Atrás</button>;
+}
+
+async function renderApp(nativeApp: NativeAppUrlApi, sessionStorage = createStorage(), auth: Record<string, unknown> = {}, trips: Record<string, unknown> = {}, entries: string[] = ["/"]) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   mountedRoots.push(root);
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
         <App auth={auth} trips={trips} sessionStorage={sessionStorage} nativeApp={nativeApp} />
         <CurrentPath />
+        <GoBack />
       </MemoryRouter>,
     );
   });
@@ -228,5 +235,21 @@ describe("App deep links", () => {
     await act(async () => finishRefresh({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } }));
 
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2");
+  });
+
+  it("con la app ya navegada apila el deep link y conserva la entrada anterior", async () => {
+    const storage = createStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "old", refreshToken: "refresh" });
+    const refresh = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } });
+    const { nativeApp, emit } = createNativeApp();
+    const container = await renderApp(nativeApp, storage, { refresh }, { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) }, ["/trips", "/profile"]);
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/profile");
+
+    await act(async () => emit("com.travellier.app://invite/VIAJE-X7K2"));
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2");
+
+    // El historial propio sigue detrás: el Atrás vuelve a la pantalla anterior en vez de saltarla o cerrar.
+    await act(async () => container.querySelector("[data-testid=go-back]")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/profile");
   });
 });
