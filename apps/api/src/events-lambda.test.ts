@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { err, ok, UnknownError, type PushDispatchRunSummary } from "app-domain";
 
-import { createEventsHandler, EVENTS_DEADLINE_MS, type EventsHandlerDependencies } from "./events-lambda.js";
+import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
+import { createEventsHandler, createEventsRuntimeLoader, EVENTS_DEADLINE_MS, type EventsHandlerDependencies } from "./events-lambda.js";
+import * as eventsModule from "./events-lambda.js";
+
+vi.mock("./adapters/mongodb/connection.js", () => ({ connectMongoDatabase: vi.fn(async () => ({ database: {} })) }));
+
+const connectionsAtImport = vi.mocked(connectMongoDatabase).mock.calls.length;
 
 const NOW = new Date("2026-11-10T12:00:00.000Z");
 const summary: PushDispatchRunSummary = { claimed: 3, delivered: 2, skipped: { expired: 0, trip_deleted: 0, not_member: 1, rejoined: 0 }, noDevices: 0,
@@ -17,12 +23,12 @@ const setup = (over: Partial<EventsHandlerDependencies> = {}) => {
 };
 
 describe("events Lambda handler", () => {
-  it("runs the dispatch for a valid tick with the internal deadline of 45 seconds", async () => {
+  it("runs the dispatch for a valid tick with the internal deadline of 40 seconds", async () => {
     const { handler, run } = setup();
-    expect(EVENTS_DEADLINE_MS).toBe(45_000);
+    expect(EVENTS_DEADLINE_MS).toBe(40_000);
     expect(await handler({ Records: [record(tick)] })).toEqual({ batchItemFailures: [] });
     expect(run).toHaveBeenCalledTimes(1);
-    expect(run).toHaveBeenCalledWith({ deadline: new Date(NOW.getTime() + 45_000) });
+    expect(run).toHaveBeenCalledWith({ deadline: new Date(NOW.getTime() + 40_000) });
   });
 
   it.each([
@@ -75,5 +81,44 @@ describe("events Lambda handler", () => {
     const { handler, run } = setup();
     expect(await handler({ Records: [] })).toEqual({ batchItemFailures: [] });
     expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe("events production composition", () => {
+  const ANDROID = "arn:aws:sns:us-east-1:123456789012:app/GCM/travellier-dev-android";
+  const IOS = "arn:aws:sns:us-east-1:123456789012:app/APNS_SANDBOX/travellier-dev-ios";
+  const environment = { APP_ENV: "dev", AWS_REGION: "eu-west-1", MONGODB_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:mongo",
+    PUSH_APPLICATIONS_SECRET_ARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:push" };
+  const secrets = { getSecretValue: vi.fn(async (arn: string) => (arn === environment.MONGODB_SECRET_ARN
+    ? JSON.stringify({ uri: "mongodb+srv://travellier.example/database", databaseName: "travellier_dev" })
+    : JSON.stringify({ stage: "dev", android: ANDROID, ios: IOS }))) };
+
+  it("builds the SNS client with the region of AWS_REGION once per cold start", async () => {
+    const client = { createPlatformEndpoint: vi.fn(), publish: vi.fn(), setEndpointAttributes: vi.fn() };
+    const createSnsClient = vi.fn(() => client);
+    const load = createEventsRuntimeLoader({ environment, secretValueReader: secrets, createSnsClient });
+    const first = await load();
+    await load();
+    expect(createSnsClient).toHaveBeenCalledTimes(1);
+    expect(createSnsClient).toHaveBeenCalledWith("eu-west-1");
+    expect(first.provider).toBeDefined();
+  });
+
+  it("fails the cold start without a region and retries on the next invocation", async () => {
+    const createSnsClient = vi.fn(() => { throw new Error("SNS region is not configured"); });
+    const load = createEventsRuntimeLoader({ environment: { ...environment, AWS_REGION: "" }, secretValueReader: secrets, createSnsClient });
+    await expect(load()).rejects.toThrow("SNS region is not configured");
+    await expect(load()).rejects.toThrow("SNS region is not configured");
+    expect(createSnsClient).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports a production handler without connecting to MongoDB on import", () => {
+    expect(typeof eventsModule.handler).toBe("function");
+    expect(connectionsAtImport).toBe(0);
+  });
+
+  it("rejects ticks of another stage when APP_ENV is not set in the production handler", async () => {
+    const result = await eventsModule.handler({ Records: [record({ kind: "events", stage: "dev" }, "x")] });
+    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: "x" }] });
   });
 });

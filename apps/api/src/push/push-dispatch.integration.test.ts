@@ -31,6 +31,7 @@ describe("push dispatch of persisted events", () => {
   const awsError = (name: string) => Object.assign(new Error("fake sdk message"), { name });
 
   const client: SnsPushClient = {
+    setEndpointAttributes: async () => ({}),
     createPlatformEndpoint: async ({ Token }) => ({ EndpointArn: `fake-endpoint/${Token}` }),
     publish: async ({ TargetArn, Message }) => {
       const token = TargetArn.replace("fake-endpoint/", "");

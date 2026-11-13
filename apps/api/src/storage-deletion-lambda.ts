@@ -12,7 +12,7 @@ import { isTick, parseBody, type SqsBatchResponse, type SqsEvent } from "./sqs-t
 
 export type { SqsBatchResponse, SqsEvent, SqsRecord } from "./sqs-tick.js";
 
-const DEADLINE_MS = 45_000;
+export const STORAGE_DELETION_DEADLINE_MS = 45_000;
 const MAX_JOBS_PER_RUN = 5;
 const MAX_SWEEP_PAGES = 20;
 
@@ -91,7 +91,7 @@ const now = () => new Date();
 export const handler = createStorageDeletionHandler({
   expectedStage,
   now,
-  deadlineMs: DEADLINE_MS,
+  deadlineMs: STORAGE_DELETION_DEADLINE_MS,
   log: (entry) => { console.log(JSON.stringify(entry)); },
   run: async ({ deadline }) => {
     const { config, database } = await loadRuntime();
@@ -103,7 +103,7 @@ export const handler = createStorageDeletionHandler({
 export const runAbandonedPhotoSweep = createPhotoSweepRunner({
   expectedStage,
   now,
-  deadlineMs: DEADLINE_MS,
+  deadlineMs: STORAGE_DELETION_DEADLINE_MS,
   sweep: async ({ deadline }) => {
     const { config, database } = await loadRuntime();
     return sweepAbandonedPhotoUploads({ links: createMongoPhotoLinkRepository(database), storage: createS3ObjectCleanup({ bucketName: config.photoBucketName }),
