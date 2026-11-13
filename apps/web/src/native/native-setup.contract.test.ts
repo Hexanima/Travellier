@@ -62,4 +62,11 @@ describe("native setup", () => {
     expect(read("../../android/app/src/main/res/xml/file_paths.xml")).toContain("<cache-path");
     expect(android).toContain("${applicationId}.fileprovider");
   });
+
+  it("keeps the cancellation rejection the .ics sharer classifies as cancelled", () => {
+    const androidPlugin = read("../../../../node_modules/@capacitor/share/android/src/main/java/com/capacitorjs/plugins/share/SharePlugin.java");
+    expect(androidPlugin).toMatch(/RESULT_CANCELED[\s\S]{0,120}call\.reject\("Share canceled"\)/);
+    const iosPlugin = read("../../../../node_modules/@capacitor/share/ios/Sources/SharePlugin/SharePlugin.swift");
+    expect(iosPlugin).toContain('call.reject("Share canceled")');
+  });
 });
