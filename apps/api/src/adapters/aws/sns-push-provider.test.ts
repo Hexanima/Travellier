@@ -25,6 +25,7 @@ const setup = (over: Partial<SnsPushClient> = {}) => {
   const client = {
     createPlatformEndpoint: vi.fn(over.createPlatformEndpoint ?? (async () => ({ EndpointArn: ENDPOINT }))),
     publish: vi.fn(over.publish ?? (async () => ({ MessageId: "fake" }))),
+    setEndpointAttributes: vi.fn(over.setEndpointAttributes ?? (async () => ({}))),
   };
   return { client, provider: createSnsPushProvider({ client, applications: { android: ANDROID_APP, ios: IOS_APP } }) };
 };
@@ -74,11 +75,48 @@ describe("SNS push provider", () => {
     expect(Object.keys(body).sort()).toEqual(["APNS", "default"]);
   });
 
-  it("maps a disabled endpoint to an invalid token", async () => {
-    for (const name of ["EndpointDisabledException", "EndpointDisabled"]) {
-      const { provider } = setup({ publish: vi.fn(async () => { throw awsError(name, 400); }) });
-      expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toEqual({ ok: true, value: { kind: "invalid_token" } });
-    }
+  it("does not touch the endpoint attributes after a successful publish", async () => {
+    const { client, provider } = setup();
+    await provider.send({ device: fcmDevice, message, dedupeId: "e:d" });
+    expect(client.setEndpointAttributes).not.toHaveBeenCalled();
+  });
+
+  it.each(["EndpointDisabledException", "EndpointDisabled"])("re-enables a disabled endpoint (%s) and retries the publish once", async (name) => {
+    const publish = vi.fn().mockRejectedValueOnce(awsError(name, 400)).mockResolvedValueOnce({ MessageId: "fake" });
+    const { client, provider } = setup({ publish });
+    expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toEqual({ ok: true, value: { kind: "delivered" } });
+    expect(client.setEndpointAttributes).toHaveBeenCalledTimes(1);
+    expect(client.setEndpointAttributes).toHaveBeenCalledWith({ EndpointArn: ENDPOINT, Attributes: { Token: SENTINEL, Enabled: "true" } });
+    expect(client.publish).toHaveBeenCalledTimes(2);
+    expect(client.publish.mock.calls[1]?.[0]).toEqual(client.publish.mock.calls[0]?.[0]);
+  });
+
+  it("maps an endpoint that is disabled again after the reactivation to an invalid token with a single cycle", async () => {
+    const { client, provider } = setup({ publish: vi.fn(async () => { throw awsError("EndpointDisabledException", 400); }) });
+    expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toEqual({ ok: true, value: { kind: "invalid_token" } });
+    expect(client.setEndpointAttributes).toHaveBeenCalledTimes(1);
+    expect(client.publish).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([["Throttling", 400, "transient"], ["InternalErrorException", 500, "transient"], ["ServiceUnavailable", 503, "transient"],
+    ["InvalidParameterException", 400, "rejected"], ["AuthorizationErrorException", 403, "rejected"]])(
+    "classifies a failed reactivation (%s) as %s", async (name, status, kind) => {
+      const { client, provider } = setup({ publish: vi.fn(async () => { throw awsError("EndpointDisabledException", 400); }),
+        setEndpointAttributes: vi.fn(async () => { throw awsError(name, status); }) });
+      expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toMatchObject({ ok: true, value: { kind } });
+      expect(client.publish).toHaveBeenCalledTimes(1);
+    });
+
+  it("maps a network failure of the reactivation to a transient failure", async () => {
+    const { provider } = setup({ publish: vi.fn(async () => { throw awsError("EndpointDisabledException", 400); }),
+      setEndpointAttributes: vi.fn(async () => { throw awsError("Error", undefined, { code: "ECONNRESET" }); }) });
+    expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toMatchObject({ ok: true, value: { kind: "transient" } });
+  });
+
+  it("maps a non-disabled failure of the retried publish normally", async () => {
+    const publish = vi.fn().mockRejectedValueOnce(awsError("EndpointDisabledException", 400)).mockRejectedValueOnce(awsError("ThrottledException", 429));
+    const { provider } = setup({ publish });
+    expect(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" })).toMatchObject({ ok: true, value: { kind: "transient" } });
   });
 
   it.each([
@@ -108,7 +146,7 @@ describe("SNS push provider", () => {
 
   it("never leaks the token, the endpoint ARN or the SDK message in a result", async () => {
     for (const name of ["EndpointDisabledException", "ThrottledException", "InvalidParameterException", "Weird"]) {
-      const { provider } = setup({ publish: vi.fn(async () => { throw awsError(name, 400); }) });
+      const { provider } = setup({ publish: vi.fn(async () => { throw awsError(name, 400); }), setEndpointAttributes: vi.fn(async () => { throw awsError("Weird", 400); }) });
       const serialized = JSON.stringify(await provider.send({ device: fcmDevice, message, dedupeId: "e:d" }));
       expect(serialized).not.toContain(SENTINEL);
       expect(serialized).not.toContain("arn:aws");

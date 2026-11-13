@@ -2006,6 +2006,7 @@ __metadata:
   dependencies:
     "@aws-sdk/client-s3": "npm:3.1132.0"
     "@aws-sdk/client-secrets-manager": "npm:3.1132.0"
+    "@aws-sdk/client-sns": "npm:3.1132.0"
     "@aws-sdk/s3-request-presigner": "npm:3.1132.0"
     "@eslint/js": "npm:^9.36.0"
     "@types/bcrypt": "npm:^5.0.2"

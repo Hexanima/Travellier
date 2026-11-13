@@ -4,6 +4,8 @@ import type { Db } from "mongodb";
 import { dispatchPushNotifications, PUSH_DISPATCH_BATCH_SIZE, type PushDispatchRunSummary, type PushProviderPort, type Result } from "app-domain";
 import { readEventsRuntimeConfig } from "./adapters/aws/events-config.js";
 import type { SecretValueReader } from "./adapters/aws/runtime-config.js";
+import { createSecretsManagerSecretValueReader } from "./adapters/aws/secrets-manager-reader.js";
+import { createSnsClient } from "./adapters/aws/sns-client.js";
 import { createSnsPushProvider, type SnsPushClient } from "./adapters/aws/sns-push-provider.js";
 import { connectMongoDatabase } from "./adapters/mongodb/connection.js";
 import { createMongoPushDeviceRepository } from "./adapters/mongodb/push-device-repository.js";
@@ -11,10 +13,11 @@ import { createMongoDispatchAudience, createMongoPushDispatchRepository } from "
 import { isTick, parseBody, type SqsBatchResponse, type SqsEvent } from "./sqs-tick.js";
 
 /**
- * Push dispatch worker (T92). READY BUT NOT WIRED: serverless.yml has no function, role or rule for it, and the production composition that
- * builds the real SNS client with the AWS SDK is NOT written (`createSnsClient` is injected; `@aws-sdk/client-sns` is not a dependency yet).
+ * Push dispatch worker (T92, wired in T142). The deadline leaves room, inside the 60 s timeout of the function, for up to four SNS calls of
+ * `SNS_CALL_BUDGET_MS` = 4 s each (create endpoint, publish, reactivate, publish) plus 5 s of closing writes: 35 + 16 + 5 = 56 s.
+ * serverless.yml and its contract test depend on it.
  */
-export const EVENTS_DEADLINE_MS = 45_000;
+export const EVENTS_DEADLINE_MS = 35_000;
 
 export interface EventsHandlerDependencies {
   /** Stage of this deployment (`APP_ENV`); a tick for another stage is a failure of the item. */
@@ -71,15 +74,28 @@ export const createEventsRun = (deps: EventsRunDependencies) =>
  * A failed cold start is retried by the next invocation.
  */
 export const createEventsRuntimeLoader = (input: { environment: Record<string, string | undefined>; secretValueReader: SecretValueReader;
-  createSnsClient: () => SnsPushClient }) => {
+  createSnsClient: (region: string) => SnsPushClient }) => {
   let runtime: Promise<{ database: Db; provider: PushProviderPort }> | undefined;
   return () => {
     runtime ??= (async () => {
       const config = await readEventsRuntimeConfig(input.environment, input.secretValueReader);
       const { database } = await connectMongoDatabase(config.mongo);
-      return { database, provider: createSnsPushProvider({ client: input.createSnsClient(), applications: config.pushApplications }) };
+      return { database, provider: createSnsPushProvider({ client: input.createSnsClient(input.environment.AWS_REGION?.trim() ?? ""), applications: config.pushApplications }) };
     })();
     runtime.catch(() => { runtime = undefined; });
     return runtime;
   };
 };
+
+const now = () => new Date();
+const loadRuntime = createEventsRuntimeLoader({ environment: process.env, secretValueReader: createSecretsManagerSecretValueReader(),
+  createSnsClient: (region) => createSnsClient({ region }) });
+
+/** Production handler: no network access happens on import; the cold start runs on the first invocation. */
+export const handler = createEventsHandler({
+  expectedStage: process.env.APP_ENV?.trim() ?? "",
+  now,
+  deadlineMs: EVENTS_DEADLINE_MS,
+  log: (entry) => { console.log(JSON.stringify(entry)); },
+  run: createEventsRun({ loadRuntime, now }),
+});

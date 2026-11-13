@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { createRequire } from 'node:module'
+import { load } from 'js-yaml'
 
 const rootDirectory = dirname(dirname(fileURLToPath(import.meta.url)))
 const servicePath = join(rootDirectory, 'serverless.yml')
@@ -203,5 +205,107 @@ describe('Serverless infrastructure contract', () => {
       )
       assert.doesNotMatch(script, /serverless deploy/)
     }
+  })
+})
+
+const { createPendingServices } = createRequire(import.meta.url)('../infrastructure/pending-services.cjs')
+const source = (path) => readFileSync(join(rootDirectory, path), 'utf8')
+const constantFrom = (text, name, where) => {
+  const declaration = text.match(new RegExp(String.raw`(?:const|let)\s+${name}\b[^;\n]*`))
+  assert.ok(declaration, `missing constant ${name} in ${where}`)
+  const match = declaration[0].match(/=\s*([0-9]+(?:_[0-9]+)*)\s*$/)
+  assert.ok(match, `constant ${name} in ${where} must be a plain numeric literal, found: ${declaration[0]}`)
+  return Number(match[1].replaceAll('_', ''))
+}
+const constant = (path, name) => constantFrom(source(path), name, path)
+
+describe('Worker functions contract (T142)', () => {
+  const service = load(source('serverless.yml'))
+  const pending = source('infrastructure/pending-services.cjs')
+  const workers = {
+    events: { handler: 'apps/api/src/events-lambda.handler', role: 'EventsWorkerRole', env: ['MONGODB_SECRET_ARN', 'PUSH_APPLICATIONS_SECRET_ARN'] },
+    'storage-deletion': { handler: 'apps/api/src/storage-deletion-lambda.handler', role: 'StorageDeletionWorkerRole', env: ['MONGODB_SECRET_ARN', 'S3_BUCKET_NAME'] },
+  }
+
+  for (const [name, worker] of Object.entries(workers)) {
+    it(`defines the ${name} function with its own role, handler and no triggers`, () => {
+      const fn = service.functions[name]
+      assert.ok(fn, `missing function ${name}`)
+      assert.equal(fn.handler, worker.handler)
+      assert.equal(fn.role, worker.role)
+      assert.equal(fn.events, undefined, 'the SQS mapping is created by pending-services.cjs')
+      assert.equal(fn.disableLogs, true, 'the log group is created by pending-services.cjs')
+      assert.equal(fn.memorySize, 256)
+      assert.deepEqual(Object.keys(fn.environment).sort(), [...worker.env].sort())
+      const { Resources } = createPendingServices('dev')
+      const group = name === 'events' ? 'EventsWorkerLogGroup' : 'StorageDeletionWorkerLogGroup'
+      assert.equal(Resources[group].Properties.LogGroupName, `/aws/lambda/travellier-api-dev-${name}`)
+    })
+  }
+
+  it('scopes environment variables per function: JWT only in api, APP_ENV in the provider', () => {
+    assert.deepEqual(Object.keys(service.provider.environment), ['APP_ENV'])
+    assert.deepEqual(Object.keys(service.functions.api.environment).sort(), ['JWT_SECRET_ARN', 'MONGODB_SECRET_ARN', 'S3_BUCKET_NAME'])
+    for (const name of Object.keys(workers)) assert.equal(service.functions[name].environment.JWT_SECRET_ARN, undefined)
+    assert.equal(service.functions.events.environment.S3_BUCKET_NAME, undefined)
+    assert.equal(service.functions['storage-deletion'].environment.PUSH_APPLICATIONS_SECRET_ARN, undefined)
+    assert.deepEqual(service.functions.events.environment.PUSH_APPLICATIONS_SECRET_ARN, { Ref: 'PushApplicationsSecret' })
+    const text = source('serverless.yml')
+    assert.doesNotMatch(text, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|PRIVATE_KEY|mongodb\+srv:\/\//)
+  })
+
+  it('keeps the api function statements without SNS', () => {
+    const statements = service.provider.iam.role.statements
+    assert.equal(JSON.stringify(statements).includes('sns:'), false)
+    assert.equal(service.functions.api.role, undefined)
+  })
+
+  it('orders each worker function after its log group', () => {
+    const resources = service.resources.find((entry) => entry.extensions)
+    assert.ok(resources, 'missing resources.extensions')
+    assert.deepEqual(resources.extensions.EventsLambdaFunction.DependsOn, ['EventsWorkerLogGroup'])
+    assert.deepEqual(resources.extensions.StorageDashdeletionLambdaFunction.DependsOn, ['StorageDeletionWorkerLogGroup'])
+  })
+
+  it('exposes the schedule expressions as stage parameters without consumer ARNs by default', () => {
+    const params = service.stages.default.params
+    assert.equal(params.eventsScheduleExpression, 'rate(1 minute)')
+    assert.equal(params.storageDeletionScheduleExpression, 'rate(5 minutes)')
+    assert.equal(params.eventsConsumerArn, '')
+    assert.equal(params.storageDeletionConsumerArn, '')
+  })
+
+  it('reads constants only from plain numeric literals', () => {
+    assert.equal(constantFrom('export const A = 40_000;', 'A', 't'), 40000)
+    assert.equal(constantFrom('const B = 3000', 'B', 't'), 3000)
+    assert.throws(() => constantFrom('const C = 40 * 1000;', 'C', 't'), /plain numeric literal/)
+    assert.throws(() => constantFrom('const D = 3000 + 1000;', 'D', 't'), /plain numeric literal/)
+    assert.throws(() => constantFrom('const E = 1', 'F', 't'), /missing constant/)
+  })
+
+  it('keeps every timeout under its lease and above its internal deadline plus the closing margin', () => {
+    // Real per-call bound: the backstop abort (request timeout + 1 s), not the socket-inactivity requestTimeout.
+    const snsSource = source('apps/api/src/adapters/aws/sns-client.ts')
+    assert.match(snsSource, /export const SNS_CALL_BUDGET_MS = SNS_REQUEST_TIMEOUT_MS \+ 1000;/)
+    assert.match(snsSource, /controller\.abort\(\); \}, SNS_CALL_BUDGET_MS\)/)
+    const snsCall = constant('apps/api/src/adapters/aws/sns-client.ts', 'SNS_REQUEST_TIMEOUT_MS') + 1000
+    const queueTimeout = 360
+    const cases = [
+      // Four SNS calls (create endpoint, publish, reactivate, publish) plus 5 s of closing writes.
+      ['events', constant('domain/src/entities/push-dispatch.ts', 'PUSH_DISPATCH_LEASE_SECONDS'),
+        constant('apps/api/src/events-lambda.ts', 'EVENTS_DEADLINE_MS'), 4 * snsCall + 5000],
+      // No SNS; 10 s: closing writes plus the last S3 call, which has no per-call timeout.
+      ['storage-deletion', constant('domain/src/entities/storage-deletion-job.ts', 'STORAGE_DELETION_LEASE_SECONDS'),
+        constant('apps/api/src/storage-deletion-lambda.ts', 'STORAGE_DELETION_DEADLINE_MS'), 10_000],
+    ]
+    for (const [name, lease, deadlineMs, marginMs] of cases) {
+      const timeout = service.functions[name].timeout
+      assert.ok(timeout < lease, `${name}: timeout ${timeout} must be under the lease ${lease}`)
+      assert.ok(timeout > deadlineMs / 1000, `${name}: timeout must exceed the deadline`)
+      assert.ok(timeout <= 60, `${name}: the deploy wrapper rejects timeouts above 60 s`)
+      assert.ok(timeout * 1000 >= deadlineMs + marginMs, `${name}: timeout leaves less than ${marginMs} ms after the deadline`)
+      assert.ok(queueTimeout >= 6 * timeout, `${name}: queue VisibilityTimeout must be at least six times the timeout`)
+    }
+    assert.match(pending, /VisibilityTimeout: 360/)
   })
 })

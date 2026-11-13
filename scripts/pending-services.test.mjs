@@ -105,6 +105,57 @@ describe('pending services infrastructure', () => {
     })
   }
 
+  for (const stage of ['dev', 'prod']) {
+    it(`${stage}: grants the events worker exactly the SNS actions it uses, on the applications and endpoints of the stage`, () => {
+      const { Resources: resources } = build(stage)
+      const statements = (role) => resources[role].Properties.Policies.flatMap((policy) => policy.PolicyDocument.Statement)
+      const push = statements('EventsWorkerRole')
+      const sns = push.filter((s) => s.Action.some((action) => action.startsWith('sns:')))
+      assert.deepEqual(new Set(sns.flatMap((s) => s.Action)), new Set(['sns:CreatePlatformEndpoint', 'sns:Publish', 'sns:SetEndpointAttributes']))
+      const prefix = 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:'
+      const resourcesOf = (action) => sns.filter((s) => s.Action.includes(action)).flatMap((s) => [s.Resource].flat()).map((r) => r['Fn::Sub'])
+      assert.deepEqual(resourcesOf('sns:CreatePlatformEndpoint').sort(), [
+        `${prefix}app/APNS/travellier-${stage}-ios`, `${prefix}app/APNS_SANDBOX/travellier-${stage}-ios`, `${prefix}app/GCM/travellier-${stage}-android`])
+      const endpoints = [
+        `${prefix}endpoint/APNS/travellier-${stage}-ios/*`, `${prefix}endpoint/APNS_SANDBOX/travellier-${stage}-ios/*`, `${prefix}endpoint/GCM/travellier-${stage}-android/*`]
+      assert.deepEqual(resourcesOf('sns:Publish').sort(), endpoints)
+      assert.deepEqual(resourcesOf('sns:SetEndpointAttributes').sort(), endpoints)
+      for (const statement of push) assert.notEqual(statement.Resource, '*')
+      assert.equal(push.some((s) => s.Action.includes('sns:CreatePlatformApplication')), false)
+      const cleanup = statements('StorageDeletionWorkerRole')
+      assert.equal(cleanup.some((s) => s.Action.some((action) => action.startsWith('sns:'))), false)
+    })
+
+    it(`${stage}: schedules default to the documented frequency and stay disabled without a consumer`, () => {
+      const { Resources: resources } = build(stage)
+      assert.equal(resources.EventsSchedule.Properties.ScheduleExpression, 'rate(1 minute)')
+      assert.equal(resources.StorageDeletionSchedule.Properties.ScheduleExpression, 'rate(5 minutes)')
+      assert.equal(resources.EventsSchedule.Properties.State, 'DISABLED')
+      assert.equal(resources.StorageDeletionSchedule.Properties.State, 'DISABLED')
+    })
+
+    it(`${stage}: keeps the worker log groups in the stack with the function names`, () => {
+      const { Resources: resources } = build(stage)
+      assert.equal(resources.EventsWorkerLogGroup.Properties.LogGroupName, `/aws/lambda/travellier-api-${stage}-events`)
+      assert.equal(resources.StorageDeletionWorkerLogGroup.Properties.LogGroupName, `/aws/lambda/travellier-api-${stage}-storage-deletion`)
+    })
+  }
+
+  it('parameterizes the schedule expressions and accepts only valid ones', () => {
+    const valid = ['rate(1 minute)', 'rate(2 minutes)', 'rate(15 minutes)', 'rate(1 hour)', 'rate(6 hours)', 'rate(1 day)', 'rate(7 days)', 'cron(0/5 * * * ? *)']
+    for (const expression of valid) {
+      const { Resources: resources } = build('dev', { eventsScheduleExpression: expression, storageDeletionScheduleExpression: expression })
+      assert.equal(resources.EventsSchedule.Properties.ScheduleExpression, expression)
+      assert.equal(resources.StorageDeletionSchedule.Properties.ScheduleExpression, expression)
+    }
+    const invalid = ['rate(0 minutes)', 'rate(1 minutes)', 'rate(2 minute)', 'rate(1 hours)', 'cron()', 'cron(* * *)', 'every minute', '', 'rate(1 minute); rm -rf /',
+      'rate(1 minute)\n', 'rate(01 minutes)', 'cron(0/5 * * * ? *) extra', 5, null]
+    for (const expression of invalid) {
+      assert.throws(() => build('dev', { eventsScheduleExpression: expression }), /Invalid schedule expression/, String(expression))
+      assert.throws(() => build('dev', { storageDeletionScheduleExpression: expression }), /Invalid schedule expression/, String(expression))
+    }
+  })
+
   it('rejects unsupported stages and consumers belonging to another stage or name', () => {
     assert.throws(() => build('staging'), /stage/)
     assert.throws(() => build('dev', { eventsConsumerArn: arn('prod', 'events') }), /consumer/)

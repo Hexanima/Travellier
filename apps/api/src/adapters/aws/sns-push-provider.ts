@@ -1,12 +1,13 @@
 import { ok, type PushMessage, type PushPlatform, type PushProviderPort, type PushSendResult } from "app-domain";
 
 /**
- * Structural subset of the SNS client used by the provider (`CreatePlatformEndpoint` and `Publish`). It is injected: this module does NOT
- * import `@aws-sdk/*` and the production composition with the real SDK client is intentionally not written yet (T92 pending infrastructure).
+ * Structural subset of the SNS client used by the provider (`CreatePlatformEndpoint`, `Publish` and `SetEndpointAttributes`). It is injected:
+ * this module does NOT import `@aws-sdk/*`; the production composition with the real SDK client is `sns-client.ts` (T142).
  */
 export interface SnsPushClient {
   createPlatformEndpoint: (input: { PlatformApplicationArn: string; Token: string }) => Promise<{ EndpointArn?: string }>;
   publish: (input: { TargetArn: string; Message: string; MessageStructure: "json" }) => Promise<unknown>;
+  setEndpointAttributes: (input: { EndpointArn: string; Attributes: Record<string, string> }) => Promise<unknown>;
 }
 
 export interface SnsPushApplications {
@@ -57,9 +58,12 @@ const classify = (error: unknown): PushSendResult => {
   return { kind: "transient", code: "sns_error" };
 };
 
+const isEndpointDisabled = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && typeof (error as { name?: unknown }).name === "string" && (error as { name: string }).name.replace(/Exception$/, "") === "EndpointDisabled";
+
 /**
  * Sends through SNS: `CreatePlatformEndpoint` per send (idempotent for the same token, so no endpoint ARN is stored) and `Publish` to it with
- * `MessageStructure: "json"`. SNS `Publish` to an endpoint has no idempotency key: `dedupeId` is not sent, so a retry after an unknown outcome
+ * `MessageStructure: "json"`; a disabled endpoint is reactivated once with `SetEndpointAttributes` (T142). SNS `Publish` to an endpoint has no idempotency key: `dedupeId` is not sent, so a retry after an unknown outcome
  * can duplicate a push (the `notificationId` in `data` lets the client deduplicate). Errors never carry the token, the ARN or the SDK message.
  */
 export const createSnsPushProvider = ({ client, applications }: { client: SnsPushClient; applications: SnsPushApplications }): PushProviderPort => ({
@@ -68,7 +72,15 @@ export const createSnsPushProvider = ({ client, applications }: { client: SnsPus
     try {
       const endpoint = await client.createPlatformEndpoint({ PlatformApplicationArn: applicationArn, Token: device.token });
       if (endpoint.EndpointArn === undefined || endpoint.EndpointArn === "") return ok({ kind: "transient", code: "missing_endpoint" });
-      await client.publish({ TargetArn: endpoint.EndpointArn, Message: buildSnsMessage(device.platform, applicationArn, message), MessageStructure: "json" });
+      const publishInput = { TargetArn: endpoint.EndpointArn, Message: buildSnsMessage(device.platform, applicationArn, message), MessageStructure: "json" as const };
+      try {
+        await client.publish(publishInput);
+      } catch (error) {
+        if (!isEndpointDisabled(error)) throw error;
+        // A disabled endpoint is re-enabled with the current token and the publish is retried ONCE. If it is disabled again, the token is invalid.
+        await client.setEndpointAttributes({ EndpointArn: endpoint.EndpointArn, Attributes: { Token: device.token, Enabled: "true" } });
+        await client.publish(publishInput);
+      }
       return ok({ kind: "delivered" });
     } catch (error) {
       return ok(classify(error));
