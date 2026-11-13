@@ -70,4 +70,26 @@ describe("pila de capas del Atrás", () => {
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).not.toHaveBeenCalled();
   });
+
+  it("una capa más profunda atiende antes que una registrada después pero más externa", () => {
+    const stack = createBackLayerStack();
+    const inner = vi.fn(() => true);
+    const outer = vi.fn(() => true);
+    stack.register(inner, 2);
+    stack.register(outer, 1);
+    expect(stack.handle()).toBe(true);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it("a igual profundidad sigue mandando la última registrada", () => {
+    const stack = createBackLayerStack();
+    const first = vi.fn(() => true);
+    const second = vi.fn(() => true);
+    stack.register(first, 3);
+    stack.register(second, 3);
+    expect(stack.handle()).toBe(true);
+    expect(second).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
 });

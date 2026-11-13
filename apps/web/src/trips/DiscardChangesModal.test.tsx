@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DiscardChangesModal } from "./DiscardChangesModal.js";
+import { Modal } from "../components/index.js";
 import { BackNavigationProvider } from "../navigation/BackNavigationProvider.js";
 import type { AppBackButton } from "../native/app-back-button.js";
 
@@ -74,5 +75,28 @@ describe("DiscardChangesModal", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(onDiscard).not.toHaveBeenCalled();
     expect(view.where()).toBe("/trips/aaaaaaaaaaaaaaaaaaaaaaaa/memories/new/expense");
+  });
+
+  it("dentro de un diálogo, el Atrás pregunta antes de cerrarlo", async () => {
+    const onClose = vi.fn();
+    const onDiscard = vi.fn();
+    const view = await render(<Modal isOpen title="Editar actividad" onClose={onClose}>
+      <DiscardChangesModal dirty message="Si salís ahora, vas a perder los cambios de esta actividad." onDiscard={onDiscard} />
+    </Modal>);
+    await view.press();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onDiscard).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain("Si salís ahora, vas a perder los cambios de esta actividad.");
+    await click(named("Descartar"));
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("dentro de un diálogo sin cambios, el Atrás lo cierra por su propia salida", async () => {
+    const onDiscard = vi.fn();
+    const view = await render(<Modal isOpen title="Editar actividad" onClose={vi.fn()}>
+      <DiscardChangesModal dirty={false} message="Perdés los cambios." onDiscard={onDiscard} />
+    </Modal>);
+    await view.press();
+    expect(onDiscard).toHaveBeenCalledTimes(1);
   });
 });

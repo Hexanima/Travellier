@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
-import { useBackLayer } from "../navigation/BackNavigationProvider.js";
+import { BackLayerDepth, useBackLayer } from "../navigation/BackNavigationProvider.js";
 
 const focusableSelector = [
   "a[href]",
@@ -138,7 +138,7 @@ export function Modal({
         </header>
         {error ? <p className="ui-modal__error" role="alert">{error}</p> : null}
         <fieldset className="ui-modal__content" disabled={disabled || loading} inert={disabled || loading || undefined}>
-          {children}
+          <BackLayerDepth>{children}</BackLayerDepth>
         </fieldset>
       </section>
     </div>
