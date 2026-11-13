@@ -31,7 +31,7 @@ import { accountIdFromAccessToken } from './calendar/calendar-account.js'
 import { createCalendarRefStore } from './calendar/calendar-ref-store.js'
 import { createCalendarSyncService, type CalendarSyncService } from './calendar/calendar-sync-service.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
-import { withNoBack } from './trips/post-origin.js'
+import { inheritNoBack } from './trips/post-origin.js'
 import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
 import { TripJourneyScreen } from './trips/TripJourneyScreen.js'
@@ -412,10 +412,10 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   useEffect(() => {
     if (sessionReady && launchChecked && hasSession && !deepLinkReceived.current &&
       (location.pathname === '/' || location.pathname === '/login')) {
-      // Reemplaza la entrada inicial: sin `noBack` el Atrás siguiente resolvería una vuelta que no existe.
-      navigate(invitationDestination(location.state) ?? '/trips', { replace: true, state: withNoBack() })
+      // Reemplaza la entrada actual: hereda `noBack` solo si detrás no hay nada, para no matar un Atrás legítimo ni dejarlo muerto.
+      navigate(invitationDestination(location.state) ?? '/trips', { replace: true, ...inheritNoBack({ key: location.key, state: location.state }) })
     }
-  }, [hasSession, launchChecked, location.pathname, location.state, navigate, sessionReady])
+  }, [hasSession, launchChecked, location.key, location.pathname, location.state, navigate, sessionReady])
 
   // Never throws; the push service bounds the wait, so closing or switching a session never depends on it.
   const revokePush = async () => {
@@ -437,7 +437,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     setHasSession(true)
     setSessionReady(true)
     void pushRef.current?.resume()
-    navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true, state: withNoBack() })
+    navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true, ...inheritNoBack(latestLocation.current) })
   }
 
   const onLocalLogout = async () => {
@@ -451,7 +451,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     setSessionExpired(false)
     setHasSession(false)
     await queueStorageOperation(() => storage.clear())
-    navigate('/login')
+    // Reemplaza la pantalla protegida que queda detrás: empujarla dejaría un Atrás que rebota al login sin cambio visible.
+    navigate('/login', { replace: true, ...inheritNoBack(latestLocation.current) })
   }
 
   if (!hasApiConfiguration) {
@@ -542,7 +543,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
             ? <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
             : hasSession
               ? <ProfileScreen auth={activeAuth} push={activePush} />
-              : <Navigate to="/login" replace />
+              : <LoginRedirect />
         } />
         {/* Links without a screen of their own (`/verify`, anything unknown): there is no public web, so they land on Mis viajes or on the login. */}
         <Route path="/verify" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
@@ -638,13 +639,20 @@ function PublicHome() {
 
 function TripRoute({ sessionReady, hasSession, children }: { sessionReady: boolean; hasSession: boolean; children: ReactNode }) {
   if (!sessionReady) return <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
-  return hasSession ? children : <Navigate to="/login" replace />
+  return hasSession ? children : <LoginRedirect />
+}
+
+/** Sin sesión la pantalla protegida se reemplaza por el login, heredando `noBack` solo si no hay una entrada detrás. */
+function LoginRedirect() {
+  const location = useLocation()
+  return <Navigate to="/login" replace {...inheritNoBack(location)} />
 }
 
 /** A link that leads nowhere in the app: with a session it opens Mis viajes and without one the login, replacing the entry so Back never returns to it. */
 function NoScreen({ sessionReady, hasSession }: { sessionReady: boolean; hasSession: boolean }) {
+  const location = useLocation()
   if (!sessionReady) return <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
-  return <Navigate to={hasSession ? '/trips' : '/login'} replace state={withNoBack()} />
+  return <Navigate to={hasSession ? '/trips' : '/login'} replace {...inheritNoBack(location)} />
 }
 
 export default App

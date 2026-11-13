@@ -21,6 +21,8 @@ const backButton = () => {
   const port: AppBackButton = { onBack: (listener) => { listeners.add(listener); return () => listeners.delete(listener); }, exitApp };
   return { port, exitApp, press: async () => { await act(async () => listeners.forEach((listener) => listener())); } };
 };
+/** El provider mantiene el candado del Atrás unos 250 ms: dos pulsaciones del usuario van separadas por más que eso. */
+const afterBackLock = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); }); };
 const storage = () => ({ read: vi.fn().mockResolvedValue({ accessToken: "old", refreshToken: "refresh" }), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) });
 const auth = { refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "access", refreshToken: "refresh" } }) };
 const props = (over: Partial<ComponentProps<typeof App>> = {}): ComponentProps<typeof App> => ({
@@ -56,6 +58,7 @@ describe("App back button integration", () => {
     const container = await render(`/trips/${tripId}/itinerary`, props({ backButton: button.port }));
     await button.press();
     expect(container.textContent).toContain("Mis viajes");
+    await afterBackLock();
     await button.press();
     expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
@@ -149,6 +152,64 @@ describe("App back button integration", () => {
     const discard = Array.from(document.querySelectorAll("button")).find((item) => item.textContent === "Descartar");
     await act(async () => discard?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
     expect(container.querySelector("[name=description]")).toBeNull();
+  });
+
+  it("sin sesión sobre la entrada inicial, el Atrás cierra la app en vez de quedar muerto", async () => {
+    const button = backButton();
+    const noSession = { read: vi.fn().mockResolvedValue(null), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) };
+    const container = await render(`/trips/${tripId}/memories`, props({ backButton: button.port, sessionStorage: noSession }));
+    expect(container.textContent).toContain("Iniciar sesión");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("sin sesión con historial detrás, el Atrás vuelve y recién la pulsación siguiente cierra", async () => {
+    const button = backButton();
+    const noSession = { read: vi.fn().mockResolvedValue(null), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) };
+    await render(["/trips", `/trips/${tripId}/memories`], props({ backButton: button.port, sessionStorage: noSession }));
+    await button.press();
+    expect(button.exitApp).not.toHaveBeenCalled();
+    await afterBackLock();
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("un enlace sin pantalla propia con historial detrás no cierra la app", async () => {
+    const button = backButton();
+    const container = await render(["/trips", "/verify"], props({ backButton: button.port }));
+    expect(container.textContent).toContain("Mis viajes");
+    await button.press();
+    expect(button.exitApp).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Mis viajes");
+  });
+
+  it("después de iniciar sesión con historial detrás el Atrás vuelve en vez de cerrar", async () => {
+    const button = backButton();
+    const noSession = { read: vi.fn().mockResolvedValue(null), save: vi.fn().mockResolvedValue(undefined), clear: vi.fn().mockResolvedValue(undefined) };
+    const login = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "access", refreshToken: "refresh" } });
+    const container = await render(["/trips", "/login"], props({ backButton: button.port, sessionStorage: noSession, auth: { ...auth, login } }));
+    const email = container.querySelector("input[name=email]") as HTMLInputElement;
+    const password = container.querySelector("input[name=password]") as HTMLInputElement;
+    await act(async () => {
+      email.value = "viajera@test.com"; email.dispatchEvent(new Event("input", { bubbles: true }));
+      password.value = "secreta"; password.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Mis viajes");
+    await button.press();
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
+  it("al cerrar sesión el primer Atrás hace algo visible en vez de quedar muerto", async () => {
+    const button = backButton();
+    const container = await render("/trips", props({ backButton: button.port }));
+    const logout = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Cerrar sesión");
+    expect(logout).toBeTruthy();
+    await act(async () => logout!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 })));
+    expect(container.textContent).toContain("Iniciar sesión");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
 
   it("en las fotos, el Atrás cierra el visor y deja la galería donde estaba", async () => {
