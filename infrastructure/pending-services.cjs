@@ -1,16 +1,25 @@
-// CloudFormation fragment: infrastructure only. T73/T92 provide the consumers.
+// CloudFormation fragment: queues, rules, roles and alarms of the workers. The Lambda functions themselves are defined in serverless.yml (T142).
 const ref = (name) => ({ Ref: name })
 const arn = (name) => ({ 'Fn::GetAtt': [name, 'Arn'] })
 const sub = (value) => ({ 'Fn::Sub': value })
 const allow = (Action, Resource, Condition) => ({ Effect: 'Allow', Action, Resource, ...(Condition ? { Condition } : {}) })
 const policy = (Statement) => ({ Version: '2012-10-17', Statement })
 
+// Strict EventBridge schedule: `rate(1 minute)`, `rate(N minutes|hours|days)` with the right singular/plural, or a 6-field `cron(...)`.
+const SCHEDULE_EXPRESSION = /^(?:rate\((?:1 (?:minute|hour|day)|(?:[2-9]|[1-9][0-9]+) (?:minutes|hours|days))\)|cron\([0-9A-Za-z*?/,#LW-]+(?: [0-9A-Za-z*?/,#LW-]+){5}\))$/
+const assertSchedule = (expression) => {
+  if (typeof expression !== 'string' || !SCHEDULE_EXPRESSION.test(expression)) throw new Error('Invalid schedule expression')
+  return expression
+}
+
 const createPendingServices = (stage, {
   eventsConsumerArn = '', storageDeletionConsumerArn = '',
+  eventsScheduleExpression = 'rate(1 minute)', storageDeletionScheduleExpression = 'rate(5 minutes)',
 } = {}) => {
   if (!['dev', 'prod'].includes(stage)) throw new Error('Unsupported infrastructure stage')
   const Resources = {}, Outputs = {}, queueArns = [], queueUrls = [], queueStatements = []
   const consumerArns = { Events: eventsConsumerArn, StorageDeletion: storageDeletionConsumerArn }
+  const scheduleExpressions = { Events: assertSchedule(eventsScheduleExpression), StorageDeletion: assertSchedule(storageDeletionScheduleExpression) }
 
   for (const name of ['FcmCredentialsSecret', 'ApnsCredentialsSecret', 'PushApplicationsSecret']) {
     Resources[name] = {
@@ -59,7 +68,7 @@ const createPendingServices = (stage, {
       Type: 'AWS::Events::Rule',
       Properties: {
         Description: `Wake up the ${collection} consumer; MongoDB remains the durable source of work.`,
-        ScheduleExpression: 'rate(1 minute)', State: consumer === '' ? 'DISABLED' : 'ENABLED',
+        ScheduleExpression: scheduleExpressions[kind], State: consumer === '' ? 'DISABLED' : 'ENABLED',
         Targets: [{ Id: `${kind}Queue`, Arn: arn(queue), Input: JSON.stringify({ kind: collection, stage }),
           RetryPolicy: { MaximumEventAgeInSeconds: 3600, MaximumRetryAttempts: 5 },
           DeadLetterConfig: { Arn: arn(deliveryDlq) } }],
@@ -89,8 +98,15 @@ const createPendingServices = (stage, {
       // trips/* (whole-bucket listing denied); residual: a HeadObject (404) on keys outside trips/ is covered; the code never lists
       // without a prefix; real verification is pending a deployment.
       allow(['s3:ListBucket'], arn('PhotoBucket'), { StringLikeIfExists: { 's3:prefix': ['trips/*'] } }))
-    else workerStatements.push(allow(['sns:Publish'], ['GCM', 'APNS', 'APNS_SANDBOX'].map((platform) =>
-      sub(`arn:\${AWS::Partition}:sns:\${AWS::Region}:\${AWS::AccountId}:endpoint/${platform}/travellier-${stage}-${platform === 'GCM' ? 'android' : 'ios'}/*`))))
+    else {
+      // Only what the SNS provider calls (T142): no CreatePlatformApplication, GetEndpointAttributes or DeleteEndpoint, and no Resource '*'.
+      const snsArn = (path) => sub(`arn:\${AWS::Partition}:sns:\${AWS::Region}:\${AWS::AccountId}:${path}`)
+      const platforms = [['GCM', 'android'], ['APNS', 'ios'], ['APNS_SANDBOX', 'ios']]
+      const endpoints = platforms.map(([platform, os]) => snsArn(`endpoint/${platform}/travellier-${stage}-${os}/*`))
+      workerStatements.push(
+        allow(['sns:CreatePlatformEndpoint'], platforms.map(([platform, os]) => snsArn(`app/${platform}/travellier-${stage}-${os}`))),
+        allow(['sns:Publish', 'sns:SetEndpointAttributes'], endpoints))
+    }
     const role = `${kind}WorkerRole`
     Resources[role] = {
       Type: 'AWS::IAM::Role',
@@ -142,5 +158,7 @@ exports.resources = async ({ resolveVariable }) => createPendingServices(
   await resolveVariable('sls:stage'), {
     eventsConsumerArn: await resolveVariable('param:eventsConsumerArn'),
     storageDeletionConsumerArn: await resolveVariable('param:storageDeletionConsumerArn'),
+    eventsScheduleExpression: await resolveVariable('param:eventsScheduleExpression'),
+    storageDeletionScheduleExpression: await resolveVariable('param:storageDeletionScheduleExpression'),
   },
 )
