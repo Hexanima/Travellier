@@ -37,7 +37,7 @@ const objectStoragePort: ObjectStoragePort = {
       expiresAt: new Date("2026-09-14T12:00:00.000Z"),
     }),
   createDownloadTarget: async () => ok({ downloadUrl: "https://downloads.example.test/photo.jpg" }),
-  headObject: async ({ objectKey }) => ok(objectKey.endsWith("missing.jpg") ? undefined : { contentType: "image/jpeg", sizeBytes: 1024 }),
+  headObject: async ({ objectKey }) => ok(objectKey.endsWith("missing.jpg") ? undefined : { contentType: "image/jpeg", sizeBytes: 1024, lastModified: new Date("2026-11-12T10:00:00.000Z") }),
 };
 
 const notificationPort: NotificationPort = {
@@ -63,7 +63,7 @@ describe("domain ports", () => {
 
   it("reports an uploaded object or its absence through headObject", async () => {
     expect(await objectStoragePort.headObject({ objectKey: "trips/t/photos/u/photo.jpg" }))
-      .toEqual({ ok: true, value: { contentType: "image/jpeg", sizeBytes: 1024 } });
+      .toEqual({ ok: true, value: { contentType: "image/jpeg", sizeBytes: 1024, lastModified: new Date("2026-11-12T10:00:00.000Z") } });
     expect(await objectStoragePort.headObject({ objectKey: "trips/t/photos/u/missing.jpg" })).toEqual({ ok: true, value: undefined });
   });
 

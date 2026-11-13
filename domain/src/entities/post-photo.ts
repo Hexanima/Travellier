@@ -7,6 +7,8 @@ export const PHOTO_EXTENSIONS = { "image/jpeg": "jpg", "image/png": "png", "imag
 export type PhotoContentType = keyof typeof PHOTO_EXTENSIONS;
 export type PhotoExtension = (typeof PHOTO_EXTENSIONS)[PhotoContentType];
 export const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+/** A confirmation is rejected when the stored object is older than this: the cleanup sweep only removes objects of 24 h or more, so 1 h of margin remains. */
+export const PHOTO_CONFIRM_MAX_AGE_SECONDS = 23 * 3600;
 export const MAX_PHOTOS_PER_BATCH = 10;
 export const MAX_PHOTOS_PER_POST = 10;
 export const PHOTO_UPLOAD_EXPIRES_SECONDS = 900;
@@ -27,7 +29,7 @@ export interface PostPhoto {
 
 export interface PostPhotoRef { id: ObjectId; order: number }
 /** What a storage `headObject` reports (`undefined` when the object does not exist). */
-export interface PhotoObjectHead { contentType: string | null; sizeBytes: number }
+export interface PhotoObjectHead { contentType: string | null; sizeBytes: number; lastModified: Date }
 export interface PhotoUploadFile { contentType: PhotoContentType; sizeBytes: number; extension: PhotoExtension }
 export interface PhotoUploadKey { tripId: ObjectId; userId: ObjectId; uploadId: string; extension: PhotoExtension }
 
@@ -108,13 +110,16 @@ export const parsePhotoReferences = (input: { tripId: ObjectId; userId: ObjectId
 };
 
 /** Compares what the storage holds with the rules; returns the failure code or `undefined` when the object is usable. */
-export const checkPhotoObject = (extension: PhotoExtension, head: PhotoObjectHead | undefined):
-  "not_uploaded" | "too_large" | "content_type_mismatch" | undefined => {
+export const checkPhotoObject = (extension: PhotoExtension, head: PhotoObjectHead | undefined, now: Date):
+  "not_uploaded" | "too_large" | "content_type_mismatch" | "upload_too_old" | undefined => {
   if (head === undefined || head.sizeBytes <= 0) return "not_uploaded";
   if (head.sizeBytes > MAX_PHOTO_BYTES) return "too_large";
   const contentType = head.contentType?.split(";")[0]?.trim().toLowerCase();
-  return contentType !== undefined && Object.hasOwn(PHOTO_EXTENSIONS, contentType) &&
-    PHOTO_EXTENSIONS[contentType as PhotoContentType] === extension ? undefined : "content_type_mismatch";
+  const typeMatches = contentType !== undefined && Object.hasOwn(PHOTO_EXTENSIONS, contentType) &&
+    PHOTO_EXTENSIONS[contentType as PhotoContentType] === extension;
+  if (!typeMatches) return "content_type_mismatch";
+  // A lastModified ahead of the clock (skew) is accepted; exactly the limit is still accepted.
+  return now.getTime() - head.lastModified.getTime() > PHOTO_CONFIRM_MAX_AGE_SECONDS * 1000 ? "upload_too_old" : undefined;
 };
 
 /**

@@ -639,12 +639,15 @@ describe("Trip post use cases", () => {
       const uuid = (n: number) => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
       const key = (n: number, ext: "jpg" | "png" | "webp" = "jpg", user = actor, trip = tripId) => `trips/${trip}/photos/${user}/${uuid(n)}.${ext}`;
       const refs = (...ns: number[]) => ns.map((n) => ({ key: key(n) }));
-      let heads: Record<string, { contentType: string | null; sizeBytes: number } | "fail" | undefined>;
+      let heads: Record<string, { contentType: string | null; sizeBytes: number; lastModified: Date } | "fail" | undefined>;
       let headCalls: string[], inTransaction: boolean, headInsideTransaction: boolean, afterHead: (() => void) | undefined;
       let storage: domain.ObjectStoragePort;
       const stored = (n: number, order: number, postRef = postId, fields: Partial<PostPhoto> = {}): PostPhoto =>
         ({ id: id(300 + n), postId: postRef, tripId, uploaderId: actor, s3Key: key(n), order, uploadedAt: createdAt, ...fields });
-      const uploaded = (...ns: number[]) => { for (const n of ns) heads[key(n)] = { contentType: "image/jpeg", sizeBytes: 1000 }; };
+      const uploadedHoursAgo = (hours: number, ...ns: number[]) => {
+        for (const n of ns) heads[key(n)] = { contentType: "image/jpeg", sizeBytes: 1000, lastModified: new Date(createdAt.getTime() - hours * 3600 * 1000) };
+      };
+      const uploaded = (...ns: number[]) => uploadedHoursAgo(0, ...ns);
       beforeEach(() => {
         heads = {}; headCalls = []; inTransaction = false; headInsideTransaction = false; afterHead = undefined;
         const original = posts.withTransaction;
@@ -704,14 +707,40 @@ describe("Trip post use cases", () => {
       });
 
       it("lists every object problem by index and writes nothing", async () => {
-        heads[key(2)] = { contentType: "image/jpeg", sizeBytes: 10 * 1024 * 1024 + 1 };
-        heads[key(3)] = { contentType: "image/png", sizeBytes: 5 };
+        heads[key(2)] = { contentType: "image/jpeg", sizeBytes: 10 * 1024 * 1024 + 1, lastModified: createdAt };
+        heads[key(3)] = { contentType: "image/png", sizeBytes: 5, lastModified: createdAt };
         uploaded(4);
         const insert = vi.spyOn(scope, "insertPhotos"), insertPost = vi.spyOn(scope, "insert");
         const result = await createWith({ photos: refs(1, 2, 3, 4) });
         expect(failures(result)).toEqual(["photos[0].key/not_uploaded", "photos[1].key/too_large", "photos[2].key/content_type_mismatch"]);
         expect(insert).not.toHaveBeenCalled(); expect(insertPost).not.toHaveBeenCalled();
         expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it("rejects an upload older than 23 h at creation with 422 upload_too_old and writes nothing", async () => {
+        uploadedHoursAgo(24, 1);
+        const insert = vi.spyOn(scope, "insertPhotos"), insertPost = vi.spyOn(scope, "insert");
+        const result = await createWith({ photos: refs(1) });
+        expect(failures(result)).toEqual(["photos[0].key/upload_too_old"]);
+        expect(insert).not.toHaveBeenCalled(); expect(insertPost).not.toHaveBeenCalled();
+        expect(state()).toEqual({ records: [], activities: [], participations: [], photoRecords: [] });
+      });
+
+      it("rejects an upload older than 23 h when updating and writes nothing", async () => {
+        records = [seedPost()]; uploadedHoursAgo(24, 1);
+        const before = state();
+        expect(failures(await updateWith({ photos: refs(1) }))).toEqual(["photos[0].key/upload_too_old"]);
+        expect(state()).toEqual(before);
+      });
+
+      it("accepts an upload of 22 h at creation and update, judged with the injected clock", async () => {
+        uploadedHoursAgo(22, 1, 2);
+        expect(await createWith({ photos: refs(1) })).toMatchObject({ ok: true });
+        records = [seedPost()];
+        expect(await updateWith({ photos: refs(2) })).toMatchObject({ ok: true });
+        const later = { ...withStorage(), now: () => new Date(createdAt.getTime() + 2 * 3600 * 1000) };
+        records = [seedPost()];
+        expect(failures(await domain.updateTripPost.execute(later, { ...context, postId, photos: refs(1) }))).toEqual(["photos[0].key/upload_too_old"]);
       });
 
       it.each([
@@ -1633,7 +1662,7 @@ describe("Trip post use cases", () => {
     const authorPhoto = { key: `trips/${tripId}/photos/${author}/${uuid}.jpg` };
     let headObject: ReturnType<typeof vi.fn>;
     const deps = () => {
-      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000 }));
+      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000, lastModified: createdAt }));
       const storage: domain.ObjectStoragePort = { createUploadTarget: async () => domain.err(new domain.UnknownError("unused")),
         createDownloadTarget: async () => domain.err(new domain.UnknownError("unused")), headObject };
       return { ...dependencies(), storage };
@@ -1873,7 +1902,7 @@ describe("Trip post use cases", () => {
       payments: agreed.payments, shares: [], createdAt } as unknown as PostExpense);
     let headObject: ReturnType<typeof vi.fn>;
     const deps = () => {
-      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000 }));
+      headObject = vi.fn(async () => domain.ok({ contentType: "image/jpeg", sizeBytes: 1000, lastModified: createdAt }));
       const storage: domain.ObjectStoragePort = { createUploadTarget: async () => domain.err(new domain.UnknownError("unused")),
         createDownloadTarget: async () => domain.err(new domain.UnknownError("unused")), headObject };
       return { ...dependencies(), storage };

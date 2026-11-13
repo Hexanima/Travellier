@@ -43,19 +43,26 @@ describe("createS3ObjectStorage headObject", () => {
     createS3ObjectStorage({ bucketName: "photos", client: { send } as unknown as S3Client, sign: vi.fn() });
   const failure = (name: string, status?: number) => Object.assign(new Error(name), { name, $metadata: { httpStatusCode: status } });
 
-  it("reports the stored content type and size of an existing object", async () => {
-    const send = vi.fn().mockResolvedValue({ ContentType: "image/png", ContentLength: 2048 });
+  const modified = new Date("2026-11-12T10:00:00.000Z");
+
+  it("reports the stored content type, size and last modification of an existing object", async () => {
+    const send = vi.fn().mockResolvedValue({ ContentType: "image/png", ContentLength: 2048, LastModified: modified });
     const result = await withClient(send).headObject({ objectKey: "trips/t/photos/u/id.png" });
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]?.[0]).toBeInstanceOf(HeadObjectCommand);
     expect(send.mock.calls[0]?.[0].input).toEqual({ Bucket: "photos", Key: "trips/t/photos/u/id.png" });
-    expect(result).toEqual({ ok: true, value: { contentType: "image/png", sizeBytes: 2048 } });
+    expect(result).toEqual({ ok: true, value: { contentType: "image/png", sizeBytes: 2048, lastModified: modified } });
   });
 
   it("returns null content type and zero size when S3 omits them", async () => {
-    const result = await withClient(vi.fn().mockResolvedValue({})).headObject({ objectKey: "k" });
-    expect(result).toEqual({ ok: true, value: { contentType: null, sizeBytes: 0 } });
+    const result = await withClient(vi.fn().mockResolvedValue({ LastModified: modified })).headObject({ objectKey: "k" });
+    expect(result).toEqual({ ok: true, value: { contentType: null, sizeBytes: 0, lastModified: modified } });
+  });
+
+  it("fails with UnknownError (not missing, not accepted) when S3 omits LastModified", async () => {
+    const result = await withClient(vi.fn().mockResolvedValue({ ContentType: "image/png", ContentLength: 5 })).headObject({ objectKey: "k" });
+    expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
   });
 
   it.each([["NotFound", 404], ["NoSuchKey", undefined], ["Other", 404]])("treats %s as a missing object", async (name, status) => {

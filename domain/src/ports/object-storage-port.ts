@@ -19,10 +19,11 @@ export interface DownloadTarget {
   downloadUrl: string;
 }
 
-/** What the storage holds for an object; `contentType` is `null` when it was stored without one. */
+/** What the storage holds for an object; `contentType` is `null` when it was stored without one; `lastModified` is when the upload finished. */
 export interface ObjectHead {
   contentType: string | null;
   sizeBytes: number;
+  lastModified: Date;
 }
 
 export interface ObjectStoragePort<

@@ -340,7 +340,7 @@ export const createTripPost: UseCase<CreationDependencies, CreateTripPostPayload
     // Storage I/O happens before the transaction: the Trip lock is never held while S3 answers.
     const member = await requireMemberBeforeStorage(posts, payload);
     if (!member.ok) return member;
-    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
+    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos }, now);
     if (!verified.ok) return verified;
     const keys = verified.value;
     return posts.withTransaction<CreateTripPostResult>(payload.tripId, async (scope) => {
@@ -418,7 +418,7 @@ export const linkTripPostToNewActivity: UseCase<CreationDependencies, LinkTripPo
   execute: async ({ posts, createId, now, storage }, payload) => {
     const member = await requireAuthorBeforeStorage(posts, payload);
     if (!member.ok) return member;
-    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
+    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos }, now);
     if (!verified.ok) return verified;
     const keys = verified.value;
     return posts.withTransaction<LinkTripPostToNewActivityResult>(payload.tripId, async (scope) => {
@@ -563,7 +563,7 @@ export const updateTripPost: UseCase<UpdateDependencies, UpdateTripPostPayload, 
     const removals = payload.removePhotos === undefined ? ok(undefined) : parsePhotoRemovals(payload.removePhotos);
     if (!removals.ok) return removals;
     const removalIds = removals.value;
-    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos });
+    const verified = await verifyOptionalPhotoUploads(storage, { tripId: payload.tripId, userId: payload.authenticatedUserId, photos: payload.photos }, now ?? (() => new Date()));
     if (!verified.ok) return verified;
     const keys = verified.value;
     if ((keys !== undefined || removalIds !== undefined || payload.expense !== undefined) && (createId === undefined || now === undefined)) {

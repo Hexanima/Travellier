@@ -176,6 +176,18 @@ describe("photo protocol HTTP API", () => {
       expect(JSON.stringify(body(response))).not.toContain("trips/");
     });
 
+    it("rejects a confirmation of an upload older than 23 h with 422 upload_too_old and saves nothing; 22 h is accepted", async () => {
+      const [stale, fresh] = await reserve([jpeg, jpeg]);
+      const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3600 * 1000);
+      fake.put(stale!.key, "image/jpeg", 1000, hoursAgo(24)); fake.put(fresh!.key, "image/jpeg", 1000, hoursAgo(22));
+      const before = await data();
+      const rejected = await publish([stale!.key]);
+      expect(outcome(rejected), rejected.body).toEqual([422, "ValidationError"]);
+      expect(fields(rejected)).toEqual(["photos[0].key/upload_too_old"]);
+      expect(await data()).toEqual(before);
+      expect((await publish([fresh!.key])).statusCode).toBe(201);
+    });
+
     it("lists every failure and saves neither post nor photos for invalid confirmations", async () => {
       const [mine] = await uploaded(1), { tripId: otherTrip, member: otherMember } = await addTrip(), other = await addMember("participant");
       const [theirs] = await uploaded(1, other), [foreignTrip] = await uploaded(1, otherMember, otherTrip);

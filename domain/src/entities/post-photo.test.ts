@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildPostPhotos, checkPhotoObject, createObjectId, createPhotoUploadKey, MAX_PHOTO_BYTES, MAX_PHOTOS_PER_BATCH,
-  MAX_PHOTOS_PER_POST, parsePhotoReferences, parsePhotoRemovals, parsePhotoUploadKey, planPhotoRemoval, validatePhotoUploadRequest, ValidationError,
+  MAX_PHOTOS_PER_POST, parsePhotoReferences, PHOTO_CONFIRM_MAX_AGE_SECONDS, parsePhotoRemovals, parsePhotoUploadKey, planPhotoRemoval, validatePhotoUploadRequest, ValidationError,
   type ObjectId, type PostPhoto,
 } from "../index.js";
 
@@ -85,18 +85,38 @@ describe("parsePhotoReferences", () => {
 });
 
 describe("checkPhotoObject", () => {
+  const now = new Date("2026-11-12T12:00:00.000Z");
+  const recent = new Date(now.getTime() - 1000);
+  const ageMs = (ms: number) => new Date(now.getTime() - ms);
+  const limitMs = PHOTO_CONFIRM_MAX_AGE_SECONDS * 1000;
   it.each([
     ["missing object", undefined, "not_uploaded", "k.jpg"],
-    ["empty object", { contentType: "image/jpeg", sizeBytes: 0 }, "not_uploaded", "k.jpg"],
-    ["too large", { contentType: "image/jpeg", sizeBytes: MAX_PHOTO_BYTES + 1 }, "too_large", "k.jpg"],
-    ["no content type", { contentType: null, sizeBytes: 1 }, "content_type_mismatch", "k.jpg"],
-    ["type not allowed", { contentType: "image/gif", sizeBytes: 1 }, "content_type_mismatch", "k.jpg"],
-    ["type differs from the extension", { contentType: "image/png", sizeBytes: 1 }, "content_type_mismatch", "k.jpg"],
-    ["valid", { contentType: "image/png", sizeBytes: MAX_PHOTO_BYTES }, undefined, "k.png"],
-    ["valid with parameters", { contentType: "IMAGE/WEBP", sizeBytes: 1 }, undefined, "k.webp"],
+    ["empty object", { contentType: "image/jpeg", sizeBytes: 0, lastModified: recent }, "not_uploaded", "k.jpg"],
+    ["too large", { contentType: "image/jpeg", sizeBytes: MAX_PHOTO_BYTES + 1, lastModified: recent }, "too_large", "k.jpg"],
+    ["no content type", { contentType: null, sizeBytes: 1, lastModified: recent }, "content_type_mismatch", "k.jpg"],
+    ["type not allowed", { contentType: "image/gif", sizeBytes: 1, lastModified: recent }, "content_type_mismatch", "k.jpg"],
+    ["type differs from the extension", { contentType: "image/png", sizeBytes: 1, lastModified: recent }, "content_type_mismatch", "k.jpg"],
+    ["valid", { contentType: "image/png", sizeBytes: MAX_PHOTO_BYTES, lastModified: recent }, undefined, "k.png"],
+    ["valid with parameters", { contentType: "IMAGE/WEBP", sizeBytes: 1, lastModified: recent }, undefined, "k.webp"],
   ])("%s", (_, head, expected, name) => {
     const extension = name.endsWith("jpg") ? "jpg" : name.endsWith("png") ? "png" : "webp";
-    expect(checkPhotoObject(extension, head)).toBe(expected);
+    expect(checkPhotoObject(extension, head, now)).toBe(expected);
+  });
+
+  describe("upload age", () => {
+    const head = (lastModified: Date, extra = {}) => ({ contentType: "image/jpeg", sizeBytes: 1, lastModified, ...extra });
+    it("the limit is 23 hours", () => expect(PHOTO_CONFIRM_MAX_AGE_SECONDS).toBe(23 * 3600));
+    it("accepts an upload of exactly 23 hours", () => expect(checkPhotoObject("jpg", head(ageMs(limitMs)), now)).toBeUndefined());
+    it("rejects an upload of 23 hours and 1 ms", () => expect(checkPhotoObject("jpg", head(ageMs(limitMs + 1)), now)).toBe("upload_too_old"));
+    it("accepts an upload of 22 hours", () => expect(checkPhotoObject("jpg", head(ageMs(22 * 3600 * 1000)), now)).toBeUndefined());
+    it("accepts a lastModified in the future (clock skew)", () => expect(checkPhotoObject("jpg", head(new Date(now.getTime() + 60_000)), now)).toBeUndefined());
+    it("reports the earlier code first", () => {
+      const old = ageMs(48 * 3600 * 1000);
+      expect(checkPhotoObject("jpg", undefined, now)).toBe("not_uploaded");
+      expect(checkPhotoObject("jpg", head(old, { sizeBytes: 0 }), now)).toBe("not_uploaded");
+      expect(checkPhotoObject("jpg", head(old, { sizeBytes: MAX_PHOTO_BYTES + 1 }), now)).toBe("too_large");
+      expect(checkPhotoObject("jpg", head(old, { contentType: "image/png" }), now)).toBe("content_type_mismatch");
+    });
   });
 });
 
