@@ -131,8 +131,9 @@ describe("PostComposer retry key (T88)", () => {
     expect(body(create, 1).id).toBe(ID1);
     expect(itineraryGet).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled();
   });
+  // Un timeout del cliente llega al composer colapsado en `kind: "network"` porque los mapeadores de la API descartan `code`; por eso acá se fija que ese error conserva el hint de reintento y el id de T88.
   it("a client timeout keeps the retry hint and the same id (T146)", async () => {
-    const create = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } }).mockResolvedValue({ ok: true, value: saved() });
+    const create = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValue({ ok: true, value: saved() });
     const { container } = await render(newPath, { create });
     await type(container, "description", "Hola"); await submit(container);
     expect(container.querySelector('[data-testid="listing"]')).toBeNull();
