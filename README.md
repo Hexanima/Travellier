@@ -56,7 +56,7 @@ El comando genera el APK debug en `apps/web/android/app/build/outputs/apk/debug/
 
 ## Infraestructura AWS
 
-Push y ejecución diferida de eventos/limpieza se configuran en [Servicios pendientes — T45](docs/infraestructura/servicios-pendientes.md), con secretos por entorno y consumidores desactivados hasta T73/T92. El wrapper de despliegue requiere también la configuración FCM/APNs allí documentada. La configuración local no acredita despliegue ni entrega real.
+Push y ejecución diferida de eventos/limpieza se configuran en [Servicios pendientes — T45](docs/infraestructura/servicios-pendientes.md), con secretos por entorno. Las funciones `events` y `storage-deletion` (con SNS y permisos mínimos) ya están definidas en `serverless.yml` (T142), pero sus reglas EventBridge siguen desactivadas hasta pasar `--param=eventsConsumerArn` / `--param=storageDeletionConsumerArn` en un segundo despliegue autorizado; frecuencias en los parámetros `eventsScheduleExpression` y `storageDeletionScheduleExpression`. El wrapper de despliegue requiere también la configuración FCM/APNs allí documentada. La configuración local no acredita despliegue ni entrega real.
 
 La API se despliega con Serverless Framework mediante [serverless.yml](serverless.yml). Los stages soportados son `dev` y `prod`; cada uno crea su propia API, Lambda y secretos de Secrets Manager.
 
