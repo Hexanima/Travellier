@@ -537,7 +537,10 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
               ? <ProfileScreen auth={activeAuth} push={activePush} />
               : <Navigate to="/login" replace />
         } />
-        <Route path="*" element={<NotFound />} />
+        {/* Links without a screen of their own (`/verify`, anything unknown): there is no public web, so they land on Mis viajes or on the login. */}
+        <Route path="/verify" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
+        <Route path="/verify/*" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
+        <Route path="*" element={<NoScreen sessionReady={sessionReady} hasSession={hasSession} />} />
       </Routes>
       </ExternalLinkContext.Provider>
     </>
@@ -630,15 +633,10 @@ function TripRoute({ sessionReady, hasSession, children }: { sessionReady: boole
   return hasSession ? children : <Navigate to="/login" replace />
 }
 
-function NotFound() {
-  return (
-    <main className="app-shell">
-      <section className="status-panel">
-        <p className="eyebrow">Travellier</p>
-        <h1>Página no encontrada</h1>
-      </section>
-    </main>
-  )
+/** A link that leads nowhere in the app: with a session it opens Mis viajes and without one the login, replacing the entry so Back never returns to it. */
+function NoScreen({ sessionReady, hasSession }: { sessionReady: boolean; hasSession: boolean }) {
+  if (!sessionReady) return <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
+  return <Navigate to={hasSession ? '/trips' : '/login'} replace />
 }
 
 export default App

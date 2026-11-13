@@ -102,15 +102,43 @@ describe("App deep links", () => {
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/invite/VIAJE-X7K2?source=share");
   });
 
-  it("no longer offers a verification screen for verify links", async () => {
+  it("sends a verify link without a session to the login screen", async () => {
     const { nativeApp, emit } = createNativeApp();
     const container = await renderApp(nativeApp);
 
     await act(async () => emit("com.travellier.app://verify/token-123"));
 
     expect(container.textContent).not.toContain("Verificación de email");
+    expect(container.textContent).not.toContain("Página no encontrada");
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/login");
+  });
+
+  it("sends a verify link with a session to Mis viajes", async () => {
+    const storage = createStorage();
+    vi.mocked(storage.read).mockResolvedValue({ accessToken: "old", refreshToken: "refresh" });
+    const refresh = vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } });
+    const { nativeApp, emit } = createNativeApp();
+    const container = await renderApp(nativeApp, storage, { refresh }, { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) });
+
+    await act(async () => emit("com.travellier.app://verify/token-123"));
+
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/trips");
+  });
+
+  it("waits for the session while it is being restored instead of deciding the verify link", async () => {
+    const storage = createStorage();
+    let restore: (value: { accessToken: string; refreshToken: string }) => void = () => undefined;
+    vi.mocked(storage.read).mockReturnValue(new Promise((resolve) => { restore = resolve; }));
+    const { nativeApp, emit } = createNativeApp();
+    const container = await renderApp(nativeApp, storage, { refresh: vi.fn().mockResolvedValue({ ok: true, value: { accessToken: "new", refreshToken: "new-refresh" } }) },
+      { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) });
+
+    await act(async () => emit("com.travellier.app://verify/token-123"));
+    expect(container.textContent).toContain("Restaurando sesión…");
     expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/verify/token-123");
-    expect(container.textContent).toContain("Página no encontrada");
+
+    await act(async () => { restore({ accessToken: "old", refreshToken: "refresh" }); });
+    expect(container.querySelector("[data-testid=path]")?.textContent).toBe("/trips");
   });
 
   it("registers with email and password from an invitation and returns to it after login", async () => {
