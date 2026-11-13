@@ -84,6 +84,10 @@ const createPendingServices = (stage, {
     if (kind === 'StorageDeletion') workerStatements.push(
       allow(['s3:DeleteObject'], sub('${PhotoBucket.Arn}/trips/*')),
       // The sweep lists with a trips/ prefix; StringLikeIfExists keeps the same shape as the API role (see serverless.yml).
+      // Scope, NOT verified against real AWS: StringLikeIfExists passes when s3:prefix is absent (HeadObject on a missing key: 404 instead
+      // of 403); per the S3 IAM docs examples a listing without Prefix sends s3:prefix as an empty string, which would NOT match
+      // trips/* (whole-bucket listing denied); residual: a HeadObject (404) on keys outside trips/ is covered; the code never lists
+      // without a prefix; real verification is pending a deployment.
       allow(['s3:ListBucket'], arn('PhotoBucket'), { StringLikeIfExists: { 's3:prefix': ['trips/*'] } }))
     else workerStatements.push(allow(['sns:Publish'], ['GCM', 'APNS', 'APNS_SANDBOX'].map((platform) =>
       sub(`arn:\${AWS::Partition}:sns:\${AWS::Region}:\${AWS::AccountId}:endpoint/${platform}/travellier-${stage}-${platform === 'GCM' ? 'android' : 'ios'}/*`))))
