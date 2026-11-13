@@ -10,6 +10,7 @@ const native = vi.hoisted(() => ({
   calendar: { requestPermissions: vi.fn(), checkPermissions: vi.fn(), findEvents: vi.fn(), createEvent: vi.fn(), modifyEvent: vi.fn(), deleteEvent: vi.fn() },
   filesystem: { writeFile: vi.fn(), deleteFile: vi.fn() },
   share: { canShare: vi.fn(), share: vi.fn() },
+  appLauncher: { openUrl: vi.fn() },
 }));
 vi.mock("@capacitor/camera", async (original) => ({ ...await original<typeof import("@capacitor/camera")>(), Camera: native.camera }));
 vi.mock("@capacitor/push-notifications", () => ({ PushNotifications: native.push }));

@@ -1,6 +1,7 @@
 import { Camera } from "@capacitor/camera";
 import { Filesystem } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
+import { AppLauncher } from "@capacitor/app-launcher";
 import { Calendar } from "@capacitor/calendar";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { Capacitor } from "@capacitor/core";
@@ -15,7 +16,7 @@ export function createCapacitorCapabilities() {
     camera: Camera,
     push: PushNotifications,
     calendar: Calendar,
-    externalLink: { open: (url, target, features) => window.open(url, target, features) },
+    externalLink: { launcher: AppLauncher, open: (url, target, features) => window.open(url, target, features) },
   });
 }
 
