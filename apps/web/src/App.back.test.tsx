@@ -51,6 +51,15 @@ describe("App back button integration", () => {
     expect(button.exitApp).not.toHaveBeenCalled();
   });
 
+  it("desde una raíz del Trip la vuelta a Mis viajes no deja una pulsación de más antes de cerrar", async () => {
+    const button = backButton();
+    const container = await render(`/trips/${tripId}/itinerary`, props({ backButton: button.port }));
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
   it("desde una raíz del Trip abierta por un aviso vuelve a avisos, igual que su enlace Volver", async () => {
     const button = backButton();
     const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };

@@ -31,6 +31,7 @@ import { accountIdFromAccessToken } from './calendar/calendar-account.js'
 import { createCalendarRefStore } from './calendar/calendar-ref-store.js'
 import { createCalendarSyncService, type CalendarSyncService } from './calendar/calendar-sync-service.js'
 import { createTripInvitationApi, type TripInvitationApi, type TripJoinResponse } from './trips/trip-invitation-api.js'
+import { withNoBack } from './trips/post-origin.js'
 import { createTripJourneyApi, type TripJourneyApi } from './trips/trip-journey-api.js'
 import { TripConfigurationScreen } from './trips/TripConfigurationScreen.js'
 import { TripJourneyScreen } from './trips/TripJourneyScreen.js'
@@ -411,7 +412,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
   useEffect(() => {
     if (sessionReady && launchChecked && hasSession && !deepLinkReceived.current &&
       (location.pathname === '/' || location.pathname === '/login')) {
-      navigate(invitationDestination(location.state) ?? '/trips', { replace: true })
+      // Reemplaza la entrada inicial: sin `noBack` el Atrás siguiente resolvería una vuelta que no existe.
+      navigate(invitationDestination(location.state) ?? '/trips', { replace: true, state: withNoBack() })
     }
   }, [hasSession, launchChecked, location.pathname, location.state, navigate, sessionReady])
 
@@ -435,7 +437,7 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     setHasSession(true)
     setSessionReady(true)
     void pushRef.current?.resume()
-    navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true })
+    navigate(invitationDestination(latestLocation.current.state) ?? '/trips', { replace: true, state: withNoBack() })
   }
 
   const onLocalLogout = async () => {
@@ -642,7 +644,7 @@ function TripRoute({ sessionReady, hasSession, children }: { sessionReady: boole
 /** A link that leads nowhere in the app: with a session it opens Mis viajes and without one the login, replacing the entry so Back never returns to it. */
 function NoScreen({ sessionReady, hasSession }: { sessionReady: boolean; hasSession: boolean }) {
   if (!sessionReady) return <main className="app-shell"><LoadingState label="Restaurando sesión…" /></main>
-  return <Navigate to={hasSession ? '/trips' : '/login'} replace />
+  return <Navigate to={hasSession ? '/trips' : '/login'} replace state={withNoBack()} />
 }
 
 export default App

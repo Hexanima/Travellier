@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { act, useState } from "react";
+import { act, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, NavigationType, Route, Routes, Router, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackNavigationProvider } from "./BackNavigationProvider.js";
 import { useBackLayer } from "./back-layer-context.js";
 import type { AppBackButton } from "../native/app-back-button.js";
+import { withNoBack } from "../trips/post-origin.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -23,6 +24,14 @@ function Where() { const location = useLocation(); return <output data-where>{lo
 const where = () => document.querySelector("[data-where]")?.textContent;
 const click = async (element: Element | null | undefined) => { expect(element).toBeTruthy(); await act(async () => element!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))); };
 const named = (text: string) => Array.from(document.querySelectorAll("button")).find((item) => item.textContent === text);
+
+/** Arranque que reemplaza la entrada inicial, como hace la app al restaurar la sesión. */
+function Start() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => { if (location.pathname === "/") navigate("/trips", { replace: true, state: withNoBack() }); }, [location.pathname, navigate]);
+  return <Screen />;
+}
 
 /** A screen with an optional dialog and, inside it, an optional confirmation: two nested layers. */
 function Screen({ saving = false }: { saving?: boolean }) {
@@ -116,6 +125,36 @@ describe("BackNavigationProvider", () => {
     await render(["/trips", "/profile"], <Screen />, button.port);
     await button.press();
     expect(where()).toBe("/trips");
+  });
+
+  it("tras reemplazar la entrada inicial el Atrás cierra la app en vez de quedar muerto", async () => {
+    const button = fakeButton();
+    await render(["/"], <Start />, button.port);
+    expect(where()).toBe("/trips");
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("una pulsación que no cambia la entrada no deja el Atrás bloqueado", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      const go = vi.fn();
+      const container = document.createElement("div"); document.body.append(container);
+      const root = createRoot(container); roots.push(root);
+      // Un `navigate(-1)` que no hace nada, como en la WebView sin entrada previa: la entrada queda igual.
+      const navigator = { createHref: (to: unknown) => String(to), push: vi.fn(), replace: vi.fn(), go, encodeLocation: undefined };
+      const location = { pathname: "/profile", search: "", hash: "", state: null, key: "entrada" };
+      await act(async () => root.render(
+        <Router location={location} navigator={navigator as never} navigationType={NavigationType.Push}>
+          <BackNavigationProvider backButton={button.port}><Where /><Screen /></BackNavigationProvider>
+        </Router>));
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(1);
+      await act(async () => { vi.advanceTimersByTime(1); });
+      await button.press();
+      expect(go).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
   });
 
   it("al desmontar se desuscribe del puerto", async () => {

@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Capacitor } from "@capacitor/core";
 import { capacitorAppBackButton, type AppBackButton } from "../native/app-back-button.js";
-import { canGoBack, readOrigin } from "../trips/post-origin.js";
+import { canGoBack, readOrigin, withNoBack } from "../trips/post-origin.js";
 import { createBackLayerStack } from "./back-layers.js";
 import { BackDepthContext, BackLayerContext } from "./back-layer-context.js";
 import { resolveBackAction } from "./back-navigation.js";
@@ -30,6 +30,10 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
   // A second press while the navigation is still pending would pop twice: it is ignored until the entry changes.
   const navigating = useRef(false);
   useEffect(() => { navigating.current = false; }, [location]);
+  // Backup: a navigation that does not change the entry (a `back` with nothing behind in the WebView) never runs that effect,
+  // so the flag is released on the next task and the following presses keep working.
+  const release = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(release.current), []);
 
   useEffect(() => {
     if (!backButton) return;
@@ -46,8 +50,11 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
       });
       if (action.kind === "exit") { backButton.exitApp(); return; }
       navigating.current = true;
+      clearTimeout(release.current);
+      release.current = setTimeout(() => { navigating.current = false; }, 0);
       if (action.kind === "back") navigateRef.current(-1);
-      else navigateRef.current(action.to, { replace: true });
+      // The entry it replaces is left behind: without `noBack` the next press would resolve to a back that goes nowhere.
+      else navigateRef.current(action.to, { replace: true, state: withNoBack() });
     });
   }, [backButton, stack]);
 
