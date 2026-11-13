@@ -10,6 +10,8 @@ Referencia funcional: [PRD v1](../../docs/versiones/v1/PRD.md), §3.7 y §7.
 | `@capacitor/camera` | 8.2.5 | Capacitor >=8; iOS SPM |
 | `@capacitor/push-notifications` | 8.1.3 | Capacitor >=8; iOS SPM |
 | `@capacitor/calendar` | 1.0.1 | Capacitor >=8; iOS SPM |
+| `@capacitor/filesystem` | 8.1.5 | Capacitor >=8; iOS SPM (T143) |
+| `@capacitor/share` | 8.0.3 | Capacitor >=8; iOS SPM (T143) |
 
 No agregar geolocalización, micrófono, recordatorios, notificaciones locales ni ejecución de fondo para este setup. Aunque un plugin incluya otras APIs, el adaptador expone únicamente capacidades de v1.
 
@@ -185,3 +187,14 @@ Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/en
 - `ExternalLinkPort.open(url)` (adaptador `src/native/external-link.ts`) revalida el enlace con `parseMapsLink` (solo `https:` y lista exacta de hosts de Maps) y abre `window.open(url, "_blank", "noopener,noreferrer")`. Construcción sin efectos y sin registrar la URL.
 - `@capacitor/app` 8.1.1 no incluye `openUrl` y `@capacitor/browser` no está instalado; no se agregaron dependencias ni cambios en `android/` o `ios/`.
 - No verificado: cómo el WebView de Capacitor maneja `window.open` hacia Google Maps o Apple Maps (intents de Android, universal links de iOS) ni la apertura real en dispositivos. Detalle y decisiones pendientes (mapa estático/WebView, credenciales, privacidad) en `docs/REVISION_PENDIENTE.md` (T94).
+
+## Guardar y compartir el `.ics` T143
+
+- Adaptador `src/native/ics-share.ts` (`createNativeIcsSharer`, fábrica productiva `createCapacitorIcsSharer()`; `App.tsx` la inyecta como `icsExport.download` solo con `Capacitor.isNativePlatform()`). Construcción sin efectos. En web/dev delega en la descarga por Blob (`downloadIcs`).
+- Flujo Android/iOS: `Filesystem.writeFile({ path, data, directory: Cache, encoding: UTF8 })` con nombre sanitizado (`safeFileName`: solo letras, dígitos, `_` y `-`, más `.ics`), luego `Share.canShare()` (falso: fallo) y `Share.share({ title, files: [uri] })`. `files` es la opción correcta en `@capacitor/share` 8 (`definitions.d.ts`; en Android solo acepta URLs `file:`). La cancelación de la hoja rechaza con `Share canceled` (Android y iOS) y se informa como mensaje neutro, no como éxito ni error.
+- Alcance del archivo: tope de 1 MB (se rechaza sin escribir). Los errores solo exponen `reason` (`cancelled`/`failed`), nunca rutas ni URIs.
+- Limpieza diferida: el temporal en Cache no se borra tras compartir (la app destino puede leerlo después de que `share` resuelva; el SO purga la caché). La siguiente exportación con el mismo nombre lo sobrescribe y, si el nombre cambió, se borra el anterior en modo best-effort sin alterar el resultado.
+- Android: `Share.share` resuelve al LANZAR la hoja; no prueba que el usuario eligiera destino ni que una app importara el archivo. iOS resuelve al cerrarse la hoja. Por eso el éxito dice «Se abrió la hoja para compartir o guardar el archivo.».
+- Android: el FileProvider (`${applicationId}.fileprovider`) ya está declarado en el manifest de la app y `res/xml/file_paths.xml` cubre `cache-path`. Los plugins no declaran permisos propios: no se agregó ninguno (el contrato verifica que no haya permisos de almacenamiento).
+- Límite: el archivo queda en Cache y no es visible en Descargas; el usuario lo guarda desde la hoja («Guardar en archivos» en iOS, un destino en Android). Un archivo persistente visible requeriría otro mecanismo o permisos (duda en `docs/REVISION_PENDIENTE.md`, T143).
+- No verificado en dispositivo real (T113): la hoja, el FileProvider y la importación en calendarios.
