@@ -67,12 +67,27 @@ describe("native setup", () => {
     const definitions = read("../../../../node_modules/@capacitor/app-launcher/dist/esm/definitions.d.ts");
     expect(definitions).toContain("openUrl(options");
     expect(definitions).toContain("completed: boolean");
+    expect(definitions).toMatch(/interface OpenURLOptions \{\s*url: string;\s*\}/);
   });
 
-  it("opens https maps links without declaring package visibility or url scheme queries", () => {
+  it("opens https maps links with the native view intent and no canOpenUrl gate, so no package visibility or url scheme queries are declared", () => {
     expect(android).not.toContain("<queries>");
     expect(plist).not.toContain("LSApplicationQueriesSchemes");
     expect(read("../../../../node_modules/@capacitor/app-launcher/android/src/main/AndroidManifest.xml")).not.toContain("uses-permission");
+    const launcherAndroid = read("../../../../node_modules/@capacitor/app-launcher/android/src/main/java/com/capacitorjs/plugins/applauncher/AppLauncherPlugin.java");
+    const launcherIos = read("../../../../node_modules/@capacitor/app-launcher/ios/Sources/AppLauncherPlugin/AppLauncherPlugin.swift");
+    const methodBody = (source: string, signature: string) => {
+      const start = source.indexOf(signature);
+      const end = source.indexOf("\n    }", start);
+      if (start < 0 || end < 0) throw new Error(`no se encontro el cuerpo de ${signature}`);
+      return source.slice(start, end);
+    };
+    const androidOpenUrl = methodBody(launcherAndroid, "public void openUrl(PluginCall call)");
+    expect(androidOpenUrl).toMatch(/new Intent\(\s*Intent\.ACTION_VIEW\s*\)/);
+    expect(androidOpenUrl).not.toMatch(/canOpenUrl|canResolve/);
+    const iosOpenUrl = methodBody(launcherIos, "func openUrl(_ call: CAPPluginCall)");
+    expect(iosOpenUrl).toMatch(/UIApplication\.shared\.open\(\s*url\b/);
+    expect(iosOpenUrl).not.toMatch(/canOpenURL/);
   });
 
   it("keeps the cancellation rejection the .ics sharer classifies as cancelled", () => {
