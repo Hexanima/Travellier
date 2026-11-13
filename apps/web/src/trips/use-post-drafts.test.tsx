@@ -3,7 +3,7 @@ import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import type { PostDraft } from "./post-draft.js";
-import { PostDraftsProvider, usePostDraft } from "./use-post-drafts.js";
+import { PostDraftsProvider, useHasPostDrafts, usePostDraft } from "./use-post-drafts.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const roots: ReturnType<typeof createRoot>[] = [];
@@ -85,5 +85,19 @@ describe("post drafts context", () => {
     await click(container, "[data-action=\"toggle\"]"); await click(container, "[data-action=\"toggle\"]");
     expect(blobs("new")).toBe("none");
     expect(blobs("edit:a")).toBe("foto-edit:a");
+  });
+});
+
+describe("useHasPostDrafts", () => {
+  function Has() { return <output>{String(useHasPostDrafts())}</output>; }
+  const mount = async (element: React.ReactNode) => {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    await act(async () => root.render(element));
+    return container.querySelector("output")?.textContent;
+  };
+  it("is false without a provider and true under one", async () => {
+    expect(await mount(<Has />)).toBe("false");
+    expect(await mount(<PostDraftsProvider><Has /></PostDraftsProvider>)).toBe("true");
   });
 });

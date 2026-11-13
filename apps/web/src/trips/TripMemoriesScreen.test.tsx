@@ -4,7 +4,10 @@ import { createRoot } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoriesLayout, TripMemoriesScreen } from "./TripMemoriesScreen.js";
+import { PostDraftsProvider, usePostDraft } from "./use-post-drafts.js";
+import { CommentDraftsProvider, useCommentDraft } from "./use-comment-drafts.js";
 import { itineraryId } from "./itinerary-test-fixture.js";
+import { emptyDraft } from "./post-draft.js";
 import type { PostResponse } from "./trip-post-api.js";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -263,5 +266,26 @@ describe("TripMemoriesScreen authorship (T125)", () => {
     const container = await render(list(), undefined, vi.fn().mockResolvedValue({ ok: false, error: { kind: "network" } }));
     expect(texts(container)).toEqual(["Recuerdo 11"]);
     expect(editLink(container, 11)?.textContent).toBe("Editar");
+  });
+});
+
+describe("MemoriesLayout under draft providers", () => {
+  function Probe() {
+    const post = usePostDraft("new"), comment = useCommentDraft("new:x");
+    return <button type="button" data-probe onClick={() => { post.setDraft(emptyDraft()); comment.setText("c"); }}>{post.draft ? "post" : "-"}{comment.text ?? "-"}</button>;
+  }
+  it("does not replace the providers above: a draft written under it survives the layout remounting", async () => {
+    const container = document.createElement("div"); document.body.append(container);
+    const root = createRoot(container); roots.push(root);
+    const tree = (shown: boolean) => <PostDraftsProvider><CommentDraftsProvider><MemoryRouter initialEntries={[`/trips/${tripId}/memories/x`]}><Routes>
+      <Route path="/trips/:tripId/memories" element={shown ? <MemoriesLayout /> : <p>vacío</p>}><Route path=":id" element={<Probe />} /></Route>
+    </Routes></MemoryRouter></CommentDraftsProvider></PostDraftsProvider>;
+    await act(async () => root.render(tree(true)));
+    await act(async () => { container.querySelector<HTMLElement>("[data-probe]")?.click(); });
+    expect(container.querySelector("[data-probe]")?.textContent).toBe("postc");
+    await act(async () => root.render(tree(false)));
+    expect(container.querySelector("[data-probe]")).toBeNull();
+    await act(async () => root.render(tree(true)));
+    expect(container.querySelector("[data-probe]")?.textContent).toBe("postc");
   });
 });
