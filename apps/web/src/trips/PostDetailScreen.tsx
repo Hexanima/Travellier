@@ -38,6 +38,10 @@ const restoreOf = (origin: PostOrigin) => {
   return { ...(photo ? { photo } : {}), restore: { anchor: origin.anchor, scrollY: origin.scrollY, ...panel } };
 };
 
+/** El refresco fallido: solo cambia la primera frase; la promesa sobre lo que queda en pantalla es la misma para cualquier causa. */
+const refreshFailure = "No pudimos actualizar el recuerdo.";
+const keptLoaded = "Lo que ya cargaste se conserva.";
+
 export function PostDetailScreen({ posts, members, comments, likes, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostDetailScreenProps) {
   const { tripId, postId } = useParams();
   return <DetailContent key={`${tripId}/${postId}`} tripId={tripId} postId={postId} get={posts.get} remove={posts.remove} timeZone={timeZone} interaction={{ members, comments, likes }} />;
@@ -51,25 +55,25 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
   useEffect(() => { title.current?.focus(); }, []);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!tripId || !postId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-      setRefreshing(true); setRefreshError(false);
+      setRefreshing(true); setRefreshError(undefined);
       try {
         const result = await get(tripId, postId);
         if (cancelled) return;
         if (result.ok) setState({ kind: "ready", detail: result.value });
         else if (["network", "server"].includes(result.error.kind)) {
-          setRefreshError(true);
+          setRefreshError(`${networkNotice(result.error, refreshFailure)} ${keptLoaded}`);
           setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
         } else setState({ kind: "error", error: result.error });
       } catch {
         if (cancelled) return;
-        setRefreshError(true);
+        setRefreshError(`${refreshFailure} ${keptLoaded}`);
         setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
       } finally {
         if (!cancelled) setRefreshing(false);
@@ -97,7 +101,7 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
       {state.kind === "loading" ? <LoadingState label="Cargando recuerdo…" /> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdo…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
-        <Feedback variant="error">No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.</Feedback>
+        <Feedback variant="error">{refreshError}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar recuerdo</Button>
       </div> : null}
       {state.kind === "error" ? <div className="trips-state">

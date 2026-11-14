@@ -301,4 +301,19 @@ describe("activity removal from the itinerary", () => {
     expect(container.textContent).toContain("No pudimos actualizar el itinerario. Los cambios guardados se conservan.");
     expect(getItinerary).toHaveBeenCalledTimes(2);
   });
+  it("un timeout al actualizar el itinerario tiene su propio texto y conserva la eliminación local (T150)", async () => {
+    const { container } = await render({ refresh: { ok: false, error: { kind: "network", code: "TimeoutError" } } });
+    const { confirm } = await openConfirm(container);
+    await confirmDelete(confirm);
+    expect(card(container)).toBeNull();
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Los cambios guardados se conservan.");
+    expect(container.textContent).not.toContain("No pudimos actualizar el itinerario");
+  });
+  it("una conexión caída al actualizar el itinerario conserva el texto de siempre (T150)", async () => {
+    const { container } = await render({ refresh: { ok: false, error: { kind: "network", code: "NetworkError" } } });
+    const { confirm } = await openConfirm(container);
+    await confirmDelete(confirm);
+    expect(container.textContent).toContain("No pudimos actualizar el itinerario. Los cambios guardados se conservan.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
 });

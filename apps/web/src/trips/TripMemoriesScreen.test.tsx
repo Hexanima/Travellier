@@ -122,6 +122,19 @@ describe("TripMemoriesScreen", () => {
     expect(texts(container)).toEqual(["Recién guardado"]);
     expect(container.textContent).toContain("No pudimos actualizar los recuerdos");
   });
+  it("un timeout al actualizar los recuerdos tiene su propio texto y conserva lo guardado (T150)", async () => {
+    const saved = post(20, "2026-01-05T10:00:00.000Z", "Recién guardado");
+    const container = await render(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }), { post: saved, notice: "created" });
+    expect(texts(container)).toEqual(["Recién guardado"]);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Los cambios guardados se conservan.");
+    expect(container.textContent).not.toContain("No pudimos actualizar los recuerdos");
+  });
+  it("una conexión caída al actualizar los recuerdos conserva el texto de siempre (T150)", async () => {
+    const saved = post(20, "2026-01-05T10:00:00.000Z", "Recién guardado");
+    const container = await render(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }), { post: saved, notice: "created" });
+    expect(container.textContent).toContain("No pudimos actualizar los recuerdos. Los cambios guardados se conservan.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("deduplicates repeated ids from the server", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [post(11, "2026-01-01T10:00:00.000Z"), post(11, "2026-01-01T10:00:00.000Z")] }));
     expect(texts(container)).toEqual(["Recuerdo 11"]);

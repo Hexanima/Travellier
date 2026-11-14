@@ -65,6 +65,10 @@ const savedFrom = (state: unknown, tripId: string | undefined): Saved | undefine
   return { post: post as PostResponse, notice: notice as Notice, going: going === true };
 };
 
+/** El refresco fallido: solo cambia la primera frase; la promesa sobre lo que queda en pantalla es la misma para cualquier causa. */
+const refreshFailure = "No pudimos actualizar los recuerdos.";
+const keptSaved = "Los cambios guardados se conservan.";
+
 export function TripMemoriesScreen({ posts, members, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: TripMemoriesScreenProps) {
   const { tripId } = useParams();
   return <MemoriesContent key={tripId} tripId={tripId} posts={posts} members={members} timeZone={timeZone} />;
@@ -89,7 +93,7 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
     return () => { cancelled = true; };
   }, [tripId, members]);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
   useEffect(() => { if (saved || alreadySaved) navigate(location.pathname, { replace: true, ...inheritNoBack(location, null) }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Silent refresh (T121): no `refreshing`/`refreshError`; a load that starts meanwhile bumps `epoch` and the older answer is dropped. The detail of a memory
   // (comments, likes) is not refreshed here: it would step over a comment draft.
@@ -118,18 +122,18 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
       epoch.current += 1;
       if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-      setRefreshing(true); setRefreshError(false);
+      setRefreshing(true); setRefreshError(undefined);
       try {
         const result = await posts.list(tripId);
         if (cancelled) return;
         if (result.ok) setState({ kind: "ready", posts: merge(result.value, localPost.current) });
         else if (["network", "server"].includes(result.error.kind)) {
-          setRefreshError(true);
+          setRefreshError(`${networkNotice(result.error, refreshFailure)} ${keptSaved}`);
           setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
         } else setState({ kind: "error", error: result.error });
       } catch {
         if (cancelled) return;
-        setRefreshError(true);
+        setRefreshError(`${refreshFailure} ${keptSaved}`);
         setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
       } finally {
         if (!cancelled) setRefreshing(false);
@@ -158,7 +162,7 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
       </div> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdos…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
-        <Feedback variant="error">No pudimos actualizar los recuerdos. Los cambios guardados se conservan.</Feedback>
+        <Feedback variant="error">{refreshError}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar recuerdos</Button>
       </div> : null}
       {state.kind === "loading" ? <LoadingState label="Cargando recuerdos…" /> : null}

@@ -245,6 +245,19 @@ describe("PostDetailScreen failures", () => {
     expect(container.textContent).toContain("No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.");
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
   });
+  it("un timeout al actualizar el recuerdo tiene su propio texto y conserva lo cargado (T150)", async () => {
+    const { container, rerender } = await open(vi.fn().mockResolvedValue(ok(detail(5))));
+    await rerender(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }));
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("No pudimos actualizar el recuerdo");
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("una conexión caída al actualizar el recuerdo conserva el texto de siempre (T150)", async () => {
+    const { container, rerender } = await open(vi.fn().mockResolvedValue(ok(detail(5))));
+    await rerender(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }));
+    expect(container.textContent).toContain("No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
 });
 
 const type = async (container: HTMLElement, name: string, value: string) => {

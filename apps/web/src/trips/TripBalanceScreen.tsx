@@ -28,6 +28,10 @@ const excerpt = (description: string | null) => {
   return text === "" ? "Recuerdo sin texto" : text.length > 80 ? `${text.slice(0, 80)}…` : text;
 };
 
+/** El refresco fallido: solo cambia la primera frase; la promesa sobre lo que queda en pantalla es la misma para cualquier causa. */
+const refreshFailure = "No pudimos actualizar el balance.";
+const outdated = "Lo que ves puede estar desactualizado.";
+
 export function TripBalanceScreen({ balance, posts, members }: TripBalanceScreenProps) {
   const { tripId } = useParams();
   return <BalanceContent key={tripId} tripId={tripId} balance={balance} posts={posts} members={members} />;
@@ -39,12 +43,12 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
   /** Only the latest request may write: an older answer that arrives late is discarded. */
   const generation = useRef(0);
 
   const fail = (error: TripFailure) => {
-    if (["network", "server"].includes(error.kind)) { setRefreshError(true); setState((current) => current.kind === "ready" ? current : { kind: "error", error }); }
+    if (["network", "server"].includes(error.kind)) { setRefreshError(`${networkNotice(error, refreshFailure)} ${outdated}`); setState((current) => current.kind === "ready" ? current : { kind: "error", error }); }
     else setState({ kind: "error", error });
   };
   /** `silent` (automatic refresh) shows no indicator: only the manual refresh and the first load do. */
@@ -52,7 +56,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
     const mine = ++generation.current;
     if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
     setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-    if (!silent) { setRefreshing(true); setRefreshError(false); }
+    if (!silent) { setRefreshing(true); setRefreshError(undefined); }
     try {
       const result = await balance.get(tripId);
       if (mine !== generation.current) return;
@@ -70,7 +74,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       ]);
       if (mine !== generation.current) return;
       setState({ kind: "ready", balance: value, people, titles });
-      if (silent) setRefreshError(false);
+      if (silent) setRefreshError(undefined);
     } catch {
       if (mine === generation.current) fail({ kind: "network" });
     } finally {
@@ -104,7 +108,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       </div> : null}
       {state.kind === "ready" ? <>
         {refreshing ? <LoadingState label="Actualizando balance…" /> : null}
-        {refreshError ? <Feedback variant="error">No pudimos actualizar el balance. Lo que ves puede estar desactualizado.</Feedback> : null}
+        {refreshError ? <Feedback variant="error">{refreshError}</Feedback> : null}
         <div className="activity-detail balance-refresh"><Button variant="secondary" onClick={() => { void load(); }}>Actualizar balance</Button>
           {state.people.role === "admin" ? <Link className="trips-settings-link" to={`/trips/${tripId}/config`}>Configurar modo de gastos</Link> : null}
         </div>
