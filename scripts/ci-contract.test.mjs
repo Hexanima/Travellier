@@ -39,6 +39,28 @@ describe('integration test job', () => {
     assert.equal(integration.env?.TZ, 'UTC')
   })
 
+  it('caches the mongodb binaries where the package downloads them', () => {
+    const cacheStep = integration.steps.find((step) =>
+      String(step.uses ?? '').startsWith('actions/cache'),
+    )
+
+    assert.ok(cacheStep, 'missing the mongodb binaries cache step')
+
+    const downloadDir = integration.env?.MONGOMS_DOWNLOAD_DIR
+
+    assert.ok(downloadDir, 'missing MONGOMS_DOWNLOAD_DIR in the job env')
+    assert.doesNotMatch(
+      String(downloadDir),
+      /~/,
+      'mongodb-memory-server does not expand "~": use an absolute path',
+    )
+    assert.equal(
+      String(cacheStep.with.path).trim(),
+      String(downloadDir).trim(),
+      'the cached path must be the download path',
+    )
+  })
+
   it('keeps the integration suite out of the quality job', () => {
     for (const step of jobs.quality.steps) {
       assert.doesNotMatch(String(step.run ?? ''), /test:integration/)
@@ -63,11 +85,17 @@ describe('integration test job', () => {
   })
 })
 
+// Minutos reservados para checkout, install, cap:sync:android, cap:smoke:bundle y sdkmanager.
+const preparationMarginMinutes = 10
+
+const failureCondition = (stepId) =>
+  new RegExp(`steps\\.${stepId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.outcome\\s*==\\s*'failure'`)
+
 describe('android emulator job', () => {
   it('boots a cold, freshly created emulator', () => {
     for (const step of emulatorSteps) {
       assert.match(String(step.with['emulator-options']), /-no-snapshot/)
-      assert.notEqual(step.with['force-avd-creation'], false)
+      assert.equal(step.with['force-avd-creation'], true)
       assert.ok(step.with['emulator-boot-timeout'], 'missing emulator-boot-timeout')
       assert.match(String(step.with['pre-emulator-launch-script']), /adb start-server/)
     }
@@ -79,8 +107,22 @@ describe('android emulator job', () => {
     const [attempt, retry] = emulatorSteps
     assert.ok(attempt.id, 'the first emulator attempt needs an id')
     assert.equal(attempt['continue-on-error'], true)
-    assert.match(String(retry.if), new RegExp(`steps\.${attempt.id}\.outcome`))
+    assert.match(String(retry.if), failureCondition(attempt.id))
     assert.doesNotMatch(String(retry['continue-on-error'] ?? ''), /true/)
+  })
+
+  it('kills a stale emulator between both attempts', () => {
+    const [attempt, retry] = emulatorSteps
+    const attemptIndex = android.steps.indexOf(attempt)
+    const retryIndex = android.steps.indexOf(retry)
+    const cleanupIndex = android.steps.findIndex((step) => /emu kill/.test(String(step.run ?? '')))
+
+    assert.notEqual(cleanupIndex, -1, 'missing the stale emulator cleanup step')
+    assert.ok(
+      attemptIndex < cleanupIndex && cleanupIndex < retryIndex,
+      'the cleanup step must sit between both attempts',
+    )
+    assert.match(String(android.steps[cleanupIndex].if), failureCondition(attempt.id))
   })
 
   it('bounds every attempt inside the job timeout', () => {
@@ -89,7 +131,10 @@ describe('android emulator job', () => {
       return sum + step['timeout-minutes']
     }, 0)
 
-    assert.ok(android['timeout-minutes'] >= total, 'the job timeout must fit both attempts')
+    assert.ok(
+      android['timeout-minutes'] >= total + preparationMarginMinutes,
+      `the job timeout must fit both attempts plus ${preparationMarginMinutes} minutes of preparation`,
+    )
   })
 
   it('waits for the boot and dismisses system dialogs before instrumenting', () => {

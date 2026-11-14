@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: UTC
+      MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v5
@@ -36,7 +37,7 @@ jobs:
       - name: Restore the in-memory MongoDB binaries
         uses: actions/cache@v4
         with:
-          path: ~/.cache/mongodb-binaries
+          path: ${{ runner.temp }}/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: |
             mongodb-binaries-${{ runner.os }}-
@@ -45,7 +46,8 @@ jobs:
 
   android-native:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    # 25 + 25 minutos de los dos intentos mas 10 minutos de preparacion.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -91,6 +93,12 @@ jobs:
             adb start-server
             adb devices
           script: bash ../test/run-android-native-smoke.sh
+      - name: Clean up a stale emulator
+        if: steps.smoke-attempt-1.outcome == 'failure'
+        run: |
+          adb devices | awk 'NR > 1 && NF { print $1 }' | xargs -r -I{} adb -s {} emu kill || true
+          pkill -f qemu-system || true
+          adb kill-server || true
       - name: Retry native bridge on API ${{ matrix.api-level }}
         id: smoke-attempt-2
         if: steps.smoke-attempt-1.outcome == 'failure'
