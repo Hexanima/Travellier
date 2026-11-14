@@ -270,6 +270,18 @@ describe.each(ops)("members: rejections on $name", ({ viewer, method, run }) => 
     expect(document.body.textContent).toContain("El titular debe transferir o eliminar el viaje.");
   });
 
+  it("un timeout tiene su propio texto dentro del diálogo, que sigue abierto (T150)", async () => {
+    await withFailure({ kind: "network", code: "TimeoutError" }, listing([nico, bea, ana, luz], ids[viewer]));
+    expect(dialog()).not.toBeNull();
+    expect(alertText()).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+  });
+
+  it("una conexión caída conserva el texto de siempre (T150)", async () => {
+    await withFailure({ kind: "network", code: "NetworkError" }, listing([nico, bea, ana, luz], ids[viewer]));
+    expect(alertText()).not.toContain("tardó demasiado");
+    expect(alertText()).toContain("Intentá nuevamente");
+  });
+
   it("a network failure stays inside the dialog and can be retried", async () => {
     const { list, failing } = await withFailure({ kind: "network" }, listing([nico, bea, ana, luz], ids[viewer]));
     expect(dialog()).not.toBeNull();

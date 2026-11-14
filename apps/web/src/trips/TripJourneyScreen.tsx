@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, Modal, TextField } from "../components/index.js";
 import { TransportCostSummary } from "./TransportCostSummary.js";
 import type { TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
 import { TransportForm, type TransportSaveCoordinator } from "./TransportForm.js";
 import type { JourneyDestination, JourneyTransport, TransportDirection, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
+
+const addDestinationFailure = "No pudimos agregar el destino. Intentá nuevamente.";
+const deleteDestinationFailure = "No pudimos eliminar el destino. Intentá nuevamente.";
 
 /** `itinerary` is optional: it only supplies the transport cost totals, which the server computes per currency. */
 type Props = { trips: Pick<TripManagementApi, "get">; journey: TripJourneyApi; itinerary?: TripItineraryApi };
@@ -129,10 +133,10 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
         setDestinationName("");
       } else {
         setDestinationError(result.error.kind === "validation" ? "Ingresá un nombre válido para el destino."
-          : "No pudimos agregar el destino. Intentá nuevamente.");
+          : networkNotice(result.error, addDestinationFailure));
       }
     } catch {
-      setDestinationError("No pudimos agregar el destino. Intentá nuevamente.");
+      setDestinationError(addDestinationFailure);
     } finally {
       addingRef.current = false;
       setAdding(false);
@@ -155,7 +159,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
         setDeleteError(result.error.kind === "last-destination" ? "El viaje debe conservar al menos un destino."
           : result.error.kind === "deletion-conflict" ? "Este destino tiene registros asociados y no se puede eliminar."
           : result.error.kind === "not-found" || result.error.kind === "forbidden" ? "El destino ya no existe o no tenés permiso para eliminarlo."
-          : "No pudimos eliminar el destino. Intentá nuevamente.");
+          : networkNotice(result.error, deleteDestinationFailure));
         if (result.error.kind === "deletion-conflict") {
           const updated = confirmedJourney.current.destinations.map((destination) => destination.id === deleteTarget.id
             ? { ...destination, hasRecords: true } : destination);
@@ -168,7 +172,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
         }
       }
     } catch {
-      setDeleteError("No pudimos eliminar el destino. Intentá nuevamente.");
+      setDeleteError(deleteDestinationFailure);
     } finally {
       deletingRef.current = false;
       setDeleting(false);

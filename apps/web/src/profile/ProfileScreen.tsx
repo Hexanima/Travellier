@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
+
 import type { AuthApi, AuthenticatedProfile } from "../auth/auth-api.js";
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
 import { initials, displayName } from "./display-name.js";
@@ -9,12 +11,14 @@ import type { PushDeviceService } from "../push/push-device-service.js";
 
 type ProfileScreenProps = { auth?: Partial<AuthApi>; push?: PushDeviceService };
 
+const saveFailure = "No pudimos guardar tu perfil. Intentá nuevamente.";
+
 export function ProfileScreen({ auth, push }: ProfileScreenProps) {
   const [profile, setProfile] = useState<AuthenticatedProfile>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
   const [nameError, setNameError] = useState<string>();
   const [success, setSuccess] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string>();
@@ -58,7 +62,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
     const form = event.currentTarget;
     const name = String(new FormData(form).get("name") ?? "").trim();
     setNameError(undefined);
-    setSaveError(false);
+    setSaveError(undefined);
     setSuccess(false);
 
     if (name === "") {
@@ -74,7 +78,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
       if (selectedFile !== undefined) {
         const uploaded = await auth?.uploadAvatar?.(selectedFile);
         if (!uploaded?.ok) {
-          setSaveError(true);
+          setSaveError(networkNotice(uploaded?.error, saveFailure));
           return;
         }
         avatar = uploaded.value.avatar;
@@ -83,13 +87,13 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
       const result = await auth?.updateProfile?.(avatar === undefined ? { name } : { name, avatar });
       if (!result?.ok) {
         setNameError(result?.error.fields?.find((field) => field.field === "name")?.message);
-        setSaveError(true);
+        setSaveError(networkNotice(result?.error, saveFailure));
         return;
       }
 
       const refreshed = await auth?.getProfile?.();
       if (!refreshed?.ok) {
-        setSaveError(true);
+        setSaveError(networkNotice(refreshed?.error, saveFailure));
         return;
       }
 
@@ -100,7 +104,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
       if (fileInput) fileInput.value = "";
       setSuccess(true);
     } catch {
-      setSaveError(true);
+      setSaveError(saveFailure);
     } finally {
       setSaving(false);
     }
@@ -152,7 +156,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
               />
               {fileError ? <p id="profile-avatar-error" className="ui-field__error" role="alert">{fileError}</p> : null}
             </div>
-            {saveError ? <Feedback variant="error">No pudimos guardar tu perfil. Intentá nuevamente.</Feedback> : null}
+            {saveError ? <Feedback variant="error">{saveError}</Feedback> : null}
             {success ? <Feedback variant="success">Perfil guardado correctamente.</Feedback> : null}
             <Button type="submit" loading={saving}>Guardar cambios</Button>
           </form>

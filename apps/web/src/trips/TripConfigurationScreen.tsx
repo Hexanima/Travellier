@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, SelectField } from "../components/index.js";
 import { loadPeople } from "./photo-people.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { MemberTripDetail, TripConfigurationUpdate, TripDetail, TripManagementApi } from "./trip-management-api.js";
+
+const configurationFailure = "No pudimos guardar la configuración. Intentá nuevamente.";
 
 type ConfigValues = Required<TripConfigurationUpdate>;
 
@@ -22,7 +25,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
   const [values, setValues] = useState<ConfigValues>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<"not-found" | "other">();
-  const [saveError, setSaveError] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -64,7 +67,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
     if (!tripId || !values || detail?.kind !== "member" || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
-    setSaveError(false);
+    setSaveError(undefined);
     setSaved(false);
     setForbiddenNotice(false);
     setNoChanges(false);
@@ -95,10 +98,10 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
         setValues(undefined);
         setLoadError("not-found");
       } else {
-        setSaveError(true);
+        setSaveError(networkNotice(result.error, configurationFailure));
       }
     } catch {
-      setSaveError(true);
+      setSaveError(configurationFailure);
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -145,7 +148,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
                     ? "Los gastos anteriores se conservan. Los que no tienen pagador siguen sin ese dato."
                     : "Los gastos anteriores se conservan. No se calcularán balances mientras esté activo el modo registro."}</Feedback>
                 ) : null}
-                {saveError ? <Feedback variant="error">No pudimos guardar la configuración. Intentá nuevamente.</Feedback> : null}
+                {saveError ? <Feedback variant="error">{saveError}</Feedback> : null}
                 {forbiddenNotice ? <Feedback variant="error">Ya no tenés permiso para cambiar el modo de gastos. No se guardó ningún cambio.</Feedback> : null}
                 {noChanges ? <Feedback>No hay cambios para guardar.</Feedback> : null}
                 {saved ? <Feedback variant="success">Configuración guardada.</Feedback> : null}

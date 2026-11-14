@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState, Modal, SelectField } from "../components/index.js";
 import { displayName } from "../profile/display-name.js";
 import { canDeleteTrip, canLeaveDirectly, memberActions } from "./member-permissions.js";
 import { inheritNoBack, noticesOrigin, originLabel, readOrigin } from "./post-origin.js";
-import type { MemberTripDetail, TripManagementApi } from "./trip-management-api.js";
+import type { MemberTripDetail, TripFailure, TripManagementApi } from "./trip-management-api.js";
 import type { TripMemberList, TripMemberRole, TripMemberSummary, TripMembersApi } from "./trip-members-api.js";
 import { useInTripShell } from "./trip-state.js";
 import { useRefreshGuard, useTripRefreshLoader } from "./trip-refresh.js";
@@ -74,6 +75,8 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
   const [memberList, setMemberList] = useState<TripMemberList>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<"not-found" | "other">();
+  /** El fallo que dejó la carga en "other": sirve para que un timeout tenga su propio texto. */
+  const [loadFailure, setLoadFailure] = useState<TripFailure>();
   const [message, setMessage] = useState<{ text: string; error: boolean }>();
   const [dialog, setDialog] = useState<Dialog>();
   const [acknowledged, setAcknowledged] = useState(false);
@@ -92,17 +95,20 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
     epoch.current += 1;
     setLoading(true);
     setLoadError(undefined);
+    setLoadFailure(undefined);
     setTrip(undefined);
     setMemberList(undefined);
     try {
       const detail = await trips.get(tripId);
       if (!detail.ok || detail.value.kind !== "member") {
         setLoadError(detail.ok || detail.error.kind === "not-found" ? "not-found" : "other");
+        if (!detail.ok) setLoadFailure(detail.error);
         return;
       }
       const listing = await members.list(tripId);
       if (!listing.ok) {
         setLoadError(listing.error.kind === "not-found" ? "not-found" : "other");
+        setLoadFailure(listing.error);
         return;
       }
       if (!listing.value.members.some((member) => member.userId === listing.value.currentUserId)) {
@@ -242,7 +248,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
       } else if (result.error.kind === "forbidden" || result.error.kind === "not-found") {
         await reloadAfterRejection(permissionChanged);
       } else {
-        setDialogError(failText);
+        setDialogError(networkNotice(result.error, failText));
       }
     } catch {
       setDialogError(failText);
@@ -415,7 +421,7 @@ export function TripMembersScreen({ trips, members, apiBaseUrl, sharing }: {
         {loading ? <LoadingState label="Cargando miembros…" /> : null}
         {!loading && loadError ? (
           <div className="trips-state">
-            <Feedback variant="error">{loadError === "not-found" ? "No encontramos este viaje o ya no sos integrante." : "No pudimos cargar los miembros."}</Feedback>
+            <Feedback variant="error">{loadError === "not-found" ? "No encontramos este viaje o ya no sos integrante." : networkNotice(loadFailure, "No pudimos cargar los miembros.")}</Feedback>
             {loadError === "other" ? <Button onClick={() => void load()}>Reintentar</Button> : null}
           </div>
         ) : null}

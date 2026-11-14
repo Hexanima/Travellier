@@ -1,10 +1,13 @@
 import { useId, useRef, useState, type FormEvent } from "react";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, SelectField, TextField } from "../components/index.js";
 import type { JourneyTransport, TransportDirection, TransportType, TripJourneyApi } from "./trip-journey-api.js";
 import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
 import { costMessages, formValuesFromTransport, prepareTransportInput, type DestinationNeighbors, type TransportFormValues, type UrbanStepFormValues } from "./transport-form-state.js";
 import { currentTimeZone } from "./transport-local-time.js";
+
+const transportSaveFailure = "No pudimos guardar el transporte. Intentá nuevamente.";
 
 /** The server code decides the text of the cost error when it is one the form knows; otherwise the server message stays. */
 const serverCostMessage = (code: string | undefined, message: string): string =>
@@ -82,10 +85,10 @@ export function TransportForm({ tripId, destinationId, direction, existing, comp
         setErrors(Object.fromEntries(result.error.fields.map(({ field, code, message }) => [field.replace(/\.estimatedAt$/, ".estimatedTime"), field === "costPerPerson" ? serverCostMessage(code, message) : message])));
         setSaveError("Revisá los datos del transporte e intentá nuevamente.");
       } else {
-        setSaveError("No pudimos guardar el transporte. Intentá nuevamente.");
+        setSaveError(networkNotice(result.error, transportSaveFailure));
       }
     } catch {
-      setSaveError("No pudimos guardar el transporte. Intentá nuevamente.");
+      setSaveError(transportSaveFailure);
     } finally {
       savingRef.current = false;
       setSaving(false);
