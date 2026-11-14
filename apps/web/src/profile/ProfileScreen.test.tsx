@@ -118,6 +118,23 @@ describe("ProfileScreen", () => {
     expect(container.textContent).toContain("nico@example.test");
   });
 
+  it("un timeout al cargar el perfil tiene su propio texto (T150)", async () => {
+    const getProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const container = await render({ getProfile });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar tu perfil");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Reintentar")).toBe(true);
+  });
+
+  it("una conexión caída al cargar el perfil conserva el texto de siempre (T150)", async () => {
+    const getProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const container = await render({ getProfile });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos cargar tu perfil.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+
   it("displays an existing avatar through its temporary view URL", async () => {
     const container = await render({
       getProfile: vi.fn().mockResolvedValue({ ok: true, value: { ...profile, avatar: "avatars/user/old.jpg" } }),

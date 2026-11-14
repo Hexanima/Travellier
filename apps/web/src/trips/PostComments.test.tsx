@@ -862,6 +862,25 @@ describe("comments panel: edit by authorship (T125)", () => {
     await click(button(item(container, 5), "Guardar"));
     expect(item(container, 5).querySelector('[role="alert"]')?.textContent).toBe("Ya no podés editar este comentario.");
   });
+  it("un timeout al editar tiene su propio texto y conserva la promesa del borrador (T150)", async () => {
+    const update = vi.fn().mockResolvedValue(fail("network", { code: "TimeoutError" }));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(item(container, 5).querySelector('[role="alert"]')?.textContent)
+      .toBe("La conexión tardó demasiado. Intentá nuevamente. Tu texto se conserva. Podés volver a guardar.");
+    expect(field(container, `comment-edit-${itineraryId(5)}`)?.value).toBe("nuevo");
+  });
+  it("una conexión caída al editar conserva el texto de siempre (T150)", async () => {
+    const update = vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" }));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(item(container, 5).querySelector('[role="alert"]')?.textContent)
+      .toBe("No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar.");
+  });
 });
 
 describe("comments panel: delete (T128)", () => {

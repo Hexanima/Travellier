@@ -12,6 +12,9 @@ import { useCommentDraft } from "./use-comment-drafts.js";
 import { canDeleteContent, canEditContent } from "./authorship.js";
 
 const authorOnlyMessage = "Solo el autor puede editar este comentario. Tu texto se conserva.";
+/** El fallo indeterminado al editar: solo cambia la primera frase; la promesa sobre el texto escrito es la misma siempre. */
+const editFailure = "No pudimos guardar los cambios.";
+const editKept = "Tu texto se conserva. Podés volver a guardar.";
 const sessionExpired = "Tu sesión venció. Volvé a iniciar sesión.";
 const validationText = (error: TripFailure) => {
   const code = error.fields?.find((item) => item.field === "text")?.code;
@@ -126,9 +129,9 @@ export function CommentItem({ comment, author, canEdit = true, canDelete = false
         if (alive.current) { setMessage(undefined); focus.current = form.current?.contains(document.activeElement) ? "button" : undefined; setEditing(false); }
         return;
       }
-      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.", authorOnlyMessage) ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
+      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.", authorOnlyMessage) ?? { variant: "error", text: `${networkNotice(result.error, editFailure)} ${editKept}` });
     } catch {
-      if (alive.current) setMessage({ variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
+      if (alive.current) setMessage({ variant: "error", text: `${editFailure} ${editKept}` });
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);

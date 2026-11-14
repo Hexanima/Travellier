@@ -12,12 +12,13 @@ import type { PushDeviceService } from "../push/push-device-service.js";
 type ProfileScreenProps = { auth?: Partial<AuthApi>; push?: PushDeviceService };
 
 const saveFailure = "No pudimos guardar tu perfil. Intentá nuevamente.";
+const loadFailure = "No pudimos cargar tu perfil.";
 
 export function ProfileScreen({ auth, push }: ProfileScreenProps) {
   const [profile, setProfile] = useState<AuthenticatedProfile>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const [loadError, setLoadError] = useState<string>();
   const [saveError, setSaveError] = useState<string>();
   const [nameError, setNameError] = useState<string>();
   const [success, setSuccess] = useState(false);
@@ -36,7 +37,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
-    setLoadError(false);
+    setLoadError(undefined);
 
     try {
       const result = await auth?.getProfile?.();
@@ -44,10 +45,10 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
         setProfile(result.value);
         await showAvatar(result.value);
       } else {
-        setLoadError(true);
+        setLoadError(networkNotice(result?.error, loadFailure));
       }
     } catch {
-      setLoadError(true);
+      setLoadError(loadFailure);
     } finally {
       setLoading(false);
     }
@@ -119,7 +120,7 @@ export function ProfileScreen({ auth, push }: ProfileScreenProps) {
         {loading ? <LoadingState label="Cargando perfil…" /> : null}
         {loadError ? (
           <>
-            <Feedback variant="error">No pudimos cargar tu perfil.</Feedback>
+            <Feedback variant="error">{loadError}</Feedback>
             <Button onClick={() => void loadProfile()}>Reintentar</Button>
           </>
         ) : null}
