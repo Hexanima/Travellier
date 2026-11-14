@@ -60,11 +60,12 @@ describe("balance: tarjetas por moneda, saldos y compensaciones", () => {
     expect(action).toContain("display: inline-flex");
     expect(action).toContain("align-items: center");
   });
-  it("los vacíos apilan enlaces de 44px solo bajo .trip-balance", () => {
-    expect(ruleBody(".trip-balance .trips-empty")).toContain("display: grid");
-    const link = ruleBody(".trip-balance .trips-empty a");
-    expect(link).toContain("min-height: 44px");
-    expect(link).toContain("display: inline-flex");
+  it("los vacíos apilan sus acciones solo bajo .trip-balance, sin recortar la altura del botón", () => {
+    const empty = ruleBody(".trip-balance .trips-empty");
+    expect(empty).toContain("display: grid");
+    expect(empty).toContain("gap: 12px");
+    // Las acciones son botones de 52px: ningún override con ámbito les baja la altura ni les quita el ancho disponible.
+    expect(css).not.toContain(".trip-balance .trips-empty a {");
   });
   it("el enlace «Configurar modo de gastos» del balance llega a 44px", () => {
     const body = ruleBody(".trip-balance .balance-refresh .trips-settings-link");

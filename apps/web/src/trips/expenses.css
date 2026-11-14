@@ -20,7 +20,7 @@
 .trip-balance .balance-pending-item .trips-settings-link { display: inline-flex; align-items: center; min-height: 44px; }
 .trip-balance .trips-empty { display: grid; gap: 12px; }
 .trip-balance .trips-empty p { margin: 0; }
-.trip-balance .trips-empty a { display: inline-flex; align-items: center; min-height: 44px; }
+/* Las acciones del vacío son botones (contrato base .trips-empty .ui-button): no hace falta recortar su altura a 44px. */
 
 /* Editor «Pagos y reparto» */
 .expense-split .expense-split__total { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; color: var(--ui-color-text); font-variant-numeric: tabular-nums; }

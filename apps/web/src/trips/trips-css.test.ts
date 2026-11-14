@@ -79,7 +79,9 @@ describe("Mis viajes y Explorar", () => {
 
   it("las entradas y el vacío usan botones de ancho completo acotados a su contenedor", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-entry-actions .ui-button")).toContain("width: 100%");
-    expect(ruleBody(app, ".trips-panel--catalog .trips-empty .ui-button")).toContain("width: 100%");
+    // El ancho del vacío vive una sola vez, en la regla base compartida por Mis viajes, Explorar, itinerario, Diario y balance.
+    expect(baseBody(".trips-empty .ui-button")).toContain("width: 100%");
+    expect(app).not.toContain(".trips-panel--catalog .trips-empty .ui-button");
     expect(app).not.toMatch(/^\.ui-button \{[^}]*width: 100%/m);
   });
   it("la navegación Cuenta agrupa botones de 52px al ancho disponible con gap de 12px", () => {

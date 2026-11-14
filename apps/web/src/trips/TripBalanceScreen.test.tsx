@@ -454,6 +454,25 @@ describe("TripBalanceScreen: presentation hooks", () => {
     const { container } = await render();
     expect(button(container, "Actualizar balance")?.classList.contains("ui-button--secondary")).toBe(true);
   });
+  it("el vacío del modo registro ofrece un primario y un secundario, no dos enlaces pelados (T153)", async () => {
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(register)) });
+    const expenses = link(container, "Ver gastos del viaje")!;
+    const memories = link(container, "Ver recuerdos")!;
+    // La acción principal es ver los gastos registrados; ver recuerdos la acompaña como secundaria.
+    expect(expenses.classList.contains("ui-button")).toBe(true);
+    expect(expenses.classList.contains("ui-button--secondary")).toBe(false);
+    expect(memories.classList.contains("ui-button")).toBe(true);
+    expect(memories.classList.contains("ui-button--secondary")).toBe(true);
+    expect(expenses.closest(".trips-empty")).toBe(memories.closest(".trips-empty"));
+  });
+  it("el vacío sin gastos completos ofrece la creación como botón primario (T153)", async () => {
+    const empty = balance({ currencies: [], includedExpenseCount: 0 });
+    const { container } = await render({ get: vi.fn().mockResolvedValue(ok(empty)) });
+    const action = link(container, "Nuevo recuerdo")!;
+    expect(action.closest(".trips-empty")).not.toBeNull();
+    expect(action.classList.contains("ui-button")).toBe(true);
+    expect(action.classList.contains("ui-button--secondary")).toBe(false);
+  });
   it("register mode keeps its links without balance sections", async () => {
     const { container } = await render({ get: vi.fn().mockResolvedValue(ok(register)) });
     expect(container.querySelector(".balance-currency")).toBeNull();

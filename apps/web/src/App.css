@@ -252,6 +252,8 @@ dd {
 }
 
 .trips-empty p { margin: 0 0 16px; }
+/* T153: la acción de un vacío es un botón al ancho disponible (DESIGN.md «Buttons»), igual en Mis viajes, Explorar, itinerario, Diario y balance. */
+.trips-empty .ui-button { width: 100%; }
 .trips-state { display: grid; justify-items: start; gap: 12px; }
 .trips-secondary { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
 .trips-back { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 12px; }
@@ -323,7 +325,6 @@ dd {
 .trips-panel--catalog .trips-secondary a { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; font-weight: 600; text-decoration: none; }
 .trips-panel--catalog .trips-secondary .ui-button { width: 100%; }
 .trips-panel--catalog .trips-empty h2 { margin: 0 0 8px; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
-.trips-panel--catalog .trips-empty .ui-button { width: 100%; }
 
 .trips-shell .trip-form-panel > p { font-size: 1rem; line-height: 1.5rem; color: var(--ui-color-muted); }
 .trip-form-panel .auth-form { gap: 20px; }

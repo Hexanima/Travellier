@@ -110,8 +110,8 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
         {state.balance.expenseMode === "register"
           ? <section className="trips-empty">
             <p>Este viaje está en modo registro: no se calculan deudas ni compensaciones. Los gastos siguen registrados en cada recuerdo.</p>
-            <Link to={`/trips/${tripId}/itinerary`}>Ver gastos del viaje</Link>
-            <Link to={`/trips/${tripId}/memories`}>Ver recuerdos</Link>
+            <Link className="ui-button" to={`/trips/${tripId}/itinerary`}>Ver gastos del viaje</Link>
+            <Link className="ui-button ui-button--secondary" to={`/trips/${tripId}/memories`}>Ver recuerdos</Link>
           </section>
           : <BalanceSections tripId={tripId ?? ""} ready={state} create={create} location={location} navigate={navigate} />}
       </> : null}
@@ -133,7 +133,7 @@ function BalanceSections({ tripId, ready, create, location, navigate }: { tripId
     {balance.currencies.length === 0
       ? <section className="trips-empty">
         <p>Todavía no hay gastos completos para calcular un balance.</p>
-        <Link to={create}>Nuevo recuerdo</Link>
+        <Link className="ui-button" to={create}>Nuevo recuerdo</Link>
       </section>
       : <p className="itinerary-secondary">Las compensaciones son sugerencias: la app no registra transferencias ni cobros.</p>}
     {balance.currencies.map(({ currency, expenseCount, balances, settlements }) => <section key={currency} className="activity-detail balance-currency" aria-labelledby={`balance-${currency}`}>

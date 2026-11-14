@@ -193,8 +193,8 @@ describe("accesos de la cabecera (T153)", () => {
     expect(group).toContain("display: grid");
     expect(group).toContain("gap: 12px");
     expect(ruleBody(".itinerary-header-actions .ui-button")).toContain("width: 100%");
-    // Acotado al vacío del itinerario: los vacíos de Diario, Fotos y Balance comparten el shell y deciden su propio ancho.
-    expect(ruleBody(".itinerary-empty .ui-button")).toContain("width: 100%");
+    // El vacío del itinerario toma el ancho de la regla base .trips-empty .ui-button, compartida con Diario y balance: acá no se repite.
+    expect(css).not.toContain(".itinerary-empty .ui-button");
     expect(css).not.toContain(".itinerary-shell .trips-empty");
   });
 });
