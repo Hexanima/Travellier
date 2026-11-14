@@ -4,6 +4,16 @@ import { err, ok, UnknownError, type ObjectStorageCleanupPort, type ObjectStorag
 
 type StorageCommand = GetObjectCommand | PutObjectCommand;
 
+/**
+ * Configuracion del cliente S3 tomada del entorno. `S3_FORCE_PATH_STYLE=true` pide el
+ * direccionamiento path-style que necesita un S3 local alcanzado por nombre de host;
+ * cualquier otro valor deja el comportamiento por defecto del SDK.
+ */
+export const readS3ClientConfig = (
+  environment: Record<string, string | undefined>,
+): { forcePathStyle?: true } =>
+  environment.S3_FORCE_PATH_STYLE?.trim() === "true" ? { forcePathStyle: true } : {};
+
 /** S3 reports a missing object as `NotFound` (HeadObject) or `NoSuchKey`, with status 404. */
 const isMissingObject = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) return false;

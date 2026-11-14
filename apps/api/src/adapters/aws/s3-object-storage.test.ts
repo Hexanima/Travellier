@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 
-import { createS3ObjectCleanup, createS3ObjectStorage } from "./s3-object-storage.js";
+import { createS3ObjectCleanup, createS3ObjectStorage, readS3ClientConfig } from "./s3-object-storage.js";
 
 describe("createS3ObjectStorage", () => {
   it("signs a PUT for the exact avatar key and content type", async () => {
@@ -128,5 +128,24 @@ describe("createS3ObjectCleanup", () => {
     const result = await withClient(vi.fn().mockRejectedValue(failure("AccessDenied", 403))).listObjects({ prefix: "trips/", maxKeys: 10 });
     expect(result).toMatchObject({ ok: false, error: { tag: "UnknownError" } });
     expect(JSON.stringify(result)).not.toMatch(/secret|photos|trips/);
+  });
+});
+
+describe("readS3ClientConfig", () => {
+  it("activa el direccionamiento path-style con \"true\"", () => {
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "true" })).toEqual({ forcePathStyle: true });
+  });
+
+  it("tolera espacios alrededor del valor", () => {
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: " true " })).toEqual({ forcePathStyle: true });
+  });
+
+  it("no activa nada sin la variable, vacia o con otro valor", () => {
+    expect(readS3ClientConfig({})).toEqual({});
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "" })).toEqual({});
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "   " })).toEqual({});
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "false" })).toEqual({});
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "TRUE" })).toEqual({});
+    expect(readS3ClientConfig({ S3_FORCE_PATH_STYLE: "1" })).toEqual({});
   });
 });
