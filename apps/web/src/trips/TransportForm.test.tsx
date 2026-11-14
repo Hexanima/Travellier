@@ -430,3 +430,23 @@ describe("TransportForm cost amounts", () => {
     expect(createTransport).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("TransportForm: causa del fallo de red al guardar (T150)", () => {
+  const save = async (error: { kind: string; code?: string }) => {
+    const { container, createTransport } = await render();
+    createTransport.mockResolvedValue({ ok: false, error });
+    await fillRoute(container);
+    await submit(container);
+    return container;
+  };
+  it("un timeout tiene su propio texto", async () => {
+    const container = await save({ kind: "network", code: "TimeoutError" });
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos guardar el transporte");
+  });
+  it("una conexión caída conserva el texto de siempre", async () => {
+    const container = await save({ kind: "network", code: "NetworkError" });
+    expect(container.textContent).toContain("No pudimos guardar el transporte. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+});

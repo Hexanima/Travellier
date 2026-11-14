@@ -164,6 +164,17 @@ describe("SpontaneousActivityForm", () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(button(container, "Aceptar")!.disabled).toBe(false);
   });
+  it("un timeout al cargar el itinerario tiene su propio texto y conserva el reintento (T150)", async () => {
+    const { container } = await open(newPath, seeded(), vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar el itinerario para validar el horario");
+    expect(button(container, "Reintentar")).toBeTruthy();
+  });
+  it("una conexión caída al cargar el itinerario conserva el texto de siempre (T150)", async () => {
+    const { container } = await open(newPath, seeded(), vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }));
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos cargar el itinerario para validar el horario. Revisá tu conexión e intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("a rejected itinerary request is also an error with Retry", async () => {
     const { container } = await open(newPath, seeded(), vi.fn().mockRejectedValue(new Error("down")));
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar el itinerario");

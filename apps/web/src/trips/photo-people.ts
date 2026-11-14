@@ -1,8 +1,8 @@
 import type { TripFailure } from "./trip-management-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 
-/** Who can be named. `loaded` is false until `members.list` answered with a valid list: without it nobody can be called a former member. */
-/** `failure` conserva el fallo del pedido cuando `loaded` es false: quien muestre un texto de red puede distinguir un timeout. */
+/** Who can be named. `loaded` is false until `members.list` answered with a valid list: without it nobody can be called a former member.
+ *  With `loaded` false, `failure` keeps the failure of that request: whoever shows a network text can tell a timeout apart. */
 export type PhotoPeople = { loaded: boolean; currentUserId?: string; role?: "admin" | "participant"; names: ReadonlyMap<string, string>; failure?: TripFailure };
 export const unknownPeople: PhotoPeople = { loaded: false, names: new Map() };
 
