@@ -103,6 +103,26 @@ describe("Trip screens", () => {
     expect(container.textContent).toContain("Patagonia");
   });
 
+  it("un timeout de la lista tiene su propio texto y conserva el reintento (T150)", async () => {
+    const list = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } })
+      .mockResolvedValueOnce({ ok: true, value: [trip] });
+    const container = await renderTrips({ list, create: vi.fn() });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("No pudimos cargar tus viajes");
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Reintentar")?.click());
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Patagonia");
+  });
+
+  it("una conexión caída de la lista conserva el texto de siempre (T150)", async () => {
+    const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }), create: vi.fn() });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar tus viajes. Intentá nuevamente.");
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("tardó demasiado");
+  });
+
   it("validates required fields without sending a request or asking for dates", async () => {
     const create = vi.fn();
     const container = await renderTrips({ list: vi.fn(), create }, "/trips/new");

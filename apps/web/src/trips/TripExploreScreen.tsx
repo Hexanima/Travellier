@@ -1,24 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import { inheritNoBack } from "./post-origin.js";
-import type { PublicTripDetail, TripDetail, TripManagementApi } from "./trip-management-api.js";
+import type { PublicTripDetail, TripDetail, TripFailure, TripManagementApi } from "./trip-management-api.js";
 
 export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "listPublic"> }) {
   const [items, setItems] = useState<PublicTripDetail[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  /** The failure travels with the state: its `code` is what tells a timeout from a dropped connection. */
+  const [loadError, setLoadError] = useState<{ error?: TripFailure }>();
 
   const load = useCallback(async () => {
     setLoading(true);
-    setLoadError(false);
+    setLoadError(undefined);
     try {
       const result = await trips.listPublic();
       if (result.ok) setItems(result.value.filter((trip) => trip.visibility === "public"));
-      else setLoadError(true);
+      else setLoadError({ error: result.error });
     } catch {
-      setLoadError(true);
+      setLoadError({});
     } finally {
       setLoading(false);
     }
@@ -40,7 +42,7 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
         {loading ? <LoadingState label="Cargando viajes públicos…" /> : null}
         {!loading && loadError ? (
           <div className="trips-state">
-            <Feedback variant="error">No pudimos cargar los viajes públicos. Intentá nuevamente.</Feedback>
+            <Feedback variant="error">{networkNotice(loadError.error, "No pudimos cargar los viajes públicos. Intentá nuevamente.")}</Feedback>
             <Button onClick={() => void load()}>Reintentar</Button>
           </div>
         ) : null}
@@ -78,14 +80,14 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
   const location = useLocation();
   const [detail, setDetail] = useState<TripDetail>();
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<"unavailable" | "other">();
-  const [joinError, setJoinError] = useState(false);
+  const [loadError, setLoadError] = useState<{ reason: "unavailable" } | { reason: "other"; error?: TripFailure }>();
+  const [joinError, setJoinError] = useState<{ error?: TripFailure }>();
   const [joining, setJoining] = useState(false);
   const joiningRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!tripId) {
-      setLoadError("unavailable");
+      setLoadError({ reason: "unavailable" });
       setLoading(false);
       return;
     }
@@ -95,14 +97,14 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
     try {
       const result = await trips.get(tripId);
       if (!result.ok) {
-        setLoadError(result.error.kind === "not-found" ? "unavailable" : "other");
+        setLoadError(result.error.kind === "not-found" ? { reason: "unavailable" } : { reason: "other", error: result.error });
       } else if (result.value.visibility !== "public") {
-        setLoadError("unavailable");
+        setLoadError({ reason: "unavailable" });
       } else {
         setDetail(result.value);
       }
     } catch {
-      setLoadError("other");
+      setLoadError({ reason: "other" });
     } finally {
       setLoading(false);
     }
@@ -114,19 +116,19 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
     if (!tripId || !detail || detail.visibility !== "public" || joiningRef.current) return;
     joiningRef.current = true;
     setJoining(true);
-    setJoinError(false);
+    setJoinError(undefined);
     try {
       const result = await trips.joinPublic(tripId);
       if (result.ok) {
         navigate("/trips", { replace: true, ...inheritNoBack(location) });
       } else if (result.error.kind === "not-found") {
         setDetail(undefined);
-        setLoadError("unavailable");
+        setLoadError({ reason: "unavailable" });
       } else {
-        setJoinError(true);
+        setJoinError({ error: result.error });
       }
     } catch {
-      setJoinError(true);
+      setJoinError({});
     } finally {
       joiningRef.current = false;
       setJoining(false);
@@ -141,10 +143,10 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
         {loading ? <LoadingState label="Cargando viaje…" /> : null}
         {!loading && loadError ? (
           <div className="trips-state">
-            <Feedback variant="error">{loadError === "unavailable"
+            <Feedback variant="error">{loadError.reason === "unavailable"
               ? "Este viaje no está disponible para unirse."
-              : "No pudimos cargar el viaje. Intentá nuevamente."}</Feedback>
-            {loadError === "other" ? <Button onClick={() => void load()}>Reintentar</Button> : null}
+              : networkNotice(loadError.error, "No pudimos cargar el viaje. Intentá nuevamente.")}</Feedback>
+            {loadError.reason === "other" ? <Button onClick={() => void load()}>Reintentar</Button> : null}
           </div>
         ) : null}
         {!loading && !loadError && detail ? (
@@ -157,7 +159,7 @@ export function PublicTripConfirmationScreen({ trips }: { trips: Pick<TripManage
             ) : (
               <>
                 <p>Al confirmar, vas a formar parte de este viaje como participante.</p>
-                {joinError ? <Feedback variant="error">No pudimos confirmar la unión. Intentá nuevamente.</Feedback> : null}
+                {joinError ? <Feedback variant="error">{networkNotice(joinError.error, "No pudimos confirmar la unión. Intentá nuevamente.")}</Feedback> : null}
                 <Button variant="secondary" onClick={() => void confirm()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
               </>
             )}
