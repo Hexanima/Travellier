@@ -7,9 +7,11 @@ export type NotificationsState = {
   items: TripNotification[]; phase: NotificationsPhase; error: TripFailure | undefined; hasMore: boolean;
   /** The last background refresh failed; what was loaded is kept. */
   refreshFailed: boolean;
+  /** That refresh´s failure: its `code` is what tells a timeout from a dropped connection. */
+  refreshError: TripFailure | undefined;
   loadMore: () => void; retry: () => void; refresh: () => Promise<void>;
 };
-type State = { items: TripNotification[]; cursor: string | null; pages: number; phase: NotificationsPhase; error?: TripFailure; refreshFailed: boolean };
+type State = { items: TripNotification[]; cursor: string | null; pages: number; phase: NotificationsPhase; error?: TripFailure; refreshFailed: boolean; refreshError?: TripFailure };
 const initial: State = { items: [], cursor: null, pages: 0, phase: "loading", refreshFailed: false };
 
 const append = (items: TripNotification[], more: TripNotification[]) => {
@@ -74,10 +76,10 @@ export function useNotifications(list: TripNotificationApi["list"], { refreshSig
           const freshIds = new Set(fresh.map((item) => item.id));
           // The first page is replaced; what had been loaded beyond it stays, with its own cursor.
           return { ...current, items: [...fresh, ...current.items.filter((item) => !freshIds.has(item.id))],
-            cursor: current.pages > 1 ? current.cursor : result.value.nextCursor, refreshFailed: false };
+            cursor: current.pages > 1 ? current.cursor : result.value.nextCursor, refreshFailed: false, refreshError: undefined };
         });
       } else if (result.error.kind === "unauthorized") expired();
-      else commit((current) => ({ ...current, refreshFailed: true }));
+      else commit((current) => ({ ...current, refreshFailed: true, refreshError: result.error }));
     }).finally(() => { refreshing.current = undefined; });
     refreshing.current = run;
     return run;
@@ -104,5 +106,6 @@ export function useNotifications(list: TripNotificationApi["list"], { refreshSig
     void refresh();
   }, [refreshSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { items: state.items, phase: state.phase, error: state.error, hasMore: state.cursor !== null, refreshFailed: state.refreshFailed, loadMore, retry, refresh };
+  return { items: state.items, phase: state.phase, error: state.error, hasMore: state.cursor !== null, refreshFailed: state.refreshFailed,
+    refreshError: state.refreshError, loadMore, retry, refresh };
 }

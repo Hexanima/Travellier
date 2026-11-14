@@ -48,9 +48,12 @@ function Notice({ notification, timeZone }: { notification: TripNotification; ti
   </>;
 }
 
+/** What was loaded is kept whatever the cause of the failure: the cause changes the first sentence, never this promise. */
+const kept = "Los que ya viste se conservan.";
+
 /** The personal inbox. It only reads: opening, listing or refreshing never touches a participation or its «Modificado» mark, and it needs no push permission. */
 export function NotificationsScreen({ notifications, refreshSignal, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: NotificationsScreenProps) {
-  const { items, phase, error, hasMore, refreshFailed, loadMore, retry, refresh } = useNotifications(notifications.list, { refreshSignal });
+  const { items, phase, error, hasMore, refreshFailed, refreshError, loadMore, retry, refresh } = useNotifications(notifications.list, { refreshSignal });
   useTripRefresh(refresh);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
@@ -72,8 +75,8 @@ export function NotificationsScreen({ notifications, refreshSignal, timeZone = I
   // A single alert at any time, by priority.
   const failure = phase === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
     : phase === "error" ? networkNotice(error, "No pudimos cargar tus avisos. Revisá tu conexión e intentá nuevamente.")
-    : phase === "more-error" ? "No pudimos cargar más avisos. Los que ya viste se conservan."
-    : refreshFailed ? "No pudimos actualizar tus avisos. Los que ya viste se conservan." : undefined;
+    : phase === "more-error" ? `${networkNotice(error, "No pudimos cargar más avisos.")} ${kept}`
+    : refreshFailed ? `${networkNotice(refreshError, "No pudimos actualizar tus avisos.")} ${kept}` : undefined;
   return <main className="app-shell trips-shell itinerary-shell">
     <div className="trips-panel">
       <Link className="trips-back" to="/trips">Volver a mis viajes</Link>

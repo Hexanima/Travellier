@@ -109,6 +109,17 @@ describe("useNotifications", () => {
     expect(api.refreshFailed).toBe(false);
   });
 
+  it("el fallo del refresco conserva su code para que la pantalla distinga el timeout (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([2, 1], null))
+      .mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } })
+      .mockResolvedValueOnce(page([2, 1], null));
+    await mount(list);
+    await act(async () => { await api.refresh(); });
+    expect(api.refreshError).toEqual({ kind: "network", code: "TimeoutError" });
+    await act(async () => { await api.refresh(); });
+    expect(api.refreshError).toBeUndefined();
+  });
+
   it("never runs two refreshes at once", async () => {
     const slow = deferred<unknown>();
     const list = vi.fn().mockResolvedValueOnce(page([1], null)).mockReturnValueOnce(slow.promise);
