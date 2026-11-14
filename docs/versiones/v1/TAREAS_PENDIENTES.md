@@ -1685,6 +1685,21 @@ Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del
 **Estimación:** S (2hs).
 **Dependencias:** T145.
 
+### T152 — Permitir un almacenamiento S3 local en el servidor de desarrollo
+
+**Capa:** Backend.
+
+**Descripción:** El servidor local arma el cliente S3 sin direccionamiento configurable, así que un S3 local tipo MinIO solo funciona cuando se lo alcanza por IP. Alcanzado por un nombre de host (un túnel, por ejemplo) el SDK firma virtual-host-style y MinIO no lo resuelve.
+
+**Criterios de aceptación:**
+
+- Una variable de entorno `S3_FORCE_PATH_STYLE` activa el direccionamiento path-style del cliente S3; sin ella, el comportamiento actual no cambia.
+- La lectura de esa variable es una función pura con tests.
+- El servidor local usa un único cliente S3 con esa configuración para el almacenamiento de auth y el de trips.
+
+**Estimación:** XS (1h).
+**Dependencias:** ninguna.
+
 ## Resumen
 
 | Fase | Tareas | Horas |
@@ -1702,7 +1717,8 @@ Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del
 | Ajustes aprobados el 2026-11-08 | 8 | 39 |
 | Correcciones aprobadas el 2026-11-12 | 26 | 107 |
 | Seguimientos aprobados el 2026-11-13 | 4 | 12 |
-| **Total del plan** | **108** | **558** |
+| Entorno de desarrollo | 1 | 1 |
+| **Total del plan** | **109** | **559** |
 
 - **Estado al 2026-11-13:** T44–T112 y T114–T147 terminadas; T113 sigue pendiente (requiere dispositivos). Se agregan 4 tareas de seguimiento (T148–T151, 12 h estimadas) surgidas de T145, T146 y T147 y registradas en `docs/REVISION_PENDIENTE.md`. T151 necesita una definición del usuario antes de implementarse.
 - **Estado al 2026-11-12:** T44–T112 y T114–T121 terminadas; T113 pendiente (requiere dispositivos). Se agregan 26 tareas (T122–T147, 107 h estimadas). Quedan 27 tareas y 115 h estimadas. T113 pasa a depender de las nuevas tareas de cliente.
