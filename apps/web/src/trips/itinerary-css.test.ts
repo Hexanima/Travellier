@@ -224,6 +224,8 @@ describe("banner de destino y días", () => {
     expect(ruleBody(".itinerary-days-nav")).toContain("min-width: 0");
     // Los ítems flex de la tira son los li, no los botones: sin flex: none encogen y el chip parte el texto en vertical.
     expect(ruleBody(".itinerary-day-strip > li")).toContain("flex: none");
+    // El panel es un grid: su pista automática crecía con el ancho mínimo del contenido y arrastraba la página entera.
+    expect(ruleBody(".ui-tabpanel")).toContain("grid-template-columns: minmax(0, 1fr)");
   });
 });
 
