@@ -8,15 +8,13 @@ import {
   waitFor, waitForGone, waitForText, type Mounted,
 } from "./support/connected-app.js";
 import { PASSWORD, createActivity, createGroup, expectOk, sessionOf, setParticipation, signUp, type Group, type Person } from "./support/fixtures.js";
+import { localDay, localTime } from "./support/local-time.js";
 
-/** Hora local (HH:MM) del instante, calculada con el desfase del proceso y no con Intl: contrasta lo que muestra la App. */
-const independentClock = (iso: string): string => {
-  const date = new Date(iso);
-  const minutes = ((date.getUTCHours() * 60 + date.getUTCMinutes() - date.getTimezoneOffset()) % 1440 + 1440) % 1440;
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-};
-/** Dia local (YYYY-MM-DD) calculado con el desfase del proceso. */
-const independentDay = (iso: string): string => new Date(Date.parse(iso) - new Date(iso).getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+/** Instantes UTC de las actividades sembradas; sus dias y horas locales se derivan con los helpers compartidos. */
+const AT = { planAdmin: "2099-03-02T09:00:00.000Z", planParticipant: "2099-03-02T16:00:00.000Z", cena: "2099-03-03T20:00:00.000Z" };
+/** Fecha y hora UTC del instante, como las espera la siembra por API. */
+const utc = (iso: string) => ({ date: iso.slice(0, 10), time: iso.slice(11, 16) });
+
 const localStamp = (iso: string) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
 
 /** El servidor real responde 401: se envia un bearer que no firmo (el resto de la solicitud llega intacta). */
@@ -126,11 +124,13 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
 
     it("admins y participantes pueden crear actividades (UI y API); quien no es integrante recibe 404 y no ve el viaje", async () => {
       for (const person of [group.admin, group.participant]) {
-        const created = await createActivity(group, person, { title: `Plan de ${person.name}`, date: "2099-03-02", time: person === group.admin ? "09:00" : "16:00", durationMinutes: 30 });
+        const at = person === group.admin ? AT.planAdmin : AT.planParticipant;
+        const created = await createActivity(group, person, { title: `Plan de ${person.name}`, ...utc(at), durationMinutes: 30 });
         expect(created.response.status, created.response.text).toBe(201);
         await open(person, `${trip()}/itinerary`);
-        await waitFor(() => chip("2099-03-02") !== null, "fichas de dia");
-        await click(chip("2099-03-02"), "dia 2");
+        const day = localDay(at);
+        await waitFor(() => chip(day) !== null, "fichas de dia");
+        await click(chip(day), `dia ${day}`);
         await waitFor(() => button("Crear actividad") !== undefined, "boton Crear actividad");
         await unmountAll();
       }
@@ -161,8 +161,8 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
       const screen = text();
       expect(screen).toContain("Nuevo horario: ");
       expect(screen).toContain(localStamp("2099-03-05T12:30:00.000Z"));
-      expect(screen).toContain(independentClock("2099-03-05T12:30:00.000Z"));
-      expect(screen).toContain(independentClock("2099-03-05T13:30:00.000Z"));
+      expect(screen).toContain(localTime("2099-03-05T12:30:00.000Z"));
+      expect(screen).toContain(localTime("2099-03-05T13:30:00.000Z"));
       expect(screen).toContain("Duración: 1 h");
       expect(screen).toContain("Planes incompatibles:");
       expect(screen).toContain(`Se superpone: ${localStamp("2099-03-05T12:00:00.000Z")} (1 h)`);
@@ -230,25 +230,25 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
     });
 
     it("la actividad y el recuerdo se muestran en la hora y el dia locales sin tocar publicacion ni vinculos", async () => {
-      activityId = (await createActivity(group, group.owner, { title: "Madrugada", date: "2099-03-04", time: "01:30", durationMinutes: 60 })).id;
+      activityId = (await createActivity(group, group.owner, { title: "Madrugada", ...utc(madrugada), durationMinutes: 60 })).id;
       const created = expectOk(await group.call(group.owner, "POST", `${trip()}/posts`, { description: "Foto de la madrugada", activityId }), 201).json.post;
       postId = created.id; createdAt = created.createdAt;
       expect(Date.parse(createdAt)).not.toBeNaN();
       const before = await apiState();
       expect(before.activity.scheduledAt).toBe(madrugada);
 
-      const day = independentDay(madrugada);
+      const day = localDay(madrugada);
       await open(group.owner, `${trip()}/itinerary?day=${day}`);
       await waitFor(() => chip(day) !== null && document.querySelector(`[data-itinerary-item="${activityId}"]`) !== null, `Madrugada en el dia local ${day}`);
       const item = document.querySelector(`[data-itinerary-item="${activityId}"]`)!;
       // Hora local: la que calcula el desfase del proceso, no una fija.
-      expect(item.querySelector("time.itinerary-item-time")!.textContent).toBe(independentClock(madrugada));
+      expect(item.querySelector("time.itinerary-item-time")!.textContent).toBe(localTime(madrugada));
       expect(item.querySelector("time.itinerary-item-time")!.getAttribute("dateTime")).toBe(madrugada);
-      expect(item.textContent).toContain(`Hasta ${independentClock("2099-03-04T02:30:00.000Z")}`);
+      expect(item.textContent).toContain(`Hasta ${localTime("2099-03-04T02:30:00.000Z")}`);
       // La publicacion muestra la hora local de createdAt, pero conserva el instante UTC de la API en `dateTime`.
       const published = Array.from(item.querySelectorAll("time")).find((node) => node.getAttribute("dateTime") === createdAt);
       expect(published, "fecha de publicacion del recuerdo").toBeDefined();
-      expect(published!.textContent).toContain(independentClock(createdAt));
+      expect(published!.textContent).toContain(localTime(createdAt));
       expect(item.textContent).toContain("Foto de la madrugada");
       // Mostrarlo en hora local no escribe nada.
       expect(await apiState()).toEqual(before);
@@ -256,7 +256,7 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
 
     it("editar solo el contenido desde la hora local conserva el instante UTC, la publicacion y el vinculo del recuerdo", async () => {
       const before = await apiState();
-      const day = independentDay(madrugada);
+      const day = localDay(madrugada);
       await open(group.owner, `${trip()}/itinerary?day=${day}`);
       await waitFor(() => button("Madrugada") !== undefined, "titulo de Madrugada");
       await click(button("Madrugada"), "Madrugada");
@@ -264,7 +264,7 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
       await clickButton("Editar actividad");
       await waitFor(() => document.querySelector('.activity-dialog [name="title"]') !== null, "formulario de edicion");
       // El formulario muestra la hora local del mismo instante.
-      expect((document.querySelector('.activity-dialog [name="time"]') as HTMLInputElement).value).toBe(independentClock(madrugada));
+      expect((document.querySelector('.activity-dialog [name="time"]') as HTMLInputElement).value).toBe(localTime(madrugada));
       expect((document.querySelector('.activity-dialog [name="date"]') as HTMLInputElement).value).toBe(day);
       await type("title", "Madrugada larga", document.querySelector(".activity-dialog")!);
       await submit(document.querySelector(".activity-dialog")!);
@@ -289,8 +289,8 @@ describe("T104 permisos, sesion vencida, avisos y zonas horarias (cliente conect
     const everything = () => harness.snapshot(["trips", "tripMembers", "activities", "activityParticipations", "posts", "postExpenses", "postPhotos", "comments", "outboxEvents"]);
 
     it("un access token rechazado al guardar la participacion lleva a la autenticacion sin guardar nada", async () => {
-      cena = (await createActivity(group, group.participant, { title: "Cena", date: "2099-03-03", time: "20:00", durationMinutes: 60 })).id;
-      await open(group.owner, `${trip()}/itinerary?day=2099-03-03`);
+      cena = (await createActivity(group, group.participant, { title: "Cena", ...utc(AT.cena), durationMinutes: 60 })).id;
+      await open(group.owner, `${trip()}/itinerary?day=${localDay(AT.cena)}`);
       await waitFor(() => fieldset("Cena")?.querySelector(".activity-participation-status")?.textContent === "Sin responder", "participacion de Cena");
       const before = await everything();
       const fault = rejectBearer(harness.baseUrl);

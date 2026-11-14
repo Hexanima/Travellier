@@ -1,4 +1,6 @@
 // T104: fixtures reproducibles por HTTP real: fechas fijas, sin Date.now ni aleatoriedad en los datos.
+// T148: la siembra es siempre en UTC, porque ese es el contrato del servidor. Lo que la App muestra o escribe en la zona
+// del proceso se deriva en cada test con los helpers de `local-time.ts`; nunca se asume que el proceso corra en UTC.
 import { ObjectId } from "mongodb";
 import type { E2EHarness, HttpResult } from "../../../api/test/e2e-harness.js";
 
@@ -62,7 +64,10 @@ export async function createGroup(h: E2EHarness, options: { realCarla?: boolean 
   return { harness: h, tripId, inviteCode: created.inviteCode, destinationId: created.primaryDestination.id, dayIds, owner, admin, participant, call };
 }
 
-/** Crea una actividad con fecha/hora/duracion fijas en el dia `date` (YYYY-MM-DD, UTC). */
+/**
+ * Crea una actividad con fecha/hora/duracion fijas en el dia `date` (YYYY-MM-DD) y la hora `time` (HH:MM), ambas en UTC:
+ * el instante sembrado es `${date}T${time}:00.000Z`. Para los valores locales de un formulario usar `local-time.ts`.
+ */
 export async function createActivity(group: Group, by: Person, input: { title: string; date: string; time: string; durationMinutes?: number }, extra: Record<string, unknown> = {}) {
   const body = { dayId: group.dayIds[`${input.date}:activity`], title: input.title, scheduledAt: `${input.date}T${input.time}:00.000Z`,
     ...(input.durationMinutes === undefined ? {} : { durationMinutes: input.durationMinutes }), ...extra };

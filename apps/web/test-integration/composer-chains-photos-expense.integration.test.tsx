@@ -1,4 +1,6 @@
 // T104: compositor, cadenas, fotos y gasto con la App real contra el handler real (MongoDB en memoria y almacenamiento falso).
+// Pensado para correr igual bajo TZ=UTC y TZ=America/Argentina/Buenos_Aires: la siembra es en UTC y los valores que el
+// formulario interpreta en la zona del proceso se derivan de cada instante con `support/local-time.ts`.
 import { ObjectId } from "mongodb";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { E2EHarness } from "../../api/test/e2e-harness.js";
@@ -8,6 +10,10 @@ import {
 } from "./support/connected-app.js";
 import { createFakeDevice, type FakeDevice } from "./support/fake-device.js";
 import { createActivity, createGroup, expectOk, sessionOf, type Group } from "./support/fixtures.js";
+import { localFormValues } from "./support/local-time.js";
+
+/** Instantes UTC de las actividades: el contrato del servidor es UTC y el formulario los escribe en la zona del proceso. */
+const AT = { cena: "2099-03-04T12:00:00.000Z", museo: "2099-03-03T12:00:00.000Z" };
 
 describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
   let harness: E2EHarness;
@@ -23,13 +29,14 @@ describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
   afterAll(async () => { await harness?.close(); });
 
   const open = (person: Group["owner"], entry: string): Promise<Mounted> => mountApp({ harness, session: sessionOf(person), entry, device });
-  /** Vincula el borrador a una actividad espontanea nueva (el compositor la crea junto con el recuerdo). */
-  async function addNewActivity(title: string) {
+  /** Vincula el borrador a una actividad espontanea nueva en el instante indicado (el compositor la crea junto con el recuerdo). */
+  async function addNewActivity(title: string, at: string) {
     await clickButton("Vincular a");
     await chooseRadio("Actividad");
     await clickButton("Crear actividad espontánea");
     await waitFor(() => document.querySelector('[name="title"]') !== null, "formulario de actividad");
-    await type("title", title); await type("date", "2099-03-04"); await type("time", "12:00");
+    const { date, time } = localFormValues(at);
+    await type("title", title); await type("date", date); await type("time", time);
     await type("durationHours", "1"); await type("durationMinutes", "30");
     await clickButton("Aceptar");
     await waitForText(`Actividad nueva: ${title}`);
@@ -50,7 +57,7 @@ describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
     device.offer(1, 2);
     await clickButton("Agregar fotos");
     await waitFor(() => document.querySelectorAll("img").length >= 2, "miniaturas");
-    await addNewActivity("Cena");
+    await addNewActivity("Cena", AT.cena);
     await addExpense("90", "ARS");
     // Pagos y reparto: Ana pone 70 y Beto 20; Beto debe 20 fijos y los demas se reparten el resto en partes iguales.
     await click(document.querySelector('button[name="split"]'), "Pagos y reparto");
@@ -109,7 +116,7 @@ describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
   const postDetail = async (id: string) => expectOk(await group.call(group.owner, "GET", `/trips/${group.tripId}/posts/${id}`)).json;
 
   it("encadena padre, hijo, ramificacion y nieto con el padre inmediato, y atribuye cada gasto por raiz o publicacion con monedas separadas", async () => {
-    const museo = await createActivity(group, group.owner, { title: "Museo", date: "2099-03-03", time: "12:00", durationMinutes: 60 });
+    const museo = await createActivity(group, group.owner, { title: "Museo", date: AT.museo.slice(0, 10), time: AT.museo.slice(11, 16), durationMinutes: 60 });
     expect(museo.response.status, museo.response.text).toBe(201);
     const root = expectOk(await group.call(group.owner, "POST", `/trips/${group.tripId}/posts`,
       { description: "Raiz: museo", activityId: museo.id, expense: { totalAmount: 50, currency: "ARS" } }), 201).json.post.id as string;
@@ -148,7 +155,7 @@ describe("T104 compositor, cadenas, fotos y gasto (cliente conectado)", () => {
     expect(independent.rootActivityId).toBeNull();
 
     const itinerary = await itineraryOf();
-    const museoDay = group.dayIds["2099-03-03:activity"];
+    const museoDay = group.dayIds[`${AT.museo.slice(0, 10)}:activity`];
     const byPost = Object.fromEntries((itinerary.expenses as Array<{ postId: string }>).map((row) => [row.postId, row]));
     for (const id of [root, child, branch, grandchild]) expect(byPost[id], `gasto de ${id}`).toMatchObject({ rootActivityId: museo.id, dayId: museoDay });
     expect(byPost[independent.post.id]).toMatchObject({ rootActivityId: null, source: "publication" });

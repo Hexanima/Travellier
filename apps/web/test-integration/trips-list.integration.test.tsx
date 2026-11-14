@@ -10,12 +10,11 @@ import {
   waitFor, waitForGone, waitForText,
 } from "./support/connected-app.js";
 import { expectOk, sessionOf, signUp, type Person } from "./support/fixtures.js";
+import { localDateTime } from "./support/local-time.js";
 
 type Span = { out?: [string, string]; back?: [string, string] };
 const tab = (label: string) => Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]')).find((item) => item.textContent === label);
 const names = () => Array.from(document.querySelectorAll(".trips-item h2")).map((item) => item.textContent ?? "");
-/** Valor de un input datetime-local para el instante, en la zona del proceso (la que usa el formulario). */
-const localInput = (iso: string) => new Date(Date.parse(iso) - new Date(iso).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
   let harness: E2EHarness;
@@ -131,8 +130,8 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     await waitFor(() => document.querySelectorAll(".journey-direction").length === 2, "formularios de transporte");
     const returnForm = document.querySelectorAll(".journey-direction")[1] as HTMLElement;
     await waitFor(() => (returnForm.querySelector('[name="departureAt"]') as HTMLInputElement).value !== "", "transporte de vuelta cargado");
-    await type("departureAt", localInput("2020-03-06T18:00:00.000Z"), returnForm);
-    await type("arrivalAt", localInput("2020-03-06T20:00:00.000Z"), returnForm);
+    await type("departureAt", localDateTime("2020-03-06T18:00:00.000Z"), returnForm);
+    await type("arrivalAt", localDateTime("2020-03-06T20:00:00.000Z"), returnForm);
     await submit(returnForm);
     await waitForText("Transporte guardado.");
     // El servidor guardo la nueva llegada y el viaje ya no tiene nada en el futuro.
