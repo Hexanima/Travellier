@@ -187,6 +187,16 @@ describe("selector de destinos", () => {
   });
 });
 
+describe("accesos de la cabecera (T153)", () => {
+  it("los accesos son un grupo de botones al ancho disponible con gap de 12px, y el vacío también", () => {
+    const group = ruleBody(".itinerary-header-actions");
+    expect(group).toContain("display: grid");
+    expect(group).toContain("gap: 12px");
+    expect(ruleBody(".itinerary-header-actions .ui-button")).toContain("width: 100%");
+    expect(ruleBody(".itinerary-shell .trips-empty .ui-button")).toContain("width: 100%");
+  });
+});
+
 describe("banner de destino y días", () => {
   it("banner de destino: radio card, padding 16, 1rem/700, conserva izquierda/ancho completo", () => {
     const banner = ruleBody(".itinerary-destination-banner.ui-button");
