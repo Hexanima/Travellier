@@ -26,29 +26,61 @@ describe("T104 smoke: App conectada al handler real", () => {
   });
 });
 
-// T148: el helper que deriva valores locales de instantes UTC se verifica contra el parser del producto, sin harness ni mongod.
+// T148: el helper deriva los valores locales con `Date#getTimezoneOffset`; aca se verifica contra oraculos independientes
+// (el reloj de pared de `Intl` y el parser del producto), para que cada caso pueda fallar en cualquier zona.
 describe("T148 helpers de hora local de los fixtures", () => {
   const instants = ["2099-03-01T10:00:00.000Z", "2099-03-03T12:30:00.000Z", "2099-03-04T01:30:00.000Z", "2099-03-06T18:00:00.000Z"];
+  const timeZone = currentTimeZone();
 
-  it("los valores para inputs datetime-local se reinterpretan como el instante original en la zona del proceso", () => {
+  /** Oraculo: el reloj de pared de la zona del proceso segun `Intl`, que el helper no usa. */
+  const wallClock = (iso: string): { day: string; time: string } => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", {
+      timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(new Date(iso)).map(({ type, value }) => [type, value]));
+    return { day: `${parts.year}-${parts.month}-${parts.day}`, time: `${parts.hour}:${parts.minute}` };
+  };
+
+  /** Oraculo del desfase de la zona en ese instante, leido de `Intl` y no de `Date#getTimezoneOffset`. */
+  const zoneOffsetMs = (iso: string): number => {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" })
+      .formatToParts(new Date(iso)).find((part) => part.type === "timeZoneName")?.value ?? "";
+    const match = /^(?:GMT|UTC)(?:([+-])(\d{1,2}):(\d{2}))?$/.exec(name);
+    expect(match, `desfase de ${timeZone} en ${iso}: ${name}`).not.toBeNull();
+    if (!match?.[1]) return 0;
+    return (match[1] === "-" ? -1 : 1) * (Number(match[2]) * 60 + Number(match[3])) * 60_000;
+  };
+
+  it("el dia, la hora y los valores de formulario son el reloj de pared de la zona del proceso", () => {
     for (const iso of instants) {
-      const candidates = parseLocalDateTimeCandidates(localDateTime(iso), currentTimeZone()).map((date) => date.toISOString());
-      expect(candidates, `${iso} en ${currentTimeZone()}`).toContain(iso);
+      const { day, time } = wallClock(iso);
+      const where = `${iso} en ${timeZone}`;
+      expect({ day: localDay(iso), time: localTime(iso) }, where).toEqual({ day, time });
+      expect(localDateTime(iso), where).toBe(`${day}T${time}`);
+      expect(localFormValues(iso), where).toEqual({ date: day, time });
     }
   });
 
-  it("el dia y la hora locales componen el valor datetime-local", () => {
-    for (const iso of instants) expect(localDateTime(iso)).toBe(`${localDay(iso)}T${localTime(iso)}`);
-  });
-
-  it("los valores del formulario de actividad son el dia y la hora locales", () => {
-    for (const iso of instants) expect(localFormValues(iso)).toEqual({ date: localDay(iso), time: localTime(iso) });
-  });
-
-  it("sin desfase del proceso, el valor local coincide con el instante UTC", () => {
+  it("los valores para inputs datetime-local se reinterpretan como el instante original en la zona del proceso", () => {
     for (const iso of instants) {
-      if (new Date(iso).getTimezoneOffset() !== 0) continue;
-      expect(localDateTime(iso)).toBe(iso.slice(0, 16));
+      const candidates = parseLocalDateTimeCandidates(localDateTime(iso), timeZone).map((date) => date.toISOString());
+      expect(candidates, `${iso} en ${timeZone}`).toContain(iso);
+    }
+  });
+
+  it("los valores del formulario de actividad se reinterpretan como el instante original en la zona del proceso", () => {
+    for (const iso of instants) {
+      const { date, time } = localFormValues(iso);
+      const candidates = parseLocalDateTimeCandidates(`${date}T${time}`, timeZone).map((instant) => instant.toISOString());
+      expect(candidates, `${iso} en ${timeZone}`).toContain(iso);
+    }
+  });
+
+  it("el dia y la hora tienen el formato que esperan los inputs y difieren del instante UTC en el desfase de la zona", () => {
+    for (const iso of instants) {
+      const where = `${iso} en ${timeZone}`;
+      expect(localDay(iso), where).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(localTime(iso), where).toMatch(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
+      expect(Date.parse(`${localDateTime(iso)}:00.000Z`) - Date.parse(iso), where).toBe(zoneOffsetMs(iso));
     }
   });
 });
