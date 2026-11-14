@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 /** jsdom no calcula estilos: fija el contrato visual de Mis viajes, Explorar, creación y Grupo sobre el texto de App.css. No sustituye revisión en dispositivo. */
 const srcDir = new URL("../", import.meta.url);
 const app = readFileSync(new URL("App.css", srcDir), "utf8").replace(/\r\n/g, "\n");
+/** Cuerpo de la última regla de primer nivel (en columna 0): ignora las reglas indentadas de los bloques @media. */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const marker = `\n${selector} {`;
+  const start = css.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return css.slice(start + marker.length).split("}")[0] ?? "";
 };
 /** Regla base: solo cuenta si el selector abre la línea (no como parte de otro ámbito). */
 const baseBody = (selector: string) => {
@@ -60,7 +62,7 @@ describe("Mis viajes y Explorar", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
   it("la tarjeta es un enlace de bloque: sin subrayado, color heredado, con hover y foco con token (T153)", () => {
-    const open = ruleBody(app.split("@media (prefers-reduced-motion")[0] ?? "", ".trips-panel--catalog .trips-item-open");
+    const open = ruleBody(app, ".trips-panel--catalog .trips-item-open");
     expect(open).toContain("display: grid");
     expect(open).toContain("text-decoration: none");
     expect(open).toContain("color: inherit");
@@ -105,7 +107,7 @@ describe("Crear, configurar y unirse", () => {
     expect(intro).toContain("line-height: 1.5rem");
     expect(intro).toContain("color: var(--ui-color-muted)");
     expect(ruleBody(app, ".trip-form-panel .auth-form")).toContain("gap: 20px");
-    const name = ruleBody(app, ".trip-form-panel .trip-config-name");
+    const name = ruleBody(app, ".trips-shell .trip-form-panel .trip-config-name");
     expect(name).toContain("font-size: 0.875rem");
     expect(name).toContain("line-height: 1.25rem");
     expect(name).toContain("color: var(--ui-color-muted)");

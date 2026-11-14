@@ -16,6 +16,15 @@ const baseBody = (css: string, selector: string) => {
   if (start < 0) return "";
   return css.slice(start + selector.length + 2).split("}")[0] ?? "";
 };
+/** Cuerpo de la primera regla cuya lista de selectores incluye todos los pedidos: no depende del formato ni del orden de la lista. */
+const ruleWith = (css: string, ...selectors: readonly string[]) => {
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+  const rule = rules.find((match) => {
+    const list = (match[1] ?? "").replace(/\/\*[\s\S]*?\*\//g, "").split(",").map((item) => item.trim());
+    return selectors.every((selector) => list.includes(selector));
+  });
+  return rule?.[2] ?? "";
+};
 /** Regla base de texto: un único bloque con los elementos que reciben nombres y textos de la gente. */
 const textBase = (() => {
   const rules = [...index.matchAll(/([^{}]+)\{([^}]*)\}/g)].map((match) => ({
@@ -47,6 +56,6 @@ describe("Destinos y transportes", () => {
     expect(directions).toContain("grid-template-columns: minmax(0, 1fr)");
   });
   it("el panel del viaje no se ensancha con un nombre largo", () => {
-    expect(baseBody(app, ".trips-panel,\n.trip-form-panel")).toContain("min-width: 0");
+    expect(ruleWith(app, ".trips-panel", ".trip-form-panel")).toContain("min-width: 0");
   });
 });
