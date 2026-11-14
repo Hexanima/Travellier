@@ -154,12 +154,13 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                   </div>
+                  {/* Acciones de la tarjeta: botones secundarios agrupados, no enlaces subrayados apilados. */}
                   <div className="trips-item-links">
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
+                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
+                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
+                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/config`}>Configuración</Link>
+                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
+                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
                   </div>
                 </ListItem>
               ))}
@@ -168,9 +169,9 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
         </Tabs>
 
         <nav className="trips-secondary" aria-label="Cuenta">
-          <Link to="/profile">Mi perfil</Link>
+          <Link className="ui-button ui-button--secondary" to="/profile">Mi perfil</Link>
           {/* Provisional entry to the notices center: T98 gives it its place in the final navigation. */}
-          <Link to="/notifications">Avisos</Link>
+          <Link className="ui-button ui-button--secondary" to="/notifications">Avisos</Link>
           <Button variant="secondary" onClick={() => void logout()} aria-disabled={closingSession || undefined}>
             {closingSession ? "Cerrando sesión…" : "Cerrar sesión"}
           </Button>

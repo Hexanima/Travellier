@@ -44,25 +44,35 @@ describe("Mis viajes y Explorar", () => {
     expect(dates).toContain("color: var(--ui-color-muted)");
     expect(dates).toContain("font-variant-numeric: tabular-nums");
   });
-  it("los enlaces de acción miden 44px, subrayados, con foco de 3px con token y offset 3px", () => {
+  it("los enlaces de acción son botones de 52px al ancho disponible, sin subrayado, con foco de 3px con token y offset 3px", () => {
     const link = ruleBody(app, ".trips-panel--catalog .trips-settings-link");
-    expect(link).toContain("min-height: 44px");
+    expect(link).toContain("min-height: 52px");
     expect(link).toContain("display: inline-flex");
-    expect(link).toContain("text-decoration: underline");
+    expect(link).toContain("width: 100%");
+    expect(link).toContain("text-decoration: none");
+    expect(link).not.toContain("text-decoration: underline");
     const focus = ruleBody(app, ".trips-panel--catalog .trips-settings-link:focus-visible");
     expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
     expect(focus).toContain("outline-offset: 3px");
-    expect(ruleBody(app, ".trips-item-links")).toContain("flex-wrap: wrap");
+    // La base compartida sigue siendo una fila flexible; el catálogo agrupa en columna con el ritmo de 12px.
+    expect(baseBody(".trips-item-links")).toContain("flex-wrap: wrap");
+    expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("display: grid");
+    expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
   it("las entradas y el vacío usan botones de ancho completo acotados a su contenedor", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-entry-actions .ui-button")).toContain("width: 100%");
     expect(ruleBody(app, ".trips-panel--catalog .trips-empty .ui-button")).toContain("width: 100%");
     expect(app).not.toMatch(/^\.ui-button \{[^}]*width: 100%/m);
   });
-  it("la navegación Cuenta tiene enlaces de 44px", () => {
+  it("la navegación Cuenta agrupa botones de 52px al ancho disponible con gap de 12px", () => {
     const link = ruleBody(app, ".trips-panel--catalog .trips-secondary a");
-    expect(link).toContain("min-height: 44px");
+    expect(link).toContain("min-height: 52px");
     expect(link).toContain("display: inline-flex");
+    expect(link).toContain("width: 100%");
+    const group = ruleBody(app, ".trips-panel--catalog .trips-secondary");
+    expect(group).toContain("display: grid");
+    expect(group).toContain("gap: 12px");
+    expect(ruleBody(app, ".trips-panel--catalog .trips-secondary .ui-button")).toContain("width: 100%");
   });
   it("el vacío es una tarjeta con h2 18/26/700", () => {
     const heading = ruleBody(app, ".trips-panel--catalog .trips-empty h2");

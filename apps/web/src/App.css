@@ -304,12 +304,16 @@ dd {
 .trips-panel--catalog .trips-dates { margin-top: 4px; font-size: 0.75rem; line-height: 1.125rem; color: var(--ui-color-muted); font-variant-numeric: tabular-nums; }
 .trips-panel--catalog .trips-description { margin-top: 8px; font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); overflow-wrap: anywhere; }
 .trips-item-links { display: flex; flex-wrap: wrap; gap: 0 20px; }
-.trips-panel--catalog .trips-settings-link { display: inline-flex; align-items: center; min-height: 44px; font-size: 0.875rem; line-height: 1.25rem; text-decoration: underline; text-underline-offset: 3px; }
+/* T153: las acciones de cada viaje son botones secundarios agrupados con el ritmo de 12px, no enlaces subrayados apilados. */
+.trips-panel--catalog .trips-item-links { display: grid; gap: 12px; }
+.trips-panel--catalog .trips-settings-link { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; text-decoration: none; }
 .trips-panel--catalog .trips-settings-link:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .trips-panel--catalog .trips-entry-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
 .trips-panel--catalog .trips-entry-actions .ui-button { width: 100%; }
-.trips-panel--catalog .trips-secondary { flex-wrap: wrap; gap: 0 20px; }
-.trips-panel--catalog .trips-secondary a { display: inline-flex; align-items: center; min-height: 44px; text-underline-offset: 3px; }
+/* T153: el pie de Cuenta no mezcla enlaces con un botón: tres acciones secundarias con el mismo peso. */
+.trips-panel--catalog .trips-secondary { display: grid; gap: 12px; }
+.trips-panel--catalog .trips-secondary a { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; font-weight: 600; text-decoration: none; }
+.trips-panel--catalog .trips-secondary .ui-button { width: 100%; }
 .trips-panel--catalog .trips-empty h2 { margin: 0 0 8px; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
 .trips-panel--catalog .trips-empty .ui-button { width: 100%; }
 

@@ -92,6 +92,26 @@ describe("Mis viajes: presentación", () => {
     expect(link?.classList.contains("ui-button")).toBe(true);
   });
 
+  it("las acciones de la fila son botones secundarios, no enlaces subrayados apilados (T153)", async () => {
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [trip] }));
+    const links = Array.from(container.querySelectorAll(".trips-item .trips-item-links > a"));
+    expect(links).toHaveLength(5);
+    for (const link of links) {
+      expect(link.classList.contains("ui-button")).toBe(true);
+      expect(link.classList.contains("ui-button--secondary")).toBe(true);
+    }
+  });
+
+  it("el pie de Cuenta no mezcla enlaces de texto con un botón: los tres son secundarios (T153)", async () => {
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [trip] }));
+    const actions = Array.from(container.querySelectorAll(".trips-secondary > *"));
+    expect(actions.map((action) => action.textContent)).toEqual(["Mi perfil", "Avisos", "Cerrar sesión"]);
+    for (const action of actions) {
+      expect(action.classList.contains("ui-button")).toBe(true);
+      expect(action.classList.contains("ui-button--secondary")).toBe(true);
+    }
+  });
+
   it("«Cerrar sesión» es secundario y los enlaces de la fila navegan", async () => {
     const past = { ...trip, startAt: "2020-01-01T00:00:00.000Z", endAt: "2020-01-10T00:00:00.000Z" };
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [past] }));
