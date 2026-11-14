@@ -305,9 +305,10 @@ describe("Modal", () => {
       expect(backdrop.getAttribute("tabindex")).toBeNull();
     });
 
-    // La app apila los modales con createPortal a document.body (ActivityForm, PostComposer, PhotoBrowser): los nodos no quedan
-    // anidados pero los eventos de React igual recorren el árbol de componentes, que es el caso que hay que cubrir.
-    it("el fondo del modal de arriba, apilado en un portal, no cierra el de abajo", async () => {
+    // Regresión del guard de `target`: con dos modales apilados en portales el fondo del de arriba no es el `currentTarget` del
+    // de abajo, así que el de abajo ignora ese click aunque el evento de React le llegue por el árbol de componentes. El cruce de
+    // portales en sí lo vigilan los tests de los manejadores de la pantalla, no este.
+    it("el guard de target protege al modal de abajo del toque en el fondo del de arriba", async () => {
       const onCloseUnder = vi.fn();
       const onCloseOver = vi.fn();
       await mount(
@@ -337,6 +338,33 @@ describe("Modal", () => {
       );
       await tap(document.body.querySelector(".ui-modal-backdrop") as HTMLElement);
       expect(onClose).toHaveBeenCalledOnce();
+      expect(onScreenClick).not.toHaveBeenCalled();
+    });
+
+    // El corte de propagación no depende de que el modal pueda cerrarse: mientras guarda, el toque del fondo no cierra, pero
+    // tampoco debe llegar por el portal a los manejadores de la pantalla que abrió el modal.
+    it("el toque del fondo no activa esos manejadores tampoco mientras el modal guarda", async () => {
+      const onClose = vi.fn();
+      const onScreenClick = vi.fn();
+      await mount(
+        <div onClick={onScreenClick}>
+          {createPortal(<Modal isOpen loading title="Conflicto" onClose={onClose}>Ok</Modal>, document.body)}
+        </div>,
+      );
+      await tap(document.body.querySelector(".ui-modal-backdrop") as HTMLElement);
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onScreenClick).not.toHaveBeenCalled();
+    });
+
+    // Mismo caso sin salida posible: un modal sin `onClose` no cierra con el toque del fondo y sigue conteniendo el evento.
+    it("el toque del fondo no activa esos manejadores tampoco en un modal sin salida", async () => {
+      const onScreenClick = vi.fn();
+      await mount(
+        <div onClick={onScreenClick}>
+          {createPortal(<Modal isOpen title="Conflicto">Ok</Modal>, document.body)}
+        </div>,
+      );
+      await tap(document.body.querySelector(".ui-modal-backdrop") as HTMLElement);
       expect(onScreenClick).not.toHaveBeenCalled();
     });
   });

@@ -125,11 +125,15 @@ export function Modal({
     const onBackdrop = pressStartedOnBackdrop.current && pressEndedOnBackdrop.current;
     pressStartedOnBackdrop.current = false;
     pressEndedOnBackdrop.current = false;
-    if (event.target !== event.currentTarget || !onBackdrop || cannotClose) {
+    if (event.target !== event.currentTarget) {
       return;
     }
-    // React events cross portals: keep a stacked modal's backdrop tap from closing the modal underneath.
+    // React events cross portals: keep a stacked modal's backdrop tap from reaching the modal underneath or the screen that
+    // opened it. It stops here even when the modal cannot close (saving, or no way out): the tap is meant for the backdrop.
     event.stopPropagation();
+    if (!onBackdrop || cannotClose) {
+      return;
+    }
     onClose?.();
   }
 
