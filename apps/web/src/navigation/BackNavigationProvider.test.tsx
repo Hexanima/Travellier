@@ -152,6 +152,29 @@ describe("BackNavigationProvider", () => {
     expect(where()).toBe("/trips");
   });
 
+  it("desde una raíz del Trip con Mis viajes detrás, la pulsación siguiente cierra la app", async () => {
+    vi.useFakeTimers();
+    try {
+      const button = fakeButton();
+      await render(["/trips", `/trips/${"a".repeat(24)}/itinerary`], <Screen />, button.port);
+      await button.press();
+      expect(where()).toBe("/trips");
+      // La entrada de la raíz del Trip se reemplaza: la que estaba detrás queda afuera, así que no hay un Atrás invisible al mismo Mis viajes.
+      await act(async () => { vi.advanceTimersByTime(250); });
+      await button.press();
+      expect(button.exitApp).toHaveBeenCalledTimes(1);
+      expect(where()).toBe("/trips");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("quien llegó a Mis viajes desde otra pantalla conserva su Atrás", async () => {
+    const button = fakeButton();
+    await render(["/profile", "/trips"], <Screen />, button.port);
+    await button.press();
+    expect(where()).toBe("/profile");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
   it("sin capas abiertas y sin historial en Mis viajes cierra la app", async () => {
     const button = fakeButton();
     await render(["/trips"], <Screen />, button.port);
