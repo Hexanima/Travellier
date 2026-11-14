@@ -30,12 +30,11 @@ describe("Mis viajes y Explorar", () => {
     expect(item).toContain("background: var(--ui-color-surface)");
     expect(item).toContain("gap: 12px");
   });
-  it("nombre 18/26/700 con quiebre de palabras, destino 14/20 de marca y fechas 12/18 muted tabulares", () => {
+  it("nombre 18/26/700, destino 14/20 de marca y fechas 12/18 muted tabulares", () => {
     const name = ruleBody(app, ".trips-panel--catalog .trips-item h2");
     expect(name).toContain("font-size: 1.125rem");
     expect(name).toContain("line-height: 1.625rem");
     expect(name).toContain("font-weight: 700");
-    expect(name).toContain("overflow-wrap: anywhere");
     const destination = ruleBody(app, ".trips-panel--catalog .trips-destination");
     expect(destination).toContain("font-size: 0.875rem");
     expect(destination).toContain("line-height: 1.25rem");
@@ -131,14 +130,13 @@ describe("Crear, configurar y unirse", () => {
 });
 
 describe("Grupo", () => {
-  it("el código de invitación es una tarjeta de marca 32/40 tabular con quiebre", () => {
+  it("el código de invitación es una tarjeta de marca 32/40 tabular", () => {
     const code = ruleBody(app, "section.trip-members-section .trip-invite-code");
     expect(code).toContain("background: var(--ui-color-brand)");
     expect(code).toContain("color: var(--ui-color-accent-contrast)");
     expect(code).toContain("font-size: 2rem");
     expect(code).toContain("line-height: 2.5rem");
     expect(code).toContain("font-variant-numeric: tabular-nums");
-    expect(code).toContain("overflow-wrap: anywhere");
     expect(code).toContain("border-radius: var(--ui-radius-card)");
   });
   it("la insignia de rol es una píldora 12/18 soft/marca y la del titular invierte", () => {

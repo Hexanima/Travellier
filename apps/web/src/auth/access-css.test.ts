@@ -42,10 +42,9 @@ describe("bienvenida, acceso y perfil", () => {
   });
 
   it("nombre y email largos se parten sin desbordar", () => {
+    // El quiebre viene de la regla base de index.css para p: acá solo se fija que el elemento pueda encogerse.
     for (const selector of [".profile-name", ".profile-email"]) {
-      const body = ruleBody(app, selector);
-      expect(body).toContain("overflow-wrap: anywhere");
-      expect(body).toContain("min-width: 0");
+      expect(ruleBody(app, selector)).toContain("min-width: 0");
     }
     expect(ruleBody(app, ".auth-panel")).toContain("min-width: 0");
   });

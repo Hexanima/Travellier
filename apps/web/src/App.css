@@ -34,7 +34,6 @@
   margin: 0 0 20px;
   color: var(--ui-color-muted);
   line-height: 1.5;
-  overflow-wrap: anywhere;
 }
 
 .auth-note { margin: 0; font-size: 0.875rem; }
@@ -66,11 +65,10 @@
   margin: 0;
   color: var(--ui-color-on-brand-muted);
   line-height: 1.5;
-  overflow-wrap: anywhere;
 }
 
 .welcome-brand .welcome-tagline { color: var(--ui-color-accent-contrast); font-weight: 700; }
-.welcome-title { margin: 0 0 8px; font-size: 1.5rem; line-height: 2rem; overflow-wrap: anywhere; }
+.welcome-title { margin: 0 0 8px; font-size: 1.5rem; line-height: 2rem; }
 .welcome-actions { display: grid; gap: 12px; }
 
 .profile-summary {
@@ -100,8 +98,8 @@
   font-weight: 700;
 }
 
-.profile-name { max-width: 100%; min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 1.25rem; font-weight: 700; line-height: 1.75rem; }
-.profile-email { max-width: 100%; min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--ui-color-muted); font-size: 0.875rem; }
+.profile-name { max-width: 100%; min-width: 0; margin: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.75rem; }
+.profile-email { max-width: 100%; min-width: 0; margin: 0; color: var(--ui-color-muted); font-size: 0.875rem; }
 
 .auth-switch {
   display: flex;
@@ -109,7 +107,6 @@
   align-items: center;
   gap: 4px 8px;
   margin: 20px 0 0;
-  overflow-wrap: anywhere;
 }
 
 .auth-switch a {
@@ -138,7 +135,6 @@ h1 {
   margin: 0;
   font-size: 2rem;
   line-height: 2.5rem;
-  overflow-wrap: anywhere;
 }
 
 dl {
@@ -236,9 +232,9 @@ dd {
 .trip-members-section { margin: 24px 0; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); padding: 20px; background: var(--ui-color-surface); }
 .trip-members-section h2 { margin: 0 0 8px; font-size: 1.3rem; }
 .trip-members-section p { color: var(--ui-color-muted); line-height: 1.5; }
-.trip-invite-code { margin: 18px 0; font-size: 1.5rem; letter-spacing: 0.04em; overflow-wrap: anywhere; }
+.trip-invite-code { margin: 18px 0; font-size: 1.5rem; letter-spacing: 0.04em; }
 .trip-members-actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.trip-invite-url { overflow-wrap: anywhere; font-size: 0.875rem; }
+.trip-invite-url { font-size: 0.875rem; }
 .trip-member-item, .trip-member-admin-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .trip-member-role { color: var(--ui-color-muted); }
 .trip-members-admin { border-color: var(--ui-color-border); }
@@ -302,10 +298,10 @@ dd {
 
 /* T110: Mis viajes, Explorar, creación, unión y Grupo. Estilos con ámbito: las clases base son compartidas con otras pantallas. */
 .trips-panel--catalog .trips-item { display: grid; align-items: start; gap: 12px; min-width: 0; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); padding: 16px; background: var(--ui-color-surface); }
-.trips-panel--catalog .trips-item h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; overflow-wrap: anywhere; }
-.trips-panel--catalog .trips-destination { font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--ui-color-brand); overflow-wrap: anywhere; }
+.trips-panel--catalog .trips-item h2 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+.trips-panel--catalog .trips-destination { font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; color: var(--ui-color-brand); }
 .trips-panel--catalog .trips-dates { margin-top: 4px; font-size: 0.75rem; line-height: 1.125rem; color: var(--ui-color-muted); font-variant-numeric: tabular-nums; }
-.trips-panel--catalog .trips-description { margin-top: 8px; font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); overflow-wrap: anywhere; }
+.trips-panel--catalog .trips-description { margin-top: 8px; font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); }
 .trips-item-links { display: flex; flex-wrap: wrap; gap: 0 20px; }
 /* T153: la tarjeta es la acción principal. Un solo enlace de bloque abre el viaje: no se subraya ni recolorea su contenido y el realce de hover cubre exactamente el área sensible. */
 .trips-panel--catalog .trips-item-open { display: grid; gap: 4px; min-width: 0; min-height: 44px; margin: -8px -8px 0; border-radius: var(--ui-radius-control); padding: 8px; color: inherit; text-decoration: none; }
@@ -328,14 +324,13 @@ dd {
 
 .trips-shell .trip-form-panel > p { font-size: 1rem; line-height: 1.5rem; color: var(--ui-color-muted); }
 .trip-form-panel .auth-form { gap: 20px; }
-.trips-shell .trip-form-panel .trip-config-name { font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); overflow-wrap: anywhere; }
-.trips-shell .trips-panel .trip-config-name { font-size: 0.875rem; line-height: 1.25rem; overflow-wrap: anywhere; }
+.trips-shell .trip-form-panel .trip-config-name { font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); }
+.trips-shell .trips-panel .trip-config-name { font-size: 0.875rem; line-height: 1.25rem; }
 .trip-form-panel .ui-feedback--info { border-color: var(--ui-color-soft); background: var(--ui-color-soft); color: var(--ui-color-brand); }
 
 .trip-form-panel .trip-public-preview { gap: 12px; border-color: var(--ui-color-brand); border-radius: var(--ui-radius-card); padding: 24px; background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); }
-.trip-form-panel .trip-public-preview h2 { overflow-wrap: anywhere; }
-.trip-form-panel .trip-public-preview .trips-destination { font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-on-brand-muted); overflow-wrap: anywhere; }
-.trip-form-panel .trip-public-preview .trips-description { color: var(--ui-color-on-brand-muted); overflow-wrap: anywhere; }
+.trip-form-panel .trip-public-preview .trips-destination { font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-on-brand-muted); }
+.trip-form-panel .trip-public-preview .trips-description { color: var(--ui-color-on-brand-muted); }
 .trip-form-panel .trip-public-preview .ui-button { width: 100%; }
 .trip-form-panel .trip-public-preview > a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ui-color-accent-contrast); text-underline-offset: 3px; }
 .trip-form-panel .trip-public-preview :is(a, .ui-button):focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; box-shadow: 0 0 0 3px var(--ui-color-accent-contrast); }
@@ -349,8 +344,8 @@ dd {
 
 section.trip-members-section { margin: 0 0 32px; border: 0; border-radius: 0; padding: 0; background: transparent; }
 section.trip-members-section.trip-members-admin { border-top: 1px solid var(--ui-color-border); padding-top: 24px; }
-section.trip-members-section :is(h2, h3) { margin: 0 0 8px; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; overflow-wrap: anywhere; }
-section.trip-members-section .trip-invite-code { margin: 16px 0; border-radius: var(--ui-radius-card); padding: 16px 20px; background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); font-size: 2rem; line-height: 2.5rem; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+section.trip-members-section :is(h2, h3) { margin: 0 0 8px; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+section.trip-members-section .trip-invite-code { margin: 16px 0; border-radius: var(--ui-radius-card); padding: 16px 20px; background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); font-size: 2rem; line-height: 2.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 section.trip-members-section .ui-list { gap: 0; }
 section.trip-members-section .trip-member-item { flex-wrap: wrap; min-width: 0; border: 0; border-bottom: 1px solid var(--ui-color-border); border-radius: 0; padding: 12px 0; background: transparent; }
 section.trip-members-section .trip-member-item > :first-child { flex: 1 1 8rem; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
@@ -359,9 +354,9 @@ section.trip-members-section .trip-member-item > :first-child { flex: 1 1 8rem; 
 .trip-member-item .ui-button { display: inline-flex; align-items: center; justify-content: center; flex: none; min-height: 44px; padding: 0 16px; }
 
 .members-dialog .ui-modal { min-width: 0; padding: 24px; max-block-size: calc(100dvh - max(16px, env(safe-area-inset-top)) - max(16px, env(safe-area-inset-bottom))); overflow-y: auto; overscroll-behavior: contain; }
-.members-dialog .ui-modal__title { font-size: 1.5rem; line-height: 2rem; font-weight: 700; overflow-wrap: anywhere; }
+.members-dialog .ui-modal__title { font-size: 1.5rem; line-height: 2rem; font-weight: 700; }
 .members-dialog .ui-modal__close { flex: none; min-width: 44px; min-height: 44px; }
-.members-dialog .ui-modal__content p { margin: 0 0 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.members-dialog .ui-modal__content p { margin: 0 0 12px; line-height: 1.5; }
 .members-dialog .trip-members-actions { flex-direction: column; flex-wrap: nowrap; gap: 12px; margin-top: 16px; }
 .members-dialog .trip-members-actions .ui-button { width: 100%; }
 .members-dialog .trip-members-ack { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 12px 0; line-height: 1.5; }

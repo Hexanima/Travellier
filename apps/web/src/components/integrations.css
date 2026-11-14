@@ -2,7 +2,7 @@
 
 /* Avisos personales: filas con divisor, sin vinetas */
 .notice-list.ui-list { gap: 0; margin: 0; padding: 0; list-style: none; }
-.notice-list .notice { display: grid; gap: 4px; min-width: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; overflow-wrap: anywhere; }
+.notice-list .notice { display: grid; gap: 4px; min-width: 0; padding: 16px 0; border: 0; border-bottom: 1px solid var(--ui-color-border); border-radius: 0; background: transparent; }
 .notice-list .notice p { margin: 0; }
 .notice-list .notice > p:first-child { font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
 .notice-list .notice .itinerary-secondary { font-size: .875rem; line-height: 1.25rem; color: var(--ui-color-muted); }

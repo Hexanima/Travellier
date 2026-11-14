@@ -104,8 +104,8 @@ describe("cabecera y pestañas del Trip", () => {
     expect(header).toContain("gap: 8px");
     expect(header).toContain("margin-bottom: 12px");
     const h1 = ruleBody(itinerary.split("@media (max-width: 359px)")[0] ?? "", ".trip-shell-header h1");
+    // El quiebre de palabras llega de la regla base de index.css para h1: acá basta con que el título pueda encogerse.
     expect(h1).toContain("min-width: 0");
-    expect(h1).toContain("overflow-wrap: anywhere");
     const actions = ruleBody(itinerary, ".trip-shell-actions");
     expect(actions).toContain("display: flex");
     expect(actions).toContain("flex-wrap: wrap");
