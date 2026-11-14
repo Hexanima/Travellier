@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createHttpClient } from "./http-client.js";
+import { timeoutNotice } from "./network-failure.js";
 
 describe("createHttpClient", () => {
   it("classifies a forbidden member action separately from a server failure", async () => {
@@ -389,6 +390,14 @@ describe("timeout (T146)", () => {
       ok: false,
       error: { kind: "network", code: "TimeoutError", message: expect.stringContaining("Intentá nuevamente") },
     });
+  });
+
+  it("carries the single timeout wording shared with the screens (T150)", async () => {
+    const fetch = vi.fn().mockReturnValue(new Promise<Response>(() => {}));
+    const pending = clientWith(fetch).get("/trips");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(await pending).toMatchObject({ ok: false, error: { message: timeoutNotice } });
   });
 
   it("does not abort before the 30 s are over", async () => {

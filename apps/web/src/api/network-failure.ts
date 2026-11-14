@@ -1,7 +1,7 @@
+import { timeoutNotice } from "./api-messages.js";
 import type { ApiClientError } from "./http-client.js";
 
-/** Texto propio del timeout del cliente: sin él, una espera agotada se lee en pantalla como una conexión caída. */
-export const timeoutNotice = "La conexión tardó demasiado. Intentá nuevamente.";
+export { timeoutNotice };
 
 /** El `code` del fallo de red viaja hasta la pantalla; el `kind` sigue siendo "network" y, por lo tanto, reintentable. */
 export const networkCode = (error: Pick<ApiClientError, "kind" | "code">): { code?: string } =>
