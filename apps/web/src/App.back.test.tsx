@@ -70,6 +70,44 @@ describe("App back button integration", () => {
     expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
 
+  it("desde una raíz del Trip abierta desde Mis viajes, una pulsación vuelve y la siguiente cierra la app", async () => {
+    const button = backButton();
+    const container = await render(["/trips", `/trips/${tripId}/itinerary`], props({ backButton: button.port }));
+    expect(container.textContent).toContain("Itinerario");
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(button.exitApp).not.toHaveBeenCalled();
+    await afterBackLock();
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("el recorrido desde una raíz del Trip abierta por un aviso llega a la salida sin pulsaciones sin efecto", async () => {
+    const button = backButton();
+    const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
+    const container = await render(["/trips", "/notifications", { pathname: `/trips/${tripId}/itinerary`, state: { origin: noticesOrigin } }],
+      props({ backButton: button.port, notifications }));
+    await button.press();
+    expect(container.textContent).toContain("Avisos");
+    await afterBackLock();
+    await button.press();
+    expect(container.textContent).toContain("Mis viajes");
+    expect(button.exitApp).not.toHaveBeenCalled();
+    await afterBackLock();
+    await button.press();
+    expect(button.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it("en Mis viajes abierto desde otra pantalla el Atrás vuelve a ella en vez de cerrar", async () => {
+    const button = backButton();
+    const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
+    const container = await render(["/notifications", "/trips"], props({ backButton: button.port, notifications }));
+    expect(container.textContent).toContain("Mis viajes");
+    await button.press();
+    expect(container.textContent).toContain("Avisos");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
   it("desde una raíz del Trip abierta por un aviso vuelve a avisos, igual que su enlace Volver", async () => {
     const button = backButton();
     const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
