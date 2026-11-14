@@ -349,7 +349,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       </section> : null}
       {state.kind === "ready" ? <TransportCostSummary totals={state.value.transportCostTotals} transports={state.value.transports}
         destinations={state.value.destinations} headingLevel={sub} /> : null}
-      {state.kind === "ready" && days.length === 0 ? <section className="trips-empty itinerary-empty">
+      {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
         <Heading level={sub}>Todavía no hay itinerario</Heading>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
         <Link className="ui-button" to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
