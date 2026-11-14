@@ -138,6 +138,18 @@ describe("cabecera y pestañas del Trip", () => {
     expect(focusRing).toContain("outline: 3px solid var(--ui-color-focus)");
     expect(focusRing).toContain("outline-offset: 3px");
   });
+  it("el envoltorio de todas las pantallas recorta el desborde horizontal sin romper los scrollers internos (T154)", () => {
+    // Sin comentarios: las explicaciones del CSS mencionan las propiedades que acá se descartan.
+    const shell = ruleBody(app, ".app-shell").replace(/\/\*[\s\S]*?\*\//g, "");
+    // Red de seguridad: recorta un desborde horizontal accidental de cualquier pantalla, no reemplaza el arreglo de su causa.
+    expect(shell).toContain("overflow-x: clip");
+    // clip y no hidden: hidden crearía un contenedor de scroll y rompe position: sticky; el vertical sigue visible.
+    expect(shell).not.toMatch(/overflow(-x)?: (hidden|auto|scroll)/);
+    expect(shell).not.toContain("overflow-y");
+    // Los scrollers horizontales propios siguen desplazándose: la tira de días y las pestañas.
+    expect(ruleBody(itinerary, ".itinerary-day-strip")).toContain("overflow-x: auto");
+    expect(ruleBody(components, ".ui-tablist")).toContain("overflow-x: auto");
+  });
   it("la cabecera de retorno mide al menos 44px", () => {
     expect(ruleBody(app, ".trips-back")).toContain("min-height: 44px");
   });

@@ -11,6 +11,9 @@
   padding: max(32px, env(safe-area-inset-top)) max(32px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(32px, env(safe-area-inset-left));
   background: var(--ui-color-paper);
   color: var(--ui-color-text);
+  /* Red de seguridad, no el arreglo: si una pantalla desborda a lo ancho, se recorta acá en vez de descuadrar la página (T154).
+     clip y no hidden: hidden crearía un contenedor de scroll y rompería position: sticky y los scrollers internos (la tira de días). Sin overflow-y: el vertical sigue visible. */
+  overflow-x: clip;
 }
 
 .status-panel {

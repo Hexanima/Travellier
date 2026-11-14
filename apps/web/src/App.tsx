@@ -17,6 +17,7 @@ import type { NativeAppUrlApi } from './navigation/app-url-listener.js'
 import { capacitorAppLifecycle, type AppLifecycle } from './native/app-lifecycle.js'
 import { createCapacitorCapabilities, createCapacitorIcsSharer } from './native/capacitor-capabilities.js'
 import { ExternalLinkContext } from './trips/external-link-context.js'
+import { createBrowserPhotoSource } from './native/browser-photo-source.js'
 import { createBrowserImageCodec } from './native/image-codec.js'
 import { createPhotoFileReader } from './native/photo-file.js'
 import { NotificationsScreen } from './notifications/NotificationsScreen.js'
@@ -288,7 +289,8 @@ function App({ auth, apiBaseUrl = import.meta.env.VITE_API_BASE_URL, sessionStor
     const device = defaultDevicePhotos.current
     return {
       api: { reserve, ...(activePhotos.countForPost ? { countForPost: activePhotos.countForPost } : {}), ...(activePhotos.listForPost ? { listForPost: activePhotos.listForPost } : {}) },
-      source: devicePhotos?.source ?? (device.source ??= createCapacitorCapabilities().photos),
+      // En la app nativa, el plugin; fuera de ella, el selector de archivos del navegador (camino de pruebas por navegador).
+      source: devicePhotos?.source ?? (device.source ??= Capacitor.isNativePlatform() ? createCapacitorCapabilities().photos : createBrowserPhotoSource()),
       reader: devicePhotos?.reader ?? (device.reader ??= createPhotoFileReader({ fetch: (url) => globalThis.fetch(url), convertFileSrc: (reference) => Capacitor.convertFileSrc(reference),
         codec: createBrowserImageCodec({ createImageBitmap: (blob, options) => globalThis.createImageBitmap(blob, options), createCanvas: () => document.createElement('canvas') }) })),
       transfer: devicePhotos?.transfer ?? (device.transfer ??= createDirectUpload({ createXhr: () => new XMLHttpRequest() })),

@@ -246,10 +246,13 @@
 .trip-shell .ui-tabpanel .ui-tablist .ui-tab[aria-selected="false"] { background: var(--ui-color-surface); color: var(--ui-color-muted); }
 .trip-shell .ui-tabpanel .ui-tablist .ui-tab[aria-selected="true"] { background: var(--ui-color-soft); color: var(--ui-color-brand); border-color: var(--ui-color-soft); }
 .trip-shell .ui-tabpanel .ui-tablist .ui-tab[aria-selected="false"]:hover { background: var(--ui-color-soft); color: var(--ui-color-brand); }
-.ui-tabpanel { display: grid; gap: 12px; min-width: 0; }
-.itinerary-days-nav { margin-top: 16px; margin-bottom: 8px; }
+/* grid-template-columns: minmax(0, 1fr): la pista automática crecía con el ancho mínimo de su ítem (.pull-to-refresh) y estiraba toda la página en horizontal (T154). */
+.ui-tabpanel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+/* min-width: 0: el nav es un ítem de grid y sin esto el ancho mínimo de la tira ensancha la columna y la página entera scrollea en horizontal (T154). */
+.itinerary-days-nav { margin-top: 16px; margin-bottom: 8px; min-width: 0; }
 .itinerary-day-strip { display: flex; gap: 8px; overflow-x: auto; padding: 6px; margin: 0; list-style: none; }
-.itinerary-day-chip { flex: none; }
+/* Los ítems flex de la tira son los li, no los botones: sin flex: none encogen y el chip parte la etiqueta letra por letra (T154). */
+.itinerary-day-strip > li { flex: none; }
 .itinerary-day-chip.ui-button { min-height: 64px; background: var(--ui-color-surface); color: var(--ui-color-brand); border-color: var(--ui-color-border); }
 .itinerary-day-chip.ui-button:hover:not(:disabled):not([aria-current="date"]) { background: var(--ui-color-soft); border-color: var(--ui-color-border); }
 .itinerary-day-chip.ui-button[aria-current="date"] { background: var(--ui-color-brand); color: var(--ui-color-accent-contrast); border-color: var(--ui-color-brand); }
