@@ -27,7 +27,7 @@ jobs:
       # Una zona que falla no cancela la otra: interesa saber si falla en las dos o solo en una.
       fail-fast: false
       matrix:
-        # La suite es independiente de la zona del proceso; la matriz lo verifica.
+        # La suite no depende de la zona del proceso en estas zonas; la matriz lo verifica.
         tz: [UTC, America/Argentina/Buenos_Aires]
     env:
       TZ: ${{ matrix.tz }}
