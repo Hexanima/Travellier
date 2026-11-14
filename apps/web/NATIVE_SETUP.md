@@ -12,6 +12,7 @@ Referencia funcional: [PRD v1](../../docs/versiones/v1/PRD.md), §3.7 y §7.
 | `@capacitor/calendar` | 1.0.1 | Capacitor >=8; iOS SPM |
 | `@capacitor/filesystem` | 8.1.5 | Capacitor >=8; iOS SPM (T143) |
 | `@capacitor/share` | 8.0.3 | Capacitor >=8; iOS SPM (T143) |
+| `@capacitor/keyboard` | 8.0.6 | Capacitor >=8; iOS SPM (T149) |
 
 No agregar geolocalización, micrófono, recordatorios, notificaciones locales ni ejecución de fondo para este setup. Aunque un plugin incluya otras APIs, el adaptador expone únicamente capacidades de v1.
 
@@ -190,6 +191,15 @@ Referencias: [entorno Capacitor](https://capacitorjs.com/docs/getting-started/en
 - Sin permisos ni capacidades de más: no se usa `canOpenUrl`, por eso no se declaran `<queries>` en el `AndroidManifest.xml` ni `LSApplicationQueriesSchemes` en el `Info.plist`. Para `https:`, `startActivity(ACTION_VIEW)` en Android y `UIApplication.open` en iOS funcionan sin esas declaraciones; usar `canOpenUrl` o esquemas propios (`comgooglemaps:`) en el futuro sí exigiría declararlos. El plugin no agrega `uses-permission`.
 - Alcance de `completed: true`: significa que el SO aceptó abrir el enlace, no que Google Maps o Apple Maps hayan mostrado el lugar. En Android, si `ACTION_VIEW` falla el plugin reintenta con `getLaunchIntentForPackage` y con la URL como action; con `https:` ambos caminos solo devuelven `false`.
 - No verificado en dispositivo (T113): la apertura real en Android e iOS, y cómo resuelven intents y universal links hacia Google Maps o Apple Maps. Decisiones pendientes (mapa estático/WebView, credenciales, privacidad) en `docs/REVISION_PENDIENTE.md` (T94 y T144).
+
+## Teclado y resize del WebView T146 / T149
+
+- `@capacitor/keyboard` 8.0.6 (MIT, peer `@capacitor/core >=8.0.0`) está instalado solo para que el bloque `plugins.Keyboard` de `capacitor.config.ts` tenga un plugin nativo que lo lea. No se usa la API JS del plugin (`show`, `hide`, `setResizeMode`, listeners `keyboardWillShow`/`keyboardDidShow`): ningún adaptador de `src/native` lo importa y no hay puerto de dominio para el teclado.
+- El config usa el tipo del plugin: `import { KeyboardResize } from "@capacitor/keyboard"` y `resize: KeyboardResize.Native`. `capacitor.config.ts` entró en el `include` de `tsconfig.node.json`, así que `yarn typecheck` verifica ese enum (antes el archivo no estaba en ningún tsconfig). El CLI transpila el config y el import de valor no rompe el `cap sync`: el `capacitor.config.json` generado queda con `"resize":"native"` y `"resizeOnFullScreen":true`.
+- iOS: `resize: native` es el único modo que redimensiona el WebView nativo. En `ios/Sources/KeyboardPlugin/Keyboard.m`, al aparecer el teclado el caso `ResizeNative` hace `setFrame` sobre el WebView restando la altura del teclado, en lugar de tocar el DOM (`body`/`ion-app`) como los modos `body` e `ionic`. Sin el plugin instalado ese bloque de config no lo leía nadie: en iOS el teclado se superponía al contenido.
+- Android: el resize real lo da `android:windowSoftInputMode="adjustResize"` de `.MainActivity` en el `AndroidManifest.xml` (T146), no el plugin. Lo que agrega el plugin en `android/.../Keyboard.java` son listeners de insets (`setOnApplyWindowInsetsListener` y `setWindowInsetsAnimationCallback`) que emiten los eventos JS del teclado, y el workaround `resizeOnFullScreen: true`, que ante cada cambio de insets llama `possiblyResizeChildOfContent` para redimensionar también cuando la app está en pantalla completa. `resize` se ignora en Android.
+- Sin permisos ni capacidades nuevas: el `AndroidManifest.xml` del plugin está vacío (sin `uses-permission`) y en iOS no requiere entradas en el `Info.plist`.
+- No verificado en dispositivo ni emulador (T113): en iOS, el resize efectivo del WebView y el teclado sobre los formularios (requiere macOS/Xcode, no es verificable desde esta PC); en Android, si `adjustResize` más `resizeOnFullScreen` producen un doble resize. Lo único ejecutado acá fue `cap sync android` / `cap sync ios`, el typecheck, el lint y los contratos.
 
 ## Guardar y compartir el `.ics` T143
 
