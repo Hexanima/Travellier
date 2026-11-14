@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { S3Client } from "@aws-sdk/client-s3";
+
 import { createApp } from "./app.js";
 import {
   connectMongoDatabase,
@@ -10,7 +12,7 @@ import { createMongoRateLimitRepository } from "./adapters/mongodb/rate-limit-re
 import { createAuthRateLimiter } from "./security/auth-rate-limit.js";
 import { readSecurityConfig } from "./security/request-limits.js";
 import { createAuthenticationApi } from "./auth/authentication-api.js";
-import { createS3ObjectStorage } from "./adapters/aws/s3-object-storage.js";
+import { createS3ObjectStorage, readS3ClientConfig } from "./adapters/aws/s3-object-storage.js";
 import { createJwtMiddleware } from "./auth/jwt-middleware.js";
 import { createPushDeviceApi } from "./push/push-device-api.js";
 import { createTripApi } from "./trips/trip-api.js";
@@ -35,6 +37,10 @@ export const createLocalApi = async (
   const jwtSecret = requiredSetting(environment, "JWT_SECRET");
   const security = readSecurityConfig(environment);
   const logLine = environment.API_VERBOSE === "false" ? undefined : (entry: unknown) => console.log(JSON.stringify(entry));
+  // Un unico cliente S3 para todos los almacenamientos locales. S3_FORCE_PATH_STYLE=true
+  // sirve para un S3 local tipo MinIO alcanzado por nombre de host (un tunel, por ejemplo);
+  // solo afecta al servidor de desarrollo y por defecto esta desactivada.
+  const s3Client = new S3Client(readS3ClientConfig(environment));
   const rateLimiter = security.rateLimitEnabled
     ? createAuthRateLimiter({
       port: createMongoRateLimitRepository(connection.database),
@@ -47,11 +53,11 @@ export const createLocalApi = async (
     auth: createAuthenticationApi({
       database: connection.database,
       jwtSecret,
-      ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
+      ...(environment.S3_BUCKET_NAME ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME, client: s3Client }) } : {}),
     }),
     // Without S3_BUCKET_NAME the local API runs without AWS: photo endpoints answer 500 and posts without photos work.
     trips: createTripApi(connection.database, environment.S3_BUCKET_NAME
-      ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME }) } : {}),
+      ? { storage: createS3ObjectStorage({ bucketName: environment.S3_BUCKET_NAME, client: s3Client }) } : {}),
     pushDevices: createPushDeviceApi(connection.database),
     ...(rateLimiter === undefined ? {} : { rateLimiter }),
   }, createJwtMiddleware({ jwtSecret }), logLine,

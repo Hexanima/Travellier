@@ -30,7 +30,7 @@ yarn workspace api dev
 
 `yarn workspace api start` también carga el mismo `.env` al iniciar la API compilada. Lambda conserva su configuración mediante variables de entorno y Secrets Manager, sin cargar archivos locales. Las migraciones crean o actualizan el esquema en la base configurada. Atlas debe permitir la IP del desarrollador y el usuario debe tener permisos de lectura y escritura sobre esa base.
 
-`S3_BUCKET_NAME` y `AWS_REGION` son opcionales para probar avatares y fotos (T72) y requieren credenciales AWS disponibles para el SDK. Dejarlas sin configurar permite probar autenticación, Trips, miembros, destinos, transportes e itinerario sin AWS.
+`S3_BUCKET_NAME` y `AWS_REGION` son opcionales para probar avatares y fotos (T72) y requieren credenciales AWS disponibles para el SDK. Dejarlas sin configurar permite probar autenticación, Trips, miembros, destinos, transportes e itinerario sin AWS. `S3_FORCE_PATH_STYLE=true` hace que el cliente S3 del servidor local use direccionamiento path-style, necesario para un S3 local tipo MinIO alcanzado por un nombre de host; está desactivada por defecto.
 
 La API local registra cada request y su respuesta en JSON: `requestId`, método, ruta, estado HTTP, duración y código de error cuando existe. Los errores inesperados registran el tipo y los frames del stack y responden HTTP 500 genérico. No se registran bodies, headers, query strings ni mensajes de excepciones; los tokens de verificación y códigos de invitación en la ruta se ocultan. Para desactivar estos logs, definir `API_VERBOSE=false` en `apps/api/.env`.
 
