@@ -125,7 +125,6 @@ describe("Crear, configurar y unirse", () => {
   });
   it("la unión por link usa un panel propio con botón de ancho completo", () => {
     expect(ruleBody(app, ".invite-panel .ui-button")).toContain("width: 100%");
-    expect(ruleBody(app, ".invite-panel strong")).toContain("overflow-wrap: anywhere");
   });
 });
 

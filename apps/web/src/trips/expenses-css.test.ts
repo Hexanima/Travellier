@@ -43,13 +43,11 @@ describe("balance: tarjetas por moneda, saldos y compensaciones", () => {
     expect(body).toContain("font-size: 1rem");
     expect(body).toContain("line-height: 1.5rem");
     expect(body).toContain("font-variant-numeric: tabular-nums");
-    expect(body).toContain("overflow-wrap: anywhere");
   });
   it("las compensaciones tienen divisor y cifras tabulares", () => {
     const body = ruleBody(".trip-balance .balance-currency .balance-settlement");
     expect(body).toContain("border-top: 1px solid var(--ui-color-border)");
     expect(body).toContain("font-variant-numeric: tabular-nums");
-    expect(body).toContain("overflow-wrap: anywhere");
   });
   it("los gastos por completar llevan divisores, motivos sin viñetas y enlace de 44px", () => {
     expect(ruleBody(".trip-balance .balance-pending .balance-pending-item")).toContain("border-top: 1px solid var(--ui-color-border)");

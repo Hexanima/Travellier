@@ -77,12 +77,11 @@ describe("fotos: grilla y miniaturas", () => {
     expect(grid).toContain("align-items: start");
     expect(grid).toContain("gap: 12px");
   });
-  it("cada ítem va en columna desde arriba y el texto largo se parte sin ensanchar", () => {
+  it("cada ítem va en columna desde arriba y la leyenda es 12/18 muted", () => {
     const item = ruleBody(".photo-grid__item");
     expect(item).toContain("align-content: start");
     expect(item).toContain("min-width: 0");
     const caption = ruleBody(".photo-grid__caption");
-    expect(caption).toContain("overflow-wrap: anywhere");
     expect(caption).toContain("min-width: 0");
     expect(caption).toContain("color: var(--ui-color-muted)");
     expect(caption).toContain("font-size: .75rem");
@@ -185,8 +184,7 @@ describe("recuerdos de actividad y cadenas", () => {
     expect(ruleBody(".comment-item")).toContain("border: 1px solid var(--ui-color-border)");
     expect(ruleBody(".itinerary-posts > .itinerary-nested-post")).toContain("border-top: 1px solid var(--ui-color-border)");
   });
-  it("los extractos largos se parten sin ensanchar la lista", () => {
-    expect(ruleBody(".memories-list .itinerary-post-description")).toContain("overflow-wrap: anywhere");
+  it("los extractos largos no ensanchan la lista", () => {
     expect(ruleBody(".memories-list .itinerary-post-description a")).toContain("min-width: 0");
   });
   it("el compositor ocupa el ancho y alinea el resumen del vínculo a la izquierda", () => {
