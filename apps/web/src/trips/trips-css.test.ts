@@ -60,7 +60,7 @@ describe("Mis viajes y Explorar", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
   it("la tarjeta es un enlace de bloque: sin subrayado, color heredado, con hover y foco con token (T153)", () => {
-    const open = ruleBody(app, ".trips-panel--catalog .trips-item-open");
+    const open = ruleBody(app.split("@media (prefers-reduced-motion")[0] ?? "", ".trips-panel--catalog .trips-item-open");
     expect(open).toContain("display: grid");
     expect(open).toContain("text-decoration: none");
     expect(open).toContain("color: inherit");
@@ -70,6 +70,9 @@ describe("Mis viajes y Explorar", () => {
     const focus = ruleBody(app, ".trips-panel--catalog .trips-item-open:focus-visible");
     expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
     expect(focus).toContain("outline-offset: 3px");
+    // El realce se anima solo con movimiento permitido: la transición vive dentro de la consulta, como en components.css.
+    expect(open).not.toContain("transition:");
+    expect(app).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\s*\.trips-panel--catalog \.trips-item-open \{[^}]*transition: background-color 150ms ease/);
   });
 
   it("las entradas y el vacío usan botones de ancho completo acotados a su contenedor", () => {

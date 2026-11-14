@@ -151,6 +151,14 @@ describe("control geometry and states", () => {
     expect(rest).not.toContain("transition:");
     expect(rest).not.toContain("translateY");
   });
+
+  it("keeps every stylesheet's motion inside the query, not only components.css", () => {
+    for (const file of cssFiles) {
+      const rest = outsideMotionQuery(read(file));
+      expect(rest, file).not.toContain("transition:");
+      expect(rest, file).not.toContain("translateY");
+    }
+  });
 });
 
 describe("itinerary overrides, focus and type scale", () => {
