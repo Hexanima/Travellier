@@ -544,3 +544,31 @@ describe("App Trip routes: invitación por link", () => {
     expect(container.textContent).toContain("Te uniste al viaje.");
   });
 });
+
+describe("Invitación por código: el timeout se distingue de la conexión caída (T150)", () => {
+  const alertText = (container: HTMLElement) => container.querySelector('[role="alert"]')?.textContent ?? "";
+  const confirmJoin = (container: HTMLElement) =>
+    act(async () => Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Confirmar unión")?.click());
+
+  it("muestra el texto del timeout y conserva el reintento", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const container = await render("/invite/VIAJE-X7K2", true, { joinByCode });
+    await confirmJoin(container);
+    expect(alertText(container)).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Confirmar unión")).toBe(true);
+  });
+
+  it("conserva el texto de siempre con la conexión caída", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const container = await render("/invite/VIAJE-X7K2", true, { joinByCode });
+    await confirmJoin(container);
+    expect(alertText(container)).toBe("No pudimos confirmar la unión. Intentá nuevamente.");
+  });
+
+  it("conserva el texto del código inválido", async () => {
+    const joinByCode = vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } });
+    const container = await render("/invite/VIAJE-X7K2", true, { joinByCode });
+    await confirmJoin(container);
+    expect(alertText(container)).toBe("El código de invitación no es válido.");
+  });
+});
