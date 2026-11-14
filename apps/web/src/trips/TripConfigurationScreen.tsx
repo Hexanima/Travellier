@@ -97,7 +97,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
       } else if (result.error.kind === "not-found" || result.error.kind === "unauthorized") {
         setDetail(undefined);
         setValues(undefined);
-        setLoadError("not-found");
+        setLoadError({ reason: "not-found" });
       } else {
         setSaveError(networkNotice(result.error, configurationFailure));
       }
