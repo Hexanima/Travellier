@@ -196,7 +196,9 @@ describe("itinerary overrides, focus and type scale", () => {
   it("gives every .ui-button background/color override outside components.css its own disabled rule", () => {
     for (const file of cssFiles.filter((f) => f !== "components/components.css")) {
       const css = read(file);
-      for (const match of css.matchAll(/^([^{}@\n][^{}]*)\{([^}]*)\}/gm)) {
+      // Un comentario antes de una regla no es parte de su selector: se quita antes de leer los selectores.
+      const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of selectors.matchAll(/^([^{}@\n][^{}]*)\{([^}]*)\}/gm)) {
         const body = match[2] ?? "";
         if (!/(^|[\s;])(background|color)\s*:/.test(body)) continue;
         for (const sel of (match[1] ?? "").split(",").map((x) => x.trim())) {
