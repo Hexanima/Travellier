@@ -180,6 +180,7 @@ dd {
 .trips-panel,
 .trip-form-panel {
   width: min(760px, 100%);
+  min-width: 0;
   margin: 0 auto;
 }
 
@@ -274,14 +275,14 @@ dd {
 .journey-header p, .journey-intro { color: var(--ui-color-muted); line-height: 1.5; }
 .journey-header p { margin: 0; font-weight: 700; }
 .journey-intro { max-width: 65ch; margin: 16px 0 28px; }
-.journey-destinations { display: grid; gap: 28px; }
-.journey-destination, .journey-add { padding: 24px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); }
+.journey-destinations { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+.journey-destination, .journey-add { min-width: 0; padding: 24px; border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius-card); background: var(--ui-color-surface); }
 .journey-destination-heading { margin-bottom: 24px; }
 .journey-delete-destination { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 24px; }
 .journey-delete-destination p { margin: 0; flex: 1 1 240px; }
 .journey-order { color: var(--ui-color-brand); font-size: .875rem; font-weight: 700; }
 .journey-destination h2, .journey-add h2 { margin: 4px 0 0; font-size: 1.5rem; }
-.journey-directions { display: grid; gap: 32px; }
+.journey-directions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; }
 .journey-direction + .journey-direction { border-top: 1px solid var(--ui-color-border); padding-top: 28px; }
 .journey-direction h3 { margin: 0 0 16px; font-size: 1.15rem; }
 .journey-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

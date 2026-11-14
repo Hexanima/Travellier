@@ -21,6 +21,12 @@
   box-sizing: border-box;
 }
 
+/* T153: los nombres que escribe la gente (viajes, destinos, lugares, integrantes) parten palabras.
+   Con el quiebre permitido, una palabra sin espacios tampoco ensancha su contenedor flex o grid. */
+h1, h2, h3, h4, h5, h6, p, dt, dd, li, legend, figcaption, blockquote, summary {
+  overflow-wrap: anywhere;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
