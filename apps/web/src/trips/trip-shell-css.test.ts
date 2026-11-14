@@ -93,6 +93,22 @@ describe("cabecera y pestañas del Trip", () => {
     expect(h1).toContain("font-weight: 700");
     expect(itinerary).toMatch(/@media \(max-width: 359px\) \{[^@]*\.trip-shell-header h1 \{[^}]*font-size: 1rem/);
   });
+  it("«Actualizar» comparte la fila del nombre como acción sin relleno de 44px, no como primario (T153)", () => {
+    const header = ruleBody(itinerary, ".trip-shell-header");
+    expect(header).toContain("display: flex");
+    expect(header).toContain("justify-content: space-between");
+    expect(header).toContain("gap: 12px");
+    const action = ruleBody(itinerary, ".trip-shell-refresh.ui-button");
+    expect(action).toContain("background: transparent");
+    expect(action).toContain("color: var(--ui-color-brand)");
+    expect(action).toContain("min-height: 44px");
+    expect(action).toContain("flex: none");
+    expect(action).not.toContain("width: 100%");
+    expect(ruleBody(itinerary, ".trip-shell-refresh.ui-button:hover:not(:disabled)")).toContain("background: var(--ui-color-soft)");
+    const disabled = ruleBody(itinerary, '.trip-shell-refresh.ui-button:disabled, .trip-shell-refresh.ui-button[aria-disabled="true"]');
+    expect(disabled).toContain("background: var(--ui-color-disabled-surface)");
+    expect(disabled).toContain("color: var(--ui-color-muted)");
+  });
   it("la cabecera de retorno mide al menos 44px", () => {
     expect(ruleBody(app, ".trips-back")).toContain("min-height: 44px");
   });

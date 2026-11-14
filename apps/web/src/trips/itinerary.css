@@ -199,7 +199,12 @@
 .calendar-sync p { margin: 0; line-height: 1.5; }
 .calendar-sync [role="group"] { display: grid; justify-items: start; gap: 8px; }
 /* Structure of the Trip tabs (T98); colors, sizes and final composition belong to the visual tasks (T105+). */
-.trip-shell-header h1 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+.trip-shell-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trip-shell-header h1 { margin: 0; min-width: 0; overflow-wrap: anywhere; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+/* «Actualizar» acompaña el nombre del viaje: acción sin relleno (DESIGN.md «acciones sin relleno»), nunca un primario que compita con las pestañas. */
+.trip-shell-refresh.ui-button { flex: none; min-height: 44px; padding: 0 12px; border-color: transparent; background: transparent; color: var(--ui-color-brand); }
+.trip-shell-refresh.ui-button:hover:not(:disabled) { border-color: transparent; background: var(--ui-color-soft); }
+.trip-shell-refresh.ui-button:disabled, .trip-shell-refresh.ui-button[aria-disabled="true"] { border-color: transparent; background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); }
 @media (max-width: 359px) {
   .trip-shell-header h1 { font-size: 1rem; }
   .itinerary-band { padding: 12px; }
