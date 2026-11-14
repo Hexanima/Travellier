@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
@@ -164,7 +165,7 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Los recuerdos de este viaje no están disponibles para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar los recuerdos. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar los recuerdos. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}

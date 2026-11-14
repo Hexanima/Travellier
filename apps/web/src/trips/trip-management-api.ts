@@ -1,5 +1,5 @@
 import type { ParticipationConfirmation } from "./participation-conflict.js";
-import type { ApiClientError, HttpClient, ApiErrorKind } from "../api/index.js";
+import { networkCode, type ApiClientError, type HttpClient, type ApiErrorKind } from "../api/index.js";
 
 export type TripSummary = {
   id: string;
@@ -101,7 +101,7 @@ const parseTripDetail = (value: unknown): TripDetail | undefined => {
 const toFailure = (error: ApiClientError): TripFailure =>
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
-    : { kind: error.kind };
+    : { kind: error.kind, ...networkCode(error) };
 
 export const createTripManagementApi = (client: Pick<HttpClient, "get" | "post" | "patch" | "delete">): TripManagementApi => ({
   deleteTrip: async (tripId) => {

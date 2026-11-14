@@ -72,6 +72,20 @@ describe("TripMemoriesScreen", () => {
     await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar"));
     expect(texts(container)).toEqual(["Recuerdo 11"]);
   });
+  it("un timeout tiene su propio texto y conserva el reintento", async () => {
+    const list = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } })
+      .mockResolvedValueOnce({ ok: true, value: [post(11, "2026-01-02T10:00:00.000Z")] });
+    const container = await render(list);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar los recuerdos");
+    await click(Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar"));
+    expect(texts(container)).toEqual(["Recuerdo 11"]);
+  });
+  it("una conexión caída conserva el texto de siempre", async () => {
+    const container = await render(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }));
+    expect(container.textContent).toContain("No pudimos cargar los recuerdos");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("is unavailable on 404 and does not offer retry", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: false, error: { kind: "not-found" } }));
     expect(container.textContent).toContain("Los recuerdos de este viaje no están disponibles para tu cuenta.");

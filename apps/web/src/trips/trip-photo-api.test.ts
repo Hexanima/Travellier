@@ -45,7 +45,7 @@ describe("photo upload reservation adapter", () => {
     expect(await setup({ error: { code: "ValidationError", message: "x", fields } }, 422).api.reserve(tripId, files))
       .toEqual({ ok: false, error: { kind: "validation", fields } });
     const client = createHttpClient({ baseUrl: "https://api.test", fetch: vi.fn().mockRejectedValue(new Error("down")), getAccessToken: async () => "t", onUnauthorized: vi.fn() });
-    expect(await createTripPhotoApi(client).reserve(tripId, files)).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await createTripPhotoApi(client).reserve(tripId, files)).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });
 

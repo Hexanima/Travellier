@@ -199,6 +199,18 @@ describe("itinerary: silent refresh", () => {
     expect(text()).toContain("No pudimos cargar el itinerario");
   });
 
+  it("un timeout del primer intento se lee con su propio texto", async () => {
+    await mount({ results: [() => ({ ok: false, error: { kind: "network", code: "TimeoutError" } })] });
+    expect(text()).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(text()).not.toContain("No pudimos cargar el itinerario");
+  });
+
+  it("una conexión caída conserva el texto de siempre", async () => {
+    await mount({ results: [() => ({ ok: false, error: { kind: "network", code: "NetworkError" } })] });
+    expect(text()).toContain("No pudimos cargar el itinerario");
+    expect(text()).not.toContain("tardó demasiado");
+  });
+
   it("does not start a second request while one is in flight", async () => {
     const gate = deferred<Result>();
     const { get } = await mount({ results: [() => ({ ok: true, value: multiDay() }), () => gate.promise] });

@@ -1,5 +1,5 @@
 import { readTransport, type Transport } from "app-domain";
-import type { ApiClientError, HttpClient } from "../api/index.js";
+import { networkCode, type ApiClientError, type HttpClient } from "../api/index.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
 
 export type TransportDirection = "outbound" | "return";
@@ -80,7 +80,7 @@ const toFailure = (error: ApiClientError): TripFailure =>
   error.status === 409 && error.code === "ItineraryConflictError" ? { kind: "itinerary-conflict" } :
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) }
-    : { kind: error.kind };
+    : { kind: error.kind, ...networkCode(error) };
 const serverFailure = (): TripResult<never> => ({ ok: false, error: { kind: "server" } });
 const destinationsPath = (tripId: string) => `/trips/${encodeURIComponent(tripId)}/destinations`;
 const transportsPath = (tripId: string, destinationId: string) =>

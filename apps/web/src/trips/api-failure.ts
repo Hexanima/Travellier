@@ -1,8 +1,9 @@
-import type { ApiClientError } from "../api/index.js";
+import { networkCode, type ApiClientError } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 
 /** Shared by the comment and like adapters: the kind and field errors travel; a 404 for an unknown comment also carries its code so the UI can tell it apart. */
 export const interactionFailure = (error: ApiClientError): TripResult<never> => ({ ok: false, error: { kind: error.kind,
+  ...networkCode(error),
   ...(error.kind === "not-found" && error.code === "CommentNotFoundError" ? { code: error.code } : {}),
   ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } });
 export const serverFailure: TripResult<never> = { ok: false, error: { kind: "server" } };

@@ -217,6 +217,21 @@ describe("PostDetailScreen failures", () => {
     expect(container.textContent).toContain("Recuerdo 5");
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+  it("tells a timeout apart with its own text, still retrying", async () => {
+    const get = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } }).mockResolvedValueOnce(ok(detail(5)));
+    const { container } = await open(get);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    await click(byText(container, "button", "Reintentar"));
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("keeps the usual text for a dropped connection", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await open(get);
+    expect(container.textContent).toContain("No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("treats a rejected request as a network error", async () => {
     const { container } = await open(vi.fn().mockRejectedValue(new Error("down")));
     expect(container.textContent).toContain("No pudimos cargar el recuerdo.");

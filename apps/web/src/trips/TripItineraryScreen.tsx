@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure, TripManagementApi } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
@@ -338,7 +339,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Este itinerario no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar el itinerario. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar el itinerario. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}

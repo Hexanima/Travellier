@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
 import { LocationPreview } from "./LocationPreview.js";
 import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, withNoBack, type PostOrigin } from "./post-origin.js";
@@ -102,7 +103,7 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Este recuerdo ya no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}

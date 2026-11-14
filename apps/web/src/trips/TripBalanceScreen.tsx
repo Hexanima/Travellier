@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState, PullToRefresh } from "../components/index.js";
 import { actionLabel, balanceLabels, excludedActions, excludedAmount, formerText, memberStatus, reasonText, settlementText, isCurrentUser, type ExcludedAction } from "./balance-view.js";
 import type { ExpenseCurrency } from "./expense-draft.js";
@@ -97,7 +98,7 @@ function BalanceContent({ tripId, balance, posts, members }: TripBalanceScreenPr
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "El balance de este viaje no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció."
-          : "No pudimos cargar el balance. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar el balance. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}

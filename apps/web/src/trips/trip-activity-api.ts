@@ -1,4 +1,4 @@
-import type { ApiClientError, HttpClient } from "../api/index.js";
+import { networkCode, type ApiClientError, type HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 import type { ItineraryActivityResponse } from "./trip-itinerary-api.js";
 import { parseConfirmation, type ParticipationConfirmation } from "./participation-conflict.js";
@@ -33,7 +33,7 @@ const failure = (error: ApiClientError): TripResult<never> => {
     const confirmation = parseConfirmation(error.details);
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
   }
-  return { ok: false, error: { kind: error.kind,
+  return { ok: false, error: { kind: error.kind, ...networkCode(error),
     ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
 };
 const response = (result: Raw, tripId: string, activityId?: string): TripResult<ActivityResponse> => {

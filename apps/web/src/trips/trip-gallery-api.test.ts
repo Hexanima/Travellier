@@ -68,7 +68,7 @@ describe("trip gallery adapter", () => {
     expect(await setup({}, 503).api.list(tripId, {})).toEqual(failure("server"));
     const fetch = vi.fn().mockRejectedValue(new TypeError("offline"));
     const api = createTripGalleryApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "t", onUnauthorized: vi.fn() }));
-    expect(await api.list(tripId, {})).toEqual(failure("network"));
+    expect(await api.list(tripId, {})).toEqual(failure("network", { code: "NetworkError" }));
     const bad = await setup({ photos: [photo(1, { url: "http://bucket.s3.test/p?sig=SECRET1" })], nextCursor: null }).api.list(tripId, {});
     expect(JSON.stringify(bad)).not.toContain("SECRET");
   });

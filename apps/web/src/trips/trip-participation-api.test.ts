@@ -60,8 +60,8 @@ describe("participation HTTP adapter", () => {
   });
   it("handles network failure", async () => {
     const { api, fetch } = setup({}); fetch.mockRejectedValue(new Error("Offline"));
-    expect(await api.get(itineraryId(1), itineraryId(8))).toEqual({ ok: false, error: { kind: "network" } });
-    expect(await api.set(itineraryId(1), itineraryId(8), "going")).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await api.get(itineraryId(1), itineraryId(8))).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    expect(await api.set(itineraryId(1), itineraryId(8), "going")).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
   describe("decisionRequired", () => {
     const mark = { reason: "schedule_conflict", changedFields: ["scheduledAt"], changedAt: "2026-09-26T10:00:00.000Z" };
