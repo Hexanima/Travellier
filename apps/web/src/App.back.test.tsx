@@ -77,7 +77,7 @@ describe("App back button integration", () => {
     const container = await render(["/trips", `/trips/${tripId}/itinerary`], props({ backButton: button.port }));
     expect(container.textContent).toContain("Itinerario");
     await button.press();
-    expect(container.textContent).toContain("Mis viajes");
+    expect(heading(container)).toBe("Mis viajes");
     expect(button.exitApp).not.toHaveBeenCalled();
     await afterBackLock();
     await button.press();

@@ -62,8 +62,9 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
       if (action.kind === "back") navigateRef.current(-1);
       // With `keepHistory` the new entry inherits `noBack` only when nothing was behind the one it replaces, so the next press neither
       // resolves to a back that goes nowhere nor closes the app with history still behind (avisos keeps the screen that opened it).
-      // Without it (Mis viajes reached from a root of the Trip) the entry behind showed the screen just reached, so the new one is marked
-      // even with history behind: the next press closes the app instead of repeating what is already on screen.
+      // Without it (Mis viajes reached from a root of the Trip) the new entry is marked even with history behind, because the definition taken
+      // ends the journey at Mis viajes and the next press must close the app. The dominant case is the Trip opened from a card of Mis viajes,
+      // where the entry behind showed the screen just reached; in the others it showed another screen and is dropped all the same.
       else navigateRef.current(action.to, { replace: true, ...(action.keepHistory ? inheritNoBack(current) : { state: withNoBack() }) });
     });
   }, [backButton, stack]);
