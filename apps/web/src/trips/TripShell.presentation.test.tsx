@@ -34,7 +34,10 @@ describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
     expect(button.closest(".trip-shell-header")).not.toBeNull();
     expect(button.closest('[role="tabpanel"]')).toBeNull();
     expect(button.classList.contains("trip-shell-refresh")).toBe(true);
-    expect(button.classList.contains("ui-button--secondary")).toBe(false);
+    // Comparte la fila del nombre: es hermano del h1 dentro de la cabecera, no un bloque aparte. El contrato «sin relleno» vive en trip-shell-css.test.ts.
+    const header = button.closest(".trip-shell-header")!;
+    expect(button.parentElement).toBe(header);
+    expect(button.previousElementSibling?.tagName).toBe("H1");
     // La fila de pestañas conserva sus tres controles: nada se suma ni se quita.
     expect(Array.from(container.querySelectorAll('[role="tablist"] [role="tab"]')).map((tab) => tab.textContent)).toEqual(["Itinerario", "Diario", "Grupo"]);
   });

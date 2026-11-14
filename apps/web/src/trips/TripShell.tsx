@@ -35,8 +35,8 @@ export function TripShell() {
   const fromNotices = readOrigin(location.state, tripId ?? "").label === "avisos";
   // The listings refresh on a pull and on the visible «Actualizar» button (the accessible alternative to the gesture); both only exist with the refresh provider.
   // The button accompanies the Trip name instead of opening the body: below the tabs it read as a fourth tab and pushed the listing down.
-  const refreshable = <ShellFrame><Outlet /></ShellFrame>;
-  const content = hasRefresh ? <PullToRefresh onRefresh={refreshNow}>{refreshable}</PullToRefresh> : refreshable;
+  const framedOutlet = <ShellFrame><Outlet /></ShellFrame>;
+  const content = hasRefresh ? <PullToRefresh onRefresh={refreshNow}>{framedOutlet}</PullToRefresh> : framedOutlet;
   return <main className="app-shell trips-shell itinerary-shell trip-shell">
     <div className="trips-panel">
       {/* Opened from the notices center (the origin travels in the entry state): the way back is that center, never another Trip. */}
