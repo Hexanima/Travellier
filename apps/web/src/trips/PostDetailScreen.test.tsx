@@ -217,6 +217,21 @@ describe("PostDetailScreen failures", () => {
     expect(container.textContent).toContain("Recuerdo 5");
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+  it("tells a timeout apart with its own text, still retrying", async () => {
+    const get = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } }).mockResolvedValueOnce(ok(detail(5)));
+    const { container } = await open(get);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    await click(byText(container, "button", "Reintentar"));
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("keeps the usual text for a dropped connection", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await open(get);
+    expect(container.textContent).toContain("No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("treats a rejected request as a network error", async () => {
     const { container } = await open(vi.fn().mockRejectedValue(new Error("down")));
     expect(container.textContent).toContain("No pudimos cargar el recuerdo.");
@@ -229,6 +244,19 @@ describe("PostDetailScreen failures", () => {
     expect(container.textContent).toContain("Resumen 7");
     expect(container.textContent).toContain("No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.");
     expect(container.querySelectorAll('[role="alert"]')).toHaveLength(1);
+  });
+  it("un timeout al actualizar el recuerdo tiene su propio texto y conserva lo cargado (T150)", async () => {
+    const { container, rerender } = await open(vi.fn().mockResolvedValue(ok(detail(5))));
+    await rerender(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }));
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("No pudimos actualizar el recuerdo");
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("una conexión caída al actualizar el recuerdo conserva el texto de siempre (T150)", async () => {
+    const { container, rerender } = await open(vi.fn().mockResolvedValue(ok(detail(5))));
+    await rerender(vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }));
+    expect(container.textContent).toContain("No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("tardó demasiado");
   });
 });
 
@@ -539,7 +567,7 @@ describe("PostDetailScreen delete (T128)", () => {
   const deleteButton = (container: HTMLElement) => byText(container, "button", "Eliminar recuerdo");
   const dialog = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
   const confirm = () => byText(dialog() as HTMLElement, "button", "Eliminar");
-  const failure = (kind: string) => ({ ok: false as const, error: { kind } });
+  const failure = (kind: string, extra: object = {}) => ({ ok: false as const, error: { kind, ...extra } });
   const withRemove = (remove: ReturnType<typeof vi.fn>, id = author, members = roster) => extras({ remove, members: people(id, members) });
   it("offers «Eliminar recuerdo» to the author and to an admin, not to another participant", async () => {
     expect(deleteButton((await open(get(), 5, undefined, extras({ members: people(author) }))).container)).toBeTruthy();
@@ -651,6 +679,23 @@ describe("PostDetailScreen delete (T128)", () => {
     expect(remove).toHaveBeenCalledTimes(2);
     expect(dialog()).toBeNull();
     expect(container.textContent).toContain("Este recuerdo ya no está disponible");
+  });
+  it("un timeout al eliminar el recuerdo tiene su propio texto y deja el diálogo abierto (T150)", async () => {
+    const remove = vi.fn().mockResolvedValue(failure("network", { code: "TimeoutError" }));
+    const { container } = await open(get(), 5, undefined, withRemove(remove));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(dialog()?.textContent).not.toContain("No pudimos eliminar el recuerdo.");
+    expect(container.textContent).toContain("Recuerdo 5");
+  });
+  it("una conexión caída al eliminar el recuerdo conserva el texto de siempre (T150)", async () => {
+    const remove = vi.fn().mockResolvedValue(failure("network", { code: "NetworkError" }));
+    const { container } = await open(get(), 5, undefined, withRemove(remove));
+    await click(deleteButton(container));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("No pudimos eliminar el recuerdo. Revisá tu conexión e intentá nuevamente.");
+    expect(dialog()?.textContent).not.toContain("tardó demasiado");
   });
   it("treats a thrown error like a network failure", async () => {
     const { container } = await open(get(), 5, undefined, withRemove(vi.fn().mockRejectedValue(new Error("x"))));

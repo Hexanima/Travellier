@@ -787,6 +787,15 @@ describe("PostComposer (new activity)", () => {
       await field(container, "description", "Hola"); await submit(container);
       expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Podés reintentar: el recuerdo no se va a publicar dos veces.");
     });
+    it("un timeout al guardar tiene su propio texto y conserva el hint de reintento (T150)", async () => {
+      const { container } = await failWith({ kind: "network", code: "TimeoutError" });
+      expect(alerts(container)).toHaveLength(1);
+      expect(alerts(container)[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. Podés reintentar: el recuerdo no se va a publicar dos veces.");
+    });
+    it("una conexión caída al guardar conserva el texto de siempre (T150)", async () => {
+      const { container } = await failWith({ kind: "network", code: "NetworkError" });
+      expect(alerts(container)[0]!.textContent).toBe("No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente. Podés reintentar: el recuerdo no se va a publicar dos veces.");
+    });
     it("a rejected request is treated as a network error with the suggestion", async () => {
       const { container } = await failWith(undefined, { create: vi.fn().mockRejectedValue(new Error("down")) });
       expect(alerts(container)[0]!.textContent).toContain("Podés reintentar");

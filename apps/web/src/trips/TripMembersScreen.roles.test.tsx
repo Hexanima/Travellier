@@ -228,17 +228,18 @@ describe("members: leaving", () => {
   });
 });
 
-type Op = { name: string; viewer: keyof typeof ids; method: "setRole" | "transferOwnership" | "leave" | "expel" | "deleteTrip"; run: () => Promise<void> };
+/** `fallback` es el texto de red propio de cada operación: se compara completo para que el par timeout / conexión caída distinga de verdad. */
+type Op = { name: string; viewer: keyof typeof ids; method: "setRole" | "transferOwnership" | "leave" | "expel" | "deleteTrip"; fallback: string; run: () => Promise<void> };
 const ops: Op[] = [
-  { name: "role", viewer: "owner", method: "setRole", run: async () => { await gestionar("Ana"); await click("Hacer admin"); await click("Confirmar cambio de rol"); } },
-  { name: "transfer", viewer: "owner", method: "transferOwnership", run: async () => {
+  { name: "role", viewer: "owner", method: "setRole", fallback: "No pudimos cambiar el rol. Intentá nuevamente.", run: async () => { await gestionar("Ana"); await click("Hacer admin"); await click("Confirmar cambio de rol"); } },
+  { name: "transfer", viewer: "owner", method: "transferOwnership", fallback: "No pudimos transferir la titularidad. Intentá nuevamente.", run: async () => {
     await gestionar("Ana"); await click("Transferir titularidad"); await acknowledge(); await click("Confirmar transferencia"); } },
-  { name: "expel", viewer: "owner", method: "expel", run: async () => { await gestionar("Ana"); await click("Expulsar"); await click("Confirmar expulsión"); } },
-  { name: "leave", viewer: "ana", method: "leave", run: async () => { await click("Salir del viaje"); await click("Confirmar salida"); } },
-  { name: "delete", viewer: "owner", method: "deleteTrip", run: async () => { await click("Eliminar viaje"); await click("Eliminar definitivamente"); } },
+  { name: "expel", viewer: "owner", method: "expel", fallback: "No pudimos expulsar a esta persona. Intentá nuevamente.", run: async () => { await gestionar("Ana"); await click("Expulsar"); await click("Confirmar expulsión"); } },
+  { name: "leave", viewer: "ana", method: "leave", fallback: "No pudimos sacarte del viaje. Intentá nuevamente.", run: async () => { await click("Salir del viaje"); await click("Confirmar salida"); } },
+  { name: "delete", viewer: "owner", method: "deleteTrip", fallback: "No pudimos eliminar el viaje. Intentá nuevamente.", run: async () => { await click("Eliminar viaje"); await click("Eliminar definitivamente"); } },
 ];
 
-describe.each(ops)("members: rejections on $name", ({ viewer, method, run }) => {
+describe.each(ops)("members: rejections on $name", ({ viewer, method, fallback, run }) => {
   const withFailure = async (error: unknown, reloaded: unknown) => {
     const list = vi.fn().mockResolvedValueOnce(listing([nico, bea, ana, luz], ids[viewer])).mockResolvedValue(reloaded);
     const failing = vi.fn().mockResolvedValue({ ok: false, error });
@@ -268,6 +269,19 @@ describe.each(ops)("members: rejections on $name", ({ viewer, method, run }) => 
     await withFailure({ kind: "conflict", code: "TripOwnerProtectedError" }, listing([nico, bea, ana, luz], ids[viewer]));
     expect(dialog()).toBeNull();
     expect(document.body.textContent).toContain("El titular debe transferir o eliminar el viaje.");
+  });
+
+  it("un timeout tiene su propio texto dentro del diálogo, que sigue abierto (T150)", async () => {
+    await withFailure({ kind: "network", code: "TimeoutError" }, listing([nico, bea, ana, luz], ids[viewer]));
+    expect(dialog()).not.toBeNull();
+    expect(alertText()).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(alertText()).not.toContain(fallback);
+  });
+
+  it("una conexión caída conserva el texto de siempre (T150)", async () => {
+    await withFailure({ kind: "network", code: "NetworkError" }, listing([nico, bea, ana, luz], ids[viewer]));
+    expect(alertText()).not.toContain("tardó demasiado");
+    expect(alertText()).toContain(fallback);
   });
 
   it("a network failure stays inside the dialog and can be retried", async () => {

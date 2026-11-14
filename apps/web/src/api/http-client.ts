@@ -1,5 +1,7 @@
 import { err, ok, type AsyncResult, TaggedError } from "app-domain";
 
+import { timeoutNotice } from "./api-messages.js";
+
 export type ApiErrorKind =
   | "client"
   | "network"
@@ -71,7 +73,6 @@ export type HttpClient = {
 const genericRequestError = "No pudimos completar la solicitud. Intentá nuevamente.";
 const networkError = "No pudimos conectarnos. Verificá tu conexión e intentá nuevamente.";
 const clientRequestError = "No pudimos preparar la solicitud. Intentá nuevamente.";
-const timeoutError = "La solicitud tardó demasiado. Intentá nuevamente.";
 const defaultTimeoutMs = 30_000;
 
 /** Rejects as soon as the signal aborts, so a response that never finishes arriving does not hang the request. */
@@ -220,7 +221,7 @@ export const createHttpClient = ({
       } catch {
         return err(
           controller.signal.aborted
-            ? new ApiClientError("network", "TimeoutError", timeoutError)
+            ? new ApiClientError("network", "TimeoutError", timeoutNotice)
             : new ApiClientError("network", "NetworkError", networkError),
         );
       }
@@ -231,7 +232,7 @@ export const createHttpClient = ({
         payload = response.status === 204 ? undefined : await untilAborted(response.json(), controller.signal);
       } catch {
         if (controller.signal.aborted) {
-          return err(new ApiClientError("network", "TimeoutError", timeoutError));
+          return err(new ApiClientError("network", "TimeoutError", timeoutNotice));
         }
 
         if (response.ok) {

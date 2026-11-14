@@ -1,4 +1,4 @@
-import type { ApiErrorKind, HttpClient } from "../api/index.js";
+import { networkCode, type ApiErrorKind, type HttpClient } from "../api/index.js";
 
 export type TripMemberRole = "admin" | "participant";
 
@@ -56,7 +56,7 @@ export const createTripMembersApi = (client: Pick<HttpClient, "get" | "delete" |
   return {
     list: async (tripId) => {
       const result = await client.get<unknown>(`${base(tripId)}/members`);
-      if (!result.ok) return { ok: false, error: { kind: result.error.kind } };
+      if (!result.ok) return { ok: false, error: { kind: result.error.kind, ...networkCode(result.error) } };
       return isMemberList(result.value)
         ? { ok: true, value: result.value }
         : { ok: false, error: { kind: "server" } };

@@ -96,6 +96,22 @@ describe("uploadPending", () => {
     expect(calls).toEqual(["reserve:1", "reserve:1", "put:https://s3.test/r2"]);
     expect(report.items[0]!.key).toBe(`trips/${tripId}/photos/r2`);
   });
+  it("distingue la espera agotada de la conexión caída al volver a reservar antes del PUT", async () => {
+    const soon = (): UploadTarget => ({ key: `trips/${tripId}/photos/soon`, uploadUrl: "https://s3.test/soon", headers: {}, expiresAt: NOW + RESERVE_MARGIN_MS - 1 });
+    for (const [error, failure] of [[{ kind: "network", code: "TimeoutError" }, "timeout"], [{ kind: "network", code: "NetworkError" }, "network"]] as const) {
+      let first = true;
+      const api = { reserve: vi.fn(async (): Promise<TripResult<UploadTarget[]>> => {
+        if (first) { first = false; return { ok: true, value: [soon()] }; }
+        return { ok: false, error };
+      }) };
+      const transfer = okTransfer();
+      const report = await run([item(1)], { api, transfer });
+      expect(api.reserve).toHaveBeenCalledTimes(2);
+      expect(transfer.put).not.toHaveBeenCalled();
+      expect(report.items[0]).toMatchObject({ status: "failed", failure });
+      expect(report.reserveError).toBeUndefined();
+    }
+  });
   it("does not re-reserve when the url is valid for exactly the margin", async () => {
     const api = fakeApi(RESERVE_MARGIN_MS);
     await run([item(1)], { api });

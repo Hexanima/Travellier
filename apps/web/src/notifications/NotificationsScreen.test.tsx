@@ -29,7 +29,7 @@ const left = (n: number): TripNotification => ({ ...base, id: itineraryId(n), ty
 const roleChanged = (n: number, role: "admin" | "participant"): TripNotification => ({ ...base, id: itineraryId(n), type: "member.role_changed", payload: { userId: itineraryId(601), role } });
 const transferred = (n: number): TripNotification => ({ ...base, id: itineraryId(n), type: "trip.ownership_transferred", payload: { previousOwnerId: itineraryId(5) } });
 const page = (items: TripNotification[], nextCursor: string | null) => ({ ok: true as const, value: { notifications: items, nextCursor } });
-const fail = (kind: string) => ({ ok: false as const, error: { kind } });
+const fail = (kind: string, code?: string) => ({ ok: false as const, error: { kind, ...(code ? { code } : {}) } });
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
 
 let here: { pathname: string; search: string; state: unknown } = { pathname: "", search: "", state: undefined };
@@ -129,6 +129,21 @@ describe("NotificationsScreen", () => {
     expect(document.querySelectorAll("li")).toHaveLength(1);
   });
 
+  it("un timeout tiene su propio texto y conserva el reintento (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(fail("network", "TimeoutError")).mockResolvedValueOnce(page([post(1)], null));
+    await mount(list);
+    expect(alerts()[0]!.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(alerts()[0]!.textContent).not.toContain("No pudimos cargar tus avisos");
+    await click(byText("Reintentar"));
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+  });
+
+  it("una conexión caída conserva el texto de siempre (T150)", async () => {
+    await mount(vi.fn().mockResolvedValue(fail("network", "NetworkError")));
+    expect(alerts()[0]!.textContent).toContain("No pudimos cargar tus avisos");
+    expect(alerts()[0]!.textContent).not.toContain("tardó demasiado");
+  });
+
   it("an expired session says so and links to the login without leaking data", async () => {
     await mount(vi.fn().mockResolvedValue(fail("unauthorized")));
     expect(alerts()).toHaveLength(1);
@@ -178,6 +193,41 @@ describe("NotificationsScreen", () => {
     expect(document.querySelectorAll("li")).toHaveLength(2);
     expect(alerts()).toHaveLength(1);
     expect(alerts()[0]!.textContent).toContain("No pudimos actualizar");
+  });
+
+  it("un timeout al cargar más avisos lo dice y conserva lo que ya se vio (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([post(2)], "c1")).mockResolvedValueOnce(fail("network", "TimeoutError")).mockResolvedValueOnce(page([post(1)], null));
+    await mount(list);
+    await click(byText("Cargar más"));
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. Los que ya viste se conservan.");
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    await click(byText("Reintentar"));
+    expect(document.querySelectorAll("li")).toHaveLength(2);
+    expect(alerts()).toHaveLength(0);
+  });
+
+  it("una conexión caída al cargar más conserva el texto de siempre (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([post(2)], "c1")).mockResolvedValueOnce(fail("network", "NetworkError"));
+    await mount(list);
+    await click(byText("Cargar más"));
+    expect(alerts()[0]!.textContent).toBe("No pudimos cargar más avisos. Los que ya viste se conservan.");
+  });
+
+  it("un timeout al refrescar lo dice y conserva lo que ya se vio (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([post(2)], null)).mockResolvedValueOnce(fail("network", "TimeoutError"));
+    await mount(list);
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(document.querySelectorAll("li")).toHaveLength(1);
+    expect(alerts()).toHaveLength(1);
+    expect(alerts()[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. Los que ya viste se conservan.");
+  });
+
+  it("una conexión caída al refrescar conserva el texto de siempre (T150)", async () => {
+    const list = vi.fn().mockResolvedValueOnce(page([post(2)], null)).mockResolvedValueOnce(fail("network", "NetworkError"));
+    await mount(list);
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(alerts()[0]!.textContent).toBe("No pudimos actualizar tus avisos. Los que ya viste se conservan.");
   });
 
   it("a refresh signal (a notice that arrived in the foreground) reloads the list", async () => {

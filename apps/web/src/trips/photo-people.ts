@@ -1,14 +1,17 @@
+import type { TripFailure } from "./trip-management-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 
-/** Who can be named. `loaded` is false until `members.list` answered with a valid list: without it nobody can be called a former member. */
-export type PhotoPeople = { loaded: boolean; currentUserId?: string; role?: "admin" | "participant"; names: ReadonlyMap<string, string> };
+/** Who can be named. `loaded` is false until `members.list` answered with a valid list: without it nobody can be called a former member.
+ *  With `loaded` false, `failure` keeps the failure of that request: whoever shows a network text can tell a timeout apart. */
+export type PhotoPeople = { loaded: boolean; currentUserId?: string; role?: "admin" | "participant"; names: ReadonlyMap<string, string>; failure?: TripFailure };
 export const unknownPeople: PhotoPeople = { loaded: false, names: new Map() };
 
 /** One silent attempt: any failure leaves the generic labels. The photo response carries no former-member mark. */
 export const loadPeople = async (members: Pick<TripMembersApi, "list">, tripId: string): Promise<PhotoPeople> => {
   try {
     const result = await members.list(tripId);
-    if (!result.ok || typeof result.value !== "object" || result.value === null || !Array.isArray(result.value.members) || typeof result.value.currentUserId !== "string") return unknownPeople;
+    if (!result.ok) return { ...unknownPeople, failure: result.error };
+    if (typeof result.value !== "object" || result.value === null || !Array.isArray(result.value.members) || typeof result.value.currentUserId !== "string") return unknownPeople;
     // A current member without a name is kept with "" so it is not mistaken for a former member.
     const names = new Map(result.value.members.map(({ userId, name }): [string, string] => [userId, typeof name === "string" ? name.trim() : ""]));
     const { currentUserId } = result.value;

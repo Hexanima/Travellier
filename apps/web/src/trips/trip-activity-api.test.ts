@@ -87,7 +87,7 @@ describe("activity HTTP adapter", () => {
   });
   it("propagates network errors", async () => {
     const { api, fetch } = setup({}); fetch.mockRejectedValue(new Error("Offline"));
-    expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await api.create(itineraryId(1), input)).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
   describe("remove", () => {
     const tripId = itineraryId(1), activityId = itineraryId(8);
@@ -118,7 +118,7 @@ describe("activity HTTP adapter", () => {
     });
     it("maps a rejected fetch to network", async () => {
       const { api, fetch } = empty(204); fetch.mockRejectedValue(new Error("Offline"));
-      expect(await api.remove(tripId, activityId)).toEqual({ ok: false, error: { kind: "network" } });
+      expect(await api.remove(tripId, activityId)).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
     });
     it("never produces a participation conflict from an unexpected 409 without valid details", async () => {
       const { api } = setup({ error: { code: "ParticipationConflictError", message: "x" } }, 409);

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button, Feedback, List, ListItem, LoadingState, Tabs, TextAreaField, TextField } from "../components/index.js";
+import { networkNotice } from "../api/index.js";
 import { classifyTrips, nextBoundaryMs, parseFilter, type TripFilter } from "./trip-list-filter.js";
-import type { TripListItem, TripManagementApi } from "./trip-management-api.js";
+import type { TripFailure, TripListItem, TripManagementApi } from "./trip-management-api.js";
 import { formatTripRange } from "./trip-range.js";
 import { inheritNoBack } from "./post-origin.js";
 import { getRememberedFilter, rememberFilter } from "./trips-filter-memory.js";
@@ -22,7 +23,8 @@ const filterTabs = [{ id: "active", label: "Activos" }, { id: "finished", label:
 export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsListScreenProps) {
   const [items, setItems] = useState<TripListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+  /** The failure travels with the state: its `code` is what tells a timeout from a dropped connection. */
+  const [loadError, setLoadError] = useState<{ error?: TripFailure }>();
   // The tab lives in the URL (?filter=finished; Activos is the absence of the parameter) and, for the links back that carry no parameter, in the session memory.
   const [searchParams, setSearchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -70,18 +72,18 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
     const request = ++requestRef.current;
     // The clock is read before the request so the Trips are reclassified even if the network fails.
     setNowMs(nowRef.current());
-    if (!silent) { setLoading(true); setLoadError(false); }
-    let failed = false;
+    if (!silent) { setLoading(true); setLoadError(undefined); }
+    let failed: { error?: TripFailure } | undefined;
     try {
       const result = await trips.list();
       if (request !== requestRef.current) return;
-      if (result.ok) { loadedRef.current = true; setItems(result.value); setLoadError(false); }
-      else failed = true;
+      if (result.ok) { loadedRef.current = true; setItems(result.value); setLoadError(undefined); }
+      else failed = { error: result.error };
     } catch {
       if (request !== requestRef.current) return;
-      failed = true;
+      failed = {};
     }
-    if (failed && (!silent || !loadedRef.current)) setLoadError(true);
+    if (failed && (!silent || !loadedRef.current)) setLoadError(failed);
     setLoading(false);
   }, [trips]);
 
@@ -120,7 +122,7 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
           {loading ? <LoadingState label="Cargando viajes…" /> : null}
           {!loading && loadError ? (
             <div className="trips-state">
-              <Feedback variant="error">No pudimos cargar tus viajes. Intentá nuevamente.</Feedback>
+              <Feedback variant="error">{networkNotice(loadError.error, "No pudimos cargar tus viajes. Intentá nuevamente.")}</Feedback>
               <Button onClick={() => void loadTrips()}>Reintentar</Button>
             </div>
           ) : null}
@@ -176,13 +178,15 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
   );
 }
 
+/** El fallo al crear: una validación conserva este texto; solo una causa de red propia (la espera agotada) cambia la frase. */
+const createFailure = "No pudimos crear el viaje. Revisá los datos e intentá nuevamente.";
 export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "create"> }) {
   const navigate = useNavigate();
   const location = useLocation();
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState(false);
+  const [formError, setFormError] = useState<string>();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -195,7 +199,7 @@ export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "cr
     if (!name) nextErrors.name = "Ingresá un nombre para el viaje.";
     if (!primaryDestination) nextErrors.primaryDestination = "Ingresá un destino principal.";
     setErrors(nextErrors);
-    setFormError(false);
+    setFormError(undefined);
     if (Object.keys(nextErrors).length > 0) return;
 
     savingRef.current = true;
@@ -218,9 +222,9 @@ export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "cr
         }
         setErrors(fields);
       }
-      setFormError(true);
+      setFormError(networkNotice(result.error, createFailure));
     } catch {
-      setFormError(true);
+      setFormError(createFailure);
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -237,7 +241,7 @@ export function CreateTripScreen({ trips }: { trips: Pick<TripManagementApi, "cr
           <TextField label="Nombre del viaje" name="name" autoComplete="off" error={errors.name} loading={saving} />
           <TextField label="Destino principal" name="primaryDestination" autoComplete="off" error={errors.primaryDestination} loading={saving} />
           <TextAreaField label="Descripción (opcional)" name="description" rows={4} loading={saving} />
-          {formError ? <Feedback variant="error">No pudimos crear el viaje. Revisá los datos e intentá nuevamente.</Feedback> : null}
+          {formError ? <Feedback variant="error">{formError}</Feedback> : null}
           <Button type="submit" loading={saving} loadingLabel="Creando viaje…">Crear viaje</Button>
         </form>
       </section>

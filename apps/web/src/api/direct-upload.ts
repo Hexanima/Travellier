@@ -1,5 +1,5 @@
-/** `expired`: S3 answered 403 (the presigned PUT is no longer valid); `rejected`: any other non-2xx; `network` includes timeouts. */
-export type UploadFailureCode = "network" | "aborted" | "expired" | "rejected";
+/** `expired`: S3 answered 403 (the presigned PUT is no longer valid); `rejected`: any other non-2xx; `timeout`: the per-file wait ran out, apart from `network` so the person reads the cause. */
+export type UploadFailureCode = "network" | "timeout" | "aborted" | "expired" | "rejected";
 export type UploadOutcome = { ok: true } | { ok: false; code: UploadFailureCode };
 export type PutOptions = { onProgress?: (fraction: number) => void; signal?: AbortSignal };
 /**
@@ -29,7 +29,7 @@ export const createDirectUpload = ({ createXhr, timeoutMs = 120_000 }: DirectUpl
     xhr.onload = () => finish(xhr.status >= 200 && xhr.status < 300 ? { ok: true }
       : xhr.status === 0 ? { ok: false, code: "network" } : xhr.status === 403 ? { ok: false, code: "expired" } : { ok: false, code: "rejected" });
     xhr.onerror = () => finish({ ok: false, code: "network" });
-    xhr.ontimeout = () => finish({ ok: false, code: "network" });
+    xhr.ontimeout = () => finish({ ok: false, code: "timeout" });
     xhr.onabort = () => finish({ ok: false, code: "aborted" });
     try { xhr.send(blob); } catch { finish({ ok: false, code: "network" }); }
   }),

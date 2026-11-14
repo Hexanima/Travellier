@@ -179,6 +179,26 @@ describe("PostLinkPicker", () => {
     await click(radio(container, "Post")); await click(radio(container, "Actividad"));
     expect(itineraryGet).toHaveBeenCalledTimes(1);
   });
+  it("un timeout al listar recuerdos tiene su propio texto (T150)", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const { container } = await open(newPath, { list });
+    await click(radio(container, "Post"));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("No pudimos cargar los recuerdos");
+  });
+  it("un timeout al listar actividades tiene su propio texto (T150)", async () => {
+    const itineraryGet = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const { container } = await open(newPath, { itineraryGet });
+    await click(radio(container, "Actividad"));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+  });
+  it("una conexión caída conserva el texto de siempre (T150)", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await open(newPath, { list });
+    await click(radio(container, "Post"));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("No pudimos cargar los recuerdos");
+    expect(container.querySelector('[role="alert"]')?.textContent).not.toContain("tardó demasiado");
+  });
   it("an activities failure does not affect posts or Sin vínculo and offers Retry", async () => {
     const itineraryGet = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce(itineraryOf());
     const { container, list } = await open(newPath, { itineraryGet });

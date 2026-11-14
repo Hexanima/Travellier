@@ -78,9 +78,14 @@ describe("post HTTP adapter", () => {
     const { api } = setup({}, status);
     expect(await api.update(tripId, itineraryId(5), { description: "x" })).toEqual({ ok: false, error: { kind } });
   });
-  it("maps a network failure", async () => {
+  it("maps a dropped connection keeping its code", async () => {
     const client = createHttpClient({ baseUrl: "https://api.test", fetch: vi.fn().mockRejectedValue(new Error("down")), getAccessToken: async () => "t", onUnauthorized: vi.fn() });
-    expect(await createTripPostApi(client).create(tripId, { description: "x" })).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await createTripPostApi(client).create(tripId, { description: "x" })).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
+  });
+  it("maps a timeout keeping its code and the reintentable network kind", async () => {
+    const client = createHttpClient({ baseUrl: "https://api.test", fetch: vi.fn().mockImplementation(() => new Promise(() => undefined)),
+      getAccessToken: async () => "t", onUnauthorized: vi.fn(), timeoutMs: 1 });
+    expect(await createTripPostApi(client).create(tripId, { description: "x" })).toEqual({ ok: false, error: { kind: "network", code: "TimeoutError" } });
   });
   it("lists preserving the received order and requests the trip posts", async () => {
     const values = [post(7), post(5), post(6)];
@@ -365,6 +370,6 @@ describe("post HTTP adapter: remove", () => {
     });
   it("maps a network failure", async () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("net"));
-    expect(await make(fetch).remove(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await make(fetch).remove(tripId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });

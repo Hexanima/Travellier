@@ -77,6 +77,18 @@ describe("TripBalanceScreen: states", () => {
     expect(container.textContent).toContain("Pesos (ARS)");
     expect(alerts(container)).toHaveLength(0);
   });
+  it("a timeout has its own text, still with retry", async () => {
+    const get = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } }).mockResolvedValueOnce(ok(balance()));
+    const { container } = await render({ get });
+    expect(alerts(container)[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    await click(button(container, "Reintentar"));
+    expect(container.textContent).toContain("Pesos (ARS)");
+  });
+  it("a dropped connection keeps the usual text", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await render({ get });
+    expect(alerts(container)[0]!.textContent).toBe("No pudimos cargar el balance. Revisá tu conexión e intentá nuevamente.");
+  });
   it.each(["not-found", "forbidden"])("%s says it is not available and offers no retry", async (kind) => {
     const { container } = await render({ get: vi.fn().mockResolvedValue({ ok: false, error: { kind } }) });
     expect(alerts(container)[0]!.textContent).toBe("El balance de este viaje no está disponible para tu cuenta.");
@@ -282,6 +294,19 @@ describe("TripBalanceScreen: refresh", () => {
     await click(button(container, "Actualizar balance"));
     expect(alerts(container)).toHaveLength(0);
     expect(get).toHaveBeenCalledTimes(3);
+  });
+  it("un timeout al actualizar el balance tiene su propio texto y conserva la advertencia (T150)", async () => {
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const { container } = await render({ get });
+    await click(button(container, "Actualizar balance"));
+    expect(alerts(container)[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. Lo que ves puede estar desactualizado.");
+    expect(container.textContent).toContain("Pesos (ARS)");
+  });
+  it("una conexión caída al actualizar el balance conserva el texto de siempre (T150)", async () => {
+    const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await render({ get });
+    await click(button(container, "Actualizar balance"));
+    expect(alerts(container)[0]!.textContent).toBe("No pudimos actualizar el balance. Lo que ves puede estar desactualizado.");
   });
   it("a refresh that says the balance is not available replaces the data", async () => {
     const get = vi.fn().mockResolvedValueOnce(ok(balance())).mockResolvedValueOnce({ ok: false, error: { kind: "forbidden" } });

@@ -58,7 +58,7 @@ describe("like HTTP adapter: post and comment likes", () => {
   });
   it("reports a network failure", async () => {
     const client = createHttpClient({ baseUrl: "https://api.test", fetch: vi.fn().mockRejectedValue(new Error("down")), getAccessToken: async () => "t", onUnauthorized: vi.fn() });
-    expect(await createTripLikeApi(client).setPostLike(tripId, postId, true)).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await createTripLikeApi(client).setPostLike(tripId, postId, true)).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });
 

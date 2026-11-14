@@ -380,3 +380,22 @@ describe("ActivityForm y el Atrás nativo", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });
+
+describe("ActivityForm: causa del fallo de red al guardar (T150)", () => {
+  const save = async (error: { kind: string; code?: string }) => {
+    const { container, create } = await render();
+    create.mockResolvedValue({ ok: false, error });
+    await field(container, "title", "Nueva actividad"); await field(container, "time", "09:00"); await submit(container);
+    return container;
+  };
+  it("un timeout tiene su propio texto", async () => {
+    const container = await save({ kind: "network", code: "TimeoutError" });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos guardar la actividad");
+  });
+  it("una conexión caída conserva el texto de siempre", async () => {
+    const container = await save({ kind: "network", code: "NetworkError" });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+});

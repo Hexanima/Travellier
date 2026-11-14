@@ -1,4 +1,4 @@
-import type { ApiClientError, HttpClient } from "../api/index.js";
+import { networkCode, type ApiClientError, type HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 import { parseConfirmation, type ParticipationConfirmation } from "./participation-conflict.js";
 import { validActivity, type ActivityResponse } from "./trip-activity-api.js";
@@ -80,7 +80,7 @@ const failure = (error: ApiClientError): TripResult<never> => {
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
   }
   if (error.status === 409 && error.code === "PhotoConflictError") return { ok: false, error: { kind: "server", code: "PhotoConflictError" } };
-  return { ok: false, error: { kind: error.kind,
+  return { ok: false, error: { kind: error.kind, ...networkCode(error),
     ...(error.fields ? { fields: error.fields.map(({ field, code, message }) => ({ field, code, message })) } : {}) } };
 };
 const server: TripResult<never> = { ok: false, error: { kind: "server" } };

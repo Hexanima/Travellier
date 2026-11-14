@@ -171,6 +171,48 @@ describe("AuthScreen", () => {
     expect(container.textContent).not.toContain("InvalidCredentialsError");
   });
 
+  it("tells a timeout apart with its own text when signing in", async () => {
+    const container = await renderAuthScreen({
+      mode: "login",
+      auth: { login: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }) },
+    });
+
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+    await submit(container);
+
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos iniciar sesión con esas credenciales.");
+  });
+
+  it("keeps the usual text for a dropped connection when signing in", async () => {
+    const container = await renderAuthScreen({
+      mode: "login",
+      auth: { login: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }) },
+    });
+
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+    await submit(container);
+
+    expect(container.textContent).toContain("No pudimos iniciar sesión con esas credenciales.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+
+  it("tells a timeout apart with its own text when registering", async () => {
+    const container = await renderAuthScreen({
+      mode: "register",
+      auth: { register: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }) },
+    });
+
+    await setValue(container.querySelector("[name=email]") as HTMLInputElement, "nico@example.test");
+    await setValue(container.querySelector("[name=password]") as HTMLInputElement, "secret-pass");
+    await submit(container);
+
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos crear tu cuenta con esos datos.");
+  });
+
   it("does not reveal an existing account when registration fails", async () => {
     const container = await renderAuthScreen({
       mode: "register",

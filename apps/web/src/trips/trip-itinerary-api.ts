@@ -1,6 +1,6 @@
 import { readTransport, type ObjectId, type TripItinerary } from "app-domain";
 import { journeyTransportForDomain } from "./trip-journey-api.js";
-import type { HttpClient } from "../api/index.js";
+import { networkCode, type HttpClient } from "../api/index.js";
 import type { TripResult } from "./trip-management-api.js";
 
 /** HTTP serialization is distinct from domain entities: IDs and UTC dates arrive as strings. */
@@ -119,7 +119,7 @@ const validItinerary = (v: unknown, tripId: string): v is TripItineraryResponse 
 export const createTripItineraryApi = (client: Pick<HttpClient, "get">): TripItineraryApi => ({
   get: async (tripId) => {
     const result = await client.get<unknown>(`/trips/${encodeURIComponent(tripId)}/itinerary`);
-    if (!result.ok) return { ok: false, error: { kind: result.error.kind } };
+    if (!result.ok) return { ok: false, error: { kind: result.error.kind, ...networkCode(result.error) } };
     return record(result.value) && validItinerary(result.value.itinerary, tripId)
       ? { ok: true, value: result.value.itinerary }
       : { ok: false, error: { kind: "server" } };

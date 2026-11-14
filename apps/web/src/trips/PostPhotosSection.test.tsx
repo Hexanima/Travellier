@@ -42,6 +42,11 @@ describe("PostPhotosSection", () => {
     expect(statuses).toEqual(["Lista", "Subiendo 45 %", "No se subió. El permiso de subida venció."]);
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+  it("distingue la espera agotada de la conexión caída en la foto (T150)", async () => {
+    const { container } = await render({ initial: [photo(1, { status: "failed", failure: "timeout" }), photo(2, { status: "failed", failure: "network" })] });
+    const statuses = Array.from(container.querySelectorAll(".post-photo-status")).map((item) => item.textContent);
+    expect(statuses).toEqual(["No se subió. La conexión tardó demasiado.", "No se subió. Sin conexión."]);
+  });
   it("has a single polite status and a single alert, even with several failed photos", async () => {
     const failed = (n: number) => photo(n, { status: "failed", failure: "network" });
     const { container } = await render({ initial: [failed(1), failed(2)], summary: "Subiendo fotos: 2 de 5", alert: "2 fotos no se subieron." });

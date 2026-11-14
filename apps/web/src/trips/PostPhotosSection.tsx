@@ -20,7 +20,8 @@ export type PostPhotosSectionProps = {
   onMove: (localId: string, delta: -1 | 1) => void;
   onRetry: (localId: string) => void;
 };
-const failureText: Record<string, string> = { network: "Sin conexión.", expired: "El permiso de subida venció.", rejected: "El servidor rechazó la foto.",
+/** Texto corto por foto: el de la espera agotada acompaña a «Sin conexión.» y no repite «Intentá nuevamente», que ya es el botón «Reintentar» de la fila. */
+const failureText: Record<string, string> = { network: "Sin conexión.", timeout: "La conexión tardó demasiado.", expired: "El permiso de subida venció.", rejected: "El servidor rechazó la foto.",
   missing: "Volvé a elegir esta foto.", not_uploaded: "No llegó al servidor.", too_large: "Pesa más de 10 MB.", content_type_mismatch: "El formato no coincide.",
   invalid: "No se pudo usar esta foto.", duplicate: "Está repetida.", server: "El servidor no respondió bien.", "not-found": "El recuerdo ya no está disponible." };
 type Pending = { kind: "remove"; index: number } | { kind: "move"; localId: string; delta: -1 | 1 };

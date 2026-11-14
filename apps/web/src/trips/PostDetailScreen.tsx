@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState, Modal } from "../components/index.js";
 import { LocationPreview } from "./LocationPreview.js";
 import { buildOrigin, canGoBack, originHref, originLabel, readOrigin, withNoBack, type PostOrigin } from "./post-origin.js";
@@ -37,6 +38,10 @@ const restoreOf = (origin: PostOrigin) => {
   return { ...(photo ? { photo } : {}), restore: { anchor: origin.anchor, scrollY: origin.scrollY, ...panel } };
 };
 
+/** El refresco fallido: solo cambia la primera frase; la promesa sobre lo que queda en pantalla es la misma para cualquier causa. */
+const refreshFailure = "No pudimos actualizar el recuerdo.";
+const keptLoaded = "Lo que ya cargaste se conserva.";
+
 export function PostDetailScreen({ posts, members, comments, likes, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: PostDetailScreenProps) {
   const { tripId, postId } = useParams();
   return <DetailContent key={`${tripId}/${postId}`} tripId={tripId} postId={postId} get={posts.get} remove={posts.remove} timeZone={timeZone} interaction={{ members, comments, likes }} />;
@@ -50,25 +55,25 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
   useEffect(() => { title.current?.focus(); }, []);
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       if (!tripId || !postId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-      setRefreshing(true); setRefreshError(false);
+      setRefreshing(true); setRefreshError(undefined);
       try {
         const result = await get(tripId, postId);
         if (cancelled) return;
         if (result.ok) setState({ kind: "ready", detail: result.value });
         else if (["network", "server"].includes(result.error.kind)) {
-          setRefreshError(true);
+          setRefreshError(`${networkNotice(result.error, refreshFailure)} ${keptLoaded}`);
           setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
         } else setState({ kind: "error", error: result.error });
       } catch {
         if (cancelled) return;
-        setRefreshError(true);
+        setRefreshError(`${refreshFailure} ${keptLoaded}`);
         setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
       } finally {
         if (!cancelled) setRefreshing(false);
@@ -96,13 +101,13 @@ function DetailContent({ tripId, postId, get, remove, timeZone, interaction }: {
       {state.kind === "loading" ? <LoadingState label="Cargando recuerdo…" /> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando recuerdo…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
-        <Feedback variant="error">No pudimos actualizar el recuerdo. Lo que ya cargaste se conserva.</Feedback>
+        <Feedback variant="error">{refreshError}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar recuerdo</Button>
       </div> : null}
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Este recuerdo ya no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
@@ -171,7 +176,7 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
         else { setConfirming(false); setNotice(text); }
         return;
       }
-      setRemoveError({ text: removeFailure });
+      setRemoveError({ text: networkNotice(result.error, removeFailure) });
     } catch {
       if (alive.current) setRemoveError({ text: removeFailure });
     } finally {

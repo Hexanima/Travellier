@@ -1,4 +1,4 @@
-import type { ApiClientError, ApiErrorKind, HttpClient } from "../api/index.js";
+import { networkCode, type ApiClientError, type ApiErrorKind, type HttpClient } from "../api/index.js";
 
 export type AuthenticatedSession = {
   accessToken: string;
@@ -13,6 +13,8 @@ export type AuthenticatedProfile = {
 
 export type AuthFailure = {
   kind: ApiErrorKind;
+  /** Solo en los fallos de red: distingue el timeout de una conexión caída sin cambiar el kind. */
+  code?: string;
   fields?: readonly { field: string; message: string }[];
 };
 
@@ -37,7 +39,7 @@ type AvatarUploadResponse = { avatar: string; uploadUrl: string; headers: Record
 const toFailure = (error: ApiClientError): AuthFailure =>
   error.kind === "validation" && error.fields !== undefined
     ? { kind: error.kind, fields: error.fields.map(({ field, message }) => ({ field, message })) }
-    : { kind: error.kind };
+    : { kind: error.kind, ...networkCode(error) };
 
 const isRegistrationResponse = (value: unknown): value is RegistrationResponse =>
   typeof value === "object" &&

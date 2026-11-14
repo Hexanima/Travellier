@@ -1,4 +1,5 @@
 import type { DirectUpload } from "../api/direct-upload.js";
+import { isTimeoutFailure } from "../api/index.js";
 import { applyPhotoChange, type PhotoChange, type PhotoDraftItem } from "./post-draft.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { TripPhotoApi, UploadTarget } from "./trip-photo-api.js";
@@ -59,7 +60,7 @@ export const uploadPending = async ({ tripId, items, blobs, api, transfer, now, 
       if (target.expiresAt - now() < RESERVE_MARGIN_MS) {
         const again = await api.reserve(tripId, [descriptor(item)]);
         if (!again.ok) {
-          if (fatal(again.error)) reserveError = again.error; else apply(item.localId, { status: "failed", failure: again.error.kind });
+          if (fatal(again.error)) reserveError = again.error; else apply(item.localId, { status: "failed", failure: isTimeoutFailure(again.error) ? "timeout" : again.error.kind });
           continue;
         }
         target = again.value[0]!;

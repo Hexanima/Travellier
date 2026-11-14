@@ -75,6 +75,28 @@ describe("createAuthApi", () => {
     expect(result).toEqual({ ok: false, error: { kind: "network" } });
   });
 
+  it("propagates the timeout code of a network failure without changing the kind", async () => {
+    const post = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { kind: "network", code: "TimeoutError", fields: undefined },
+    });
+
+    const result = await createAuthApi({ post } as never).login({ email: "nico@example.test", password: "secret-pass" });
+
+    expect(result).toEqual({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+  });
+
+  it("propagates the code of a dropped connection too", async () => {
+    const post = vi.fn().mockResolvedValue({
+      ok: false,
+      error: { kind: "network", code: "NetworkError", fields: undefined },
+    });
+
+    const result = await createAuthApi({ post } as never).login({ email: "nico@example.test", password: "secret-pass" });
+
+    expect(result).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
+  });
+
   it("passes structured validation errors through to the form", async () => {
     const post = vi.fn().mockResolvedValue({
       ok: false,

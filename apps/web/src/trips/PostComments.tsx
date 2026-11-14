@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, Modal, TextAreaField } from "../components/index.js";
 import { commentLength, commentProblem, COMMENT_MAX } from "./comment-text.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
@@ -11,6 +12,9 @@ import { useCommentDraft } from "./use-comment-drafts.js";
 import { canDeleteContent, canEditContent } from "./authorship.js";
 
 const authorOnlyMessage = "Solo el autor puede editar este comentario. Tu texto se conserva.";
+/** El fallo indeterminado al editar: solo cambia la primera frase; la promesa sobre el texto escrito es la misma siempre. */
+const editFailure = "No pudimos guardar los cambios.";
+const editKept = "Tu texto se conserva. Podés volver a guardar.";
 const sessionExpired = "Tu sesión venció. Volvé a iniciar sesión.";
 const validationText = (error: TripFailure) => {
   const code = error.fields?.find((item) => item.field === "text")?.code;
@@ -53,7 +57,8 @@ export function PostLikeControl({ likes }: { likes: LikesController }) {
     {likes.status === "loading" ? <LoadingState label="Cargando me gusta…" /> : null}
     {likes.status === "error" ? <div className="like-error">
       <Feedback variant="error" role="status">{unavailable ? "Ya no podés ver los me gusta de este recuerdo."
-        : likes.error?.kind === "unauthorized" ? sessionExpired : "No pudimos cargar los me gusta. Los comentarios se muestran sin contadores."}</Feedback>
+        : likes.error?.kind === "unauthorized" ? sessionExpired
+        : `${networkNotice(likes.error, "No pudimos cargar los me gusta.")} Los comentarios se muestran sin contadores.`}</Feedback>
       {likes.error?.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
         : !unavailable ? <Button onClick={() => void likes.refresh()}>Reintentar me gusta</Button> : null}
     </div> : null}
@@ -124,9 +129,9 @@ export function CommentItem({ comment, author, canEdit = true, canDelete = false
         if (alive.current) { setMessage(undefined); focus.current = form.current?.contains(document.activeElement) ? "button" : undefined; setEditing(false); }
         return;
       }
-      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.", authorOnlyMessage) ?? { variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
+      if (alive.current) setMessage(definiteFailure(result.error, "Ya no podés editar este comentario.", authorOnlyMessage) ?? { variant: "error", text: `${networkNotice(result.error, editFailure)} ${editKept}` });
     } catch {
-      if (alive.current) setMessage({ variant: "error", text: "No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar." });
+      if (alive.current) setMessage({ variant: "error", text: `${editFailure} ${editKept}` });
     } finally {
       savingRef.current = false;
       if (alive.current) setSaving(false);
@@ -165,7 +170,8 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   const [list, setList] = useState<ListState>({ kind: "loading" });
   const [people, setPeople] = useState<People>({ loaded: false, names: {} });
   const [updating, setUpdating] = useState(false);
-  const [updateFailed, setUpdateFailed] = useState(false);
+  /** The failure travels with the state: its `code` is what tells a timeout from a dropped connection. */
+  const [updateFailed, setUpdateFailed] = useState<{ error?: TripFailure }>();
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState<Message>();
   // Deleting: one dialog for the whole panel; `removeId` is the comment it asks about.
@@ -201,12 +207,12 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
   }, [tripId]);
   const load = useCallback(async (): Promise<boolean> => {
     const id = requests.current += 1;
-    const failed = (error: TripFailure) => { setUpdateFailed(true); setList((current) => current.kind === "ready" ? current : { kind: "error", error }); return false; };
+    const failed = (error: TripFailure) => { setUpdateFailed({ error }); setList((current) => current.kind === "ready" ? current : { kind: "error", error }); return false; };
     try {
       const result = await latest.current.comments.list(tripId, postId);
       if (!alive.current || id !== requests.current) return false;
       if (!result.ok) return failed(result.error);
-      setUpdateFailed(false); setList({ kind: "ready", items: sorted(result.value) });
+      setUpdateFailed(undefined); setList({ kind: "ready", items: sorted(result.value) });
       return true;
     } catch {
       return alive.current && id === requests.current ? failed({ kind: "network" }) : false;
@@ -314,7 +320,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
         if (read && target && !mayDelete(target, read)) { setRemoveId(undefined); setRemoveNotice({ variant: "error", text }); focusAfter.current = { kind: "field" }; }
         else setRemoveError({ text });
       } else if (error.kind === "not-found") setRemoveError({ text: "Este recuerdo ya no está disponible para tu cuenta." });
-      else setRemoveError({ text: deleteFailure });
+      else setRemoveError({ text: networkNotice(error, deleteFailure) });
     } catch {
       if (alive.current) setRemoveError({ text: deleteFailure });
     } finally {
@@ -328,12 +334,12 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
     {list.kind === "loading" ? <LoadingState label="Cargando comentarios…" /> : null}
     {list.kind === "error" ? <div className="trips-state">
       <Feedback variant="error">{unavailable ? "Ya no podés ver los comentarios de este recuerdo." : list.error.kind === "unauthorized" ? sessionExpired
-        : "No pudimos cargar los comentarios. Revisá tu conexión e intentá nuevamente."}</Feedback>
+        : networkNotice(list.error, "No pudimos cargar los comentarios. Revisá tu conexión e intentá nuevamente.")}</Feedback>
       {list.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link> : !unavailable ? <Button onClick={retry}>Reintentar comentarios</Button> : null}
     </div> : null}
     {list.kind === "ready" ? <>
       {updating ? <LoadingState label="Actualizando comentarios…" /> : null}
-      {updateFailed ? <Feedback variant="error" role="status">No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.</Feedback> : null}
+      {updateFailed ? <Feedback variant="error" role="status">{networkNotice(updateFailed.error, "No pudimos actualizar los comentarios.")} Lo que ya cargaste se conserva.</Feedback> : null}
       <Button onClick={() => void reload()} disabled={updating}>Actualizar comentarios</Button>
       {list.items.length === 0 ? <p className="itinerary-secondary">Todavía no hay comentarios.</p> : <ul className="comment-list" aria-label="Comentarios">
         {list.items.map((comment) => <CommentItem key={comment.id} comment={comment} author={authorOf(comment, people)} canEdit={canEditContent(people, comment.authorId, comment.authorIsFormerMember)}

@@ -368,6 +368,26 @@ describe("ExpenseSplitForm", () => {
     expect(container.querySelector("[data-section]")).not.toBeNull();
   });
 
+  it("un timeout del recuerdo tiene su propio texto y conserva el reintento (T150)", async () => {
+    const get = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } }).mockResolvedValue(detail(view()));
+    const { container } = await open({ path: editPath, get, draft: seeded(null) });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    await click(button(container, "Reintentar"));
+    expect(container.querySelector("[data-section]")).not.toBeNull();
+  });
+
+  it("un timeout de los integrantes también tiene su propio texto (T150)", async () => {
+    const list = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const { container } = await open({ list });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+  });
+
+  it("una conexión caída conserva el texto de siempre (T150)", async () => {
+    const get = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const { container } = await open({ path: editPath, get, draft: seeded(null) });
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos cargar los pagos y el reparto. Revisá tu conexión e intentá nuevamente.");
+  });
+
   it("shows a retry without editor when the members cannot be read", async () => {
     const list = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValue(members());
     const { container } = await open({ list });

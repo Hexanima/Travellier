@@ -1,5 +1,5 @@
 import type { ActivityParticipationStatus } from "app-domain";
-import type { ApiClientError, HttpClient } from "../api/index.js";
+import { networkCode, type ApiClientError, type HttpClient } from "../api/index.js";
 import { parseConfirmation, type ParticipationConfirmation } from "./participation-conflict.js";
 import type { TripResult } from "./trip-management-api.js";
 
@@ -35,7 +35,7 @@ const failure = (error: ApiClientError): TripResult<never> => {
     const confirmation = parseConfirmation(error.details);
     return { ok: false, error: confirmation ? { kind: "participation-conflict", confirmation } : { kind: "server" } };
   }
-  return { ok: false, error: { kind: error.kind,
+  return { ok: false, error: { kind: error.kind, ...networkCode(error),
     ...(error.fields ? { fields: error.fields.map(({ field, message }) => ({ field, message })) } : {}) } };
 };
 const invalid: TripResult<never> = { ok: false, error: { kind: "server" } };

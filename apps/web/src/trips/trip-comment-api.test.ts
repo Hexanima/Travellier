@@ -74,7 +74,7 @@ describe("comment HTTP adapter: create", () => {
   });
   it("reports a network failure", async () => {
     const client = createHttpClient({ baseUrl: "https://api.test", fetch: vi.fn().mockRejectedValue(new Error("down")), getAccessToken: async () => "t", onUnauthorized: vi.fn() });
-    expect(await createTripCommentApi(client).create(tripId, postId, "x")).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await createTripCommentApi(client).create(tripId, postId, "x")).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });
 
@@ -125,6 +125,6 @@ describe("comment HTTP adapter: remove", () => {
     expect(await setup(failure("Forbidden", 403), 403).api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: false, error: { kind: "forbidden" } });
     const fetch = vi.fn().mockRejectedValue(new TypeError("net"));
     const api = createTripCommentApi(createHttpClient({ baseUrl: "https://api.test", fetch, getAccessToken: async () => "token", onUnauthorized: vi.fn() }));
-    expect(await api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network" } });
+    expect(await api.remove(tripId, postId, itineraryId(5))).toEqual({ ok: false, error: { kind: "network", code: "NetworkError" } });
   });
 });

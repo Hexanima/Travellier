@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, Modal } from "../components/index.js";
 import { ActivityForm } from "./ActivityForm.js";
 import type { ActivityFormContext } from "./activity-form-state.js";
@@ -72,7 +73,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       if (result.ok) { onRemoved(existing.id, "removed"); return; }
       if (result.error.kind === "not-found" || result.error.kind === "forbidden") { onRemoved(existing.id, "gone"); return; }
       setRemovalError(result.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-        : "No pudimos eliminar la actividad. Revisá tu conexión e intentá nuevamente.");
+        : networkNotice(result.error, "No pudimos eliminar la actividad. Revisá tu conexión e intentá nuevamente."));
       setRemoval("confirming");
     } finally { removingRef.current = false; }
   };
@@ -85,7 +86,7 @@ export function ActivityDialog({ request, itinerary, timeZone, activities, onClo
       {state.kind === "error" ? <div className="activity-detail">
         <Feedback variant="error">{state.error.kind === "not-found" || state.error.kind === "forbidden" ? "Esta actividad no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar la actividad. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <a href="/login">Iniciar sesión</a>
           : !["not-found", "forbidden"].includes(state.error.kind) ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}

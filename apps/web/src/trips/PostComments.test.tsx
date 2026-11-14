@@ -96,6 +96,19 @@ describe("comments panel: loading", () => {
     expect(order(container)).toEqual(["Comentario 5"]);
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+  it("un timeout al cargar tiene su propio texto y conserva el reintento (T150)", async () => {
+    const api = apis([], { comments: { list: vi.fn().mockResolvedValueOnce(fail("network", { code: "TimeoutError" })).mockResolvedValueOnce(ok([comment(5)])) } });
+    const container = await render(api);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar los comentarios.");
+    await click(button(container, "Reintentar comentarios"));
+    expect(order(container)).toEqual(["Comentario 5"]);
+  });
+  it("una conexión caída al cargar conserva el texto de siempre (T150)", async () => {
+    const container = await render(apis([], { comments: { list: vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" })) } }));
+    expect(container.textContent).toContain("No pudimos cargar los comentarios.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("treats a rejected list as a network error", async () => {
     const container = await render(apis([], { comments: { list: vi.fn().mockRejectedValue(new Error("down")) } }));
     expect(container.textContent).toContain("No pudimos cargar los comentarios.");
@@ -129,6 +142,28 @@ describe("comments panel: loading", () => {
     await click(button(container, "Actualizar comentarios"));
     expect(order(container)).toEqual(["Comentario 5"]);
     expect(container.textContent).toContain("No pudimos actualizar los comentarios.");
+  });
+  it("un timeout al actualizar los comentarios lo dice y conserva lo cargado (T150)", async () => {
+    const api = apis([comment(5)], { comments: { list: vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValueOnce(fail("network", { code: "TimeoutError" })) } });
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    expect(order(container)).toEqual(["Comentario 5"]);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("No pudimos actualizar los comentarios.");
+  });
+  it("una conexión caída al actualizar los comentarios conserva el texto de siempre (T150)", async () => {
+    const api = apis([comment(5)], { comments: { list: vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValueOnce(fail("network", { code: "NetworkError" })) } });
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    expect(container.textContent).toContain("No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+  it("un timeout al cargar los me gusta lo dice y conserva la promesa de los contadores (T150)", async () => {
+    const api = apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(fail("network", { code: "TimeoutError" })) } });
+    const container = await render(api);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Los comentarios se muestran sin contadores.");
+    expect(container.textContent).not.toContain("No pudimos cargar los me gusta.");
+    expect(button(container, "Reintentar me gusta")).toBeDefined();
   });
   it("shows the comments with the like buttons disabled and a retry when only the likes fail", async () => {
     const api = apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValueOnce(fail("network")).mockResolvedValueOnce(ok(summary({ comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }))) } });
@@ -532,6 +567,23 @@ describe("likes", () => {
     expect(likeOf(container, `comment:${itineraryId(5)}`).textContent).toBe("Quitar me gusta 3");
     expect(item(container, 5).textContent).not.toContain("No pudimos actualizar el me gusta.");
   });
+  it("un timeout al dar me gusta tiene su propio texto y lo deja reintentable (T150)", async () => {
+    const set = vi.fn().mockResolvedValueOnce(fail("network", { code: "TimeoutError" })).mockResolvedValueOnce(ok({ liked: true, count: 3 }));
+    const api = withLikes({ comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }, [comment(5)], { likes: { setCommentLike: set } });
+    const container = await render(api);
+    await click(likeOf(container, `comment:${itineraryId(5)}`));
+    expect(item(container, 5).textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(item(container, 5).textContent).not.toContain("No pudimos actualizar el me gusta.");
+    await click(likeOf(container, `comment:${itineraryId(5)}`));
+    expect(likeOf(container, `comment:${itineraryId(5)}`).textContent).toBe("Quitar me gusta 3");
+  });
+  it("una conexión caída al dar me gusta conserva el texto de siempre (T150)", async () => {
+    const api = withLikes({}, [], { likes: { setPostLike: vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" })) } });
+    const container = await render(api);
+    await click(likeOf(container, "post"));
+    expect(container.textContent).toContain("No pudimos actualizar el me gusta. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("treats a rejected like as a network failure", async () => {
     const api = withLikes({}, [], { likes: { setPostLike: vi.fn().mockRejectedValue(new Error("down")) } });
     const container = await render(api);
@@ -810,6 +862,25 @@ describe("comments panel: edit by authorship (T125)", () => {
     await click(button(item(container, 5), "Guardar"));
     expect(item(container, 5).querySelector('[role="alert"]')?.textContent).toBe("Ya no podés editar este comentario.");
   });
+  it("un timeout al editar tiene su propio texto y conserva la promesa del borrador (T150)", async () => {
+    const update = vi.fn().mockResolvedValue(fail("network", { code: "TimeoutError" }));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(item(container, 5).querySelector('[role="alert"]')?.textContent)
+      .toBe("La conexión tardó demasiado. Intentá nuevamente. Tu texto se conserva. Podés volver a guardar.");
+    expect(field(container, `comment-edit-${itineraryId(5)}`)?.value).toBe("nuevo");
+  });
+  it("una conexión caída al editar conserva el texto de siempre (T150)", async () => {
+    const update = vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" }));
+    const container = await render(apis([own(5)], { comments: { update } }));
+    await click(button(item(container, 5), "Editar"));
+    await type(container, `comment-edit-${itineraryId(5)}`, "nuevo");
+    await click(button(item(container, 5), "Guardar"));
+    expect(item(container, 5).querySelector('[role="alert"]')?.textContent)
+      .toBe("No pudimos guardar los cambios. Tu texto se conserva. Podés volver a guardar.");
+  });
 });
 
 describe("comments panel: delete (T128)", () => {
@@ -941,6 +1012,14 @@ describe("comments panel: delete (T128)", () => {
     expect(remove).toHaveBeenCalledTimes(2);
     expect(dialog()).toBeNull();
     expect(order(container)).toEqual([]);
+  });
+  it("un timeout al eliminar tiene su propio texto en el diálogo (T150)", async () => {
+    const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockResolvedValue(failure("network", { code: "TimeoutError" })) } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(dialog()?.textContent).not.toContain("No pudimos eliminar el comentario.");
+    expect(order(container)).toEqual(["Comentario 6"]);
   });
   it("treats a thrown error like a network failure", async () => {
     const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockRejectedValue(new Error("x")) } }));

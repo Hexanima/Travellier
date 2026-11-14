@@ -25,10 +25,11 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-async function render(options: { trip?: unknown; destinations?: unknown; loadFailure?: boolean; transports?: JourneyTransport[]; itinerary?: TripItineraryApi } = {}) {
-  const get = vi.fn().mockResolvedValue({ ok: true, value: options.trip ?? trip });
+async function render(options: { trip?: unknown; tripFailure?: unknown; destinations?: unknown; loadFailure?: boolean; failureCode?: string;
+  transports?: JourneyTransport[]; itinerary?: TripItineraryApi } = {}) {
+  const get = vi.fn().mockResolvedValue(options.tripFailure ?? { ok: true, value: options.trip ?? trip });
   const listDestinations = vi.fn().mockResolvedValue(options.loadFailure
-    ? { ok: false, error: { kind: "network" } }
+    ? { ok: false, error: { kind: "network", ...(options.failureCode === undefined ? {} : { code: options.failureCode }) } }
     : { ok: true, value: options.destinations ?? [first] });
   const listTransports = vi.fn(async (_tripId: string, destinationId: string) => ({
     ok: true, value: (options.transports ?? []).filter((transport) => transport.destinationId === destinationId),
@@ -396,6 +397,31 @@ describe("TripJourneyScreen", () => {
     expect(container.querySelectorAll("form.journey-transport-form")).toHaveLength(2);
   });
 
+  it("un timeout al cargar los destinos tiene su propio texto y conserva el reintento (T150)", async () => {
+    const { container, listDestinations } = await render({ loadFailure: true, failureCode: "TimeoutError" });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(alert?.textContent).not.toContain("No pudimos cargar los destinos y transportes");
+    listDestinations.mockResolvedValueOnce({ ok: true, value: [first] });
+    await act(async () => Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Reintentar")?.click());
+    expect(container.querySelectorAll("form.journey-transport-form")).toHaveLength(2);
+  });
+
+  it("una conexión caída al cargar los destinos conserva el texto de siempre (T150)", async () => {
+    const { container } = await render({ loadFailure: true, failureCode: "NetworkError" });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain("No pudimos cargar los destinos y transportes.");
+    expect(alert?.textContent).not.toContain("tardó demasiado");
+  });
+
+  it("el timeout al cargar el viaje se distingue, y el viaje inexistente conserva su texto (T150)", async () => {
+    const { container } = await render({ tripFailure: { ok: false, error: { kind: "network", code: "TimeoutError" } } });
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    const missing = await render({ tripFailure: { ok: false, error: { kind: "not-found" } } });
+    expect(missing.container.querySelector('[role="alert"]')?.textContent).toBe("No encontramos este viaje.");
+  });
+
   describe("transport cost totals", () => {
     const itineraryApi = (value: TripItineraryResponse = itineraryFixture() as TripItineraryResponse) =>
       ({ get: vi.fn().mockResolvedValue({ ok: true, value }) });
@@ -426,6 +452,23 @@ describe("TripJourneyScreen", () => {
       await act(async () => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Reintentar totales")?.click());
       expect(container.querySelector("[data-transport-costs]")).not.toBeNull();
       expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
+    });
+
+    it("un timeout al cargar los totales tiene su propio texto y conserva el reintento (T150)", async () => {
+      const itinerary = { get: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }) };
+      const { container } = await render({ itinerary: itinerary as unknown as TripItineraryApi });
+      expect(container.querySelector("[data-transport-costs-unavailable]")?.textContent)
+        .toContain("La conexión tardó demasiado. Intentá nuevamente.");
+      expect(container.textContent).not.toContain("No pudimos cargar los totales");
+      expect(Array.from(container.querySelectorAll("button")).some((item) => item.textContent === "Reintentar totales")).toBe(true);
+    });
+
+    it("una conexión caída al cargar los totales conserva el texto de siempre (T150)", async () => {
+      const itinerary = { get: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }) };
+      const { container } = await render({ itinerary: itinerary as unknown as TripItineraryApi });
+      expect(container.querySelector("[data-transport-costs-unavailable]")?.textContent)
+        .toContain("No pudimos cargar los totales de costo de transporte.");
+      expect(container.textContent).not.toContain("tardó demasiado");
     });
 
     it("refreshes only the totals after saving a transport, keeping destinations and entered forms", async () => {

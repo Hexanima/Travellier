@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, TextField } from "../components/index.js";
 import { initialNewActivity, newActivityWhen, resolveNewActivity } from "./new-activity-draft.js";
 import { draftKeyFor, setNewActivity, type NewActivityDraft, type PostDraft } from "./post-draft.js";
 import type { ItineraryDayResponse, TripItineraryApi } from "./trip-itinerary-api.js";
+import type { TripFailure } from "./trip-management-api.js";
 import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import { DiscardChangesModal } from "./DiscardChangesModal.js";
 import "./itinerary.css";
 
 export type SpontaneousActivityFormProps = { itinerary: Pick<TripItineraryApi, "get">; timeZone?: string };
-type Days = { kind: "loading" } | { kind: "error" } | { kind: "ready"; days: ItineraryDayResponse[] };
+type Days = { kind: "loading" } | { kind: "error"; error?: TripFailure } | { kind: "ready"; days: ItineraryDayResponse[] };
 /** Order in which the first error is shown and focused; `scheduledAt` is reported on the time field. */
 const errorOrder = ["title", "date", "time", "scheduledAt", "durationHours", "durationMinutes"];
 
@@ -47,7 +49,7 @@ function Form({ itinerary, timeZone: zone, tripId, draft, commit, setReturned, c
     let cancelled = false;
     setLoaded({ kind: "loading" });
     const settle = (next: Days) => { if (!cancelled) setLoaded(next); };
-    itinerary.get(tripId ?? "").then((result) => settle(result.ok ? { kind: "ready", days: result.value.days } : { kind: "error" }), () => settle({ kind: "error" }));
+    itinerary.get(tripId ?? "").then((result) => settle(result.ok ? { kind: "ready", days: result.value.days } : { kind: "error", error: result.error }), () => settle({ kind: "error" }));
     return () => { cancelled = true; };
   }, [itinerary, tripId, attempt]);
   useEffect(() => {
@@ -101,7 +103,7 @@ function Form({ itinerary, timeZone: zone, tripId, draft, commit, setReturned, c
         </fieldset>
         {loaded.kind === "loading" ? <LoadingState label="Cargando itinerario…" /> : null}
         {loaded.kind === "error" ? <div className="trips-state">
-          <Feedback variant="error">No pudimos cargar el itinerario para validar el horario. Revisá tu conexión e intentá nuevamente.</Feedback>
+          <Feedback variant="error">{networkNotice(loaded.error, "No pudimos cargar el itinerario para validar el horario. Revisá tu conexión e intentá nuevamente.")}</Feedback>
           <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button>
         </div> : null}
         <Button type="submit" disabled={loaded.kind !== "ready"}>Aceptar</Button>

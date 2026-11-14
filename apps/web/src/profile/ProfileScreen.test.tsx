@@ -61,6 +61,24 @@ describe("ProfileScreen", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain("guardado");
   });
 
+  it("un timeout al guardar tiene su propio texto (T150)", async () => {
+    const updateProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: profile }), updateProfile });
+    await submit(container);
+
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos guardar tu perfil");
+  });
+
+  it("una conexión caída al guardar conserva el texto de siempre (T150)", async () => {
+    const updateProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: profile }), updateProfile });
+    await submit(container);
+
+    expect(container.textContent).toContain("No pudimos guardar tu perfil. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+
   it("shows a field error without saving an empty name", async () => {
     const updateProfile = vi.fn();
     const container = await render({ getProfile: vi.fn().mockResolvedValue({ ok: true, value: profile }), updateProfile });
@@ -98,6 +116,23 @@ describe("ProfileScreen", () => {
     });
     expect(getProfile).toHaveBeenCalledTimes(2);
     expect(container.textContent).toContain("nico@example.test");
+  });
+
+  it("un timeout al cargar el perfil tiene su propio texto (T150)", async () => {
+    const getProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const container = await render({ getProfile });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar tu perfil");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Reintentar")).toBe(true);
+  });
+
+  it("una conexión caída al cargar el perfil conserva el texto de siempre (T150)", async () => {
+    const getProfile = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const container = await render({ getProfile });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos cargar tu perfil.");
+    expect(container.textContent).not.toContain("tardó demasiado");
   });
 
   it("displays an existing avatar through its temporary view URL", async () => {

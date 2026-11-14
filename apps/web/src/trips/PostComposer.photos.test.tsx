@@ -228,6 +228,15 @@ describe("PostComposer photos: publishing", () => {
     expect(blobSentTo(1)).toBe(blobs[1]); expect(blobSentTo(2)).toBe(blobs[0]); expect(blobSentTo(3)).toBe(blobs[2]);
     expect(sent.map((item) => item.key)).toEqual([key(1), key(2), key(3)]);
   });
+  it("una espera agotada al subir una foto se distingue de la conexión caída (T150)", async () => {
+    const mocks = makeDeps();
+    mocks.transfer.put.mockImplementation(async (url: string) => url.endsWith("k2") ? { ok: false, code: "timeout" } as const : { ok: true } as const);
+    const { container, create } = await render(newPath, mocks);
+    await field(container, "description", "Atardecer"); await choose(container, mocks, 1, 2, 3);
+    await submit(container);
+    expect(create).not.toHaveBeenCalled();
+    expect(statuses(container)).toEqual(["Lista", "No se subió. La conexión tardó demasiado.", "Lista"]);
+  });
   it("publishes a memory made only of photos", async () => {
     const mocks = makeDeps();
     const { container, create } = await render(newPath, mocks);
@@ -398,6 +407,23 @@ describe("PostComposer photos: publishing", () => {
     expect(alerts(container)).toHaveLength(1);
     expect(alerts(container)[0]!.textContent).toContain("No pudimos subir las fotos");
     expect(container.querySelector("form")).not.toBeNull();
+  });
+  it("un timeout de la reserva tiene su propio texto y conserva el aviso de que no se publicó (T150)", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    expect(alerts(container)[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. El recuerdo no se publicó.");
+  });
+  it("una conexión caída de la reserva conserva el texto de siempre (T150)", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "NetworkError" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    expect(alerts(container)[0]!.textContent).toContain("No pudimos subir las fotos");
+    expect(alerts(container)[0]!.textContent).not.toContain("tardó demasiado");
   });
   it("a 422 on the reservation marks the named photo of the batch and points to it instead of blaming the connection", async () => {
     const mocks = makeDeps();
@@ -723,6 +749,22 @@ describe("PostComposer published photos (T128)", () => {
     await field(container, "description", "Nuevo"); await submit(container);
     expect(update).toHaveBeenCalledExactlyOnceWith(tripId, postId, { description: "Nuevo" });
   });
+  it("un timeout al cargar las fotos publicadas tiene su propio texto y conserva la promesa de edición (T150)", async () => {
+    const mocks = makeDeps(), count = vi.fn(async () => ({ ok: true as const, value: 0 })); Object.assign(mocks.api, { countForPost: count });
+    withList(mocks, async () => ({ ok: false, error: { kind: "network", code: "TimeoutError" } }));
+    const { container } = await render(editPath, mocks);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Podés seguir editando.");
+    expect(container.textContent).not.toContain("No pudimos cargar las fotos publicadas");
+  });
+
+  it("una conexión caída al cargar las fotos publicadas conserva el texto de siempre (T150)", async () => {
+    const mocks = makeDeps(), count = vi.fn(async () => ({ ok: true as const, value: 0 })); Object.assign(mocks.api, { countForPost: count });
+    withList(mocks, async () => ({ ok: false, error: { kind: "network", code: "NetworkError" } }));
+    const { container } = await render(editPath, mocks);
+    expect(container.textContent).toContain("No pudimos cargar las fotos publicadas. Podés seguir editando.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+
   it("retries the list from the failure message", async () => {
     const mocks = makeDeps();
     const list = withList(mocks, vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "server" } }).mockResolvedValue({ ok: true, value: publishedList }));

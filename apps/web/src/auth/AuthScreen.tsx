@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, PasswordField, TextField } from "../components/index.js";
 import type { AuthApi, AuthenticatedSession, AuthFailure } from "./auth-api.js";
 
@@ -21,6 +22,9 @@ const validationMessages = {
 
 const fieldErrors = (error: AuthFailure): Record<string, string> =>
   Object.fromEntries((error.fields ?? []).map(({ field, message }) => [field, message]));
+
+const registerFailure = "No pudimos crear tu cuenta con esos datos.";
+const loginFailure = "No pudimos iniciar sesión con esas credenciales.";
 
 const sessionExpiredNotice = "Tu sesión venció. Entrá con tu cuenta para seguir; tus viajes no se eliminan.";
 
@@ -78,7 +82,7 @@ export function AuthScreen({ auth, mode, onAuthenticated, sessionExpired = false
 
         const apiErrors = result === undefined ? {} : fieldErrors(result.error);
         setErrors(apiErrors);
-        setFormError("No pudimos crear tu cuenta con esos datos.");
+        setFormError(networkNotice(result?.error, registerFailure));
         return;
       }
 
@@ -91,9 +95,9 @@ export function AuthScreen({ auth, mode, onAuthenticated, sessionExpired = false
 
       const apiErrors = result === undefined ? {} : fieldErrors(result.error);
       setErrors(apiErrors);
-      setFormError("No pudimos iniciar sesión con esas credenciales.");
+      setFormError(networkNotice(result?.error, loginFailure));
     } catch {
-      setFormError(isRegister ? "No pudimos crear tu cuenta con esos datos." : "No pudimos iniciar sesión con esas credenciales.");
+      setFormError(isRegister ? registerFailure : loginFailure);
     } finally {
       submitting.current = false;
       setLoading(false);

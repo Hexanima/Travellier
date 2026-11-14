@@ -5,7 +5,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } fr
 
 import './App.css'
 import { createDirectUpload } from './api/direct-upload.js'
-import { createHttpClient } from './api/index.js'
+import { createHttpClient, networkNotice } from './api/index.js'
 import { AuthScreen } from './auth/AuthScreen.js'
 import { createAuthApi, type AuthApi, type AuthenticatedSession } from './auth/auth-api.js'
 import { createNativeSessionStorage, type NativeSessionStorage } from './auth/native-session-storage.js'
@@ -596,7 +596,7 @@ function InviteEntry({ sessionReady, hasSession, trips, push, code }: InviteEntr
               : <>
                   <Button onClick={() => void confirmJoin()} loading={joining} loadingLabel="Confirmando…">Confirmar unión</Button>
                   {result && !result.ok
-                    ? <p role="alert">{result.error.kind === 'not-found' ? 'El código de invitación no es válido.' : 'No pudimos confirmar la unión. Intentá nuevamente.'}</p>
+                    ? <p role="alert">{result.error.kind === 'not-found' ? 'El código de invitación no es válido.' : networkNotice(result.error, 'No pudimos confirmar la unión. Intentá nuevamente.')}</p>
                     : null}
                 </>}
       </section>

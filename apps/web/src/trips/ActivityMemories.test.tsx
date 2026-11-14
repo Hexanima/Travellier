@@ -29,7 +29,7 @@ const post = (n: number, o: PostOptions): ItineraryPostResponse => {
 const photo = (n: number, forPost: ItineraryPostResponse, order = 0): GalleryPhoto => ({ id: itineraryId(n), postId: forPost.id, order, uploadedAt: "2026-03-10T13:30:00.000Z", uploaderId: me,
   url: `https://s3.test/${n}?sig=SECRET${n}`, expiresAtMs: NOW + 300_000, post: { createdAt: forPost.createdAt, authorId: me, rootActivityId: activityId, rootTransportId: null } });
 const page = (photos: GalleryPhoto[], nextCursor: string | null): { ok: true; value: GalleryPage } => ({ ok: true, value: { photos, nextCursor } });
-const fail = (kind: string) => ({ ok: false as const, error: { kind } });
+const fail = (kind: string, code?: string) => ({ ok: false as const, error: { kind, ...(code ? { code } : {}) } });
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; };
 const members = { list: vi.fn() };
 beforeEach(() => { members.list.mockReset().mockResolvedValue({ ok: true, value: { currentUserId: me, members: [{ id: itineraryId(900), userId: me, name: "Yo", role: "admin", joinedAt: "2026-11-01T10:00:00.000Z" }] } }); });
@@ -244,6 +244,18 @@ describe("ActivityMemories (Recuerdos)", () => {
       expect(alertTexts()).toHaveLength(0);
       expect(container.querySelectorAll("[data-memory] img")).toHaveLength(2);
     });
+    it("un timeout de las miniaturas tiene su propio texto, en una sola alerta (T150)", async () => {
+      const container = await mount(vi.fn().mockResolvedValue(fail("network", "TimeoutError")));
+      expect(memoryRows(container)).toEqual([p1.id, p2.id, p3.id]);
+      expect(alertTexts()).toHaveLength(1);
+      expect(alertTexts()[0]).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+      expect(alertTexts()[0]).not.toContain("No pudimos cargar las miniaturas");
+    });
+    it("una conexión caída de las miniaturas conserva el texto de siempre (T150)", async () => {
+      await mount(vi.fn().mockResolvedValue(fail("network", "NetworkError")));
+      expect(alertTexts()[0]).toContain("No pudimos cargar las miniaturas.");
+      expect(alertTexts()[0]).not.toContain("tardó demasiado");
+    });
     it("a failed page 2 keeps the loaded thumbnails and shows one alert", async () => {
       const list = vi.fn().mockResolvedValueOnce(page([photo(21, p1, 0)], "c1")).mockResolvedValueOnce(fail("server"));
       const container = await mount(list);
@@ -327,6 +339,17 @@ describe("ActivityMemories (Fotos)", () => {
     await mount(vi.fn().mockResolvedValue(fail("network")), { tab: "photos" });
     expect(alertTexts()).toHaveLength(1);
     expect(alertTexts()[0]).toContain("No pudimos cargar las fotos");
+  });
+  it("un timeout de la galería tiene su propio texto, en una sola alerta (T150)", async () => {
+    await mount(vi.fn().mockResolvedValue(fail("network", "TimeoutError")), { tab: "photos" });
+    expect(alertTexts()).toHaveLength(1);
+    expect(alertTexts()[0]).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(alertTexts()[0]).not.toContain("No pudimos cargar las fotos");
+  });
+  it("una conexión caída de la galería conserva el texto de siempre (T150)", async () => {
+    await mount(vi.fn().mockResolvedValue(fail("network", "NetworkError")), { tab: "photos" });
+    expect(alertTexts()[0]).toContain("No pudimos cargar las fotos");
+    expect(alertTexts()[0]).not.toContain("tardó demasiado");
   });
   it("401 shows «Iniciar sesión»", async () => {
     const container = await mount(vi.fn().mockResolvedValue(fail("unauthorized")), { tab: "photos" });

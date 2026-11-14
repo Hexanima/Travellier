@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import type { TripFailure, TripManagementApi } from "./trip-management-api.js";
 import type { ItineraryPostResponse, TripItineraryApi, TripItineraryResponse } from "./trip-itinerary-api.js";
@@ -64,6 +65,10 @@ function ExpenseLines({ totals, empty }: { totals: ExpenseTotals; empty?: string
   </>;
 }
 
+/** El refresco fallido: solo cambia la primera frase; la promesa sobre lo que queda en pantalla es la misma para cualquier causa. */
+const refreshFailure = "No pudimos actualizar el itinerario.";
+const keptSaved = "Los cambios guardados se conservan.";
+
 export function TripItineraryScreen({ itinerary, activities, participations, members, tripName, trips, icsExport, calendarSync, now, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: Props) {
   const { tripId } = useParams();
   return <ItineraryContent key={tripId} tripId={tripId} itinerary={itinerary} activities={activities} participations={participations} members={members} tripName={tripName} trips={trips} icsExport={icsExport} calendarSync={calendarSync} timeZone={timeZone} now={now} />;
@@ -118,7 +123,7 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
   };
   const [panelSettled, setPanelSettled] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState(false);
+  const [refreshError, setRefreshError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [notice, setNotice] = useState<{ text: string; variant: "success" | "info" }>();
   const noticeRef = useRef<HTMLDivElement>(null);
@@ -178,19 +183,19 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       epoch.current += 1;
       if (!tripId) { setState({ kind: "error", error: { kind: "not-found" } }); return; }
       setState((current) => current.kind === "ready" ? current : { kind: "loading" });
-      setRefreshing(attempt > 0); setRefreshError(false);
+      setRefreshing(attempt > 0); setRefreshError(undefined);
       try {
         const result = await itinerary.get(tripId);
         if (!cancelled) {
           if (result.ok) setState({ kind: "ready", value: result.value });
           else if (["network", "server"].includes(result.error.kind)) {
-            setRefreshError(attempt > 0);
+            setRefreshError(attempt > 0 ? `${networkNotice(result.error, refreshFailure)} ${keptSaved}` : undefined);
             setState((current) => current.kind === "ready" ? current : { kind: "error", error: result.error });
           } else { setState({ kind: "error", error: result.error }); closeDialog(); }
         }
       } catch {
         if (!cancelled) {
-          setRefreshError(attempt > 0);
+          setRefreshError(attempt > 0 ? `${refreshFailure} ${keptSaved}` : undefined);
           setState((current) => current.kind === "ready" ? current : { kind: "error", error: { kind: "network" } });
         }
       } finally {
@@ -331,14 +336,14 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       {state.kind === "ready" && notice ? <div ref={noticeRef} tabIndex={-1}><Feedback variant={notice.variant}>{notice.text}</Feedback></div> : null}
       {state.kind === "ready" && refreshing ? <LoadingState label="Actualizando itinerario…" /> : null}
       {state.kind === "ready" && refreshError ? <div className="activity-detail">
-        <Feedback variant="error">No pudimos actualizar el itinerario. Los cambios guardados se conservan.</Feedback>
+        <Feedback variant="error">{refreshError}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Actualizar itinerario</Button>
       </div> : null}
       {state.kind === "loading" ? <LoadingState label="Cargando itinerario…" /> : null}
       {state.kind === "error" ? <div className="trips-state">
         <Feedback variant="error">{unavailable ? "Este itinerario no está disponible para tu cuenta."
           : state.error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-          : "No pudimos cargar el itinerario. Revisá tu conexión e intentá nuevamente."}</Feedback>
+          : networkNotice(state.error, "No pudimos cargar el itinerario. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         {state.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
           : !unavailable ? <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button> : null}
       </div> : null}
