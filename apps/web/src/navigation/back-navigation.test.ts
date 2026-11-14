@@ -16,9 +16,11 @@ describe("resolución del Atrás", () => {
       .toEqual({ kind: "navigate", to: "/trips", replace: true, keepHistory: false });
   });
 
-  it("una raíz del Trip abierta desde avisos vuelve a avisos", () => {
-    expect(resolveBackAction({ pathname: `/trips/${tripId}/itinerary`, tripId, canGoBack: true, fromNotices: true }))
-      .toEqual({ kind: "navigate", to: "/notifications", replace: true, keepHistory: false });
+  it("una raíz del Trip abierta desde avisos vuelve a avisos y conserva el historial de esa pantalla", () => {
+    for (const canGoBack of [true, false]) {
+      expect(resolveBackAction({ pathname: `/trips/${tripId}/itinerary`, tripId, canGoBack, fromNotices: true }))
+        .toEqual({ kind: "navigate", to: "/notifications", replace: true, keepHistory: true });
+    }
   });
 
   it("una pantalla interna con historial vuelve atrás", () => {

@@ -60,9 +60,10 @@ export function BackNavigationProvider({ children, backButton = Capacitor.isNati
       if (action.kind === "exit") { backButton.exitApp(); return; }
       lock();
       if (action.kind === "back") navigateRef.current(-1);
-      // The entry it replaces is left behind: with `keepHistory` it inherits `noBack` only when nothing was behind it, so the next press
-      // neither resolves to a back that goes nowhere nor closes the app with history still behind. Without it (leaving a root of the Trip)
-      // the entry behind showed the screen just reached, so it is marked: the next press closes the app instead of repeating it.
+      // With `keepHistory` the new entry inherits `noBack` only when nothing was behind the one it replaces, so the next press neither
+      // resolves to a back that goes nowhere nor closes the app with history still behind (avisos keeps the screen that opened it).
+      // Without it (Mis viajes reached from a root of the Trip) the entry behind showed the screen just reached, so the new one is marked
+      // even with history behind: the next press closes the app instead of repeating what is already on screen.
       else navigateRef.current(action.to, { replace: true, ...(action.keepHistory ? inheritNoBack(current) : { state: withNoBack() }) });
     });
   }, [backButton, stack]);

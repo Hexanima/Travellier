@@ -41,6 +41,8 @@ const props = (over: Partial<ComponentProps<typeof App>> = {}): ComponentProps<t
   posts: { list: vi.fn().mockResolvedValue({ ok: true, value: [] }) },
   ...over,
 });
+/** El encabezado de la pantalla montada: afirma sobre la pantalla en sí y no sobre un texto que otra pantalla también muestra (su enlace, por ejemplo). */
+const heading = (container: HTMLElement) => container.querySelector("h1")?.textContent;
 type Entry = string | { pathname: string; search?: string; state?: unknown };
 async function render(entry: Entry | Entry[], app: ComponentProps<typeof App>) {
   const entries = Array.isArray(entry) ? entry : [entry];
@@ -82,29 +84,51 @@ describe("App back button integration", () => {
     expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
 
-  it("el recorrido desde una raíz del Trip abierta por un aviso llega a la salida sin pulsaciones sin efecto", async () => {
+  it("el recorrido desde una raíz del Trip abierta por un aviso conserva el historial de Avisos hasta la salida", async () => {
     const button = backButton();
     const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
     const container = await render(["/trips", "/notifications", { pathname: `/trips/${tripId}/itinerary`, state: { origin: noticesOrigin } }],
       props({ backButton: button.port, notifications }));
     await button.press();
-    expect(container.textContent).toContain("Avisos");
+    expect(heading(container)).toBe("Avisos");
+    await afterBackLock();
+    // Avisos conserva su propio origen: la pulsación siguiente sigue su historial (acá, la entrada de Avisos que abrió el viaje) en vez de caer en Mis viajes.
+    await button.press();
+    expect(heading(container)).toBe("Avisos");
     await afterBackLock();
     await button.press();
-    expect(container.textContent).toContain("Mis viajes");
+    expect(heading(container)).toBe("Mis viajes");
     expect(button.exitApp).not.toHaveBeenCalled();
     await afterBackLock();
     await button.press();
     expect(button.exitApp).toHaveBeenCalledTimes(1);
   });
 
+  it("abierto un aviso de una raíz del Trip desde el perfil, el Atrás llega a Avisos y vuelve al perfil sin cerrar la app", async () => {
+    const button = backButton();
+    const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
+    const container = await render(["/profile", "/notifications", { pathname: `/trips/${tripId}/itinerary`, state: { origin: noticesOrigin } }],
+      props({ backButton: button.port, notifications }));
+    await button.press();
+    expect(heading(container)).toBe("Avisos");
+    await afterBackLock();
+    // Avisos conserva su historial: la pulsación siguiente lo sigue hacia atrás. Repite Avisos porque la entrada de la raíz del Trip se
+    // reemplazó por Avisos justo encima de la entrada de Avisos que abrió el viaje; lo que importa es que el perfil siga alcanzable.
+    await button.press();
+    expect(heading(container)).toBe("Avisos");
+    await afterBackLock();
+    await button.press();
+    expect(heading(container)).toBe("Mi perfil");
+    expect(button.exitApp).not.toHaveBeenCalled();
+  });
+
   it("en Mis viajes abierto desde otra pantalla el Atrás vuelve a ella en vez de cerrar", async () => {
     const button = backButton();
     const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
     const container = await render(["/notifications", "/trips"], props({ backButton: button.port, notifications }));
-    expect(container.textContent).toContain("Mis viajes");
+    expect(heading(container)).toBe("Mis viajes");
     await button.press();
-    expect(container.textContent).toContain("Avisos");
+    expect(heading(container)).toBe("Avisos");
     expect(button.exitApp).not.toHaveBeenCalled();
   });
 
@@ -114,7 +138,7 @@ describe("App back button integration", () => {
     const container = await render({ pathname: `/trips/${tripId}/itinerary`, state: { origin: noticesOrigin } }, props({ backButton: button.port, notifications }));
     expect(container.querySelector("a.trips-back")?.textContent).toBe("Volver a avisos");
     await button.press();
-    expect(container.textContent).toContain("Avisos");
+    expect(heading(container)).toBe("Avisos");
   });
 
   it("en Mis viajes sin historial cierra la app en vez de dejar el Atrás muerto", async () => {
@@ -136,9 +160,9 @@ describe("App back button integration", () => {
     const button = backButton();
     const notifications = { list: vi.fn().mockResolvedValue({ ok: true, value: { notifications: [], unreadCount: 0 } }) };
     const container = await render(["/trips", "/notifications"], props({ backButton: button.port, notifications }));
-    expect(container.textContent).toContain("Avisos");
+    expect(heading(container)).toBe("Avisos");
     await button.press();
-    expect(container.textContent).toContain("Mis viajes");
+    expect(heading(container)).toBe("Mis viajes");
   });
 
   it("sin puerto nativo no se toca nada: la app sigue funcionando con el Atrás del navegador", async () => {

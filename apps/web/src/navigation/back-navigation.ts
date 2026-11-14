@@ -2,8 +2,10 @@ import { rootTabOf } from "../trips/trip-tabs.js";
 
 /**
  * What the back press does when no open layer consumed it.
- * `keepHistory` says what happens with the entry behind the one being replaced: `true` keeps it reachable (the new entry inherits
- * `noBack` only when nothing was behind), `false` leaves it out, because the press already moved to the screen that entry showed.
+ * `keepHistory` decides the state of the entry that replaces the current one:
+ * `true` (every destination but one) leaves the history behind reachable, inheriting `noBack` only when nothing was behind;
+ * `false` marks the new entry as having nothing behind even if there was history, and only Mis viajes reached from a root of the Trip does it,
+ * because that press already moved to the screen the entry behind showed.
  */
 export type BackAction = { kind: "back" } | { kind: "navigate"; to: string; replace: true; keepHistory: boolean } | { kind: "exit" };
 export type BackContext = {
@@ -24,9 +26,13 @@ const appRoots = new Set(["/trips", "/", "/login"]);
  * It never resolves to nothing: a root of the Trip returns to its shell origin, anything else goes back, to Mis viajes or out of the app.
  */
 export const resolveBackAction = ({ pathname, tripId, canGoBack, fromNotices }: BackContext): BackAction => {
-  // Leaving a root of the Trip ends the road behind it: the tabs replace their entry, so the Trip sits right on top of whatever opened it
-  // (Mis viajes, avisos) and keeping that entry would answer the next press with a back to the very screen just reached, with nothing visible.
-  if (rootTabOf(pathname, tripId)) return { kind: "navigate", to: fromNotices ? "/notifications" : "/trips", replace: true, keepHistory: false };
+  // A root of the Trip leaves to whatever opened it. Avisos is a destination with an origin of its own (someone reaches it from the profile or
+  // from Mis viajes), so its history stays: dropping it would answer the next press with the fallback to Mis viajes and lose a legitimate back.
+  // Mis viajes is the root of the app and nothing else opens it: the tabs replace their entry, so the Trip sat right on top of it and keeping
+  // that entry would answer the next press with a back to the very screen just reached, with nothing visible.
+  if (rootTabOf(pathname, tripId)) return fromNotices
+    ? { kind: "navigate", to: "/notifications", replace: true, keepHistory: true }
+    : { kind: "navigate", to: "/trips", replace: true, keepHistory: false };
   if (canGoBack) return { kind: "back" };
   if (appRoots.has(pathname)) return { kind: "exit" };
   // No entry behind: a screen reached by deep link or notice. `/register` has no session yet, everything else falls back to Mis viajes.
