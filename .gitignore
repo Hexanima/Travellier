@@ -146,3 +146,5 @@ dist
 
 # Disposable Android smoke-test emulators and downloaded SDK tools.
 .android-smoke/
+# Binarios de mongodb-memory-server cacheados en CI (MONGOMS_DOWNLOAD_DIR).
+.mongodb-binaries

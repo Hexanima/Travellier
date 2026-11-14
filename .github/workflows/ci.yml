@@ -25,22 +25,24 @@ jobs:
     timeout-minutes: 30
     env:
       TZ: UTC
-      MONGOMS_DOWNLOAD_DIR: ${{ runner.temp }}/mongodb-binaries
+      # Solo github, needs, strategy, matrix, vars, secrets e inputs existen en jobs.<job_id>.env.
+      MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.mongodb-binaries
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           package-manager-cache: false
-      - run: corepack enable
-      - run: corepack yarn install --immutable
+      # Antes del install: el postinstall de mongodb-memory-server descarga el binario ahi.
       - name: Restore the in-memory MongoDB binaries
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/mongodb-binaries
+          path: ${{ github.workspace }}/.mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: |
             mongodb-binaries-${{ runner.os }}-
+      - run: corepack enable
+      - run: corepack yarn install --immutable
       - run: corepack yarn workspace web typecheck:integration
       - run: corepack yarn test:integration
 
@@ -96,9 +98,12 @@ jobs:
       - name: Clean up a stale emulator
         if: steps.smoke-attempt-1.outcome == 'failure'
         run: |
-          adb devices | awk 'NR > 1 && NF { print $1 }' | xargs -r -I{} adb -s {} emu kill || true
+          # El paso corre fuera de android-emulator-runner: sin su PATH no hay "adb".
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          test -x "$ADB"
+          "$ADB" devices | awk 'NR > 1 && NF { print $1 }' | xargs -r -I{} "$ADB" -s {} emu kill || true
           pkill -f qemu-system || true
-          adb kill-server || true
+          "$ADB" kill-server || true
       - name: Retry native bridge on API ${{ matrix.api-level }}
         id: smoke-attempt-2
         if: steps.smoke-attempt-1.outcome == 'failure'

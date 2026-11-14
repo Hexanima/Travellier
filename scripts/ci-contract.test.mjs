@@ -19,6 +19,12 @@ const emulatorSteps = android.steps.filter((step) =>
   String(step.uses ?? '').startsWith('reactivecircus/android-emulator-runner'),
 )
 
+const cacheStep = integration.steps.find((step) => String(step.uses ?? '').startsWith('actions/cache'))
+const downloadDir = integration.env?.MONGOMS_DOWNLOAD_DIR
+// GitHub solo admite estos contextos al evaluar jobs.<job_id>.env; usar otro (por ejemplo
+// runner) invalida el workflow entero y ningun job llega a ejecutarse.
+const contextsAllowedInJobEnv = ['github', 'needs', 'strategy', 'matrix', 'vars', 'secrets', 'inputs']
+
 describe('integration test job', () => {
   it('runs the web integration suite in its own job', () => {
     assert.ok(integration, 'missing web-integration job')
@@ -40,14 +46,7 @@ describe('integration test job', () => {
   })
 
   it('caches the mongodb binaries where the package downloads them', () => {
-    const cacheStep = integration.steps.find((step) =>
-      String(step.uses ?? '').startsWith('actions/cache'),
-    )
-
     assert.ok(cacheStep, 'missing the mongodb binaries cache step')
-
-    const downloadDir = integration.env?.MONGOMS_DOWNLOAD_DIR
-
     assert.ok(downloadDir, 'missing MONGOMS_DOWNLOAD_DIR in the job env')
     assert.doesNotMatch(
       String(downloadDir),
@@ -58,6 +57,39 @@ describe('integration test job', () => {
       String(cacheStep.with.path).trim(),
       String(downloadDir).trim(),
       'the cached path must be the download path',
+    )
+  })
+
+  it('builds the download path with a context valid in jobs.<job_id>.env', () => {
+    const value = String(downloadDir)
+    const used = Array.from(value.matchAll(/\$\{\{\s*([A-Za-z_][\w-]*)/g)).map((match) => match[1])
+
+    for (const context of used) {
+      assert.ok(
+        contextsAllowedInJobEnv.includes(context),
+        `the "${context}" context is not available in jobs.<job_id>.env: use one of ${contextsAllowedInJobEnv.join(', ')}`,
+      )
+    }
+
+    if (used.length === 0) {
+      assert.match(value, /^\//, 'without a context the download path must be an absolute path')
+    }
+  })
+
+  it('restores the cache before the step that downloads the binaries', () => {
+    const installIndex = integration.steps.findIndex((step) =>
+      /corepack yarn install/.test(String(step.run ?? '')),
+    )
+
+    assert.notEqual(installIndex, -1, 'missing the install step')
+
+    // El postinstall de mongodb-memory-server descarga el binario durante el install:
+    // o la cache se restaura antes, o el postinstall queda desactivado y descarga el globalSetup.
+    if (String(integration.env?.MONGOMS_DISABLE_POSTINSTALL ?? '') === 'true') return
+
+    assert.ok(
+      integration.steps.indexOf(cacheStep) < installIndex,
+      'the cache must be restored before "corepack yarn install" (its postinstall downloads the binary) or the postinstall must be disabled with MONGOMS_DISABLE_POSTINSTALL',
     )
   })
 
@@ -123,6 +155,20 @@ describe('android emulator job', () => {
       'the cleanup step must sit between both attempts',
     )
     assert.match(String(android.steps[cleanupIndex].if), failureCondition(attempt.id))
+
+    // El paso corre fuera de android-emulator-runner: sin su PATH no hay "adb" y los
+    // "|| true" dejarian la limpieza en silencio.
+    const cleanup = String(android.steps[cleanupIndex].run ?? '')
+
+    for (const line of cleanup.split('\n')) {
+      assert.doesNotMatch(
+        line,
+        /(^|[|&;(] *| )adb /,
+        'invoke adb as "$ANDROID_HOME/platform-tools/adb": the cleanup step has no emulator PATH',
+      )
+    }
+
+    assert.match(cleanup, /\$ANDROID_HOME\/platform-tools\/adb/)
   })
 
   it('bounds every attempt inside the job timeout', () => {
