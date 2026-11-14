@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef } from "react";
-import type { KeyboardEvent, ReactNode } from "react";
+import type { KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { BackLayerDepth } from "../navigation/BackNavigationProvider.js";
 import { useBackLayer } from "../navigation/back-layer-context.js";
@@ -43,6 +43,7 @@ export function Modal({
 }: ModalProps) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
+  const pressStartedOnBackdrop = useRef(false);
   const cannotClose = loading || !onClose;
   // The native back press closes the open dialog before touching the navigation. While it cannot close (saving, or no way out)
   // it keeps the press instead of leaving the screen behind the dialog.
@@ -106,12 +107,34 @@ export function Modal({
     }
   }
 
+  // El toque fuera del modal es el equivalente táctil del Atrás nativo: misma condición (hay salida y no está guardando).
+  // Solo cuenta si el gesto empezó y terminó en el fondo: un arrastre que nace dentro (seleccionar texto) no cierra.
+  function handleBackdropPointerDown(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>) {
+    pressStartedOnBackdrop.current = event.target === event.currentTarget;
+  }
+
+  function handleBackdropClick(event: ReactMouseEvent<HTMLElement>) {
+    const startedOnBackdrop = pressStartedOnBackdrop.current;
+    pressStartedOnBackdrop.current = false;
+    if (event.target !== event.currentTarget || !startedOnBackdrop || cannotClose) {
+      return;
+    }
+    // React events cross portals: keep a stacked modal's backdrop tap from closing the modal underneath.
+    event.stopPropagation();
+    onClose?.();
+  }
+
   if (!isOpen) {
     return null;
   }
 
   return (
-    <div className="ui-modal-backdrop">
+    <div
+      className="ui-modal-backdrop"
+      onPointerDown={handleBackdropPointerDown}
+      onMouseDown={handleBackdropPointerDown}
+      onClick={handleBackdropClick}
+    >
       <section
         ref={dialogRef}
         className="ui-modal"

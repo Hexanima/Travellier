@@ -226,4 +226,80 @@ describe("Modal", () => {
       expect(where(back.container)).toBe("/trips");
     });
   });
+  describe("toque fuera del modal", () => {
+    const mount = async (modal: React.ReactElement) => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      mountedRoots.push(root);
+      await act(async () => { root.render(modal); });
+      return container;
+    };
+    const parts = (container: HTMLElement) => ({
+      backdrop: container.querySelector(".ui-modal-backdrop") as HTMLElement,
+      dialog: container.querySelector(".ui-modal") as HTMLElement,
+    });
+    /** Secuencia real de un toque: pointerdown (jsdom no tiene PointerEvent), mousedown y click sobre el mismo objetivo. */
+    const tap = async (down: HTMLElement, up: HTMLElement = down) => act(async () => {
+      down.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      down.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      up.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    it("cierra al tocar el fondo, fuera del modal", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}><button>Ok</button></Modal>);
+      await tap(parts(container).backdrop);
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    it("no cierra al tocar dentro del modal", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}><button>Ok</button></Modal>);
+      await tap(parts(container).dialog);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("no cierra mientras guarda", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen loading title="Cambiar" onClose={onClose}>Ok</Modal>);
+      await tap(parts(container).backdrop);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("un diálogo sin cierre no se cierra con el toque de fuera", async () => {
+      const container = await mount(<Modal isOpen title="Cambiar">Ok</Modal>);
+      await tap(parts(container).backdrop);
+      expect(container.querySelector("[role=dialog]")).not.toBeNull();
+    });
+
+    it("no cierra si el gesto empezó dentro (arrastre al seleccionar texto)", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}><button>Ok</button></Modal>);
+      const { backdrop, dialog } = parts(container);
+      await tap(dialog, backdrop);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("el fondo no es un control: sin rol propio ni foco", async () => {
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={() => undefined}>Ok</Modal>);
+      const { backdrop } = parts(container);
+      expect(backdrop.getAttribute("role")).toBeNull();
+      expect(backdrop.getAttribute("tabindex")).toBeNull();
+    });
+
+    it("el fondo del modal de arriba no cierra el de abajo", async () => {
+      const onCloseUnder = vi.fn();
+      const onCloseOver = vi.fn();
+      const container = await mount(
+        <Modal isOpen title="Actividad" onClose={onCloseUnder}>
+          <Modal isOpen title="Conflicto" onClose={onCloseOver}>Ok</Modal>
+        </Modal>,
+      );
+      const backdrops = container.querySelectorAll(".ui-modal-backdrop");
+      await tap(backdrops[backdrops.length - 1] as HTMLElement);
+      expect(onCloseOver).toHaveBeenCalledOnce();
+      expect(onCloseUnder).not.toHaveBeenCalled();
+    });
+  });
 });
