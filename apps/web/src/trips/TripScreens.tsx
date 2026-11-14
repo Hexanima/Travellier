@@ -147,20 +147,18 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
             <List aria-label={filter === "active" ? "Viajes activos" : "Viajes finalizados"}>
               {shown.map((trip) => (
                 <ListItem key={trip.id} className="trips-item">
-                  <div>
+                  {/* The card itself is the main action: one link opens the Trip at its root (the itinerary) and its accessible name is the Trip, not the word Itinerario.
+                      Itinerario, Diario/Recuerdos, Grupo (miembros e invitación) and Destinos y transportes live inside the Trip: repeating them here duplicated the whole navigation per Trip. */}
+                  <Link className="trips-item-open" to={`/trips/${trip.id}/itinerary`}>
                     <h2>{trip.name}</h2>
                     {trip.primaryDestination === null ? null : <p className="trips-destination">{trip.primaryDestination.name}</p>}
                     {/* Provisional: the final presentation of the dates comes with the approved design. */}
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
-                  </div>
-                  {/* Acciones de la tarjeta: botones secundarios agrupados, no enlaces subrayados apilados. */}
+                  </Link>
+                  {/* The only secondary action left: the configuration has no entry inside the Trip for a participant (the balance only offers it to admins). */}
                   <div className="trips-item-links">
-                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
-                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
                     <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/config`}>Configuración</Link>
-                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
-                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
                   </div>
                 </ListItem>
               ))}

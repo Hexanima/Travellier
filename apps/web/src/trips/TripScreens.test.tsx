@@ -59,14 +59,17 @@ describe("Trip screens", () => {
     expect(container.textContent).toContain("Bariloche");
     expect(container.querySelector('a[href="/trips/new"]')).not.toBeNull();
     expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
-    expect(container.querySelector(`a[href="/trips/${trip.id}/members"]`)).not.toBeNull();
     expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).not.toBeNull();
-    expect(container.querySelector(`a[href="/trips/${trip.id}/journey"]`)).not.toBeNull();
   });
 
-  it("links each Trip to its memories", async () => {
+  it("opens the Trip from its card, without repeating the navigation that lives inside it", async () => {
     const container = await renderTrips({ list: vi.fn().mockResolvedValue({ ok: true, value: [trip] }), create: vi.fn() });
-    expect(container.querySelector(`a[href="/trips/${trip.id}/memories"]`)?.textContent).toBe("Recuerdos");
+    const open = container.querySelector(`.trips-item a[href="/trips/${trip.id}/itinerary"]`);
+    expect(open?.classList.contains("trips-item-open")).toBe(true);
+    expect(open?.textContent).toContain("Patagonia");
+    for (const rest of ["memories", "journey", "members"]) {
+      expect(container.querySelector(`.trips-item a[href="/trips/${trip.id}/${rest}"]`)).toBeNull();
+    }
   });
 
   it("links the notices center next to the profile, also when there are no Trips", async () => {

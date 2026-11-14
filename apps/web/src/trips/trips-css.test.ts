@@ -59,6 +59,19 @@ describe("Mis viajes y Explorar", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("display: grid");
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
+  it("la tarjeta es un enlace de bloque: sin subrayado, color heredado, con hover y foco con token (T153)", () => {
+    const open = ruleBody(app, ".trips-panel--catalog .trips-item-open");
+    expect(open).toContain("display: grid");
+    expect(open).toContain("text-decoration: none");
+    expect(open).toContain("color: inherit");
+    expect(open).toContain("min-height: 44px");
+    const hover = ruleBody(app, ".trips-panel--catalog .trips-item-open:hover");
+    expect(hover).toContain("background: var(--ui-color-soft)");
+    const focus = ruleBody(app, ".trips-panel--catalog .trips-item-open:focus-visible");
+    expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
+    expect(focus).toContain("outline-offset: 3px");
+  });
+
   it("las entradas y el vacío usan botones de ancho completo acotados a su contenedor", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-entry-actions .ui-button")).toContain("width: 100%");
     expect(ruleBody(app, ".trips-panel--catalog .trips-empty .ui-button")).toContain("width: 100%");

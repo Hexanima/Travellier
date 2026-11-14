@@ -304,7 +304,11 @@ dd {
 .trips-panel--catalog .trips-dates { margin-top: 4px; font-size: 0.75rem; line-height: 1.125rem; color: var(--ui-color-muted); font-variant-numeric: tabular-nums; }
 .trips-panel--catalog .trips-description { margin-top: 8px; font-size: 0.875rem; line-height: 1.25rem; color: var(--ui-color-muted); overflow-wrap: anywhere; }
 .trips-item-links { display: flex; flex-wrap: wrap; gap: 0 20px; }
-/* T153: las acciones de cada viaje son botones secundarios agrupados con el ritmo de 12px, no enlaces subrayados apilados. */
+/* T153: la tarjeta es la acción principal. Un solo enlace de bloque abre el viaje: no se subraya ni recolorea su contenido y el realce de hover cubre exactamente el área sensible. */
+.trips-panel--catalog .trips-item-open { display: grid; gap: 4px; min-width: 0; min-height: 44px; margin: -8px -8px 0; border-radius: var(--ui-radius-control); padding: 8px; color: inherit; text-decoration: none; transition: background-color 150ms ease; }
+.trips-panel--catalog .trips-item-open:hover { background: var(--ui-color-soft); }
+.trips-panel--catalog .trips-item-open:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
+/* T153: la única acción secundaria que queda es un botón, no un enlace subrayado. */
 .trips-panel--catalog .trips-item-links { display: grid; gap: 12px; }
 .trips-panel--catalog .trips-settings-link { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; text-decoration: none; }
 .trips-panel--catalog .trips-settings-link:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }

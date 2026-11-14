@@ -495,15 +495,14 @@ describe("App Trip routes", () => {
       });
     });
 
-    it("moves a Trip between tabs after changing its transports and coming back", async () => {
+    it("moves a Trip between tabs after its dates change and the list is loaded again on the way back", async () => {
       const list = vi.fn()
         .mockResolvedValueOnce({ ok: true, value: [dated(tripId, "Patagonia", "2099-01-09T10:00:00.000Z")] })
         .mockResolvedValue({ ok: true, value: [dated(tripId, "Patagonia", "2020-01-09T10:00:00.000Z")] });
-      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) },
-        { listDestinations: async () => ({ ok: true, value: [] }), listTransports: async () => ({ ok: true, value: [] }) });
+      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) }, undefined, adminMembers);
       expect(names(container)).toEqual(["Patagonia"]);
-      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/journey"]`)?.click());
-      expect(container.textContent).toContain("Destinos y transportes");
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/config"]`)?.click());
+      expect(container.textContent).toContain("Configuración del viaje");
       await act(async () => backLink(container)?.click());
       expect(list).toHaveBeenCalledTimes(2);
       expect(names(container)).toEqual([]);
