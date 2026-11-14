@@ -93,11 +93,27 @@ describe("cabecera y pestañas del Trip", () => {
     expect(h1).toContain("font-weight: 700");
     expect(itinerary).toMatch(/@media \(max-width: 359px\) \{[^@]*\.trip-shell-header h1 \{[^}]*font-size: 1rem/);
   });
-  it("«Actualizar» comparte la fila del nombre como acción sin relleno de 44px, no como primario (T153)", () => {
+  it("el nombre del viaje conserva una línea propia y las acciones una fila alineada al final (T153)", () => {
     const header = ruleBody(itinerary, ".trip-shell-header");
-    expect(header).toContain("display: flex");
-    expect(header).toContain("justify-content: space-between");
-    expect(header).toContain("gap: 12px");
+    // Una sola columna: el nombre nunca comparte ancho con las acciones, ni con nombre corto, largo o de una palabra interminable.
+    expect(header).toContain("display: grid");
+    expect(header).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(header).not.toContain("display: flex");
+    expect(header).not.toContain("justify-content: space-between");
+    expect(header).toContain("gap: 8px");
+    expect(header).toContain("margin-bottom: 12px");
+    const h1 = ruleBody(itinerary.split("@media (max-width: 359px)")[0] ?? "", ".trip-shell-header h1");
+    expect(h1).toContain("min-width: 0");
+    expect(h1).toContain("overflow-wrap: anywhere");
+    const actions = ruleBody(itinerary, ".trip-shell-actions");
+    expect(actions).toContain("display: flex");
+    expect(actions).toContain("flex-wrap: wrap");
+    expect(actions).toContain("justify-content: flex-end");
+    expect(actions).toContain("align-items: center");
+    expect(actions).toContain("gap: 8px");
+    expect(actions).not.toContain("min-width");
+  });
+  it("«Actualizar» es una acción sin relleno de 44px en la fila de acciones, no un primario (T153)", () => {
     const action = ruleBody(itinerary, ".trip-shell-refresh.ui-button");
     expect(action).toContain("background: transparent");
     expect(action).toContain("color: var(--ui-color-brand)");
@@ -109,7 +125,7 @@ describe("cabecera y pestañas del Trip", () => {
     expect(disabled).toContain("background: var(--ui-color-disabled-surface)");
     expect(disabled).toContain("color: var(--ui-color-muted)");
   });
-  it("«Configuración» acompaña el nombre como acción sin relleno de 44px, sin subrayado (T153)", () => {
+  it("«Configuración» es una acción sin relleno de 44px en la fila de acciones, sin subrayado (T153)", () => {
     const action = ruleBody(itinerary, ".trip-shell-settings");
     expect(action).toContain("min-height: 44px");
     expect(action).toContain("background: transparent");

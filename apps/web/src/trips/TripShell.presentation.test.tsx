@@ -35,10 +35,13 @@ describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
     expect(button.closest(".trip-shell-header")).not.toBeNull();
     expect(button.closest('[role="tabpanel"]')).toBeNull();
     expect(button.classList.contains("trip-shell-refresh")).toBe(true);
-    // Comparte la fila del nombre: es hermano del h1 dentro de la cabecera, no un bloque aparte. El contrato «sin relleno» vive en trip-shell-css.test.ts.
+    // Vive en la fila de acciones de la cabecera, debajo del nombre: el nombre del viaje conserva su línea completa. El contrato «sin relleno» y el reparto viven en trip-shell-css.test.ts.
     const header = button.closest(".trip-shell-header")!;
-    expect(button.parentElement).toBe(header);
-    expect(button.previousElementSibling?.tagName).toBe("H1");
+    const actions = button.closest(".trip-shell-actions")!;
+    expect(actions.parentElement).toBe(header);
+    expect(header.firstElementChild?.tagName).toBe("H1");
+    expect(header.firstElementChild?.nextElementSibling).toBe(actions);
+    expect(header.children).toHaveLength(2);
     // La fila de pestañas conserva sus tres controles: nada se suma ni se quita.
     expect(Array.from(container.querySelectorAll('[role="tablist"] [role="tab"]')).map((tab) => tab.textContent)).toEqual(["Itinerario", "Diario", "Grupo"]);
   });
@@ -50,11 +53,15 @@ describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
   });
 });
 describe("TripShell: acceso a la configuración (T153)", () => {
-  it("la cabecera del viaje lleva a la configuración y comparte la fila del nombre", async () => {
+  it("la cabecera del viaje lleva a la configuración desde la fila de acciones, sin ocupar la línea del nombre", async () => {
     const container = await mount(`/trips/${tripId}/itinerary`);
     const link = settingsLink(container)!;
     const header = link.closest(".trip-shell-header")!;
-    expect(link.parentElement).toBe(header);
+    const actions = link.closest(".trip-shell-actions")!;
+    expect(link.parentElement).toBe(actions);
+    expect(actions.parentElement).toBe(header);
+    // El nombre no comparte fila con ninguna acción: las dos acciones son las únicas hijas de la fila de acciones.
+    expect(Array.from(actions.children).map((item) => item.textContent)).toEqual(["Actualizar", "Configuración"]);
     expect(link.classList.contains("trip-shell-settings")).toBe(true);
     // El nombre accesible dice que la configuración es la del viaje; el texto visible queda contenido en él.
     expect(link.textContent).toBe("Configuración");
