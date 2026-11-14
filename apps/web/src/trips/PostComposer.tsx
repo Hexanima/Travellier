@@ -17,6 +17,7 @@ import type { ParticipationConfirmation } from "./participation-conflict.js";
 import { canGoBack, readOrigin, originHref, withNoBack } from "./post-origin.js";
 import { activityParam, clearExpense, draftFromPost, draftKeyFor, emptyDraft, hasContent, isDraftDirty, prepareCreate, prepareExpenseOnlyUpdate, prepareUpdate, setExpense, setLink, setNewActivity, setRemoveExpense, setTransport, toggleRemovePhoto, type PostDraft, type ResolvedNewActivity } from "./post-draft.js";
 import { commentLength } from "./comment-text.js";
+import { networkNotice } from "../api/index.js";
 import { loadPeople, unknownPeople, type PhotoPeople } from "./photo-people.js";
 import { canEditContent } from "./authorship.js";
 import type { TripMembersApi } from "./trip-members-api.js";
@@ -41,7 +42,7 @@ export type PostComposerProps = { posts: Pick<TripPostApi, "create" | "update" |
 type PendingConfirmation = { input: PostInput; confirmation: ParticipationConfirmation; stale: boolean };
 type Loaded = { kind: "loading" } | { kind: "ready"; post?: PostResponse; expense?: SavedExpenseView } | { kind: "error"; error: TripFailure };
 /** The stored expense (and the dates it is attributed to) as read from the itinerary, which is where a post carries it. */
-type ExpenseLoad = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpense; attribution?: { source: "activity" | "publication"; occurredAt: string; publishedAt: string } };
+type ExpenseLoad = { kind: "loading" } | { kind: "error"; error?: TripFailure } | { kind: "ready"; saved?: SavedExpense; attribution?: { source: "activity" | "publication"; occurredAt: string; publishedAt: string } };
 const removedExpenseText = "Gasto: se quitará al guardar. Dejará de figurar en el registro y en el balance.";
 const notInPostMessage = "Una foto que querías quitar ya no pertenece a este recuerdo. Actualizamos la lista.";
 const removeWithActivityMessage = "No se pueden quitar fotos y crear una actividad nueva en el mismo guardado. Deshacé la quita de fotos o quitá la actividad nueva.";
@@ -124,6 +125,8 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
   const [photoError, setPhotoError] = useState<string>();
   const [focusRetry, setFocusRetry] = useState(0);
   const itineraryRequest = useRef<Promise<TripItineraryResponse | undefined> | undefined>(undefined);
+  /** El fallo del último pedido del itinerario: sin él, la carga del gasto no podría distinguir un timeout. */
+  const itineraryFailure = useRef<TripFailure | undefined>(undefined);
   const hadPending = useRef(false);
   const savingRef = useRef(false);
   /** The photo ids behind the `photos` of the input last sent, by position. */
@@ -241,7 +244,9 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
   const photosCtl = usePostPhotos({ deps: photos, tripId, blobs: handle.blobs, getDraft: () => draftRef.current, applyDraft, isSaving: () => savingRef.current });
   /** Needed only with a new activity: to revalidate its schedule and to name the incompatible plans. A failure never blocks publishing. */
   const loadItinerary = () => {
-    itineraryRequest.current ??= itinerary.get(tripId ?? "").then((result) => result.ok ? result.value : undefined, () => undefined).then((value) => {
+    itineraryRequest.current ??= itinerary.get(tripId ?? "").then(
+      (result) => { itineraryFailure.current = result.ok ? undefined : result.error; return result.ok ? result.value : undefined; },
+      () => { itineraryFailure.current = undefined; return undefined; }).then((value) => {
       if (value) setLoadedItinerary(value); else itineraryRequest.current = undefined;
       return value;
     });
@@ -254,7 +259,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     setExpenseLoad({ kind: "loading" });
     void loadItinerary().then((value) => {
       if (cancelled) return;
-      if (!value) { setExpenseLoad({ kind: "error" }); return; }
+      if (!value) { setExpenseLoad({ kind: "error", ...(itineraryFailure.current ? { error: itineraryFailure.current } : {}) }); return; }
       try {
         const stored = [...value.posts, ...value.unplacedPosts].find((item) => item.id === postId)?.expense;
         const row = value.expenses.find((item) => item.postId === postId);
@@ -334,7 +339,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
       if (blocksSave(outcome.error.kind) || outcome.error.kind === "forbidden" || outcome.error.kind === "unauthorized") fail(outcome.error);
       // A validation failure of the reservation already marked each photo it names (by its place in the reserved batch): point to them.
       else if (outcome.error.kind === "validation" && (outcome.error.fields?.length ?? 0) > 0) setPhotoError(`${invalidReservedMessage}${unsaved}`);
-      else setPhotoError(`No pudimos subir las fotos. Revisá tu conexión e intentá nuevamente.${unsaved}`);
+      else setPhotoError(`${networkNotice(outcome.error, "No pudimos subir las fotos. Revisá tu conexión e intentá nuevamente.")}${unsaved}`);
       if (outcome.failed > 0) setFocusRetry((value) => value + 1);
       return false;
     }
@@ -568,7 +573,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
         <Link to="/login">Iniciar sesión</Link>
       </div> : null}
       {loaded.kind === "error" && !unavailable(loaded.error.kind) && loaded.error.kind !== "unauthorized" ? <div className="trips-state">
-        <Feedback variant="error">No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.</Feedback>
+        <Feedback variant="error">{networkNotice(loaded.error, "No pudimos cargar el recuerdo. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button>
       </div> : null}
       {loaded.kind === "ready" && !blocked ? <form ref={formRef} className="auth-form post-composer" onSubmit={(event) => void submit(event)} noValidate>
@@ -630,7 +635,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
           {attribution ? <p id="post-expense-attribution" className="itinerary-secondary">Gasto atribuido al <span className="expense-date">{formatLocalDate(attribution.occurredAt, timeZone)}</span> (actividad) · Publicado el <span className="expense-date">{formatLocalDate(attribution.publishedAt, timeZone)}</span></p> : null}
           {expenseLoad.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
           {expenseLoad.kind === "error" ? <div className="trips-state">
-            <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente. Podés seguir editando el texto.</Feedback>
+            <Feedback variant="error">{networkNotice(expenseLoad.error, "No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente.")} Podés seguir editando el texto.</Feedback>
             <Button onClick={() => setExpenseAttempt((value) => value + 1)}>Reintentar</Button>
           </div> : null}
           {removingExpense ? <Button name="keepExpense" disabled={saving} onClick={keepSaved}>Conservar gasto</Button> : <>
@@ -648,7 +653,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
         </section>
         {message ? <Feedback>{message}</Feedback> : null}
         {authorOnly ? <Feedback variant="error" role="alert">{authorOnlyMessage}</Feedback> : null}
-        {failure && failure.kind !== "validation" && !photoConflict && !authorOnly ? <Feedback variant="error">No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.
+        {failure && failure.kind !== "validation" && !photoConflict && !authorOnly ? <Feedback variant="error">{networkNotice(failure, "No pudimos guardar el recuerdo. Revisá tu conexión e intentá nuevamente.")}
           {(safeRetry || newActivity || draft.extras.photos.length > 0 || (!existing && draft.extras.expense !== null)) && (failure.kind === "network" || failure.kind === "server") ? ` ${safeRetry ? safeRetryHint : retryHint}` : ""}</Feedback> : null}
         {failure?.kind === "validation" && !missingContent && !errors.description && !errors.link && !errors.activity && !errors.photos && !errors.expense ? <Feedback variant="error">Revisá los datos del recuerdo.</Feedback> : null}
         <Button type="submit" loading={saving} loadingLabel={existing ? "Guardando…" : "Publicando…"}>

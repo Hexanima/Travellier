@@ -399,6 +399,23 @@ describe("PostComposer photos: publishing", () => {
     expect(alerts(container)[0]!.textContent).toContain("No pudimos subir las fotos");
     expect(container.querySelector("form")).not.toBeNull();
   });
+  it("un timeout de la reserva tiene su propio texto y conserva el aviso de que no se publicó (T150)", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "TimeoutError" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    expect(alerts(container)[0]!.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente. El recuerdo no se publicó.");
+  });
+  it("una conexión caída de la reserva conserva el texto de siempre (T150)", async () => {
+    const mocks = makeDeps();
+    mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "network", code: "NetworkError" } } as never);
+    const { container } = await render(newPath, mocks);
+    await field(container, "description", "Texto"); await choose(container, mocks, 1);
+    await submit(container);
+    expect(alerts(container)[0]!.textContent).toContain("No pudimos subir las fotos");
+    expect(alerts(container)[0]!.textContent).not.toContain("tardó demasiado");
+  });
   it("a 422 on the reservation marks the named photo of the batch and points to it instead of blaming the connection", async () => {
     const mocks = makeDeps();
     mocks.api.reserve.mockResolvedValueOnce({ ok: false, error: { kind: "validation", fields: [{ field: "files[1].contentType", code: "unsupported", message: "x" }] } } as never);
