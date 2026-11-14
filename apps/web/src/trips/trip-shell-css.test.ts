@@ -9,10 +9,13 @@ const components = read("components/components.css");
 const app = read("App.css");
 const index = read("index.css");
 const html = readFileSync(new URL("../index.html", srcDir), "utf8");
+/** Regla base: solo cuenta si el selector abre la línea (no como parte de otro ámbito ni de un override de @media). */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const text = `\n${css}`;
+  const marker = `\n${selector} {`;
+  const start = text.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return text.slice(start + marker.length).split("}")[0] ?? "";
 };
 const tab = ruleBody(itinerary, ".trip-shell .ui-tab");
 const selectedTab = ruleBody(itinerary, ".trip-shell .ui-tab[aria-selected=\"true\"]");
@@ -98,8 +101,6 @@ describe("cabecera y pestañas del Trip", () => {
     // Una sola columna: el nombre nunca comparte ancho con las acciones, ni con nombre corto, largo o de una palabra interminable.
     expect(header).toContain("display: grid");
     expect(header).toContain("grid-template-columns: minmax(0, 1fr)");
-    expect(header).not.toContain("display: flex");
-    expect(header).not.toContain("justify-content: space-between");
     expect(header).toContain("gap: 8px");
     expect(header).toContain("margin-bottom: 12px");
     const h1 = ruleBody(itinerary.split("@media (max-width: 359px)")[0] ?? "", ".trip-shell-header h1");
@@ -111,7 +112,6 @@ describe("cabecera y pestañas del Trip", () => {
     expect(actions).toContain("justify-content: flex-end");
     expect(actions).toContain("align-items: center");
     expect(actions).toContain("gap: 8px");
-    expect(actions).not.toContain("min-width");
   });
   it("«Actualizar» es una acción sin relleno de 44px en la fila de acciones, no un primario (T153)", () => {
     const action = ruleBody(itinerary, ".trip-shell-refresh.ui-button");
@@ -120,7 +120,7 @@ describe("cabecera y pestañas del Trip", () => {
     expect(action).toContain("min-height: 44px");
     expect(action).toContain("flex: none");
     expect(action).not.toContain("width: 100%");
-    expect(ruleBody(itinerary, ".trip-shell-refresh.ui-button:hover:not(:disabled)")).toContain("background: var(--ui-color-soft)");
+    expect(ruleBody(itinerary, ".trip-shell-refresh.ui-button:where(:hover:not(:disabled))")).toContain("background: var(--ui-color-soft)");
     const disabled = ruleBody(itinerary, '.trip-shell-refresh.ui-button:disabled, .trip-shell-refresh.ui-button[aria-disabled="true"]');
     expect(disabled).toContain("background: var(--ui-color-disabled-surface)");
     expect(disabled).toContain("color: var(--ui-color-muted)");

@@ -14,11 +14,13 @@ const cssFiles = (readdirSync(srcDir, { recursive: true }) as string[])
   .map((entry) => entry.split("\\").join("/"))
   .filter((entry) => entry.endsWith(".css"));
 
-/** Cuerpo de la última regla `selector {` (la de medidas, tras la de bordes agrupados). */
+/** Cuerpo de la última regla `selector {` que abre una línea (la de medidas, tras la de bordes agrupados): nunca un override anidado ni otro ámbito. */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const text = `\n${css}`;
+  const marker = `\n${selector} {`;
+  const start = text.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return text.slice(start + marker.length).split("}")[0] ?? "";
 };
 const outsideMotionQuery = (css: string) =>
   css.replace(/@media \(prefers-reduced-motion: no-preference\) \{(?:[^{}]*\{[^{}]*\})*\s*\}/g, "");

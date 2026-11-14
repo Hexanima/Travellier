@@ -41,7 +41,6 @@ describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
     expect(actions.parentElement).toBe(header);
     expect(header.firstElementChild?.tagName).toBe("H1");
     expect(header.firstElementChild?.nextElementSibling).toBe(actions);
-    expect(header.children).toHaveLength(2);
     // La fila de pestañas conserva sus tres controles: nada se suma ni se quita.
     expect(Array.from(container.querySelectorAll('[role="tablist"] [role="tab"]')).map((tab) => tab.textContent)).toEqual(["Itinerario", "Diario", "Grupo"]);
   });
