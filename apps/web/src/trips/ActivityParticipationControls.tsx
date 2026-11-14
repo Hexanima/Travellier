@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { isTimeoutFailure, networkNotice, timeoutNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState } from "../components/index.js";
 import type { DecisionRequired, PersonalParticipationStatus } from "./trip-participation-api.js";
 import type { ParticipationState } from "./use-activity-participations.js";
@@ -46,8 +47,9 @@ export function ActivityParticipationControls({ title, state, timeZone, onChange
     {error ? <>
       <Feedback variant="error">{error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
         : unavailable ? "La participación en esta actividad no está disponible para tu cuenta."
-        : state?.kind === "ready" ? "No pudimos guardar tu participación. Tu respuesta anterior se conserva. Intentá nuevamente."
-        : "No pudimos cargar tu participación. Revisá tu conexión e intentá nuevamente."}</Feedback>
+        : state?.kind === "ready" ? (isTimeoutFailure(error) ? `${timeoutNotice} Tu respuesta anterior se conserva.`
+          : "No pudimos guardar tu participación. Tu respuesta anterior se conserva. Intentá nuevamente.")
+        : networkNotice(error, "No pudimos cargar tu participación. Revisá tu conexión e intentá nuevamente.")}</Feedback>
       {error.kind === "unauthorized" ? <a href="/login">Iniciar sesión</a>
         : !unavailable && error.kind !== "validation" ? <Button onClick={onRetry}>Reintentar</Button> : null}
     </> : null}

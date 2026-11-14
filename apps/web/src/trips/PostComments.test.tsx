@@ -96,6 +96,19 @@ describe("comments panel: loading", () => {
     expect(order(container)).toEqual(["Comentario 5"]);
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
+  it("un timeout al cargar tiene su propio texto y conserva el reintento (T150)", async () => {
+    const api = apis([], { comments: { list: vi.fn().mockResolvedValueOnce(fail("network", { code: "TimeoutError" })).mockResolvedValueOnce(ok([comment(5)])) } });
+    const container = await render(api);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos cargar los comentarios.");
+    await click(button(container, "Reintentar comentarios"));
+    expect(order(container)).toEqual(["Comentario 5"]);
+  });
+  it("una conexión caída al cargar conserva el texto de siempre (T150)", async () => {
+    const container = await render(apis([], { comments: { list: vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" })) } }));
+    expect(container.textContent).toContain("No pudimos cargar los comentarios.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
   it("treats a rejected list as a network error", async () => {
     const container = await render(apis([], { comments: { list: vi.fn().mockRejectedValue(new Error("down")) } }));
     expect(container.textContent).toContain("No pudimos cargar los comentarios.");
@@ -941,6 +954,14 @@ describe("comments panel: delete (T128)", () => {
     expect(remove).toHaveBeenCalledTimes(2);
     expect(dialog()).toBeNull();
     expect(order(container)).toEqual([]);
+  });
+  it("un timeout al eliminar tiene su propio texto en el diálogo (T150)", async () => {
+    const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockResolvedValue(failure("network", { code: "TimeoutError" })) } }));
+    await click(delButton(container, 6));
+    await click(confirm());
+    expect(dialog()?.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(dialog()?.textContent).not.toContain("No pudimos eliminar el comentario.");
+    expect(order(container)).toEqual(["Comentario 6"]);
   });
   it("treats a thrown error like a network failure", async () => {
     const container = await render(apis([comment(6)], { comments: { remove: vi.fn().mockRejectedValue(new Error("x")) } }));

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { Link } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, Modal, TextAreaField } from "../components/index.js";
 import { commentLength, commentProblem, COMMENT_MAX } from "./comment-text.js";
 import type { TripFailure, TripResult } from "./trip-management-api.js";
@@ -314,7 +315,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
         if (read && target && !mayDelete(target, read)) { setRemoveId(undefined); setRemoveNotice({ variant: "error", text }); focusAfter.current = { kind: "field" }; }
         else setRemoveError({ text });
       } else if (error.kind === "not-found") setRemoveError({ text: "Este recuerdo ya no está disponible para tu cuenta." });
-      else setRemoveError({ text: deleteFailure });
+      else setRemoveError({ text: networkNotice(error, deleteFailure) });
     } catch {
       if (alive.current) setRemoveError({ text: deleteFailure });
     } finally {
@@ -328,7 +329,7 @@ export function CommentsPanel({ tripId, postId, comments, members, likes, format
     {list.kind === "loading" ? <LoadingState label="Cargando comentarios…" /> : null}
     {list.kind === "error" ? <div className="trips-state">
       <Feedback variant="error">{unavailable ? "Ya no podés ver los comentarios de este recuerdo." : list.error.kind === "unauthorized" ? sessionExpired
-        : "No pudimos cargar los comentarios. Revisá tu conexión e intentá nuevamente."}</Feedback>
+        : networkNotice(list.error, "No pudimos cargar los comentarios. Revisá tu conexión e intentá nuevamente.")}</Feedback>
       {list.error.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link> : !unavailable ? <Button onClick={retry}>Reintentar comentarios</Button> : null}
     </div> : null}
     {list.kind === "ready" ? <>
