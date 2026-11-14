@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback } from "../components/index.js";
 import { PhotoBrowser } from "./PhotoBrowser.js";
 import { memoryThumbnails, type ActivityTab } from "./activity-memories.js";
@@ -95,7 +96,7 @@ export function ContextMemories({ tripId, filter, memories, members, timeZone, t
   const moment = useMemo(() => new Intl.DateTimeFormat("es-AR", { timeZone, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }), [timeZone]);
   const failure = gallery.phase === "initial-error" || gallery.phase === "more-error" ? gallery.error : undefined;
   const thumbnailNotice = failure !== undefined && !unavailable(failure)
-    ? { text: failure.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión." : "No pudimos cargar las miniaturas.",
+    ? { text: failure.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión." : networkNotice(failure, "No pudimos cargar las miniaturas."),
       action: failure.kind === "unauthorized" ? <Link to="/login">Iniciar sesión</Link>
         : rejectsCursor(failure) ? <Button onClick={gallery.restart}>Volver a cargar desde el inicio</Button> : <Button onClick={gallery.retry}>Reintentar</Button> }
     : failure === undefined && gallery.refreshFailed && !unavailable(gallery.refreshError)

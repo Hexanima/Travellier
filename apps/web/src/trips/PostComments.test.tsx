@@ -143,6 +143,28 @@ describe("comments panel: loading", () => {
     expect(order(container)).toEqual(["Comentario 5"]);
     expect(container.textContent).toContain("No pudimos actualizar los comentarios.");
   });
+  it("un timeout al actualizar los comentarios lo dice y conserva lo cargado (T150)", async () => {
+    const api = apis([comment(5)], { comments: { list: vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValueOnce(fail("network", { code: "TimeoutError" })) } });
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    expect(order(container)).toEqual(["Comentario 5"]);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("No pudimos actualizar los comentarios.");
+  });
+  it("una conexión caída al actualizar los comentarios conserva el texto de siempre (T150)", async () => {
+    const api = apis([comment(5)], { comments: { list: vi.fn().mockResolvedValueOnce(ok([comment(5)])).mockResolvedValueOnce(fail("network", { code: "NetworkError" })) } });
+    const container = await render(api);
+    await click(button(container, "Actualizar comentarios"));
+    expect(container.textContent).toContain("No pudimos actualizar los comentarios. Lo que ya cargaste se conserva.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+  it("un timeout al cargar los me gusta lo dice y conserva la promesa de los contadores (T150)", async () => {
+    const api = apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValue(fail("network", { code: "TimeoutError" })) } });
+    const container = await render(api);
+    expect(container.textContent).toContain("La conexión tardó demasiado. Intentá nuevamente. Los comentarios se muestran sin contadores.");
+    expect(container.textContent).not.toContain("No pudimos cargar los me gusta.");
+    expect(button(container, "Reintentar me gusta")).toBeDefined();
+  });
   it("shows the comments with the like buttons disabled and a retry when only the likes fail", async () => {
     const api = apis([comment(5)], { likes: { summary: vi.fn().mockResolvedValueOnce(fail("network")).mockResolvedValueOnce(ok(summary({ comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }))) } });
     const container = await render(api);
@@ -544,6 +566,23 @@ describe("likes", () => {
     expect(set.mock.calls).toEqual([[tripId, postId, itineraryId(5), true], [tripId, postId, itineraryId(5), true]]);
     expect(likeOf(container, `comment:${itineraryId(5)}`).textContent).toBe("Quitar me gusta 3");
     expect(item(container, 5).textContent).not.toContain("No pudimos actualizar el me gusta.");
+  });
+  it("un timeout al dar me gusta tiene su propio texto y lo deja reintentable (T150)", async () => {
+    const set = vi.fn().mockResolvedValueOnce(fail("network", { code: "TimeoutError" })).mockResolvedValueOnce(ok({ liked: true, count: 3 }));
+    const api = withLikes({ comments: { [itineraryId(5)]: { count: 2, likedByMe: false } } }, [comment(5)], { likes: { setCommentLike: set } });
+    const container = await render(api);
+    await click(likeOf(container, `comment:${itineraryId(5)}`));
+    expect(item(container, 5).textContent).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(item(container, 5).textContent).not.toContain("No pudimos actualizar el me gusta.");
+    await click(likeOf(container, `comment:${itineraryId(5)}`));
+    expect(likeOf(container, `comment:${itineraryId(5)}`).textContent).toBe("Quitar me gusta 3");
+  });
+  it("una conexión caída al dar me gusta conserva el texto de siempre (T150)", async () => {
+    const api = withLikes({}, [], { likes: { setPostLike: vi.fn().mockResolvedValue(fail("network", { code: "NetworkError" })) } });
+    const container = await render(api);
+    await click(likeOf(container, "post"));
+    expect(container.textContent).toContain("No pudimos actualizar el me gusta. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
   });
   it("treats a rejected like as a network failure", async () => {
     const api = withLikes({}, [], { likes: { setPostLike: vi.fn().mockRejectedValue(new Error("down")) } });

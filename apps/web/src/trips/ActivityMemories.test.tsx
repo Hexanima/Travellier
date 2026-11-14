@@ -244,6 +244,18 @@ describe("ActivityMemories (Recuerdos)", () => {
       expect(alertTexts()).toHaveLength(0);
       expect(container.querySelectorAll("[data-memory] img")).toHaveLength(2);
     });
+    it("un timeout de las miniaturas tiene su propio texto, en una sola alerta (T150)", async () => {
+      const container = await mount(vi.fn().mockResolvedValue(fail("network", "TimeoutError")));
+      expect(memoryRows(container)).toEqual([p1.id, p2.id, p3.id]);
+      expect(alertTexts()).toHaveLength(1);
+      expect(alertTexts()[0]).toContain("La conexión tardó demasiado. Intentá nuevamente.");
+      expect(alertTexts()[0]).not.toContain("No pudimos cargar las miniaturas");
+    });
+    it("una conexión caída de las miniaturas conserva el texto de siempre (T150)", async () => {
+      await mount(vi.fn().mockResolvedValue(fail("network", "NetworkError")));
+      expect(alertTexts()[0]).toContain("No pudimos cargar las miniaturas.");
+      expect(alertTexts()[0]).not.toContain("tardó demasiado");
+    });
     it("a failed page 2 keeps the loaded thumbnails and shows one alert", async () => {
       const list = vi.fn().mockResolvedValueOnce(page([photo(21, p1, 0)], "c1")).mockResolvedValueOnce(fail("server"));
       const container = await mount(list);

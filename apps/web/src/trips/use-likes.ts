@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { networkNotice } from "../api/index.js";
 import type { TripFailure } from "./trip-management-api.js";
 import type { LikesSummary, LikeState, TripLikeApi } from "./trip-like-api.js";
 
@@ -20,7 +21,7 @@ export type LikesController = {
 const unreachable = (error: TripFailure) => error.kind === "forbidden" || (error.kind === "not-found" && error.code !== "CommentNotFoundError");
 const noticeFor = (error: TripFailure) => error.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
   : error.kind === "not-found" && error.code === "CommentNotFoundError" ? "Este comentario ya no está disponible."
-  : unreachable(error) ? "Ya no podés ver este recuerdo." : "No pudimos actualizar el me gusta. Intentá nuevamente.";
+  : unreachable(error) ? "Ya no podés ver este recuerdo." : networkNotice(error, "No pudimos actualizar el me gusta. Intentá nuevamente.");
 type Known = { summary: Summary; confirmed: Readonly<Record<string, LikeState>>; seeded: Readonly<Record<string, LikeState>> };
 /** What is shown: the last server answer for that button, else the summary counter, else the zero of a comment created here. Nothing is invented. */
 const stateOf = (known: Known, key: LikeKey): LikeState | undefined => {
