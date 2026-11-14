@@ -5,7 +5,7 @@ import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, SelectField } from "../components/index.js";
 import { loadPeople } from "./photo-people.js";
 import type { TripMembersApi } from "./trip-members-api.js";
-import type { MemberTripDetail, TripConfigurationUpdate, TripDetail, TripManagementApi } from "./trip-management-api.js";
+import type { MemberTripDetail, TripConfigurationUpdate, TripDetail, TripFailure, TripManagementApi } from "./trip-management-api.js";
 
 const configurationFailure = "No pudimos guardar la configuración. Intentá nuevamente.";
 
@@ -24,7 +24,8 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
   const [detail, setDetail] = useState<TripDetail>();
   const [values, setValues] = useState<ConfigValues>();
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<"not-found" | "other">();
+  /** The failure travels with the state: its `code` is what tells a timeout from a dropped connection. */
+  const [loadError, setLoadError] = useState<{ reason: "not-found" } | { reason: "other"; error?: TripFailure }>();
   const [saveError, setSaveError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -35,7 +36,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
 
   const load = useCallback(async (quiet = false) => {
     if (!tripId) {
-      setLoadError("not-found");
+      setLoadError({ reason: "not-found" });
       setLoading(false);
       return;
     }
@@ -44,7 +45,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
     try {
       const result = await trips.get(tripId);
       if (!result.ok) {
-        setLoadError(result.error.kind === "not-found" ? "not-found" : "other");
+        setLoadError(result.error.kind === "not-found" ? { reason: "not-found" } : { reason: "other", error: result.error });
         return;
       }
       // Unknown role (the list failed) means read-only: the mode is never editable by default.
@@ -52,7 +53,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
       setDetail(result.value);
       setValues(result.value.kind === "member" ? valuesFromTrip(result.value) : undefined);
     } catch {
-      setLoadError("other");
+      setLoadError({ reason: "other" });
     } finally {
       setLoading(false);
     }
@@ -116,8 +117,9 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
         {loading ? <LoadingState label="Cargando configuración…" /> : null}
         {!loading && loadError ? (
           <div className="trips-state">
-            <Feedback variant="error">{loadError === "not-found" ? "No encontramos este viaje." : "No pudimos cargar la configuración."}</Feedback>
-            {loadError === "other" ? <Button onClick={() => void load()}>Reintentar</Button> : null}
+            <Feedback variant="error">{loadError.reason === "not-found" ? "No encontramos este viaje."
+              : networkNotice(loadError.error, "No pudimos cargar la configuración.")}</Feedback>
+            {loadError.reason === "other" ? <Button onClick={() => void load()}>Reintentar</Button> : null}
           </div>
         ) : null}
         {!loading && !loadError && detail ? (

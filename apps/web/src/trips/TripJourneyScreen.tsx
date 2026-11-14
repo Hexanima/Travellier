@@ -9,6 +9,7 @@ import { TransportForm, type TransportSaveCoordinator } from "./TransportForm.js
 import type { JourneyDestination, JourneyTransport, TransportDirection, TripJourneyApi } from "./trip-journey-api.js";
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
 
+const journeyLoadFailure = "No pudimos cargar los destinos y transportes.";
 const addDestinationFailure = "No pudimos agregar el destino. Intentá nuevamente.";
 const deleteDestinationFailure = "No pudimos eliminar el destino. Intentá nuevamente.";
 
@@ -86,17 +87,19 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
     try {
       const detail = await trips.get(tripId);
       if (!detail.ok) {
-        setLoadError(detail.error.kind === "not-found" ? "No encontramos este viaje." : "No pudimos cargar el viaje.");
+        setLoadError(detail.error.kind === "not-found" ? "No encontramos este viaje."
+          : networkNotice(detail.error, "No pudimos cargar el viaje."));
         return;
       }
       setTrip(detail.value);
       if (detail.value.kind !== "member") return;
       const listed = await journey.listDestinations(tripId);
-      if (!listed.ok) { setLoadError("No pudimos cargar los destinos y transportes."); return; }
+      if (!listed.ok) { setLoadError(networkNotice(listed.error, journeyLoadFailure)); return; }
       const ordered = [...listed.value].sort((a, b) => a.order - b.order);
       const responses = await Promise.all(ordered.map((destination) => journey.listTransports(tripId, destination.id)));
-      if (responses.some((response) => !response.ok)) {
-        setLoadError("No pudimos cargar los destinos y transportes."); return;
+      const failed = responses.find((response) => !response.ok);
+      if (failed !== undefined && !failed.ok) {
+        setLoadError(networkNotice(failed.error, journeyLoadFailure)); return;
       }
       const loadedTransports = Object.fromEntries(ordered.map((destination, index) => [destination.id,
         responses[index]?.ok ? responses[index].value : []]));
@@ -105,7 +108,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
       setTransports(loadedTransports);
       void loadCosts();
     } catch {
-      setLoadError("No pudimos cargar los destinos y transportes.");
+      setLoadError(journeyLoadFailure);
     } finally {
       setLoading(false);
     }
