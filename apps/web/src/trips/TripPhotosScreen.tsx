@@ -34,6 +34,8 @@ function PhotosContent({ tripId, members, timeZone }: { tripId: string; members:
   const empty = <section className="trips-empty">
     <Heading level={inShell ? 3 : 2}>Todavía no hay fotos</Heading>
     <p>Las fotos aparecen cuando alguien las agrega a un recuerdo.</p>
+    {/* Same destination as the floating button of this screen: the empty state offers the way out where the reader is looking, as in Diario, balance and the itinerary. */}
+    <Link className="ui-button" to={create}>Crear un recuerdo con fotos</Link>
   </section>;
   const body = <div className="memory-feed">
       <header className="itinerary-header">

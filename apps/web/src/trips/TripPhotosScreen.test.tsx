@@ -89,9 +89,12 @@ describe("TripPhotosScreen", () => {
   });
   it("shows the empty state with a link to a new memory", async () => {
     const container = await mount(vi.fn().mockResolvedValue(page([], null)));
-    expect(container.textContent).toContain("Todavía no hay fotos");
-    const link = Array.from(container.querySelectorAll("a")).find((item) => item.textContent === "Nuevo recuerdo");
+    const empty = container.querySelector("section.trips-empty")!;
+    expect(empty.textContent).toContain("Todavía no hay fotos");
+    // El vacío lleva su propia acción, como los de Diario, balance e itinerario: no deja la salida solo en el botón flotante.
+    const link = Array.from(empty.querySelectorAll("a")).find((item) => item.textContent === "Crear un recuerdo con fotos");
     expect(link?.getAttribute("href")).toBe(`/trips/${tripId}/memories/new`);
+    expect(link?.classList.contains("ui-button")).toBe(true);
     expect(container.querySelector("ul.photo-grid")).toBeNull();
     expect(byText(container, "Cargar más")).toBeUndefined();
   });
