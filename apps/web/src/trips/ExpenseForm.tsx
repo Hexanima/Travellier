@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState, SelectField, TextAreaField, TextField } from "../components/index.js";
 import { diffExpense, expenseCurrencies, expenseDraftFromSaved, validateExpense, type AmountError, type ExpenseDraft, type SavedExpense } from "./expense-draft.js";
 import { MAX_AMOUNT_TEXT } from "./amount-limits.js";
@@ -7,6 +8,7 @@ import { commentLength } from "./comment-text.js";
 import { EXPENSE_BREAKDOWN_MAX } from "./post-text-limits.js";
 import { clearExpense, draftKeyFor, setExpense, type PostDraft } from "./post-draft.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
+import type { TripFailure } from "./trip-management-api.js";
 import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
 import { DiscardChangesModal } from "./DiscardChangesModal.js";
@@ -14,7 +16,7 @@ import "./itinerary.css";
 import "./expenses.css";
 
 export type ExpenseFormProps = { itinerary: Pick<TripItineraryApi, "get"> };
-type Saved = { kind: "loading" } | { kind: "error" } | { kind: "ready"; expense?: SavedExpense };
+type Saved = { kind: "loading" } | { kind: "error"; error?: TripFailure } | { kind: "ready"; expense?: SavedExpense };
 /** Order in which the first error is shown and focused. */
 const errorOrder = ["amount", "currency", "breakdown"] as const;
 const amountMessages: Record<AmountError, string> = {
@@ -57,7 +59,7 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
     setSaved({ kind: "loading" });
     const settle = (next: Saved) => { if (!cancelled) setSaved(next); };
     itinerary.get(tripId ?? "").then((result) => {
-      if (!result.ok) { settle({ kind: "error" }); return; }
+      if (!result.ok) { settle({ kind: "error", error: result.error }); return; }
       const post = [...result.value.posts, ...result.value.unplacedPosts].find((item) => item.id === postId);
       settle({ kind: "ready", ...(post?.expense ? { expense: { totalAmount: post.expense.totalAmount, currency: post.expense.currency, breakdown: post.expense.breakdown } } : {}) });
     }, () => settle({ kind: "error" }));
@@ -78,7 +80,7 @@ function Shell({ itinerary, tripId, postId, draft, commit, setReturned, composer
       </header>
       {saved.kind === "loading" ? <LoadingState label="Cargando gasto…" /> : null}
       {saved.kind === "error" ? <div className="trips-state">
-        <Feedback variant="error">No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente.</Feedback>
+        <Feedback variant="error">{networkNotice(saved.error, "No pudimos cargar el gasto guardado. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button>
       </div> : null}
       {saved.kind === "ready" ? <Form draft={draft} commit={commit} saved={saved.expense} leaving={leaving} back={back} /> : <Button variant="secondary" onClick={back}>Cancelar</Button>}

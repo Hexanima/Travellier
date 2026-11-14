@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState } from "../components/index.js";
 import { draftKeyFor, setLink, type PostDraft, type PostLink } from "./post-draft.js";
 import { activityOptionLabel, excludedPostIds, linkSummary, postOptionLabel } from "./post-link-options.js";
 import type { TripItineraryApi } from "./trip-itinerary-api.js";
-import type { TripResult } from "./trip-management-api.js";
+import type { TripFailure, TripResult } from "./trip-management-api.js";
 import type { PostResponse, TripPostApi } from "./trip-post-api.js";
 import { inheritNoBack } from "./post-origin.js";
 import { usePostDraft, type PostDraftHandle } from "./use-post-drafts.js";
@@ -14,7 +15,7 @@ export type PostLinkPickerProps = { posts: Pick<TripPostApi, "list" | "get">; it
   /** Enables «Crear actividad espontánea» by opening the subform of the composer (T67); `onCreateSpontaneous` still wins when given. */
   spontaneousActivity?: boolean };
 type Kind = "none" | "post" | "activity";
-type Lazy<T> = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; value: T } | { kind: "error" };
+type Lazy<T> = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; value: T } | { kind: "error"; error?: TripFailure };
 type Activity = { id: string; title: string; scheduledAt: string };
 export const transportDroppedNotice = "Un recuerdo continuación no mantiene otro vínculo directo; se quitó el transporte.";
 
@@ -29,7 +30,7 @@ function useLazy<T>(wanted: boolean, load: () => Promise<TripResult<T>>): [Lazy<
     if (!wanted || started.current === attempt) return;
     started.current = attempt; setState({ kind: "loading" });
     const settle = (next: Lazy<T>) => { if (mounted.current && started.current === attempt) setState(next); };
-    loader.current().then((result) => settle(result.ok ? { kind: "ready", value: result.value } : { kind: "error" }), () => settle({ kind: "error" }));
+    loader.current().then((result) => settle(result.ok ? { kind: "ready", value: result.value } : { kind: "error", error: result.error }), () => settle({ kind: "error" }));
   }, [wanted, attempt]);
   return [state, () => setAttempt((value) => value + 1)];
 }
@@ -110,7 +111,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
       {kind === "post" ? <section className="post-link-panel">
         {postList.kind === "loading" || postList.kind === "idle" ? <LoadingState label="Cargando recuerdos…" /> : null}
         {postList.kind === "error" ? <div className="trips-state">
-          <Feedback variant="error">No pudimos cargar los recuerdos. Revisá tu conexión e intentá nuevamente.</Feedback>
+          <Feedback variant="error">{networkNotice(postList.error, "No pudimos cargar los recuerdos. Revisá tu conexión e intentá nuevamente.")}</Feedback>
           <Button onClick={retryPosts}>Reintentar</Button>
         </div> : null}
         {postList.kind === "ready" && postOptions.length === 0 ? <Feedback>Todavía no hay otros recuerdos para vincular.</Feedback> : null}
@@ -124,7 +125,7 @@ function Picker({ posts, itinerary, timeZone = Intl.DateTimeFormat().resolvedOpt
       {kind === "activity" ? <section className="post-link-panel">
         {activityList.kind === "loading" || activityList.kind === "idle" ? <LoadingState label="Cargando actividades…" /> : null}
         {activityList.kind === "error" ? <div className="trips-state">
-          <Feedback variant="error">No pudimos cargar las actividades. Revisá tu conexión e intentá nuevamente.</Feedback>
+          <Feedback variant="error">{networkNotice(activityList.error, "No pudimos cargar las actividades. Revisá tu conexión e intentá nuevamente.")}</Feedback>
           <Button onClick={retryActivities}>Reintentar</Button>
         </div> : null}
         {activityList.kind === "ready" && activityOptions.length === 0 ? <Feedback>Este viaje todavía no tiene actividades.</Feedback> : null}

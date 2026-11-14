@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState } from "../components/index.js";
 import { formatCents } from "./expense-format.js";
 import { blockedMessage, canPropose, checkSplit, commitSplit, formerLabels, includeAll, includeMember, newRowKey, percentNote, proposeShares, savedSplit, splitTotals,
   type ListErrors, type PaymentRow, type RowErrors, type SectionCheck, type ShareRow, type ShareUnit, type SplitTotals } from "./expense-split.js";
 import { authorLabel, loadPeople, type PhotoPeople } from "./photo-people.js";
 import { draftKeyFor, setSplit, type PostDraft } from "./post-draft.js";
+import type { TripFailure } from "./trip-management-api.js";
 import type { TripMembersApi } from "./trip-members-api.js";
 import type { SavedExpenseView, TripPostApi } from "./trip-post-api.js";
 import { inheritNoBack } from "./post-origin.js";
@@ -15,7 +17,7 @@ import "./itinerary.css";
 import "./expenses.css";
 
 export type ExpenseSplitFormProps = { posts: Pick<TripPostApi, "get">; members: Pick<TripMembersApi, "list"> };
-type Load = { kind: "loading" } | { kind: "error" } | { kind: "ready"; saved?: SavedExpenseView; people: PhotoPeople };
+type Load = { kind: "loading" } | { kind: "error"; error?: TripFailure } | { kind: "ready"; saved?: SavedExpenseView; people: PhotoPeople };
 type EntryState = { fromComposer?: boolean; rowErrors?: RowErrors; listErrors?: ListErrors } | null;
 const shareUnits: readonly [ShareUnit, string][] = [["amount", "Monto"], ["percent", "Porcentaje"], ["remainder", "Resto en partes iguales"], ["excluded", "No participa"]];
 const paymentUnits: readonly [PaymentRow["unit"], string][] = [["amount", "Monto"], ["percent", "Porcentaje"]];
@@ -57,7 +59,9 @@ function Shell({ posts, members, tripId, postId, draft, commit, setReturned, com
       try {
         const [post, people] = await Promise.all([postId ? posts.get(tripId, postId) : Promise.resolve(undefined), loadPeople(members, tripId)]);
         // An unreadable stored expense is an error here (the lists would be edited blind), not an empty split.
-        if ((post && !post.ok) || (post?.ok && post.value.expenseUnreadable) || !people.loaded) { settle({ kind: "error" }); return; }
+        if ((post && !post.ok) || (post?.ok && post.value.expenseUnreadable) || !people.loaded) {
+          settle({ kind: "error", ...(post && !post.ok ? { error: post.error } : people.failure ? { error: people.failure } : {}) }); return;
+        }
         settle({ kind: "ready", people, ...(post?.ok && post.value.expense ? { saved: post.value.expense } : {}) });
       } catch { settle({ kind: "error" }); }
     })();
@@ -79,7 +83,7 @@ function Shell({ posts, members, tripId, postId, draft, commit, setReturned, com
       </header>
       {load.kind === "loading" ? <LoadingState label="Cargando pagos y reparto…" /> : null}
       {load.kind === "error" ? <div className="trips-state">
-        <Feedback variant="error">No pudimos cargar los pagos y el reparto. Revisá tu conexión e intentá nuevamente.</Feedback>
+        <Feedback variant="error">{networkNotice(load.error, "No pudimos cargar los pagos y el reparto. Revisá tu conexión e intentá nuevamente.")}</Feedback>
         <Button onClick={() => setAttempt((value) => value + 1)}>Reintentar</Button>
       </div> : null}
       {load.kind === "ready" && totals && !totals.ok ? <div className="trips-state"><Feedback variant="error">{blockedMessage}</Feedback></div> : null}
