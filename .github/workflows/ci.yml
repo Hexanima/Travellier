@@ -20,9 +20,36 @@ jobs:
       - run: corepack yarn test
       - run: corepack yarn build
 
-  android-native:
+  web-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TZ: UTC
+      # Solo github, needs, strategy, matrix, vars, secrets e inputs existen en jobs.<job_id>.env.
+      MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.mongodb-binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      # Antes del install: el postinstall de mongodb-memory-server descarga el binario ahi.
+      - name: Restore the in-memory MongoDB binaries
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            mongodb-binaries-${{ runner.os }}-
+      - run: corepack enable
+      - run: corepack yarn install --immutable
+      - run: corepack yarn workspace web typecheck:integration
+      - run: corepack yarn test:integration
+
+  android-native:
+    runs-on: ubuntu-latest
+    # 25 + 25 minutos de los dos intentos mas 10 minutos de preparacion.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -47,22 +74,64 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Verify native bridge on API ${{ matrix.api-level }}
+        id: smoke-attempt-1
+        continue-on-error: true
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: google_apis
           profile: pixel
+          force-avd-creation: true
+          emulator-boot-timeout: 900
           emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -camera-back emulated -camera-front emulated -writable-system
           disable-animations: true
+          disable-spellchecker: true
           working-directory: apps/web/android
-          pre-emulator-launch-script: sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+          pre-emulator-launch-script: |
+            sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+            adb kill-server || true
+            adb start-server
+            adb devices
+          script: bash ../test/run-android-native-smoke.sh
+      - name: Clean up a stale emulator
+        if: steps.smoke-attempt-1.outcome == 'failure'
+        run: |
+          # El paso corre fuera de android-emulator-runner: sin su PATH no hay "adb".
+          ADB="$ANDROID_HOME/platform-tools/adb"
+          test -x "$ADB"
+          "$ADB" devices | awk 'NR > 1 && NF { print $1 }' | xargs -r -I{} "$ADB" -s {} emu kill || true
+          pkill -f qemu-system || true
+          "$ADB" kill-server || true
+      - name: Retry native bridge on API ${{ matrix.api-level }}
+        id: smoke-attempt-2
+        if: steps.smoke-attempt-1.outcome == 'failure'
+        timeout-minutes: 25
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel
+          force-avd-creation: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -camera-back emulated -camera-front emulated -writable-system
+          disable-animations: true
+          disable-spellchecker: true
+          working-directory: apps/web/android
+          pre-emulator-launch-script: |
+            sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+            adb kill-server || true
+            adb start-server
+            adb devices
           script: bash ../test/run-android-native-smoke.sh
       - name: Publish Android evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: t46-android-api-${{ matrix.api-level }}
+          overwrite: true
           path: |
             apps/web/android/app/build/reports/androidTests/connected/
             apps/web/android/app/build/outputs/androidTest-results/connected/

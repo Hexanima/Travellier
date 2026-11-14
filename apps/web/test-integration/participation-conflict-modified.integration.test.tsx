@@ -32,8 +32,8 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     return button(label, scope!);
   };
   const statusOf = (title: string) => fieldset(title)?.querySelector(".activity-participation-status")?.textContent;
-  /** Espera a que la participacion de la actividad termine de cargar (no solo a que aparezca su titulo). */
-  const ready = (title: string) => waitFor(() => statusOf(title) !== undefined, `participacion de «${title}» cargada`);
+  /** Espera a que la participacion de cada actividad indicada termine de cargar (no solo a que aparezca su titulo): cada tarjeta la pide por separado. */
+  const ready = (...titles: string[]) => waitFor(() => titles.every((title) => statusOf(title) !== undefined), `participacion de ${titles.map((title) => `«${title}»`).join(", ")} cargada`);
   const modal = () => document.querySelector('[role="dialog"]') as HTMLElement | null;
 
   beforeAll(async () => { ensureNodeFetch(); harness = await startHarness("web_participation"); group = await createGroup(harness); }, 180_000);
@@ -49,7 +49,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     expect(await stored(museo, group.owner)).toMatchObject({ status: "going" });
     expect(await stored(museo, group.admin)).toBeNull();
     await open(group.owner);
-    await ready("Museo");
+    await ready("Museo", "Cena");
     expect(statusOf("Museo")).toBe("Voy");
     expect(statusOf("Cena")).toBe("Sin responder");
     expect(inside("Cena", "Voy")!.getAttribute("aria-pressed")).toBe("false");
@@ -91,7 +91,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     const misa = (await createActivity(group, group.owner, { title: "Misa", date: "2099-03-02", time: "09:00", durationMinutes: 60 })).id;
     const feria = (await createActivity(group, group.participant, { title: "Feria", date: "2099-03-02", time: "09:30", durationMinutes: 60 })).id;
     await open(group.owner, "2099-03-02");
-    await ready("Feria");
+    await ready("Feria", "Misa");
     await click(inside("Feria", "Voy"), "Voy de Feria");
     await waitFor(() => modal() !== null, "modal de conflicto");
     await clickButton("Cambiar de plan");
@@ -106,7 +106,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     const beta = (await createActivity(group, group.owner, { title: "Beta", date: "2099-03-06", time: "10:30", durationMinutes: 30 })).id;
     const gama = (await createActivity(group, group.participant, { title: "Gama", date: "2099-03-06", time: "10:15", durationMinutes: 60 })).id;
     await open(group.owner, "2099-03-06");
-    await ready("Gama");
+    await ready("Gama", "Alfa", "Beta");
     expect(statusOf("Alfa")).toBe("Voy");
     expect(statusOf("Beta")).toBe("Voy");
     await click(inside("Gama", "Voy"), "Voy de Gama");
@@ -126,7 +126,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
     const delta = (await createActivity(group, group.owner, { title: "Delta", date: "2099-03-06", time: "14:00", durationMinutes: 30 })).id;
     await createActivity(group, group.participant, { title: "Zeta", date: "2099-03-06", time: "14:15", durationMinutes: 60 });
     await open(group.owner, "2099-03-06");
-    await ready("Zeta");
+    await ready("Zeta", "Delta");
     await click(inside("Zeta", "Voy"), "Voy de Zeta");
     await waitFor(() => modal() !== null, "modal de conflicto");
     const before = await scheduleState();
@@ -190,7 +190,7 @@ describe("T104 participacion, conflicto y «Modificado» (cliente conectado)", (
       expect(await participationOf(group.owner, paseo)).toMatchObject({ status: "going", decisionRequired: null });
 
       await open(group.admin, "2099-03-05");
-      await ready("Paseo");
+      await ready("Paseo", "Almuerzo");
       expect(statusOf("Paseo")).toBe("Sin responder");
       expect(statusOf("Almuerzo")).toBe("Voy");
       expect(inside("Paseo", "Voy")!.getAttribute("aria-pressed")).toBe("false");

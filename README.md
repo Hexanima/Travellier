@@ -43,12 +43,22 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn lint`
 - `corepack yarn typecheck`
 - `corepack yarn test`
+- `corepack yarn test:integration`
 - `corepack yarn build`
 - `corepack yarn workspace api dev`
 - `corepack yarn workspace web dev`
 - `corepack yarn workspace web cap:sync`
 - `corepack yarn workspace web cap:build:android`
 - `corepack yarn workspace web cap:build:ios` (macOS con Xcode)
+- `corepack yarn workspace web typecheck:integration`
+
+Las pruebas de integración del cliente corren el cliente real contra el handler real de la API, con MongoDB en memoria, un solo worker y zona horaria fija; por eso viven fuera de `corepack yarn test`. En CI son el job `web-integration`, con `TZ: UTC`. En `test-integration/participation-conflict-modified.integration.test.tsx` un caso siembra instantes UTC mientras el formulario escribe el horario en la zona del proceso, así que el job fija `TZ: UTC` para que la corrida sea determinista; otros archivos son TZ-agnósticos por diseño. Para un solo archivo:
+
+```sh
+TZ=UTC corepack yarn workspace web exec vitest run --config vitest.integration.config.ts test-integration/smoke.integration.test.tsx --maxWorkers=1
+```
+
+El smoke nativo de Android se corre en CI dentro del job `android-native` (`bash ../test/run-android-native-smoke.sh` desde `apps/web/android`, sobre un emulador desechable); el job espera `sys.boot_completed`, descarta los diálogos del sistema y reintenta una sola vez si el emulador falla.
 
 Para compilar Android, `cap:build:android` usa un JDK 21, requerido por las fuentes Java de Capacitor 8. En Windows también detecta el JBR de Android Studio. Si no está disponible, configurá `ANDROID_JAVA_HOME` o `JAVA_HOME`; JDK 17 y 25 no son compatibles con este setup.
 

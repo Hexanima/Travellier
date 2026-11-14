@@ -190,19 +190,45 @@ describe("individual participation persistence", () => {
     const paused: TripParticipationPort = { ...repository, withTransaction: (tripId, work) => repository.withTransaction(tripId, (scope) => work({
       ...scope, findMemberRole: async (userId) => { const result = await scope.findMemberRole(userId); authorized.release(); await resume.ready; return result; },
     })) };
-    const order: string[] = [];
+    // Harness: delay the teardown of the participation session so the losing interleaving is deterministic.
+    const start = db.client.startSession.bind(db.client);
+    let participationSession: ReturnType<typeof start> | undefined;
+    let pending = true;
+    vi.spyOn(db.client, "startSession").mockImplementation((...args: Parameters<typeof start>) => {
+      const session = start(...args);
+      if (pending) {
+        pending = false;
+        participationSession = session;
+        const end = session.endSession.bind(session);
+        session.endSession = (async () => { await new Promise((resolve) => setTimeout(resolve, 50)); await end(); }) as typeof session.endSession;
+      }
+      return session;
+    });
+    const lockedAfterParticipation: boolean[] = [];
     const registered = setTripActivityParticipation.execute({ participations: paused, createId: () => id(new ObjectId()), now: () => new Date() },
-      { ...context(), status: "going" }).then((result) => { if (result.ok) order.push("participation"); return result; });
+      { ...context(), status: "going" });
     await authorized.ready;
     const trips = db.collection("trips"), collection = db.collection.bind(db), update = trips.updateOne.bind(trips);
     vi.spyOn(db, "collection").mockImplementation((name, options) => name === "trips" ? trips : collection(name, options));
-    vi.spyOn(trips, "updateOne").mockImplementation((...args) => { attempted.release(); return update(...args); });
+    vi.spyOn(trips, "updateOne").mockImplementation(async (...args) => {
+      attempted.release();
+      const result = await update(...args);
+      // Only the expulsion lock matters; read outside its session to see what is already committed.
+      if (args[2]?.session !== participationSession)
+        lockedAfterParticipation.push(await db.collection("activityParticipations")
+          .countDocuments({ activityId: activity, userId: actor }) === 1);
+      return result;
+    });
     api = createTripApi(db);
-    const expelled = api.expelMember!({ tripId: id(trip), actorUserId: id(other), targetUserId: id(actor) })
-      .then((result) => { if (result.ok) order.push("expulsion"); return result; });
+    const expelled = api.expelMember!({ tripId: id(trip), actorUserId: id(other), targetUserId: id(actor) });
     try { await Promise.race([expelled, attempted.ready]); } finally { resume.release(); }
     const results = await Promise.all([registered, expelled]);
-    expect(results.every((r) => r.ok)).toBe(true); expect(order).toEqual(["participation", "expulsion"]);
+    expect(results.every((r) => r.ok)).toBe(true);
+    // The settling order of the promises is not the invariant: after committing, the participation still tears
+    // down its session, so the expulsion may resolve first. The invariant is that the expulsion only acquired
+    // the Trip lock once the response was already durable.
+    expect(lockedAfterParticipation.length).toBeGreaterThan(0);
+    expect(lockedAfterParticipation[0]).toBe(true);
     expect(await set("going")).toMatchObject({ ok: false, error: { tag: "TripNotFoundError" } });
   }, 20_000);
   it("rejects participation when concurrent expulsion acquires coordination first", async () => {

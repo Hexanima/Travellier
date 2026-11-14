@@ -63,7 +63,8 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     const by = (name: string) => list.find((item) => item.name === name)!;
     expect(by("Sin transportes")).toMatchObject({ startAt: null, endAt: null });
     expect(by("Futuro 2099")).toMatchObject({ startAt: "2099-03-01T08:00:00.000Z", endAt: "2099-03-06T20:00:00.000Z" });
-    expect(by("Solo ida 2099")).toMatchObject({ startAt: "2099-05-01T08:00:00.000Z", endAt: "2099-05-01T10:00:00.000Z" });
+    // T130: sin transporte de vuelta en el destino, el fin queda vacio aunque haya ida.
+    expect(by("Solo ida 2099")).toMatchObject({ startAt: "2099-05-01T08:00:00.000Z", endAt: null });
   });
 
   it("Activos muestra los viajes futuros, sin transportes e incompletos; Finalizados, los de fechas pasadas", async () => {
@@ -71,23 +72,26 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     await loaded();
     expect(tab("Activos")?.getAttribute("aria-selected")).toBe("true");
     // Orden de la lista: los mas recientes primero.
-    expect(names()).toEqual(["Solo ida 2099", "Sin transportes", "Futuro 2099"]);
+    expect(names()).toEqual(["Solo ida 2020", "Solo ida 2099", "Sin transportes", "Futuro 2099"]);
     const item = (name: string) => Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === name) as HTMLElement;
     expect(item("Sin transportes").querySelector(".trips-dates")?.textContent).toBe("Fechas por definir");
     expect(item("Futuro 2099").querySelector(".trips-dates")?.textContent).toBe(formatTripRange("2099-03-01T08:00:00.000Z", "2099-03-06T20:00:00.000Z"));
-    expect(item("Solo ida 2099").querySelector(".trips-dates")?.textContent).toBe(formatTripRange("2099-05-01T08:00:00.000Z", "2099-05-01T10:00:00.000Z"));
+    // Un viaje sin vuelta no tiene fin derivado: muestra «Fechas por definir» y sigue Activo, aunque la ida ya haya pasado.
+    expect(item("Solo ida 2099").querySelector(".trips-dates")?.textContent).toBe("Fechas por definir");
+    expect(item("Solo ida 2020").querySelector(".trips-dates")?.textContent).toBe("Fechas por definir");
     expect(text()).not.toContain("Terminado 2020");
     await selectTab("Finalizados");
-    // Con el codigo actual, un viaje con solo la ida ya pasada se clasifica por esa llegada (endAt) y queda en Finalizados.
-    expect(names()).toEqual(["Solo ida 2020", "Terminado 2020"]);
+    // Solo finaliza el viaje con vuelta en cada destino y la ultima llegada ya pasada.
+    expect(names()).toEqual(["Terminado 2020"]);
     expect(document.querySelector('[aria-label="Viajes finalizados"]')).not.toBeNull();
   });
 
   it("limite temporal: finaliza solo cuando endAt es estrictamente anterior al instante actual (hasta el milisegundo)", async () => {
-    // Tres viajes con la llegada final en T-1 ms, T y T+1 ms (T = 2020-06-15T12:00:00.500Z); cada uno con solo la ida.
+    // Tres viajes con la llegada de la vuelta en T-1 ms, T y T+1 ms (T = 2020-06-15T12:00:00.500Z).
+    // La vuelta es imprescindible: sin ella el fin queda vacio y el viaje nunca finaliza.
     const day = "2020-06-15";
     for (const [name, end] of [["Limite -1ms", "12:00:00.499"], ["Limite exacto", "12:00:00.500"], ["Limite +1ms", "12:00:00.501"]] as const) {
-      await createTrip(name, { out: [`${day}T08:00:00.000Z`, `${day}T${end}Z`] });
+      await createTrip(name, { out: [`${day}T08:00:00.000Z`, `${day}T09:00:00.000Z`], back: [`${day}T11:00:00.000Z`, `${day}T${end}Z`] });
     }
     const boundary = ["Limite -1ms", "Limite exacto", "Limite +1ms"];
     await open();
