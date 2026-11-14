@@ -305,10 +305,11 @@ describe("Modal", () => {
       expect(backdrop.getAttribute("tabindex")).toBeNull();
     });
 
-    // Regresión del guard de `target`: con dos modales apilados en portales el fondo del de arriba no es el `currentTarget` del
-    // de abajo, así que el de abajo ignora ese click aunque el evento de React le llegue por el árbol de componentes. El cruce de
-    // portales en sí lo vigilan los tests de los manejadores de la pantalla, no este.
-    it("el guard de target protege al modal de abajo del toque en el fondo del de arriba", async () => {
+    // Regresión: con dos modales apilados en portales, el fondo del de arriba corta la propagación del click
+    // (`stopPropagation`), así que el manejador del de abajo no corre aunque el evento de React le llegue por el árbol de
+    // componentes. El guard de `target` lo vigilan los casos de clicks dentro del modal; el cruce de portales, los tests de los
+    // manejadores de la pantalla.
+    it("el toque en el fondo del modal de arriba no cierra el de abajo", async () => {
       const onCloseUnder = vi.fn();
       const onCloseOver = vi.fn();
       await mount(

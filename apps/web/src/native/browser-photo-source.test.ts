@@ -116,6 +116,9 @@ describe("browser photo source", () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, "document")!;
     Reflect.deleteProperty(globalThis, "document");
     try {
+      // `Reflect.deleteProperty` devuelve `false` en silencio si el global no fuera configurable: sin esto el test pasaría
+      // igual con la lectura en tiempo de construcción.
+      expect("document" in globalThis).toBe(false);
       expect(() => createBrowserPhotoSource()).not.toThrow();
     } finally {
       Object.defineProperty(globalThis, "document", descriptor);
