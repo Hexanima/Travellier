@@ -1701,10 +1701,10 @@ Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del
 | Aplicación visual final | 9 | 54 |
 | Ajustes aprobados el 2026-11-08 | 8 | 39 |
 | Correcciones aprobadas el 2026-11-12 | 26 | 107 |
-| Seguimientos aprobados el 2026-11-14 | 4 | 12 |
+| Seguimientos aprobados el 2026-11-13 | 4 | 12 |
 | **Total del plan** | **108** | **558** |
 
-- **Estado al 2026-11-14:** T44–T112 y T114–T147 terminadas; T113 sigue pendiente (requiere dispositivos). Se agregan 4 tareas de seguimiento (T148–T151, 12 h estimadas) surgidas de T145, T146 y T147 y registradas en `docs/REVISION_PENDIENTE.md`. T151 necesita una definición del usuario antes de implementarse.
+- **Estado al 2026-11-13:** T44–T112 y T114–T147 terminadas; T113 sigue pendiente (requiere dispositivos). Se agregan 4 tareas de seguimiento (T148–T151, 12 h estimadas) surgidas de T145, T146 y T147 y registradas en `docs/REVISION_PENDIENTE.md`. T151 necesita una definición del usuario antes de implementarse.
 - **Estado al 2026-11-12:** T44–T112 y T114–T121 terminadas; T113 pendiente (requiere dispositivos). Se agregan 26 tareas (T122–T147, 107 h estimadas). Quedan 27 tareas y 115 h estimadas. T113 pasa a depender de las nuevas tareas de cliente.
 - **Estado al 2026-11-08:** T44–T47 terminadas (18 h estimadas). Quedan 74 tareas y 421 h estimadas: 66 del plan original (382 h) y 8 agregadas el 2026-11-08 (T114–T121, 39 h). Las cifras siguientes describen el plan original del 2026-10-11.
 - **Único plan pendiente: 70 tareas (T44–T113), 400 horas.** Sustituye las 18 tareas pendientes anteriores; no se ejecutan además de este listado.
