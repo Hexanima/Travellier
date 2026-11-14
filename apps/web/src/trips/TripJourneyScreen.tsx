@@ -202,7 +202,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
   return (
     <main className="app-shell trips-shell">
       <div className="trips-panel journey-panel">
-        <Link className="trips-back" to="/trips">Volver a mis viajes</Link>
+        <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
         <header className="journey-header">
           <h1>Destinos y transportes</h1>
           {trip ? <p>{trip.name}</p> : null}

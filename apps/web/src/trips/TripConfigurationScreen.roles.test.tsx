@@ -43,6 +43,13 @@ const submit = (container: HTMLElement) => act(async () => container.querySelect
 const note = "Solo los administradores pueden cambiarlo";
 
 describe("Trip configuration: roles", () => {
+  it("returns to the Trip itinerary, where it is opened from", async () => {
+    const { container } = await mount("admin");
+    const back = container.querySelector<HTMLAnchorElement>("a.trips-back");
+    expect(back?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
+    expect(back?.textContent).toBe("Volver al itinerario");
+  });
+
   it("admin or owner edits the expense mode and sends only it", async () => {
     const { container, updateConfiguration } = await mount("admin");
     expect(container.querySelector('[name="expenseMode"]')).not.toBeNull();

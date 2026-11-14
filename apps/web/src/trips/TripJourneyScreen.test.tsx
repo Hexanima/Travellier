@@ -74,6 +74,13 @@ const sameDestination = () => [
 ];
 
 describe("TripJourneyScreen", () => {
+  it("returns to the Trip itinerary, where it is opened from", async () => {
+    const { container } = await render();
+    const back = container.querySelector<HTMLAnchorElement>("a.trips-back");
+    expect(back?.getAttribute("href")).toBe(`/trips/${tripId}/itinerary`);
+    expect(back?.textContent).toBe("Volver al itinerario");
+  });
+
   const button = (container: HTMLElement, label: string) => Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
     .find((element) => (element.getAttribute("aria-label") ?? element.textContent) === label)!;
 

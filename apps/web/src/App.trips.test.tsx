@@ -427,6 +427,7 @@ describe("App Trip routes", () => {
     const names = (container: HTMLElement) => [...container.querySelectorAll(".trips-item h2")].map((el) => el.textContent);
     const tabButton = (container: HTMLElement, label: string) => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === label);
     const backLink = (container: HTMLElement) => [...container.querySelectorAll("a")].find((a) => a.textContent === "Volver a mis viajes");
+    const itineraryBackLink = (container: HTMLElement) => [...container.querySelectorAll("a")].find((a) => a.textContent === "Volver al itinerario");
 
     it("keeps Finalizados selected when coming back from a Trip with the back link", async () => {
       const list = vi.fn().mockResolvedValue({ ok: true, value: [finishedTrip, activeTrip] });
@@ -436,6 +437,7 @@ describe("App Trip routes", () => {
       await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
       await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
       expect(container.textContent).toContain("Configuración del viaje");
+      await act(async () => itineraryBackLink(container)?.click());
       await act(async () => backLink(container)?.click());
       expect(tabButton(container, "Finalizados")?.getAttribute("aria-selected")).toBe("true");
       expect(names(container)).toEqual(["Terminado"]);
@@ -517,6 +519,7 @@ describe("App Trip routes", () => {
       await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
       await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
       expect(container.textContent).toContain("Configuración del viaje");
+      await act(async () => itineraryBackLink(container)?.click());
       await act(async () => backLink(container)?.click());
       expect(list).toHaveBeenCalledTimes(2);
       expect(names(container)).toEqual([]);

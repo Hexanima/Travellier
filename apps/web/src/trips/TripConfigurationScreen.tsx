@@ -108,7 +108,7 @@ export function TripConfigurationScreen({ trips, members }: { trips: TripManagem
   return (
     <main className="app-shell trips-shell">
       <section className="trip-form-panel" aria-labelledby="trip-config-title">
-        <Link className="trips-back" to="/trips">Volver a mis viajes</Link>
+        <Link className="trips-back" to={`/trips/${tripId}/itinerary`}>Volver al itinerario</Link>
         <h1 id="trip-config-title">Configuración del viaje</h1>
         {loading ? <LoadingState label="Cargando configuración…" /> : null}
         {!loading && loadError ? (
