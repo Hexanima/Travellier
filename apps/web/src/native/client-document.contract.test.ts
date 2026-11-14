@@ -17,9 +17,11 @@ describe("client document (T146)", () => {
     expect(html).toContain("viewport-fit=cover");
   });
 
-  it("configures the keyboard resize mode", () => {
-    expect(capacitor).toMatch(/Keyboard:\s*\{[^}]*resize:\s*"native"/s);
+  it("configures the keyboard resize mode with the plugin type (T149)", () => {
+    expect(capacitor).toMatch(/import \{ KeyboardResize \} from "@capacitor\/keyboard";/);
+    expect(capacitor).toMatch(/Keyboard:\s*\{[^}]*resize:\s*KeyboardResize\.Native/s);
     expect(capacitor).toMatch(/Keyboard:\s*\{[^}]*resizeOnFullScreen:\s*true/s);
+    expect(capacitor).not.toMatch(/resize:\s*"native"/);
   });
 
   it("makes the Android main activity resize instead of panning under the keyboard", () => {

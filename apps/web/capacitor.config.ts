@@ -1,4 +1,5 @@
 import type { CapacitorConfig } from "@capacitor/cli";
+import { KeyboardResize } from "@capacitor/keyboard";
 
 const config: CapacitorConfig = {
   appId: "com.travellier.app",
@@ -6,7 +7,7 @@ const config: CapacitorConfig = {
   webDir: "dist",
   plugins: {
     // El teclado achica el viewport en vez de desplazarlo: los campos y botones del formulario siguen visibles.
-    Keyboard: { resize: "native", resizeOnFullScreen: true },
+    Keyboard: { resize: KeyboardResize.Native, resizeOnFullScreen: true },
   },
 };
 
