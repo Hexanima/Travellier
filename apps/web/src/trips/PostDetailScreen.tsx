@@ -172,7 +172,7 @@ function ReadyContent({ tripId, postId, detail, origin, publication, interaction
         else { setConfirming(false); setNotice(text); }
         return;
       }
-      setRemoveError({ text: removeFailure });
+      setRemoveError({ text: networkNotice(result.error, removeFailure) });
     } catch {
       if (alive.current) setRemoveError({ text: removeFailure });
     } finally {

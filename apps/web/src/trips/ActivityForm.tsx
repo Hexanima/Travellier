@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, TextAreaField, TextField } from "../components/index.js";
 import { initialActivityValues, prepareActivityInput, type ActivityFormContext, type ActivityFormValues } from "./activity-form-state.js";
 import type { ActivityInput, ActivityResponse, TripActivityApi } from "./trip-activity-api.js";
@@ -132,7 +133,7 @@ export function ActivityForm({ context, activities, existing, knownActivities = 
     {failure ? <Feedback variant="error">{failure.kind === "validation" ? "Revisá los datos de la actividad."
       : failure.kind === "unauthorized" ? <>Tu sesión venció. <a href="/login">Iniciar sesión</a></>
       : failure.kind === "not-found" || failure.kind === "forbidden" ? "La actividad o el día ya no están disponibles. Volvé a cargar el itinerario."
-      : "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente."}</Feedback> : null}
+      : networkNotice(failure, "No pudimos guardar la actividad. Revisá tu conexión e intentá nuevamente.")}</Feedback> : null}
     <Button type="submit" loading={saving}>{existing ? "Guardar cambios" : "Guardar actividad"}</Button>
     {onExit ? <DiscardChangesModal dirty={JSON.stringify(values) !== JSON.stringify(initial)} saving={saving}
       message="Si salís ahora, vas a perder los cambios de esta actividad." onDiscard={onExit} /> : null}
