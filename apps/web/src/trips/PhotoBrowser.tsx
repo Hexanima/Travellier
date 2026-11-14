@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, LoadingState } from "../components/index.js";
 import { PhotoGrid } from "./PhotoGrid.js";
 import { PhotoViewer } from "./PhotoViewer.js";
@@ -114,7 +115,7 @@ export function PhotoBrowser({ gallery, people, timeZone, tripId, label, originL
   const failureText = failure === undefined ? undefined : unavailable ? "Las fotos de este viaje no están disponibles para tu cuenta."
     : failure.kind === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
     : rejectsCursor(failure) ? "No pudimos continuar la lista de fotos. Podés volver a cargarla desde el inicio."
-    : "No pudimos cargar las fotos. Revisá tu conexión e intentá nuevamente.";
+    : networkNotice(failure, "No pudimos cargar las fotos. Revisá tu conexión e intentá nuevamente.");
   const refreshText = "No pudimos renovar algunas fotos. Se conservan las que ya estaban cargadas.";
   // With the viewer open (aria-modal) the notices live inside it and are not repeated in the page: a single alert is visible at any time.
   const inViewer = viewed !== undefined;

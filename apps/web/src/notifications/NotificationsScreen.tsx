@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { networkNotice } from "../api/index.js";
 import { Button, Feedback, List, ListItem, LoadingState } from "../components/index.js";
 import { noticesOrigin } from "../trips/post-origin.js";
 import { useTripRefresh } from "../trips/use-trip-refresh.js";
@@ -49,7 +50,7 @@ function Notice({ notification, timeZone }: { notification: TripNotification; ti
 
 /** The personal inbox. It only reads: opening, listing or refreshing never touches a participation or its «Modificado» mark, and it needs no push permission. */
 export function NotificationsScreen({ notifications, refreshSignal, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }: NotificationsScreenProps) {
-  const { items, phase, hasMore, refreshFailed, loadMore, retry, refresh } = useNotifications(notifications.list, { refreshSignal });
+  const { items, phase, error, hasMore, refreshFailed, loadMore, retry, refresh } = useNotifications(notifications.list, { refreshSignal });
   useTripRefresh(refresh);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
@@ -70,7 +71,7 @@ export function NotificationsScreen({ notifications, refreshSignal, timeZone = I
 
   // A single alert at any time, by priority.
   const failure = phase === "unauthorized" ? "Tu sesión venció. Volvé a iniciar sesión."
-    : phase === "error" ? "No pudimos cargar tus avisos. Revisá tu conexión e intentá nuevamente."
+    : phase === "error" ? networkNotice(error, "No pudimos cargar tus avisos. Revisá tu conexión e intentá nuevamente.")
     : phase === "more-error" ? "No pudimos cargar más avisos. Los que ya viste se conservan."
     : refreshFailed ? "No pudimos actualizar tus avisos. Los que ya viste se conservan." : undefined;
   return <main className="app-shell trips-shell itinerary-shell">
