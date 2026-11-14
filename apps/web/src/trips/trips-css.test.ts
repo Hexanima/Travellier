@@ -55,8 +55,11 @@ describe("Mis viajes y Explorar", () => {
     const focus = ruleBody(app, ".trips-panel--catalog .trips-settings-link:focus-visible");
     expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
     expect(focus).toContain("outline-offset: 3px");
-    // La base compartida sigue siendo una fila flexible; el catálogo agrupa en columna con el ritmo de 12px.
-    expect(baseBody(".trips-item-links")).toContain("flex-wrap: wrap");
+    // La fila y su grupo de acciones solo viven en el catálogo (Mis viajes y Explorar): la base no declara un flex que ningún elemento puede observar.
+    expect(baseBody(".trips-item")).toBe("");
+    expect(baseBody(".trips-item-links")).toBe("");
+    expect(app).not.toContain(".trips-item > div");
+    expect(app).not.toMatch(/\.trips-item \{[^}]*(?:display: flex|flex-direction)/);
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("display: grid");
     expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
