@@ -12,8 +12,11 @@ const setup = () => {
 };
 /** El input vive en el documento solo mientras el selector está abierto. */
 const picker = () => document.querySelector<HTMLInputElement>('input[type="file"]');
-const chooseFiles = (input: HTMLInputElement, files: readonly File[]) => {
+const setFiles = (input: HTMLInputElement, files: readonly File[]) => {
   Object.defineProperty(input, "files", { configurable: true, value: files });
+};
+const chooseFiles = (input: HTMLInputElement, files: readonly File[]) => {
+  setFiles(input, files);
   input.dispatchEvent(new Event("change"));
 };
 
@@ -93,6 +96,30 @@ describe("browser photo source", () => {
     const result = await selection;
     expect(!result.ok && result.error.kind).toBe("cancelled");
     expect(picker()).toBeNull();
+  });
+  // Regresión: con una foto grande (o `capture` en iOS) el input ya tiene los archivos cuando vuelve el foco, pero el `change`
+  // llega después de la gracia. Descartar por tiempo perdía esa elección y la app no avisaba nada (`cancelled` es silencioso).
+  it("no descarta la elección cuando el change llega después de la gracia", async () => {
+    vi.useFakeTimers();
+    const { source } = setup();
+    const selection = source.select("gallery");
+    const input = picker()!;
+    setFiles(input, [fileOf("f.jpg", "image/jpeg")]);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await selection).toEqual({ ok: true, value: [{ reference: "blob:photo-1", previewUrl: "blob:photo-1", format: "image/jpeg" }] });
+    expect(picker()).toBeNull();
+  });
+  // Regresión de CI: `App.tsx` construye el puerto en un `useMemo` que también corre en el render sin DOM de `App.test.tsx`.
+  // Leer `document` al construir rompía ese archivo con ReferenceError.
+  it("no lee document al construirse: el documento se resuelve al abrir el selector", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "document")!;
+    Reflect.deleteProperty(globalThis, "document");
+    try {
+      expect(() => createBrowserPhotoSource()).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, "document", descriptor);
+    }
   });
   it("el regreso del foco no descarta una elección que llega enseguida", async () => {
     vi.useFakeTimers();

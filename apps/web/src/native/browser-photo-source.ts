@@ -14,16 +14,20 @@ export type BrowserPhotoDependencies = {
  * Camino de pruebas por navegador (no hay plataforma web pública): sube fotos con un `<input type="file">` cuando la app
  * no corre en Capacitor. El resto de la cadena (lector, codec, validación y subida a S3) es la misma que en la app nativa.
  */
-export function createBrowserPhotoSource({ doc = document, createObjectUrl = (file: File) => URL.createObjectURL(file) }: BrowserPhotoDependencies = {}): PhotoSourcePort {
+export function createBrowserPhotoSource({ doc, createObjectUrl }: BrowserPhotoDependencies = {}): PhotoSourcePort {
+  // `document` se lee recién al abrir el selector, no al construir el puerto: `App.tsx` lo arma en un `useMemo` que también
+  // corre en el render sin DOM, donde la referencia global no existe.
+  const resolveDoc = () => doc ?? document;
+  const toObjectUrl = (file: File) => (createObjectUrl ?? ((target: File) => URL.createObjectURL(target)))(file);
   return {
     // En el navegador no hay permiso que consultar: el propio selector pide lo que haga falta al abrirse.
     checkPermission: async () => ok("granted"),
     select: async (source) => {
       try {
-        const files = await pickFiles(doc, source);
+        const files = await pickFiles(resolveDoc(), source);
         if (!files.length) return err(new NativeCapabilityError("cancelled"));
         return ok(files.map((file): SelectedPhoto => {
-          const url = createObjectUrl(file);
+          const url = toObjectUrl(file);
           return { reference: url, previewUrl: url, ...(file.type ? { format: file.type } : {}) };
         }));
       } catch {
@@ -59,11 +63,12 @@ function pickFiles(doc: Document, source: PhotoSource): Promise<readonly File[]>
     input.addEventListener("change", () => finish(Array.from(input.files ?? [])));
     // Cancelación avisada: `cancel` en navegadores modernos; `change` sin archivos en los que vacían la selección.
     input.addEventListener("cancel", () => finish([]));
-    // Red para navegadores sin `cancel`: al volver el foco a la página sin aviso del input se da por cancelado tras una gracia
-    // (el `change` llega al cerrarse el selector, antes de leer los archivos, así que no se pierde una elección real).
+    // Red para navegadores sin `cancel`: al volver el foco a la página sin aviso del input se resuelve tras una gracia. Al
+    // expirar manda lo que tenga el input, no el tiempo: si ya hay archivos (una foto grande o `capture` en iOS puede devolver
+    // el foco antes del `change`) se resuelve con esa elección, y solo un input vacío cuenta como cancelación.
     function onFocus() {
       if (settled || timer !== undefined) return;
-      timer = setTimeout(() => finish([]), CANCEL_GRACE_MS);
+      timer = setTimeout(() => finish(Array.from(input.files ?? [])), CANCEL_GRACE_MS);
     }
     doc.body.append(input);
     input.click();
