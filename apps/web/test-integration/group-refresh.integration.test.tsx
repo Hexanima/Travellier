@@ -1,5 +1,7 @@
 // T104: Grupo por rol, salida y transferencia, moneda de transportes y refresco periodico o al reanudar con la App real contra el handler real.
 // El orden importa: primero lo no destructivo (roles, refresco), despues transferencia y salida; la moneda usa viajes propios.
+// Pensado para correr igual bajo TZ=UTC y TZ=America/Argentina/Buenos_Aires: la siembra es en UTC y los valores locales
+// (dias de las fichas, inputs datetime-local) se derivan de cada instante con `support/local-time.ts`.
 import { ObjectId } from "mongodb";
 import { act } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,10 +12,9 @@ import {
   startHarness, submit, text, type, unmountAll, waitFor, waitForGone, waitForText, type Mounted,
 } from "./support/connected-app.js";
 import { createActivity, createGroup, expectOk, insertPerson, sessionOf, type Group, type Person } from "./support/fixtures.js";
+import { localDateTime, localDay } from "./support/local-time.js";
 import type { AppLifecycle } from "../src/native/app-lifecycle.js";
 
-/** Valor de un input datetime-local para el instante, en la zona del proceso (la que usa el formulario). */
-const localInput = (iso: string) => new Date(Date.parse(iso) - new Date(iso).getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 const memberRow = (name: string) => Array.from(document.querySelectorAll(".trip-member-item")).find((item) => item.textContent?.includes(name)) as HTMLElement | undefined;
 const manageButtons = () => Array.from(document.querySelectorAll('[data-member-action="manage"]')).map((item) => item.getAttribute("aria-label"));
 const headings = () => Array.from(document.querySelectorAll("h3")).map((item) => item.textContent);
@@ -118,7 +119,9 @@ describe("T104 grupo, salida/transferencia, moneda de transportes y refresco (cl
   });
 
   describe("refresco periodico y al reanudar (sin perder borradores)", () => {
-    const day = "2099-03-03";
+    /** Instante UTC de la actividad sembrada; su dia local es el de la ficha a elegir. */
+    const AT_MIRADOR = "2099-03-03T15:00:00.000Z";
+    const day = localDay(AT_MIRADOR);
     const chip = () => document.querySelector(`[data-day^="${day}"]`) as HTMLElement | null;
     const selected = () => document.querySelector('.itinerary-day-chip[aria-current="date"]')?.getAttribute("data-day")?.startsWith(day);
     const tick = (ms: number) => act(async () => { vi.advanceTimersByTime(ms); await Promise.resolve(); });
@@ -131,7 +134,7 @@ describe("T104 grupo, salida/transferencia, moneda de transportes y refresco (cl
       await click(chip(), "ficha del dia");
       await waitFor(() => selected() === true, "dia elegido");
       expect(text()).not.toContain("Paseo del mirador");
-      const created = await createActivity(group, group.admin, { title: "Paseo del mirador", date: day, time: "15:00", durationMinutes: 60 });
+      const created = await createActivity(group, group.admin, { title: "Paseo del mirador", date: AT_MIRADOR.slice(0, 10), time: AT_MIRADOR.slice(11, 16), durationMinutes: 60 });
       expect(created.response.status).toBe(201);
       await tick(29_000);
       await settle();
@@ -308,7 +311,7 @@ describe("T104 grupo, salida/transferencia, moneda de transportes y refresco (cl
       expect(outbound.querySelector('[name="costCurrency"]')).not.toBeNull();
       const fill = async (form: HTMLElement, [departureAt, arrivalAt]: readonly [string, string], cost: string, currency: string) => {
         await type("departurePlace", "EZE", form); await type("arrivalPlace", "COR", form);
-        await type("departureAt", localInput(departureAt), form); await type("arrivalAt", localInput(arrivalAt), form);
+        await type("departureAt", localDateTime(departureAt), form); await type("arrivalAt", localDateTime(arrivalAt), form);
         await type("costPerPerson", cost, form);
         if (currency) await type("costCurrency", currency, form);
       };

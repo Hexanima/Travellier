@@ -1625,6 +1625,66 @@ Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del
 **Estimación:** M (5hs).
 **Dependencias:** T103, T104, T138, T139.
 
+### T148 — Independizar los fixtures de integración de la zona horaria
+
+**Capa:** Pruebas.
+
+**Descripción:** Hacer que las pruebas de integración del cliente pasen con cualquier zona horaria del proceso, no solo con `TZ=UTC`. Hoy el job fija `TZ: UTC` para que la corrida sea determinista y eso oculta la dependencia.
+
+**Criterios de aceptación:**
+
+- Los fixtures que siembran instantes UTC y los formularios que escriben horarios en la zona del proceso quedan alineados: ningún caso depende de que ambas coincidan.
+- La suite pasa con `TZ=UTC` y con `TZ=America/Argentina/Buenos_Aires`; el caso de `participation-conflict-modified.integration.test.tsx` que hoy falla fuera de UTC queda cubierto.
+- El `TZ: UTC` del job y la nota del README se actualizan al motivo que quede (determinismo, no requisito).
+
+**Estimación:** M (5hs).
+**Dependencias:** T147.
+
+### T149 — Instalar el plugin de teclado para iOS
+
+**Capa:** Frontend/nativo.
+
+**Descripción:** Instalar `@capacitor/keyboard` para que el modo de resize configurado en T146 tenga efecto en iOS. En Android el comportamiento ya lo da `android:windowSoftInputMode="adjustResize"`.
+
+**Criterios de aceptación:**
+
+- `@capacitor/keyboard` instalado y sincronizado en Android e iOS; el bloque `plugins.Keyboard` de `capacitor.config.ts` pasa a usar el tipo del plugin.
+- El contrato de plugins nativos incluye el nuevo plugin.
+- La verificación en iOS queda registrada como pendiente de dispositivo: no se puede ejecutar desde esta PC (requiere macOS/Xcode).
+
+**Estimación:** S (3hs).
+**Dependencias:** T146.
+
+### T150 — Mostrar un texto propio para el timeout
+
+**Capa:** Frontend.
+
+**Descripción:** Diferenciar en pantalla un timeout de una conexión caída. Hoy el cliente produce `code: "TimeoutError"` con su mensaje, pero los mapeadores de la API descartan `code` y `message` para los errores de red, así que el usuario ve el texto de conexión caída.
+
+**Criterios de aceptación:**
+
+- Los mapeadores propagan el `code` del error de red sin cambiar el `kind`, que sigue siendo reintentable.
+- Las pantallas que muestran el fallo de red distinguen el timeout con un texto propio, que el usuario define antes de implementar; el resto de los errores de red conserva su texto actual.
+- Tests que cubran el timeout y la conexión caída por separado.
+
+**Estimación:** S (2hs).
+**Dependencias:** T146.
+
+### T151 — Definir el Atrás en la raíz del Trip
+
+**Capa:** Frontend.
+
+**Descripción:** Resolver la pulsación sin efecto visible al volver desde una raíz del Trip a Mis viajes. El Atrás reemplaza la entrada de la raíz del Trip, así que la siguiente pulsación consume la entrada anterior antes de cerrar la app. El PRD no define cuántas pulsaciones cuesta salir.
+
+**Criterios de aceptación:**
+
+- El usuario define el comportamiento esperado: salir de Mis viajes con una sola pulsación o conservar el historial previo.
+- La implementación respeta esa definición sin reintroducir el defecto corregido en T145 (marcar `noBack` a ciegas mata un Atrás legítimo).
+- Casos de prueba del recorrido completo desde una raíz del Trip hasta la salida.
+
+**Estimación:** S (2hs).
+**Dependencias:** T145.
+
 ## Resumen
 
 | Fase | Tareas | Horas |
@@ -1641,8 +1701,10 @@ Tareas derivadas de la resolución de `docs/REVISION_PENDIENTE.md` y del PRD del
 | Aplicación visual final | 9 | 54 |
 | Ajustes aprobados el 2026-11-08 | 8 | 39 |
 | Correcciones aprobadas el 2026-11-12 | 26 | 107 |
-| **Total del plan** | **104** | **546** |
+| Seguimientos aprobados el 2026-11-13 | 4 | 12 |
+| **Total del plan** | **108** | **558** |
 
+- **Estado al 2026-11-13:** T44–T112 y T114–T147 terminadas; T113 sigue pendiente (requiere dispositivos). Se agregan 4 tareas de seguimiento (T148–T151, 12 h estimadas) surgidas de T145, T146 y T147 y registradas en `docs/REVISION_PENDIENTE.md`. T151 necesita una definición del usuario antes de implementarse.
 - **Estado al 2026-11-12:** T44–T112 y T114–T121 terminadas; T113 pendiente (requiere dispositivos). Se agregan 26 tareas (T122–T147, 107 h estimadas). Quedan 27 tareas y 115 h estimadas. T113 pasa a depender de las nuevas tareas de cliente.
 - **Estado al 2026-11-08:** T44–T47 terminadas (18 h estimadas). Quedan 74 tareas y 421 h estimadas: 66 del plan original (382 h) y 8 agregadas el 2026-11-08 (T114–T121, 39 h). Las cifras siguientes describen el plan original del 2026-10-11.
 - **Único plan pendiente: 70 tareas (T44–T113), 400 horas.** Sustituye las 18 tareas pendientes anteriores; no se ejecutan además de este listado.

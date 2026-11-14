@@ -52,7 +52,9 @@ El repositorio parte de un template de arquitectura limpia y conserva sus límit
 - `corepack yarn workspace web cap:build:ios` (macOS con Xcode)
 - `corepack yarn workspace web typecheck:integration`
 
-Las pruebas de integración del cliente corren el cliente real contra el handler real de la API, con MongoDB en memoria, un solo worker y zona horaria fija; por eso viven fuera de `corepack yarn test`. En CI son el job `web-integration`, con `TZ: UTC`. En `test-integration/participation-conflict-modified.integration.test.tsx` un caso siembra instantes UTC mientras el formulario escribe el horario en la zona del proceso, así que el job fija `TZ: UTC` para que la corrida sea determinista; otros archivos son TZ-agnósticos por diseño. Para un solo archivo:
+Las pruebas de integración del cliente corren el cliente real contra el handler real de la API, con MongoDB en memoria, un solo worker y zona horaria fija; por eso viven fuera de `corepack yarn test`. En CI son el job `web-integration`.
+
+La suite no depende de la zona horaria del proceso en las zonas que verifica la matriz de CI (`UTC` y `America/Argentina/Buenos_Aires`): los fixtures siembran instantes UTC (el contrato del servidor) y los valores que la App muestra o interpreta en la zona del proceso —días de las fichas del itinerario, horarios de los formularios, inputs `datetime-local`— se derivan de cada instante con `test-integration/support/local-time.ts`. Para verificarlo, el job corre con una matriz de esas dos zonas y `fail-fast: false`. La independencia no se promete para cualquier zona: con un desfase grande, los instantes de un mismo caso pueden caer en días locales distintos y romper las esperas. `TZ` fija la zona de cada corrida por determinismo, no porque la suite requiera una zona en particular. Para un solo archivo:
 
 ```sh
 TZ=UTC corepack yarn workspace web exec vitest run --config vitest.integration.config.ts test-integration/smoke.integration.test.tsx --maxWorkers=1

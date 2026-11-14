@@ -23,8 +23,14 @@ jobs:
   web-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # Una zona que falla no cancela la otra: interesa saber si falla en las dos o solo en una.
+      fail-fast: false
+      matrix:
+        # La suite no depende de la zona del proceso en estas zonas; la matriz lo verifica.
+        tz: [UTC, America/Argentina/Buenos_Aires]
     env:
-      TZ: UTC
+      TZ: ${{ matrix.tz }}
       # Solo github, needs, strategy, matrix, vars, secrets e inputs existen en jobs.<job_id>.env.
       MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.mongodb-binaries
     steps:

@@ -41,8 +41,18 @@ describe('integration test job', () => {
     )
   })
 
-  it('fixes the time zone of the integration job', () => {
-    assert.equal(integration.env?.TZ, 'UTC')
+  it('runs the integration job on a matrix of time zones', () => {
+    const zones = integration.strategy?.matrix?.tz
+    assert.ok(Array.isArray(zones), 'web-integration must run a matrix of time zones')
+    for (const zone of ['UTC', 'America/Argentina/Buenos_Aires']) {
+      assert.ok(zones.includes(zone), `the time zone matrix must include ${zone}`)
+    }
+    assert.equal(integration.env?.TZ, '${{ matrix.tz }}')
+    assert.equal(
+      integration.strategy['fail-fast'],
+      false,
+      'one failing time zone must not cancel the others',
+    )
   })
 
   it('caches the mongodb binaries where the package downloads them', () => {
