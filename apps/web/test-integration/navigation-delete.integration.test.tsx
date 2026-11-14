@@ -267,8 +267,12 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
       mendozaDeparture: "2099-04-07T18:00:00.000Z", mendozaReturn: "2099-04-07T20:00:00.000Z",
       tucumanOut: "2099-04-07T21:00:00.000Z", tucumanArrival: "2099-04-07T23:00:00.000Z",
     };
-    /** Dia local de una fecha intermedia del viaje: el mediodia UTC cae en el mismo dia local en UTC y en Buenos Aires. */
-    const midDay = (date: string) => localDay(`${date}T12:00:00.000Z`);
+    /** Dia local a `days` dias del dia local del instante sembrado: ninguna fecha del itinerario se escribe a mano. */
+    const dayAfter = (iso: string, days: number) => {
+      const day = new Date(`${localDay(iso)}T00:00:00.000Z`);
+      day.setUTCDate(day.getUTCDate() + days);
+      return day.toISOString().slice(0, 10);
+    };
     const fmt = (iso: string) => new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(iso));
     const banner = () => document.querySelector(".itinerary-destination-banner")?.textContent ?? "";
     const stops = () => Array.from(document.querySelectorAll(".destination-picker__stop")) as HTMLButtonElement[];
@@ -312,14 +316,14 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
 
     it("cerrar el selector no cambia el dia ni el scroll", async () => {
       await openItinerary(group.owner, route.tripId);
-      await pickDay(midDay("2099-04-03"));
+      await pickDay(dayAfter(AT_ROUTE.cordobaArrival, 2));
       const scrollTo = window.scrollTo as unknown as Mock, scrollIntoView = Element.prototype.scrollIntoView as unknown as Mock;
       scrollTo.mockClear(); scrollIntoView.mockClear();
       await click(document.querySelector(".itinerary-destination-banner"), "banner");
       await waitFor(pickerOpen, "selector");
       await clickButton("Cerrar");
       await waitFor(() => !pickerOpen(), "selector cerrado");
-      expect(selectedChip()).toBe(midDay("2099-04-03"));
+      expect(selectedChip()).toBe(dayAfter(AT_ROUTE.cordobaArrival, 2));
       expect(banner()).toBe("Destino: Córdoba · Ver destinos");
       expect(scrollTo).not.toHaveBeenCalled();
       expect(scrollIntoView).not.toHaveBeenCalled();
@@ -327,7 +331,7 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
 
     it("elegir un destino lleva a su primer dia y una fecha compartida conserva el destino elegido", async () => {
       await openItinerary(group.owner, route.tripId);
-      await pickDay(midDay("2099-04-02"));
+      await pickDay(dayAfter(AT_ROUTE.cordobaArrival, 1));
       await click(document.querySelector(".itinerary-destination-banner"), "banner");
       await waitFor(pickerOpen, "selector");
       await click(stops()[1], "Mendoza");
@@ -335,7 +339,7 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
       // Mendoza llega el 4/4, dia compartido con la salida de Cordoba: el destino elegido gana en esa fecha.
       await waitFor(() => selectedChip() === localDay(AT_ROUTE.mendozaArrival), "primer dia de Mendoza");
       expect(banner()).toBe("Destino: Mendoza · Ver destinos");
-      await pickDay(midDay("2099-04-05"));
+      await pickDay(dayAfter(AT_ROUTE.mendozaArrival, 1));
       expect(banner()).toBe("Destino: Mendoza · Ver destinos");
       // Volver a la fecha compartida: el destino elegido (Mendoza) se conserva aunque Cordoba tambien contenga el 4/4.
       await pickDay(localDay(AT_ROUTE.cordobaDeparture));
@@ -353,7 +357,7 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
 
     it("un destino con transportes incompletos indica que falta y no habilita el salto ni inventa fechas", async () => {
       await openItinerary(group.owner, route.tripId);
-      await pickDay(midDay("2099-04-02"));
+      await pickDay(dayAfter(AT_ROUTE.cordobaArrival, 1));
       await click(document.querySelector(".itinerary-destination-banner"), "banner");
       await waitFor(pickerOpen, "selector");
       const [, , tucuman, salta] = stops();
@@ -367,11 +371,11 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
       await click(tucuman, "Tucumán (no disponible)");
       await click(salta, "Salta (no disponible)");
       expect(pickerOpen()).toBe(true);
-      expect(selectedChip()).toBe(midDay("2099-04-02"));
+      expect(selectedChip()).toBe(dayAfter(AT_ROUTE.cordobaArrival, 1));
       expect(banner()).toBe("Destino: Córdoba · Ver destinos");
       await clickButton("Cerrar");
       await waitFor(() => !pickerOpen(), "selector cerrado");
-      expect(selectedChip()).toBe(midDay("2099-04-02"));
+      expect(selectedChip()).toBe(dayAfter(AT_ROUTE.cordobaArrival, 1));
       // La API no cambio: el selector no escribe nada.
       expect(await harness.db.collection("transports").countDocuments({ tripId: new ObjectId(route.tripId) })).toBe(5);
     });
