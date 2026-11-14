@@ -3,6 +3,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import type { E2EHarness } from "../../api/test/e2e-harness.js";
 import { ensureNodeFetch, mountApp, prepareDom, startHarness, unmountAll, waitForText } from "./support/connected-app.js";
 import { createGroup, sessionOf, type Group } from "./support/fixtures.js";
+import { localDateTime, localDay, localFormValues, localTime } from "./support/local-time.js";
+import { currentTimeZone, parseLocalDateTimeCandidates } from "../src/trips/transport-local-time.js";
 
 describe("T104 smoke: App conectada al handler real", () => {
   let harness: E2EHarness;
@@ -21,5 +23,32 @@ describe("T104 smoke: App conectada al handler real", () => {
   it("el itinerario del viaje muestra los transportes reales", async () => {
     await mountApp({ harness, session: sessionOf(group.admin), entry: `/trips/${group.tripId}/itinerary` });
     await waitForText("Buenos Aires");
+  });
+});
+
+// T148: el helper que deriva valores locales de instantes UTC se verifica contra el parser del producto, sin harness ni mongod.
+describe("T148 helpers de hora local de los fixtures", () => {
+  const instants = ["2099-03-01T10:00:00.000Z", "2099-03-03T12:30:00.000Z", "2099-03-04T01:30:00.000Z", "2099-03-06T18:00:00.000Z"];
+
+  it("los valores para inputs datetime-local se reinterpretan como el instante original en la zona del proceso", () => {
+    for (const iso of instants) {
+      const candidates = parseLocalDateTimeCandidates(localDateTime(iso), currentTimeZone()).map((date) => date.toISOString());
+      expect(candidates, `${iso} en ${currentTimeZone()}`).toContain(iso);
+    }
+  });
+
+  it("el dia y la hora locales componen el valor datetime-local", () => {
+    for (const iso of instants) expect(localDateTime(iso)).toBe(`${localDay(iso)}T${localTime(iso)}`);
+  });
+
+  it("los valores del formulario de actividad son el dia y la hora locales", () => {
+    for (const iso of instants) expect(localFormValues(iso)).toEqual({ date: localDay(iso), time: localTime(iso) });
+  });
+
+  it("sin desfase del proceso, el valor local coincide con el instante UTC", () => {
+    for (const iso of instants) {
+      if (new Date(iso).getTimezoneOffset() !== 0) continue;
+      expect(localDateTime(iso)).toBe(iso.slice(0, 16));
+    }
   });
 });
