@@ -20,9 +20,32 @@ jobs:
       - run: corepack yarn test
       - run: corepack yarn build
 
-  android-native:
+  web-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: corepack enable
+      - run: corepack yarn install --immutable
+      - name: Restore the in-memory MongoDB binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: |
+            mongodb-binaries-${{ runner.os }}-
+      - run: corepack yarn workspace web typecheck:integration
+      - run: corepack yarn test:integration
+
+  android-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -47,22 +70,55 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Verify native bridge on API ${{ matrix.api-level }}
+        id: smoke-attempt-1
+        continue-on-error: true
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: google_apis
           profile: pixel
+          force-avd-creation: true
+          emulator-boot-timeout: 900
           emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -camera-back emulated -camera-front emulated -writable-system
           disable-animations: true
+          disable-spellchecker: true
           working-directory: apps/web/android
-          pre-emulator-launch-script: sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+          pre-emulator-launch-script: |
+            sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+            adb kill-server || true
+            adb start-server
+            adb devices
+          script: bash ../test/run-android-native-smoke.sh
+      - name: Retry native bridge on API ${{ matrix.api-level }}
+        id: smoke-attempt-2
+        if: steps.smoke-attempt-1.outcome == 'failure'
+        timeout-minutes: 25
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel
+          force-avd-creation: true
+          emulator-boot-timeout: 900
+          emulator-options: -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -camera-back emulated -camera-front emulated -writable-system
+          disable-animations: true
+          disable-spellchecker: true
+          working-directory: apps/web/android
+          pre-emulator-launch-script: |
+            sdkmanager 'platforms;android-36' 'build-tools;36.1.0'
+            adb kill-server || true
+            adb start-server
+            adb devices
           script: bash ../test/run-android-native-smoke.sh
       - name: Publish Android evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: t46-android-api-${{ matrix.api-level }}
+          overwrite: true
           path: |
             apps/web/android/app/build/reports/androidTests/connected/
             apps/web/android/app/build/outputs/androidTest-results/connected/
