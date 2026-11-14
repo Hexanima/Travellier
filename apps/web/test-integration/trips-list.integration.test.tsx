@@ -35,6 +35,12 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
   const only = (wanted: string[]) => names().filter((item) => wanted.includes(item));
   const open = (entry = "/trips") => mountApp({ harness, session: sessionOf(ana), entry });
   const loaded = () => waitFor(() => document.querySelector(".trips-item") !== null || text().includes("No tenés viajes"), "lista de viajes");
+  // La tarjeta de Mis viajes es un unico enlace de bloque que abre el viaje en su itinerario: no repite la navegacion interna del Trip.
+  const openTrip = async (name: string) => {
+    const row = Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === name);
+    await click(row?.querySelector("a.trips-item-open"), `tarjeta del viaje «${name}»`);
+    await waitFor(() => currentPath() === `/trips/${ids[name]}/itinerary`, `itinerario de «${name}»`);
+  };
   const selectTab = async (label: string) => { await click(tab(label), `pestaña ${label}`); await waitFor(() => tab(label)?.getAttribute("aria-selected") === "true", `pestaña ${label} elegida`); };
   const focusApp = () => act(async () => { window.dispatchEvent(new Event("focus")); await sleep(0); });
 
@@ -121,22 +127,32 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
   });
 
   it("refresco tras cambiar un transporte desde la pantalla de destinos: el viaje pasa de Activos a Finalizados", async () => {
-    await createTrip("Se termina", { out: ["2020-03-01T08:00:00.000Z", "2020-03-01T10:00:00.000Z"], back: ["2099-03-06T18:00:00.000Z", "2099-03-06T20:00:00.000Z"] });
+    // El viaje abarca pocos dias alrededor del instante real: ahora se entra por su itinerario, y un viaje de decadas lo volveria inmanejable.
+    // Arranca Activo porque la vuelta todavia no llego; la edicion la deja en el pasado.
+    const midnight = Math.trunc(Date.now() / 86_400_000) * 86_400_000;
+    const at = (days: number, hours: number) => new Date(midnight + days * 86_400_000 + hours * 3_600_000).toISOString();
+    await createTrip("Se termina", { out: [at(-3, 8), at(-3, 10)], back: [at(2, 18), at(2, 20)] });
     await open();
     await loaded();
     expect(names()).toContain("Se termina");
-    const row = Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === "Se termina")!;
-    await click(Array.from(row.querySelectorAll("a")).find((link) => link.textContent === "Destinos y transportes"), "enlace de destinos y transportes");
+    // Destinos y transportes se alcanza desde la cabecera del itinerario del viaje.
+    await openTrip("Se termina");
+    await waitFor(() => linkByText("Destinos y transportes") !== undefined, "enlace de destinos y transportes");
+    await clickLink("Destinos y transportes");
     await waitFor(() => document.querySelectorAll(".journey-direction").length === 2, "formularios de transporte");
     const returnForm = document.querySelectorAll(".journey-direction")[1] as HTMLElement;
     await waitFor(() => (returnForm.querySelector('[name="departureAt"]') as HTMLInputElement).value !== "", "transporte de vuelta cargado");
-    await type("departureAt", localDateTime("2020-03-06T18:00:00.000Z"), returnForm);
-    await type("arrivalAt", localDateTime("2020-03-06T20:00:00.000Z"), returnForm);
+    await type("departureAt", localDateTime(at(-1, 18)), returnForm);
+    await type("arrivalAt", localDateTime(at(-1, 20)), returnForm);
     await submit(returnForm);
     await waitForText("Transporte guardado.");
     // El servidor guardo la nueva llegada y el viaje ya no tiene nada en el futuro.
     const saved = expectOk(await harness.http(ana.token, "GET", "/trips")).json.trips.find((trip: { name: string }) => trip.name === "Se termina");
-    expect(saved).toMatchObject({ startAt: "2020-03-01T08:00:00.000Z", endAt: "2020-03-06T20:00:00.000Z" });
+    expect(saved).toMatchObject({ startAt: at(-3, 8), endAt: at(-1, 20) });
+    // Destinos y transportes vuelve al itinerario del viaje; desde ahi se sale a Mis viajes.
+    await clickLink("Volver al itinerario");
+    await waitFor(() => currentPath() === `/trips/${ids["Se termina"]}/itinerary`, "itinerario tras guardar");
+    await waitFor(() => linkByText("Volver a mis viajes") !== undefined, "enlace de regreso");
     await clickLink("Volver a mis viajes");
     await waitFor(() => currentPath() === "/trips" && document.querySelector(".trips-item") !== null, "lista tras volver");
     expect(names()).not.toContain("Se termina");
@@ -164,9 +180,7 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     await loaded();
     await selectTab("Finalizados");
     expect(names()).toContain("Terminado 2020");
-    const row = Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === "Terminado 2020")!;
-    await click(Array.from(row.querySelectorAll("a")).find((link) => link.textContent === "Itinerario"), "enlace Itinerario");
-    await waitFor(() => currentPath() === `/trips/${ids["Terminado 2020"]}/itinerary`, "itinerario del viaje terminado");
+    await openTrip("Terminado 2020");
     await waitFor(() => linkByText("Volver a mis viajes") !== undefined, "enlace de regreso");
     await clickLink("Volver a mis viajes");
     await waitFor(() => currentPath() === "/trips" && tab("Finalizados") !== undefined, "lista");
@@ -174,9 +188,9 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     expect(tab("Finalizados")?.getAttribute("aria-selected")).toBe("true");
     expect(names()).toContain("Terminado 2020");
     expect(names()).not.toContain("Futuro 2099");
-    // Atras del dispositivo desde el mismo viaje.
-    const again = Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === "Terminado 2020")!;
-    await click(Array.from(again.querySelectorAll("a")).find((link) => link.textContent === "Recuerdos"), "enlace Recuerdos");
+    // Atras del dispositivo desde el mismo viaje: el diario se alcanza por su pestana y no acumula historial.
+    await openTrip("Terminado 2020");
+    await click(tab("Diario"), "pestaña Diario");
     await waitFor(() => currentPath() === `/trips/${ids["Terminado 2020"]}/memories`, "recuerdos");
     await goBack();
     await waitFor(() => currentPath().startsWith("/trips") && tab("Finalizados") !== undefined, "lista tras atras");
@@ -184,8 +198,7 @@ describe("T104 Mis viajes: Activos y Finalizados (cliente conectado)", () => {
     expect(tab("Finalizados")?.getAttribute("aria-selected")).toBe("true");
     // Y volver a Activos tambien se conserva.
     await selectTab("Activos");
-    const active = Array.from(document.querySelectorAll(".trips-item")).find((node) => node.querySelector("h2")?.textContent === "Futuro 2099")!;
-    await click(Array.from(active.querySelectorAll("a")).find((link) => link.textContent === "Itinerario"), "enlace Itinerario activo");
+    await openTrip("Futuro 2099");
     await waitFor(() => linkByText("Volver a mis viajes") !== undefined, "enlace de regreso");
     await clickLink("Volver a mis viajes");
     await waitFor(() => currentPath() === "/trips" && tab("Activos") !== undefined, "lista");
