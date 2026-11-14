@@ -9,10 +9,13 @@ const components = read("components/components.css");
 const app = read("App.css");
 const index = read("index.css");
 const html = readFileSync(new URL("../index.html", srcDir), "utf8");
+/** Regla base: solo cuenta si el selector abre la línea (no como parte de otro ámbito ni de un override de @media). */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const text = `\n${css}`;
+  const marker = `\n${selector} {`;
+  const start = text.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return text.slice(start + marker.length).split("}")[0] ?? "";
 };
 const tab = ruleBody(itinerary, ".trip-shell .ui-tab");
 const selectedTab = ruleBody(itinerary, ".trip-shell .ui-tab[aria-selected=\"true\"]");
@@ -92,6 +95,48 @@ describe("cabecera y pestañas del Trip", () => {
     expect(h1).toContain("line-height: 1.625rem");
     expect(h1).toContain("font-weight: 700");
     expect(itinerary).toMatch(/@media \(max-width: 359px\) \{[^@]*\.trip-shell-header h1 \{[^}]*font-size: 1rem/);
+  });
+  it("el nombre del viaje conserva una línea propia y las acciones una fila alineada al final (T153)", () => {
+    const header = ruleBody(itinerary, ".trip-shell-header");
+    // Una sola columna: el nombre nunca comparte ancho con las acciones, ni con nombre corto, largo o de una palabra interminable.
+    expect(header).toContain("display: grid");
+    expect(header).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(header).toContain("gap: 8px");
+    expect(header).toContain("margin-bottom: 12px");
+    const h1 = ruleBody(itinerary.split("@media (max-width: 359px)")[0] ?? "", ".trip-shell-header h1");
+    // El quiebre de palabras llega de la regla base de index.css para h1: acá basta con que el título pueda encogerse.
+    expect(h1).toContain("min-width: 0");
+    const actions = ruleBody(itinerary, ".trip-shell-actions");
+    expect(actions).toContain("display: flex");
+    expect(actions).toContain("flex-wrap: wrap");
+    expect(actions).toContain("justify-content: flex-end");
+    expect(actions).toContain("align-items: center");
+    expect(actions).toContain("gap: 8px");
+  });
+  it("«Actualizar» es una acción sin relleno de 44px en la fila de acciones, no un primario (T153)", () => {
+    const action = ruleBody(itinerary, ".trip-shell-refresh.ui-button");
+    expect(action).toContain("background: transparent");
+    expect(action).toContain("color: var(--ui-color-brand)");
+    expect(action).toContain("min-height: 44px");
+    expect(action).toContain("flex: none");
+    expect(action).not.toContain("width: 100%");
+    expect(ruleBody(itinerary, ".trip-shell-refresh.ui-button:where(:hover:not(:disabled))")).toContain("background: var(--ui-color-soft)");
+    const disabled = ruleBody(itinerary, '.trip-shell-refresh.ui-button:disabled, .trip-shell-refresh.ui-button[aria-disabled="true"]');
+    expect(disabled).toContain("background: var(--ui-color-disabled-surface)");
+    expect(disabled).toContain("color: var(--ui-color-muted)");
+  });
+  it("«Configuración» es una acción sin relleno de 44px en la fila de acciones, sin subrayado (T153)", () => {
+    const action = ruleBody(itinerary, ".trip-shell-settings");
+    expect(action).toContain("min-height: 44px");
+    expect(action).toContain("background: transparent");
+    expect(action).toContain("color: var(--ui-color-brand)");
+    expect(action).toContain("flex: none");
+    expect(action).toContain("text-decoration: none");
+    expect(action).not.toContain("width: 100%");
+    expect(ruleBody(itinerary, ".trip-shell-settings:hover")).toContain("background: var(--ui-color-soft)");
+    const focusRing = ruleBody(itinerary, ".trip-shell-settings:focus-visible");
+    expect(focusRing).toContain("outline: 3px solid var(--ui-color-focus)");
+    expect(focusRing).toContain("outline-offset: 3px");
   });
   it("la cabecera de retorno mide al menos 44px", () => {
     expect(ruleBody(app, ".trips-back")).toContain("min-height: 44px");

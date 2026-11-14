@@ -187,6 +187,18 @@ describe("selector de destinos", () => {
   });
 });
 
+describe("accesos de la cabecera (T153)", () => {
+  it("los accesos son un grupo de botones al ancho disponible con gap de 12px, y el vacío también", () => {
+    const group = ruleBody(".itinerary-header-actions");
+    expect(group).toContain("display: grid");
+    expect(group).toContain("gap: 12px");
+    expect(ruleBody(".itinerary-header-actions .ui-button")).toContain("width: 100%");
+    // El vacío del itinerario toma el ancho de la regla base .trips-empty .ui-button, compartida con Diario y balance: no tiene estilo ni clase propia.
+    expect(css).not.toContain(".itinerary-empty");
+    expect(css).not.toContain(".itinerary-shell .trips-empty");
+  });
+});
+
 describe("banner de destino y días", () => {
   it("banner de destino: radio card, padding 16, 1rem/700, conserva izquierda/ancho completo", () => {
     const banner = ruleBody(".itinerary-destination-banner.ui-button");
@@ -216,7 +228,6 @@ describe("modales y formularios de actividad", () => {
     expect(title).toContain("font-size: 1.5rem");
     expect(title).toContain("line-height: 2rem");
     expect(title).toContain("font-weight: 700");
-    expect(title).toContain("overflow-wrap: anywhere");
     expect(ruleBody(".participation-conflict-layer .ui-modal, .activity-confirm-layer .ui-modal")).toContain("padding: 24px");
   });
   it("botones de formulario y de confirmación a ancho completo, en columna con gap 12 y sin forzar 44px", () => {

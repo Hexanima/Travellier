@@ -159,12 +159,16 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
     const tab = (label: string) => Array.from(document.querySelectorAll('[role="tab"]')).find((item) => item.textContent?.trim() === label) as HTMLElement | undefined;
     const selectedTabs = () => Array.from(document.querySelectorAll('[role="tab"][aria-selected="true"]')).map((item) => item.textContent?.trim());
     const headerNode = () => document.querySelector(".trip-shell-header");
+    // La cabecera lleva el nombre del viaje y, en su propia fila, Actualizar y Configuracion: el nombre es el h1.
+    const headerName = () => headerNode()?.querySelector("h1")?.textContent;
+    // La tarjeta de Mis viajes es un unico enlace de bloque al itinerario del viaje.
+    const openTripCard = () => click(document.querySelector(`.trips-item a.trips-item-open[href="/trips/${group.tripId}/itinerary"]`), "tarjeta del viaje");
 
     it("Itinerario, Diario y Grupo comparten la cabecera y las pestanas; el Diario tiene Posts y Fotos", async () => {
       mate = await post(group.owner, { description: "Mate en la plaza" });
       cafe = await post(group.owner, { description: "Cafe de la tarde", activityId: (await createActivity(group, group.owner, { title: "Cafe", ...utc(AT.cafe), durationMinutes: 30 })).id });
       await openItinerary(group.admin);
-      await waitFor(() => headerNode()?.textContent === "Córdoba 2099", "nombre del viaje en la cabecera");
+      await waitFor(() => headerName() === "Córdoba 2099", "nombre del viaje en la cabecera");
       const header = headerNode();
       expect(Array.from(document.querySelectorAll('[role="tab"]')).map((item) => item.textContent)).toEqual(["Itinerario", "Diario", "Grupo", "Posts", "Fotos"].slice(0, 3));
       expect(selectedTabs()).toEqual(["Itinerario"]);
@@ -217,9 +221,9 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
     it("las pestanas raiz salen a Mis viajes: con el enlace y con Atras del dispositivo, sin acumular historial por cambiar de pestana", async () => {
       await mountApp({ harness, session: sessionOf(group.admin), entry: "/trips" });
       await waitForText("Córdoba 2099");
-      await click(Array.from(document.querySelectorAll("a")).find((item) => item.textContent?.trim() === "Itinerario" && item.getAttribute("href")?.includes(group.tripId)), "enlace Itinerario del viaje");
+      await openTripCard();
       await waitFor(() => currentPath() === `/trips/${group.tripId}/itinerary`, "itinerario");
-      await waitFor(() => headerNode()?.textContent === "Córdoba 2099", "cabecera");
+      await waitFor(() => headerName() === "Córdoba 2099", "cabecera");
       await click(tab("Diario"), "Diario");
       await waitFor(() => currentPath() === `/trips/${group.tripId}/memories`, "diario");
       await click(tab("Grupo"), "Grupo");
@@ -228,7 +232,7 @@ describe("T104 eliminar actividad y navegacion del Trip (cliente conectado)", ()
       await goBack();
       await waitFor(() => currentPath() === "/trips", "Mis viajes con Atras");
       await waitForText("Córdoba 2099");
-      await click(Array.from(document.querySelectorAll("a")).find((item) => item.textContent?.trim() === "Itinerario" && item.getAttribute("href")?.includes(group.tripId)), "enlace Itinerario del viaje");
+      await openTripCard();
       await waitFor(() => currentPath() === `/trips/${group.tripId}/itinerary`, "itinerario");
       await click(linkByText("Volver a mis viajes"), "volver a mis viajes");
       await waitFor(() => currentPath() === "/trips", "Mis viajes con el enlace");

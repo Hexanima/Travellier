@@ -147,20 +147,16 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
             <List aria-label={filter === "active" ? "Viajes activos" : "Viajes finalizados"}>
               {shown.map((trip) => (
                 <ListItem key={trip.id} className="trips-item">
-                  <div>
+                  {/* The card itself is the main action: one link opens the Trip at its root (the itinerary) and its accessible name is the Trip, not the word Itinerario.
+                      Itinerario, Diario/Recuerdos, Grupo (miembros e invitación) and Destinos y transportes live inside the Trip: repeating them here duplicated the whole navigation per Trip.
+                      The configuration also lives inside the Trip, in its header (approved prototype): the card has no secondary action. */}
+                  <Link className="trips-item-open" to={`/trips/${trip.id}/itinerary`}>
                     <h2>{trip.name}</h2>
                     {trip.primaryDestination === null ? null : <p className="trips-destination">{trip.primaryDestination.name}</p>}
                     {/* Provisional: the final presentation of the dates comes with the approved design. */}
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
-                  </div>
-                  <div className="trips-item-links">
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/itinerary`}>Itinerario</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/memories`}>Recuerdos</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/config`}>Configuración</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/journey`}>Destinos y transportes</Link>
-                    <Link className="trips-settings-link" to={`/trips/${trip.id}/members`}>Miembros e invitación</Link>
-                  </div>
+                  </Link>
                 </ListItem>
               ))}
             </List>
@@ -168,9 +164,9 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
         </Tabs>
 
         <nav className="trips-secondary" aria-label="Cuenta">
-          <Link to="/profile">Mi perfil</Link>
+          <Link className="ui-button ui-button--secondary" to="/profile">Mi perfil</Link>
           {/* Provisional entry to the notices center: T98 gives it its place in the final navigation. */}
-          <Link to="/notifications">Avisos</Link>
+          <Link className="ui-button ui-button--secondary" to="/notifications">Avisos</Link>
           <Button variant="secondary" onClick={() => void logout()} aria-disabled={closingSession || undefined}>
             {closingSession ? "Cerrando sesión…" : "Cerrar sesión"}
           </Button>

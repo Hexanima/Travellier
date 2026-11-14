@@ -57,6 +57,14 @@ describe("TripMemoriesScreen", () => {
     expect(container.textContent).toContain("Todavía no hay recuerdos.");
     expect(container.querySelectorAll(`a[href="/trips/${tripId}/memories/new"]`).length).toBeGreaterThanOrEqual(2);
   });
+  it("el vacío del diario ofrece la creación como botón primario, como el del itinerario (T153)", async () => {
+    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [] }));
+    const action = container.querySelector(`.trips-empty a[href="/trips/${tripId}/memories/new"]`);
+    expect(action?.textContent).toBe("Crear el primer recuerdo");
+    expect(action?.classList.contains("ui-button")).toBe(true);
+    // Es la única acción del vacío: nada compite con ella como secundaria.
+    expect(action?.classList.contains("ui-button--secondary")).toBe(false);
+  });
   it("shows an error with retry", async () => {
     const list = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce({ ok: true, value: [post(11, "2026-01-02T10:00:00.000Z")] });
     const container = await render(list);

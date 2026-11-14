@@ -315,12 +315,16 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       <header className="itinerary-header">
         {inShell ? <h2>Itinerario</h2> : <h1>Itinerario</h1>}
         <p>El viaje, día a día. Horarios en tu zona local.</p>
-        {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
+        {/* One group of secondary buttons instead of stacked text links. Without days the way to the transports belongs to the empty state alone: there it is the single action. */}
         {/* Entry to the balance, also in register mode (it explains why there are no debts and keeps the way to the expenses). It lives in the itinerary panel: the balance opens outside the tabs. */}
-        {state.kind === "ready" ? <Link className="trips-settings-link" to={`/trips/${tripId}/balance`}>Balance</Link> : null}
+        {state.kind === "ready" ? <div className="itinerary-header-actions">
+          {days.length > 0 ? <Link className="ui-button ui-button--secondary" to={`/trips/${tripId}/journey`}>Destinos y transportes</Link> : null}
+          <Link className="ui-button ui-button--secondary" to={`/trips/${tripId}/balance`}>Balance</Link>
+        </div> : null}
         {/* The native calendar sync (T96) and the .ics export (static copy) stay in the itinerary panel. */}
         {state.kind === "ready" && calendarSync && tripId ? <CalendarSync service={calendarSync} tripId={tripId} itinerary={itinerary} loaded={state.value} timeZone={timeZone} /> : null}
-        {state.kind === "ready" ? <ExportIcsButton tripName={tripName || shellName} itinerary={state.value} timeZone={timeZone} {...icsExport}
+        {/* An empty itinerary already says so in its own card: the export notice would repeat it. It belongs where there is content that cannot be exported. */}
+        {state.kind === "ready" && days.length > 0 ? <ExportIcsButton tripName={tripName || shellName} itinerary={state.value} timeZone={timeZone} {...icsExport}
           resolveTripName={trips && tripId ? async () => { const result = await trips.get(tripId); return result.ok ? result.value.name : undefined; } : undefined} /> : null}
       </header>
       {state.kind === "ready" && saved ? <Feedback variant="success">Actividad guardada.</Feedback> : null}
@@ -348,9 +352,10 @@ function ItineraryContent({ tripId, itinerary, activities, participations, membe
       {state.kind === "ready" && days.length === 0 ? <section className="trips-empty">
         <Heading level={sub}>Todavía no hay itinerario</Heading>
         <p>Configurá los transportes para ver las fechas y franjas del viaje.</p>
-        <Link to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
+        <Link className="ui-button" to={`/trips/${tripId}/journey`}>Configurar transportes</Link>
       </section> : null}
-      {state.kind === "ready" && choices.length > 0 ? <>
+      {/* The stop selector travels with the calendar: without days no stop can be chosen and the banner only repeated the empty state. */}
+      {state.kind === "ready" && days.length > 0 && choices.length > 0 ? <>
         <button type="button" className="ui-button itinerary-destination-banner" aria-haspopup="dialog" onClick={() => setPickerOpen(true)}>
           {currentDestination ? `Destino: ${currentDestination.name} · Ver destinos` : "Ver destinos"}</button>
         {pickerOpen ? <DestinationPicker choices={choices} current={currentDestination?.id} timeZone={timeZone}

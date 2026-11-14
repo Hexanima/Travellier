@@ -35,6 +35,10 @@ const memberTrip = {
 const adminMembers = { list: async () => ({ ok: true, value: { currentUserId: "admin", ownerId: "admin", members: [
   { id: "membership", userId: "admin", name: "Admin", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
 ] } }) };
+const participantMembers = { list: async () => ({ ok: true, value: { currentUserId: "member", ownerId: "owner", members: [
+  { id: "owner-membership", userId: "owner", name: "Titular", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
+  { id: "member-membership", userId: "member", name: "Integrante", role: "participant", isOwner: false, joinedAt: "2026-09-25T12:00:00.000Z" },
+] } }) };
 const changeSelect = (container: HTMLElement, name: string, value: string) => act(async () => {
   const select = container.querySelector(`[name="${name}"]`) as HTMLSelectElement;
   select.value = value;
@@ -313,6 +317,14 @@ describe("App Trip routes", () => {
     expect(privateView.querySelector('input[type="date"]')).toBeNull();
   });
 
+  it("abre la configuración desde la cabecera del viaje, también para un participante (T153)", async () => {
+    const container = await render(`/trips/${tripId}/itinerary`, true, { get: async () => ({ ok: true, value: memberTrip }) }, undefined, participantMembers);
+    const settings = container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`);
+    expect(settings).not.toBeNull();
+    await act(async () => settings?.click());
+    expect(container.textContent).toContain("Configuración del viaje");
+  });
+
   it("does not request Trip configuration before login", async () => {
     const get = vi.fn();
     const container = await render(`/trips/${tripId}/config`, false, { get });
@@ -415,14 +427,17 @@ describe("App Trip routes", () => {
     const names = (container: HTMLElement) => [...container.querySelectorAll(".trips-item h2")].map((el) => el.textContent);
     const tabButton = (container: HTMLElement, label: string) => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === label);
     const backLink = (container: HTMLElement) => [...container.querySelectorAll("a")].find((a) => a.textContent === "Volver a mis viajes");
+    const itineraryBackLink = (container: HTMLElement) => [...container.querySelectorAll("a")].find((a) => a.textContent === "Volver al itinerario");
 
     it("keeps Finalizados selected when coming back from a Trip with the back link", async () => {
       const list = vi.fn().mockResolvedValue({ ok: true, value: [finishedTrip, activeTrip] });
       const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) });
       expect(names(container)).toEqual(["Futuro"]);
       await act(async () => tabButton(container, "Finalizados")?.click());
-      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/config"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
       expect(container.textContent).toContain("Configuración del viaje");
+      await act(async () => itineraryBackLink(container)?.click());
       await act(async () => backLink(container)?.click());
       expect(tabButton(container, "Finalizados")?.getAttribute("aria-selected")).toBe("true");
       expect(names(container)).toEqual(["Terminado"]);
@@ -495,15 +510,16 @@ describe("App Trip routes", () => {
       });
     });
 
-    it("moves a Trip between tabs after changing its transports and coming back", async () => {
+    it("moves a Trip between tabs after its dates change and the list is loaded again on the way back", async () => {
       const list = vi.fn()
         .mockResolvedValueOnce({ ok: true, value: [dated(tripId, "Patagonia", "2099-01-09T10:00:00.000Z")] })
         .mockResolvedValue({ ok: true, value: [dated(tripId, "Patagonia", "2020-01-09T10:00:00.000Z")] });
-      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) },
-        { listDestinations: async () => ({ ok: true, value: [] }), listTransports: async () => ({ ok: true, value: [] }) });
+      const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) }, undefined, adminMembers);
       expect(names(container)).toEqual(["Patagonia"]);
-      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/journey"]`)?.click());
-      expect(container.textContent).toContain("Destinos y transportes");
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
+      expect(container.textContent).toContain("Configuración del viaje");
+      await act(async () => itineraryBackLink(container)?.click());
       await act(async () => backLink(container)?.click());
       expect(list).toHaveBeenCalledTimes(2);
       expect(names(container)).toEqual([]);

@@ -14,11 +14,13 @@ const cssFiles = (readdirSync(srcDir, { recursive: true }) as string[])
   .map((entry) => entry.split("\\").join("/"))
   .filter((entry) => entry.endsWith(".css"));
 
-/** Cuerpo de la última regla `selector {` (la de medidas, tras la de bordes agrupados). */
+/** Cuerpo de la última regla `selector {` que abre una línea (la de medidas, tras la de bordes agrupados): nunca un override anidado ni otro ámbito. */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const text = `\n${css}`;
+  const marker = `\n${selector} {`;
+  const start = text.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return text.slice(start + marker.length).split("}")[0] ?? "";
 };
 const outsideMotionQuery = (css: string) =>
   css.replace(/@media \(prefers-reduced-motion: no-preference\) \{(?:[^{}]*\{[^{}]*\})*\s*\}/g, "");
@@ -151,6 +153,14 @@ describe("control geometry and states", () => {
     expect(rest).not.toContain("transition:");
     expect(rest).not.toContain("translateY");
   });
+
+  it("keeps every stylesheet's motion inside the query, not only components.css", () => {
+    for (const file of cssFiles) {
+      const rest = outsideMotionQuery(read(file));
+      expect(rest, file).not.toContain("transition:");
+      expect(rest, file).not.toContain("translateY");
+    }
+  });
 });
 
 describe("itinerary overrides, focus and type scale", () => {
@@ -196,7 +206,9 @@ describe("itinerary overrides, focus and type scale", () => {
   it("gives every .ui-button background/color override outside components.css its own disabled rule", () => {
     for (const file of cssFiles.filter((f) => f !== "components/components.css")) {
       const css = read(file);
-      for (const match of css.matchAll(/^([^{}@\n][^{}]*)\{([^}]*)\}/gm)) {
+      // Un comentario antes de una regla no es parte de su selector: se quita antes de leer los selectores.
+      const selectors = css.replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const match of selectors.matchAll(/^([^{}@\n][^{}]*)\{([^}]*)\}/gm)) {
         const body = match[2] ?? "";
         if (!/(^|[\s;])(background|color)\s*:/.test(body)) continue;
         for (const sel of (match[1] ?? "").split(",").map((x) => x.trim())) {

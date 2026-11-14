@@ -61,7 +61,7 @@ export function TripExploreScreen({ trips }: { trips: Pick<TripManagementApi, "l
                   {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                 </div>
                 <div className="trips-item-links">
-                  <Link className="trips-settings-link" to={`/trips/explore/${trip.id}`}>Ver viaje</Link>
+                  <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/explore/${trip.id}`}>Ver viaje</Link>
                 </div>
               </ListItem>
             ))}

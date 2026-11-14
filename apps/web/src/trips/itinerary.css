@@ -7,6 +7,9 @@
 .itinerary-header h1 { margin: 0; font-size: 1.5rem; line-height: 2rem; }
 .itinerary-header > p { margin: 0; color: var(--ui-color-muted); line-height: 1.5; }
 .itinerary-header > a { min-height: 44px; display: inline-flex; align-items: center; }
+/* Accesos de la pantalla: un grupo de botones secundarios al ancho disponible, con el ritmo de 12px de Layout. */
+.itinerary-header-actions { display: grid; gap: 12px; width: 100%; }
+.itinerary-header-actions .ui-button { width: 100%; }
 .itinerary-days { display: grid; gap: 40px; }
 .itinerary-day h2 { margin: 0 0 16px; font-size: 1.125rem; line-height: 1.625rem; text-wrap: balance; }
 .itinerary-bands { display: grid; gap: 12px; }
@@ -51,7 +54,7 @@
 .transport-facts { margin: 0; display: grid; gap: var(--ui-space-2); }
 .transport-facts div { display: flex; gap: var(--ui-space-2); }
 .transport-facts dt { font-weight: 600; color: var(--ui-color-muted); }
-.transport-facts dd { margin: 0; overflow-wrap: anywhere; }
+.transport-facts dd { margin: 0; }
 .transport-dialog h3:focus { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .activity-form, .activity-detail { display: grid; gap: var(--ui-space-4); }
 .activity-detail h3, .activity-detail p, .activity-context { margin: 0; line-height: 1.5; }
@@ -60,7 +63,7 @@
 .activity-duration { min-width: 0; margin: 0; padding: 0; border: 0; display: grid; gap: var(--ui-space-2); }
 .activity-duration legend { padding: 0; margin-bottom: var(--ui-space-2); font-size: .875rem; line-height: 1.25rem; font-weight: 600; }
 .activity-date-time { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--ui-space-3); }
-.activity-description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.activity-description { white-space: pre-wrap; }
 .activity-maps-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--ui-color-accent); text-underline-offset: .2em; }
 .location-preview { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-space-3); }
 .location-preview__icon { display: inline-flex; color: var(--ui-color-accent); }
@@ -75,7 +78,7 @@
 .activity-dialog .ui-modal__close { min-width: 44px; min-height: 44px; }
 .activity-dialog .ui-control { min-width: 0; caret-color: var(--ui-color-accent); }
 .activity-dialog a:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
-.activity-dialog .ui-modal__title, .participation-conflict-layer .ui-modal__title, .activity-confirm-layer .ui-modal__title { font-size: 1.5rem; line-height: 2rem; font-weight: 700; overflow-wrap: anywhere; }
+.activity-dialog .ui-modal__title, .participation-conflict-layer .ui-modal__title, .activity-confirm-layer .ui-modal__title { font-size: 1.5rem; line-height: 2rem; font-weight: 700; }
 .participation-conflict-layer .ui-modal, .activity-confirm-layer .ui-modal { padding: 24px; }
 .activity-form > .ui-button, .participation-conflict-actions .ui-button, .activity-confirm-actions .ui-button { width: 100%; }
 .activity-dialog .ui-modal__content { margin-inline: 0; }
@@ -135,7 +138,7 @@
 .comment-list { list-style: none; margin: 0; padding: 0; }
 .comment-item { padding: var(--ui-space-3); border: 1px solid var(--ui-color-border); border-radius: var(--ui-radius); }
 .comment-author, .comment-text, .comment-count { margin: 0; }
-.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-text { white-space: pre-wrap; }
 .comment-actions { display: flex; flex-wrap: wrap; gap: var(--ui-space-2); }
 .comment-actions .ui-button, .like-button { min-height: 44px; min-width: 44px; }
 .like-button[aria-pressed="true"] { background: var(--ui-color-accent); color: var(--ui-color-accent-contrast); opacity: 1; }
@@ -169,7 +172,7 @@
 .photo-viewer__failed button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .photo-viewer__nav button:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .photo-viewer__nav button:disabled, .photo-viewer__nav button[aria-disabled="true"] { border-color: var(--ui-color-disabled-surface); background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); cursor: not-allowed; }
-.photo-grid__caption { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ui-color-muted); font-size: .75rem; line-height: 1.125rem; }
+.photo-grid__caption { margin: 0; min-width: 0; color: var(--ui-color-muted); font-size: .75rem; line-height: 1.125rem; }
 .photo-viewer { display: grid; gap: 8px; }
 .photo-viewer img { display: block; max-width: 100%; max-height: calc(70dvh - env(safe-area-inset-bottom)); margin: 0 auto; object-fit: contain; border-radius: var(--ui-radius-control); background: var(--ui-color-soft); }
 .photo-viewer__nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
@@ -189,7 +192,7 @@
 .memory-parent__excerpt:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 .memory-parent .itinerary-secondary { margin: 0; color: var(--ui-color-muted); }
 .post-composer #post-link-summary { display: block; width: 100%; text-align: left; }
-.memories-list .itinerary-post-description { min-width: 0; overflow-wrap: anywhere; }
+.memories-list .itinerary-post-description { min-width: 0; }
 .memories-list .itinerary-post-description a { min-width: 0; max-width: 100%; }
 /* Provisional structure of the .ics export (no final tokens): T98 places it. */
 .ics-export { display: grid; justify-items: start; gap: 8px; max-width: 60ch; }
@@ -199,7 +202,19 @@
 .calendar-sync p { margin: 0; line-height: 1.5; }
 .calendar-sync [role="group"] { display: grid; justify-items: start; gap: 8px; }
 /* Structure of the Trip tabs (T98); colors, sizes and final composition belong to the visual tasks (T105+). */
-.trip-shell-header h1 { margin: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+/* El nombre del viaje ocupa su propia línea (una sola columna) y las acciones su fila, alineadas al final: compartir fila partía el nombre en cinco líneas a 375px (T153). */
+.trip-shell-header { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 12px; }
+.trip-shell-header h1 { margin: 0; min-width: 0; font-size: 1.125rem; line-height: 1.625rem; font-weight: 700; }
+/* Fila de acciones de la cabecera: se envuelve antes de empujar el ancho, nunca recorta el nombre. */
+.trip-shell-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+/* «Actualizar» acompaña el nombre del viaje: acción sin relleno (DESIGN.md «acciones sin relleno»), nunca un primario que compita con las pestañas. */
+.trip-shell-refresh.ui-button { flex: none; min-height: 44px; padding: 0 12px; border-color: transparent; background: transparent; color: var(--ui-color-brand); }
+.trip-shell-refresh.ui-button:where(:hover:not(:disabled)) { border-color: transparent; background: var(--ui-color-soft); }
+.trip-shell-refresh.ui-button:disabled, .trip-shell-refresh.ui-button[aria-disabled="true"] { border-color: transparent; background: var(--ui-color-disabled-surface); color: var(--ui-color-muted); }
+/* «Configuración» comparte la fila del nombre como acción sin relleno (DESIGN.md «acciones sin relleno»), con el área mínima de 44px. */
+.trip-shell-settings { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 12px; border-radius: var(--ui-radius-control); background: transparent; color: var(--ui-color-brand); font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; text-decoration: none; }
+.trip-shell-settings:hover { background: var(--ui-color-soft); }
+.trip-shell-settings:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
 @media (max-width: 359px) {
   .trip-shell-header h1 { font-size: 1rem; }
   .itinerary-band { padding: 12px; }

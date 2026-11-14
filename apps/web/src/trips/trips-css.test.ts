@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 /** jsdom no calcula estilos: fija el contrato visual de Mis viajes, Explorar, creación y Grupo sobre el texto de App.css. No sustituye revisión en dispositivo. */
 const srcDir = new URL("../", import.meta.url);
 const app = readFileSync(new URL("App.css", srcDir), "utf8").replace(/\r\n/g, "\n");
+/** Cuerpo de la última regla de primer nivel (en columna 0): ignora las reglas indentadas de los bloques @media. */
 const ruleBody = (css: string, selector: string) => {
-  const start = css.lastIndexOf(`${selector} {`);
+  const marker = `\n${selector} {`;
+  const start = css.lastIndexOf(marker);
   if (start < 0) return "";
-  return css.slice(start + selector.length + 2).split("}")[0] ?? "";
+  return css.slice(start + marker.length).split("}")[0] ?? "";
 };
 /** Regla base: solo cuenta si el selector abre la línea (no como parte de otro ámbito). */
 const baseBody = (selector: string) => {
@@ -28,12 +30,11 @@ describe("Mis viajes y Explorar", () => {
     expect(item).toContain("background: var(--ui-color-surface)");
     expect(item).toContain("gap: 12px");
   });
-  it("nombre 18/26/700 con quiebre de palabras, destino 14/20 de marca y fechas 12/18 muted tabulares", () => {
+  it("nombre 18/26/700, destino 14/20 de marca y fechas 12/18 muted tabulares", () => {
     const name = ruleBody(app, ".trips-panel--catalog .trips-item h2");
     expect(name).toContain("font-size: 1.125rem");
     expect(name).toContain("line-height: 1.625rem");
     expect(name).toContain("font-weight: 700");
-    expect(name).toContain("overflow-wrap: anywhere");
     const destination = ruleBody(app, ".trips-panel--catalog .trips-destination");
     expect(destination).toContain("font-size: 0.875rem");
     expect(destination).toContain("line-height: 1.25rem");
@@ -44,25 +45,56 @@ describe("Mis viajes y Explorar", () => {
     expect(dates).toContain("color: var(--ui-color-muted)");
     expect(dates).toContain("font-variant-numeric: tabular-nums");
   });
-  it("los enlaces de acción miden 44px, subrayados, con foco de 3px con token y offset 3px", () => {
+  it("los enlaces de acción son botones de 52px al ancho disponible, sin subrayado, con foco de 3px con token y offset 3px", () => {
     const link = ruleBody(app, ".trips-panel--catalog .trips-settings-link");
-    expect(link).toContain("min-height: 44px");
+    expect(link).toContain("min-height: 52px");
     expect(link).toContain("display: inline-flex");
-    expect(link).toContain("text-decoration: underline");
+    expect(link).toContain("width: 100%");
+    expect(link).toContain("text-decoration: none");
+    expect(link).not.toContain("text-decoration: underline");
     const focus = ruleBody(app, ".trips-panel--catalog .trips-settings-link:focus-visible");
     expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
     expect(focus).toContain("outline-offset: 3px");
-    expect(ruleBody(app, ".trips-item-links")).toContain("flex-wrap: wrap");
+    // La fila y su grupo de acciones solo viven en el catálogo (Mis viajes y Explorar): la base no declara un flex que ningún elemento puede observar.
+    expect(baseBody(".trips-item")).toBe("");
+    expect(baseBody(".trips-item-links")).toBe("");
+    expect(app).not.toContain(".trips-item > div");
+    expect(app).not.toMatch(/\.trips-item \{[^}]*(?:display: flex|flex-direction)/);
+    expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("display: grid");
+    expect(ruleBody(app, ".trips-panel--catalog .trips-item-links")).toContain("gap: 12px");
   });
+  it("la tarjeta es un enlace de bloque: sin subrayado, color heredado, con hover y foco con token (T153)", () => {
+    const open = ruleBody(app, ".trips-panel--catalog .trips-item-open");
+    expect(open).toContain("display: grid");
+    expect(open).toContain("text-decoration: none");
+    expect(open).toContain("color: inherit");
+    expect(open).toContain("min-height: 44px");
+    const hover = ruleBody(app, ".trips-panel--catalog .trips-item-open:hover");
+    expect(hover).toContain("background: var(--ui-color-soft)");
+    const focus = ruleBody(app, ".trips-panel--catalog .trips-item-open:focus-visible");
+    expect(focus).toContain("outline: 3px solid var(--ui-color-focus)");
+    expect(focus).toContain("outline-offset: 3px");
+    // El realce se anima solo con movimiento permitido: la transición vive dentro de la consulta, como en components.css.
+    expect(open).not.toContain("transition:");
+    expect(app).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\s*\.trips-panel--catalog \.trips-item-open \{[^}]*transition: background-color 150ms ease/);
+  });
+
   it("las entradas y el vacío usan botones de ancho completo acotados a su contenedor", () => {
     expect(ruleBody(app, ".trips-panel--catalog .trips-entry-actions .ui-button")).toContain("width: 100%");
-    expect(ruleBody(app, ".trips-panel--catalog .trips-empty .ui-button")).toContain("width: 100%");
+    // El ancho del vacío vive una sola vez, en la regla base compartida por Mis viajes, Explorar, itinerario, Diario y balance.
+    expect(baseBody(".trips-empty .ui-button")).toContain("width: 100%");
+    expect(app).not.toContain(".trips-panel--catalog .trips-empty .ui-button");
     expect(app).not.toMatch(/^\.ui-button \{[^}]*width: 100%/m);
   });
-  it("la navegación Cuenta tiene enlaces de 44px", () => {
+  it("la navegación Cuenta agrupa botones de 52px al ancho disponible con gap de 12px", () => {
     const link = ruleBody(app, ".trips-panel--catalog .trips-secondary a");
-    expect(link).toContain("min-height: 44px");
+    expect(link).toContain("min-height: 52px");
     expect(link).toContain("display: inline-flex");
+    expect(link).toContain("width: 100%");
+    const group = ruleBody(app, ".trips-panel--catalog .trips-secondary");
+    expect(group).toContain("display: grid");
+    expect(group).toContain("gap: 12px");
+    expect(ruleBody(app, ".trips-panel--catalog .trips-secondary .ui-button")).toContain("width: 100%");
   });
   it("el vacío es una tarjeta con h2 18/26/700", () => {
     const heading = ruleBody(app, ".trips-panel--catalog .trips-empty h2");
@@ -79,7 +111,7 @@ describe("Crear, configurar y unirse", () => {
     expect(intro).toContain("line-height: 1.5rem");
     expect(intro).toContain("color: var(--ui-color-muted)");
     expect(ruleBody(app, ".trip-form-panel .auth-form")).toContain("gap: 20px");
-    const name = ruleBody(app, ".trip-form-panel .trip-config-name");
+    const name = ruleBody(app, ".trips-shell .trip-form-panel .trip-config-name");
     expect(name).toContain("font-size: 0.875rem");
     expect(name).toContain("line-height: 1.25rem");
     expect(name).toContain("color: var(--ui-color-muted)");
@@ -96,19 +128,17 @@ describe("Crear, configurar y unirse", () => {
   });
   it("la unión por link usa un panel propio con botón de ancho completo", () => {
     expect(ruleBody(app, ".invite-panel .ui-button")).toContain("width: 100%");
-    expect(ruleBody(app, ".invite-panel strong")).toContain("overflow-wrap: anywhere");
   });
 });
 
 describe("Grupo", () => {
-  it("el código de invitación es una tarjeta de marca 32/40 tabular con quiebre", () => {
+  it("el código de invitación es una tarjeta de marca 32/40 tabular", () => {
     const code = ruleBody(app, "section.trip-members-section .trip-invite-code");
     expect(code).toContain("background: var(--ui-color-brand)");
     expect(code).toContain("color: var(--ui-color-accent-contrast)");
     expect(code).toContain("font-size: 2rem");
     expect(code).toContain("line-height: 2.5rem");
     expect(code).toContain("font-variant-numeric: tabular-nums");
-    expect(code).toContain("overflow-wrap: anywhere");
     expect(code).toContain("border-radius: var(--ui-radius-card)");
   });
   it("la insignia de rol es una píldora 12/18 soft/marca y la del titular invierte", () => {
@@ -177,6 +207,8 @@ describe("invariantes y reglas compartidas", () => {
     expect(baseBody(".trips-state")).toContain("justify-items: start");
     expect(baseBody(".trip-members-actions")).toBe(" display: flex; flex-wrap: wrap; gap: 12px; ");
     expect(baseBody(".trips-settings-link")).toContain("flex: none");
+    // .trips-secondary solo vive bajo el catálogo: su base aporta la separación y nada que el ámbito ya reemplace.
+    expect(baseBody(".trips-secondary")).toBe(" margin-top: 32px; ");
   });
   it("lo nuevo no usa hex, clamp, opacity, vh, ni fixed/sticky", () => {
     expect(added).not.toBe("");

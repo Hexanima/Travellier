@@ -171,7 +171,7 @@ function MemoriesContent({ tripId, posts, members, timeZone }: TripMemoriesScree
       {state.kind === "ready" && state.posts.length === 0 ? <section className="trips-empty">
         <Heading level={inShell ? 3 : 2}>Todavía no hay recuerdos.</Heading>
         <p>Publicá el primero para empezar el diario del viaje.</p>
-        <Link to={create}>Crear el primer recuerdo</Link>
+        <Link className="ui-button" to={create}>Crear el primer recuerdo</Link>
       </section> : null}
       {state.kind === "ready" && state.posts.length > 0 ? <List className="itinerary-posts memories-list" aria-label="Recuerdos">
         {state.posts.map((post) => <ListItem className="itinerary-nested-post" key={post.id} data-memory={post.id} tabIndex={-1}>

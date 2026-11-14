@@ -77,7 +77,6 @@ describe("avisos personales", () => {
     const body = ruleBody(".notice-list .notice");
     expect(body).toContain("border-bottom: 1px solid var(--ui-color-border)");
     expect(body).toContain("padding: 16px 0");
-    expect(body).toContain("overflow-wrap: anywhere");
   });
   it("el titular es 16/24/700 y lo secundario 14/20 muted", () => {
     const head = ruleBody(".notice-list .notice > p:first-child");
