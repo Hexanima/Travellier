@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -239,11 +240,19 @@ describe("Modal", () => {
       backdrop: container.querySelector(".ui-modal-backdrop") as HTMLElement,
       dialog: container.querySelector(".ui-modal") as HTMLElement,
     });
-    /** Secuencia real de un toque: pointerdown (jsdom no tiene PointerEvent), mousedown y click sobre el mismo objetivo. */
+    /** Ancestro común de los dos extremos del gesto: el navegador emite ahí el click cuando el press y el release difieren. */
+    const commonAncestor = (down: HTMLElement, up: HTMLElement) => {
+      let node: HTMLElement | null = down;
+      while (node && !node.contains(up)) node = node.parentElement;
+      return node ?? down;
+    };
+    /** Secuencia real de un toque: pointerdown/mousedown en el origen, pointerup/mouseup en el final y click en el ancestro común (jsdom no tiene PointerEvent). */
     const tap = async (down: HTMLElement, up: HTMLElement = down) => act(async () => {
       down.dispatchEvent(new Event("pointerdown", { bubbles: true }));
       down.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      up.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      up.dispatchEvent(new Event("pointerup", { bubbles: true }));
+      up.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      commonAncestor(down, up).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
     it("cierra al tocar el fondo, fuera del modal", async () => {
@@ -281,6 +290,14 @@ describe("Modal", () => {
       expect(onClose).not.toHaveBeenCalled();
     });
 
+    it("no cierra si el gesto terminó dentro del modal (arrastre desde el fondo)", async () => {
+      const onClose = vi.fn();
+      const container = await mount(<Modal isOpen title="Cambiar" onClose={onClose}><button>Ok</button></Modal>);
+      const { backdrop, dialog } = parts(container);
+      await tap(backdrop, dialog);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
     it("el fondo no es un control: sin rol propio ni foco", async () => {
       const container = await mount(<Modal isOpen title="Cambiar" onClose={() => undefined}>Ok</Modal>);
       const { backdrop } = parts(container);
@@ -288,18 +305,39 @@ describe("Modal", () => {
       expect(backdrop.getAttribute("tabindex")).toBeNull();
     });
 
-    it("el fondo del modal de arriba no cierra el de abajo", async () => {
+    // La app apila los modales con createPortal a document.body (ActivityForm, PostComposer, PhotoBrowser): los nodos no quedan
+    // anidados pero los eventos de React igual recorren el árbol de componentes, que es el caso que hay que cubrir.
+    it("el fondo del modal de arriba, apilado en un portal, no cierra el de abajo", async () => {
       const onCloseUnder = vi.fn();
       const onCloseOver = vi.fn();
-      const container = await mount(
+      await mount(
         <Modal isOpen title="Actividad" onClose={onCloseUnder}>
-          <Modal isOpen title="Conflicto" onClose={onCloseOver}>Ok</Modal>
+          {createPortal(<Modal isOpen title="Conflicto" onClose={onCloseOver}>Ok</Modal>, document.body)}
         </Modal>,
       );
-      const backdrops = container.querySelectorAll(".ui-modal-backdrop");
-      await tap(backdrops[backdrops.length - 1] as HTMLElement);
+      const backdrops = document.body.querySelectorAll<HTMLElement>(".ui-modal-backdrop");
+      expect(backdrops).toHaveLength(2);
+      const [under, over] = [backdrops[0], backdrops[1]];
+      expect(over.contains(under)).toBe(false);
+      expect(under.contains(over)).toBe(false);
+      await tap(over);
       expect(onCloseOver).toHaveBeenCalledOnce();
       expect(onCloseUnder).not.toHaveBeenCalled();
+    });
+
+    // Mismo motivo: el portal saca el modal del DOM de la pantalla que lo abrió, pero el evento sigue subiendo por el árbol de
+    // React hasta sus manejadores (una fila o tarjeta pulsable), que no deben reaccionar al toque de cierre.
+    it("el toque del fondo no activa los manejadores de la pantalla que abrió el modal", async () => {
+      const onClose = vi.fn();
+      const onScreenClick = vi.fn();
+      await mount(
+        <div onClick={onScreenClick}>
+          {createPortal(<Modal isOpen title="Conflicto" onClose={onClose}>Ok</Modal>, document.body)}
+        </div>,
+      );
+      await tap(document.body.querySelector(".ui-modal-backdrop") as HTMLElement);
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onScreenClick).not.toHaveBeenCalled();
     });
   });
 });

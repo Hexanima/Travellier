@@ -44,6 +44,7 @@ export function Modal({
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const pressStartedOnBackdrop = useRef(false);
+  const pressEndedOnBackdrop = useRef(false);
   const cannotClose = loading || !onClose;
   // The native back press closes the open dialog before touching the navigation. While it cannot close (saving, or no way out)
   // it keeps the press instead of leaving the screen behind the dialog.
@@ -111,12 +112,20 @@ export function Modal({
   // Solo cuenta si el gesto empezó y terminó en el fondo: un arrastre que nace dentro (seleccionar texto) no cierra.
   function handleBackdropPointerDown(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>) {
     pressStartedOnBackdrop.current = event.target === event.currentTarget;
+    pressEndedOnBackdrop.current = false;
+  }
+
+  // El click se emite en el ancestro común de los dos extremos del gesto: si solo se mirara el press, un arrastre que nace en el
+  // fondo y suelta dentro del modal cerraría igual. Por eso también se registra donde terminó.
+  function handleBackdropPointerUp(event: ReactPointerEvent<HTMLElement> | ReactMouseEvent<HTMLElement>) {
+    pressEndedOnBackdrop.current = event.target === event.currentTarget;
   }
 
   function handleBackdropClick(event: ReactMouseEvent<HTMLElement>) {
-    const startedOnBackdrop = pressStartedOnBackdrop.current;
+    const onBackdrop = pressStartedOnBackdrop.current && pressEndedOnBackdrop.current;
     pressStartedOnBackdrop.current = false;
-    if (event.target !== event.currentTarget || !startedOnBackdrop || cannotClose) {
+    pressEndedOnBackdrop.current = false;
+    if (event.target !== event.currentTarget || !onBackdrop || cannotClose) {
       return;
     }
     // React events cross portals: keep a stacked modal's backdrop tap from closing the modal underneath.
@@ -133,6 +142,8 @@ export function Modal({
       className="ui-modal-backdrop"
       onPointerDown={handleBackdropPointerDown}
       onMouseDown={handleBackdropPointerDown}
+      onPointerUp={handleBackdropPointerUp}
+      onMouseUp={handleBackdropPointerUp}
       onClick={handleBackdropClick}
     >
       <section
