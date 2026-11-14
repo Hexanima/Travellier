@@ -44,6 +44,8 @@ export function TripShell() {
       <header className="trip-shell-header">
         <h1>{name || "Viaje"}</h1>
         {hasRefresh ? <Button className="trip-shell-refresh" onClick={() => { void refreshNow(); }}>Actualizar</Button> : null}
+        {/* La configuración del viaje se abre desde su cabecera (prototipo aprobado), disponible para cualquier integrante y sin repetirse en la tarjeta de Mis viajes. */}
+        <Link className="trip-shell-settings" to={`/trips/${tripId ?? ""}/config`} aria-label="Configuración del viaje">Configuración</Link>
       </header>
       <Tabs idPrefix="trip-tab" label="Secciones del viaje" items={tabs} selected={root.tab}
         onSelect={(id) => { if (id !== root.tab) select(id as TripTab); }}>

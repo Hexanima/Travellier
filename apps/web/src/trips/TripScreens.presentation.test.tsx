@@ -58,14 +58,13 @@ describe("Mis viajes: presentación", () => {
     expect(container.querySelector(".trips-item h2")?.textContent).toBe("Patagonia");
   });
 
-  it("la tarjeta no repite la navegación interna del viaje: una sola acción secundaria (T153)", async () => {
+  it("la tarjeta no repite la navegación interna del viaje: queda sin acción secundaria (T153)", async () => {
     const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [trip] }));
-    const links = Array.from(container.querySelectorAll(".trips-item .trips-item-links > a"));
-    expect(links.map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["Configuración", `/trips/${trip.id}/config`],
-    ]);
-    for (const rest of ["memories", "journey", "members"]) {
-      expect(container.querySelector(`.trips-item-links a[href="/trips/${trip.id}/${rest}"]`)).toBeNull();
+    // La configuración vive en la cabecera del viaje (prototipo aprobado): la tarjeta es solo el enlace al viaje.
+    expect(container.querySelector(".trips-item .trips-item-links")).toBeNull();
+    expect(container.querySelectorAll(".trips-item a")).toHaveLength(1);
+    for (const rest of ["config", "memories", "journey", "members"]) {
+      expect(container.querySelector(`.trips-item a[href="/trips/${trip.id}/${rest}"]`)).toBeNull();
     }
   });
 
@@ -101,16 +100,6 @@ describe("Mis viajes: presentación", () => {
     const link = container.querySelector(".trips-empty a");
     expect(link?.textContent).toBe("Crear viaje");
     expect(link?.classList.contains("ui-button")).toBe(true);
-  });
-
-  it("la acción de la fila es un botón secundario, no un enlace subrayado (T153)", async () => {
-    const container = await render(vi.fn().mockResolvedValue({ ok: true, value: [trip] }));
-    const links = Array.from(container.querySelectorAll(".trips-item .trips-item-links > a"));
-    expect(links).toHaveLength(1);
-    for (const link of links) {
-      expect(link.classList.contains("ui-button")).toBe(true);
-      expect(link.classList.contains("ui-button--secondary")).toBe(true);
-    }
   });
 
   it("el pie de Cuenta no mezcla enlaces de texto con un botón: los tres son secundarios (T153)", async () => {

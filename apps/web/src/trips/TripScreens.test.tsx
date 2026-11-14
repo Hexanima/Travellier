@@ -59,7 +59,8 @@ describe("Trip screens", () => {
     expect(container.textContent).toContain("Bariloche");
     expect(container.querySelector('a[href="/trips/new"]')).not.toBeNull();
     expect(container.querySelector('a[href="/trips/join"]')).not.toBeNull();
-    expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).not.toBeNull();
+    // La configuración se abre desde la cabecera del viaje, no desde la tarjeta de Mis viajes.
+    expect(container.querySelector(`a[href="/trips/${trip.id}/config"]`)).toBeNull();
   });
 
   it("opens the Trip from its card, without repeating the navigation that lives inside it", async () => {

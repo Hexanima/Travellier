@@ -35,6 +35,10 @@ const memberTrip = {
 const adminMembers = { list: async () => ({ ok: true, value: { currentUserId: "admin", ownerId: "admin", members: [
   { id: "membership", userId: "admin", name: "Admin", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
 ] } }) };
+const participantMembers = { list: async () => ({ ok: true, value: { currentUserId: "member", ownerId: "owner", members: [
+  { id: "owner-membership", userId: "owner", name: "Titular", role: "admin", isOwner: true, joinedAt: "2026-09-24T12:00:00.000Z" },
+  { id: "member-membership", userId: "member", name: "Integrante", role: "participant", isOwner: false, joinedAt: "2026-09-25T12:00:00.000Z" },
+] } }) };
 const changeSelect = (container: HTMLElement, name: string, value: string) => act(async () => {
   const select = container.querySelector(`[name="${name}"]`) as HTMLSelectElement;
   select.value = value;
@@ -313,6 +317,14 @@ describe("App Trip routes", () => {
     expect(privateView.querySelector('input[type="date"]')).toBeNull();
   });
 
+  it("abre la configuración desde la cabecera del viaje, también para un participante (T153)", async () => {
+    const container = await render(`/trips/${tripId}/itinerary`, true, { get: async () => ({ ok: true, value: memberTrip }) }, undefined, participantMembers);
+    const settings = container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`);
+    expect(settings).not.toBeNull();
+    await act(async () => settings?.click());
+    expect(container.textContent).toContain("Configuración del viaje");
+  });
+
   it("does not request Trip configuration before login", async () => {
     const get = vi.fn();
     const container = await render(`/trips/${tripId}/config`, false, { get });
@@ -421,7 +433,8 @@ describe("App Trip routes", () => {
       const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) });
       expect(names(container)).toEqual(["Futuro"]);
       await act(async () => tabButton(container, "Finalizados")?.click());
-      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/config"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
       expect(container.textContent).toContain("Configuración del viaje");
       await act(async () => backLink(container)?.click());
       expect(tabButton(container, "Finalizados")?.getAttribute("aria-selected")).toBe("true");
@@ -501,7 +514,8 @@ describe("App Trip routes", () => {
         .mockResolvedValue({ ok: true, value: [dated(tripId, "Patagonia", "2020-01-09T10:00:00.000Z")] });
       const container = await render("/trips", true, { list, get: async () => ({ ok: true, value: memberTrip }) }, undefined, adminMembers);
       expect(names(container)).toEqual(["Patagonia"]);
-      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/config"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`a[href="/trips/${tripId}/itinerary"]`)?.click());
+      await act(async () => container.querySelector<HTMLElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`)?.click());
       expect(container.textContent).toContain("Configuración del viaje");
       await act(async () => backLink(container)?.click());
       expect(list).toHaveBeenCalledTimes(2);

@@ -26,6 +26,7 @@ async function mount(path: string) {
   return container;
 }
 const refreshButton = (container: HTMLElement) => Array.from(container.querySelectorAll("button")).find((item) => item.textContent === "Actualizar");
+const settingsLink = (container: HTMLElement) => container.querySelector<HTMLAnchorElement>(`.trip-shell-header a[href="/trips/${tripId}/config"]`);
 
 describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
   it("«Actualizar» acompaña el título del viaje y no compite con la fila de pestañas", async () => {
@@ -46,5 +47,27 @@ describe("TripShell: jerarquía de «Actualizar» (T153)", () => {
     expect(Array.from(container.querySelectorAll('[role="tablist"]'))).toHaveLength(2);
     expect(refreshButton(container)!.closest(".trip-shell-header")).not.toBeNull();
     expect(container.querySelectorAll(".trip-shell-refresh")).toHaveLength(1);
+  });
+});
+describe("TripShell: acceso a la configuración (T153)", () => {
+  it("la cabecera del viaje lleva a la configuración y comparte la fila del nombre", async () => {
+    const container = await mount(`/trips/${tripId}/itinerary`);
+    const link = settingsLink(container)!;
+    const header = link.closest(".trip-shell-header")!;
+    expect(link.parentElement).toBe(header);
+    expect(link.classList.contains("trip-shell-settings")).toBe(true);
+    // El nombre accesible dice que la configuración es la del viaje; el texto visible queda contenido en él.
+    expect(link.textContent).toBe("Configuración");
+    expect(link.getAttribute("aria-label")).toBe("Configuración del viaje");
+    expect(link.closest('[role="tabpanel"]')).toBeNull();
+    // La fila de pestañas conserva sus tres controles.
+    expect(Array.from(container.querySelectorAll('[role="tablist"] [role="tab"]')).map((tab) => tab.textContent)).toEqual(["Itinerario", "Diario", "Grupo"]);
+  });
+  it("el acceso no depende del rol ni de la sección abierta: una sola entrada en cada raíz", async () => {
+    for (const path of ["itinerary", "memories"]) {
+      const container = await mount(`/trips/${tripId}/${path}`);
+      expect(container.querySelectorAll(".trip-shell-settings")).toHaveLength(1);
+      expect(settingsLink(container)).not.toBeNull();
+    }
   });
 });

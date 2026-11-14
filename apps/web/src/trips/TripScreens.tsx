@@ -148,7 +148,8 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
               {shown.map((trip) => (
                 <ListItem key={trip.id} className="trips-item">
                   {/* The card itself is the main action: one link opens the Trip at its root (the itinerary) and its accessible name is the Trip, not the word Itinerario.
-                      Itinerario, Diario/Recuerdos, Grupo (miembros e invitación) and Destinos y transportes live inside the Trip: repeating them here duplicated the whole navigation per Trip. */}
+                      Itinerario, Diario/Recuerdos, Grupo (miembros e invitación) and Destinos y transportes live inside the Trip: repeating them here duplicated the whole navigation per Trip.
+                      The configuration also lives inside the Trip, in its header (approved prototype): the card has no secondary action. */}
                   <Link className="trips-item-open" to={`/trips/${trip.id}/itinerary`}>
                     <h2>{trip.name}</h2>
                     {trip.primaryDestination === null ? null : <p className="trips-destination">{trip.primaryDestination.name}</p>}
@@ -156,10 +157,6 @@ export function TripsListScreen({ trips, onLocalLogout, now = Date.now }: TripsL
                     <p className="trips-dates">{formatTripRange(trip.startAt, trip.endAt)}</p>
                     {trip.description ? <p className="trips-description">{trip.description}</p> : null}
                   </Link>
-                  {/* The only secondary action left: the configuration has no entry inside the Trip for a participant (the balance only offers it to admins). */}
-                  <div className="trips-item-links">
-                    <Link className="trips-settings-link ui-button ui-button--secondary" to={`/trips/${trip.id}/config`}>Configuración</Link>
-                  </div>
                 </ListItem>
               ))}
             </List>

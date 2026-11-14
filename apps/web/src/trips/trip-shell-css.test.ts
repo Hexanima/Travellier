@@ -109,6 +109,19 @@ describe("cabecera y pestañas del Trip", () => {
     expect(disabled).toContain("background: var(--ui-color-disabled-surface)");
     expect(disabled).toContain("color: var(--ui-color-muted)");
   });
+  it("«Configuración» acompaña el nombre como acción sin relleno de 44px, sin subrayado (T153)", () => {
+    const action = ruleBody(itinerary, ".trip-shell-settings");
+    expect(action).toContain("min-height: 44px");
+    expect(action).toContain("background: transparent");
+    expect(action).toContain("color: var(--ui-color-brand)");
+    expect(action).toContain("flex: none");
+    expect(action).toContain("text-decoration: none");
+    expect(action).not.toContain("width: 100%");
+    expect(ruleBody(itinerary, ".trip-shell-settings:hover")).toContain("background: var(--ui-color-soft)");
+    const focusRing = ruleBody(itinerary, ".trip-shell-settings:focus-visible");
+    expect(focusRing).toContain("outline: 3px solid var(--ui-color-focus)");
+    expect(focusRing).toContain("outline-offset: 3px");
+  });
   it("la cabecera de retorno mide al menos 44px", () => {
     expect(ruleBody(app, ".trips-back")).toContain("min-height: 44px");
   });
