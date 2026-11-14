@@ -10,6 +10,7 @@ import type { JourneyDestination, JourneyTransport, TransportDirection, TripJour
 import type { TripDetail, TripManagementApi } from "./trip-management-api.js";
 
 const journeyLoadFailure = "No pudimos cargar los destinos y transportes.";
+const costsFailure = "No pudimos cargar los totales de costo de transporte.";
 const addDestinationFailure = "No pudimos agregar el destino. Intentá nuevamente.";
 const deleteDestinationFailure = "No pudimos eliminar el destino. Intentá nuevamente.";
 
@@ -51,7 +52,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
     destinations: [], transports: {},
   });
   const [costs, setCosts] = useState<TripItineraryResponse>();
-  const [costsFailed, setCostsFailed] = useState(false);
+  const [costsFailed, setCostsFailed] = useState<string>();
   const costsRequest = useRef(0);
   const [savingTransport, setSavingTransport] = useState(false);
   const savingTransportRef = useRef(false);
@@ -74,9 +75,9 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
     try {
       const result = await itinerary.get(tripId);
       if (request !== costsRequest.current) return;
-      if (result.ok) { setCosts(result.value); setCostsFailed(false); } else setCostsFailed(true);
+      if (result.ok) { setCosts(result.value); setCostsFailed(undefined); } else setCostsFailed(networkNotice(result.error, costsFailure));
     } catch {
-      if (request === costsRequest.current) setCostsFailed(true);
+      if (request === costsRequest.current) setCostsFailed(costsFailure);
     }
   }, [itinerary, tripId]);
 
@@ -228,7 +229,7 @@ export function TripJourneyScreen({ trips, journey, itinerary }: Props) {
               destinations={costs.destinations} headingLevel={2} /> : null}
             {costsFailed && costs ? <p data-transport-costs-stale role="status">Los totales pueden estar desactualizados.{" "}
               <Button onClick={() => void loadCosts()}>Reintentar totales</Button></p> : null}
-            {costsFailed && !costs ? <p data-transport-costs-unavailable>No pudimos cargar los totales de costo de transporte.{" "}
+            {costsFailed && !costs ? <p data-transport-costs-unavailable>{costsFailed}{" "}
               <Button onClick={() => void loadCosts()}>Reintentar totales</Button></p> : null}
             <div className="journey-destinations">
               {destinations.map((destination) => {

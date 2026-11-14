@@ -454,6 +454,23 @@ describe("TripJourneyScreen", () => {
       expect(container.querySelector("[data-transport-costs-unavailable]")).toBeNull();
     });
 
+    it("un timeout al cargar los totales tiene su propio texto y conserva el reintento (T150)", async () => {
+      const itinerary = { get: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } }) };
+      const { container } = await render({ itinerary: itinerary as unknown as TripItineraryApi });
+      expect(container.querySelector("[data-transport-costs-unavailable]")?.textContent)
+        .toContain("La conexión tardó demasiado. Intentá nuevamente.");
+      expect(container.textContent).not.toContain("No pudimos cargar los totales");
+      expect(Array.from(container.querySelectorAll("button")).some((item) => item.textContent === "Reintentar totales")).toBe(true);
+    });
+
+    it("una conexión caída al cargar los totales conserva el texto de siempre (T150)", async () => {
+      const itinerary = { get: vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } }) };
+      const { container } = await render({ itinerary: itinerary as unknown as TripItineraryApi });
+      expect(container.querySelector("[data-transport-costs-unavailable]")?.textContent)
+        .toContain("No pudimos cargar los totales de costo de transporte.");
+      expect(container.textContent).not.toContain("tardó demasiado");
+    });
+
     it("refreshes only the totals after saving a transport, keeping destinations and entered forms", async () => {
       const itinerary = itineraryApi();
       const { container, listDestinations, listTransports, createTransport } = await render({ itinerary });

@@ -49,7 +49,8 @@ describe("direct upload", () => {
     expect(await run((xhr) => { xhr.status = 500; xhr.onload?.(); })).toEqual({ ok: false, code: "rejected" });
     expect(await run((xhr) => { xhr.status = 0; xhr.onload?.(); })).toEqual({ ok: false, code: "network" });
     expect(await run((xhr) => xhr.onerror?.())).toEqual({ ok: false, code: "network" });
-    expect(await run((xhr) => xhr.ontimeout?.())).toEqual({ ok: false, code: "network" });
+    // La espera agotada se distingue de la conexión caída: el fallo sigue siendo reintentable (T150).
+    expect(await run((xhr) => xhr.ontimeout?.())).toEqual({ ok: false, code: "timeout" });
   });
   it("applies the per-file timeout, default and custom", async () => {
     const first = setup().upload.put(url, {}, blob, {}); expect(FakeXhr.last.timeout).toBe(120_000); FakeXhr.last.onerror?.(); await first;

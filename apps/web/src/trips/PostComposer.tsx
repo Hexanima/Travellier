@@ -47,7 +47,10 @@ const removedExpenseText = "Gasto: se quitará al guardar. Dejará de figurar en
 const notInPostMessage = "Una foto que querías quitar ya no pertenece a este recuerdo. Actualizamos la lista.";
 const removeWithActivityMessage = "No se pueden quitar fotos y crear una actividad nueva en el mismo guardado. Deshacé la quita de fotos o quitá la actividad nueva.";
 /** The published photos of the post being edited (author only): read once when editing, never kept in the draft. */
-type PublishedLoad = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; items: PublishedPhoto[] } | { kind: "error" };
+type PublishedLoad = { kind: "idle" } | { kind: "loading" } | { kind: "ready"; items: PublishedPhoto[] } | { kind: "error"; message: string };
+/** El fallo al listar las fotos publicadas: solo cambia la primera frase; la promesa de seguir editando es la misma para cualquier causa. */
+const publishedFailure = "No pudimos cargar las fotos publicadas.";
+const keepEditing = "Podés seguir editando.";
 const objectId = (value: string) => /^[0-9a-f]{24}$/.test(value);
 const expenseWaitMessage = "Esperá a que cargue el gasto guardado para guardar los cambios.";
 const exceedsMessage = "El nuevo importe queda por debajo de pagos o partes fijas ya registrados. Ajustalos en Pagos y reparto.";
@@ -164,8 +167,9 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
     void (async () => {
       try {
         const result = await listPublished(tripId, existingId);
-        if (!cancelled) setPublishedLoad(result.ok ? { kind: "ready", items: result.value } : { kind: "error" });
-      } catch { if (!cancelled) setPublishedLoad({ kind: "error" }); }
+        if (!cancelled) setPublishedLoad(result.ok ? { kind: "ready", items: result.value }
+          : { kind: "error", message: `${networkNotice(result.error, publishedFailure)} ${keepEditing}` });
+      } catch { if (!cancelled) setPublishedLoad({ kind: "error", message: `${publishedFailure} ${keepEditing}` }); }
     })();
     return () => { cancelled = true; };
   }, [wantsPublished, existingId, tripId, listPublished, publishedAttempt]);
@@ -593,7 +597,7 @@ function Composer({ tripId, postId, posts, itinerary, photos, members, timeZone,
           {wantsPublished ? <>
             {publishedLoad.kind === "loading" ? <LoadingState label="Cargando fotos publicadas…" /> : null}
             {publishedLoad.kind === "error" ? <div className="trips-state">
-              <Feedback variant="error">No pudimos cargar las fotos publicadas. Podés seguir editando.</Feedback>
+              <Feedback variant="error">{publishedLoad.message}</Feedback>
               <Button aria-label="Reintentar fotos publicadas" onClick={() => setPublishedAttempt((value) => value + 1)}>Reintentar</Button>
             </div> : null}
             {publishedLoad.kind === "ready" ? <PublishedPhotosSection items={publishedLoad.items} marked={draft.extras.removePhotoIds} busy={saving || photosCtl.uploading || photosCtl.selecting}

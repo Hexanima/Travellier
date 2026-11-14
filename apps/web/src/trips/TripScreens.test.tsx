@@ -178,6 +178,38 @@ describe("Trip screens", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("destino");
   });
 
+  it("un timeout al crear el viaje tiene su propio texto (T150)", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "TimeoutError" } });
+    const container = await renderTrips({ list: vi.fn(), create }, "/trips/new");
+    await setValue(container.querySelector('[name="name"]'), "Patagonia");
+    await setValue(container.querySelector('[name="primaryDestination"]'), "Bariloche");
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("La conexión tardó demasiado. Intentá nuevamente.");
+    expect(container.textContent).not.toContain("No pudimos crear el viaje");
+  });
+
+  it("una conexión caída al crear el viaje conserva el texto de siempre (T150)", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "network", code: "NetworkError" } });
+    const container = await renderTrips({ list: vi.fn(), create }, "/trips/new");
+    await setValue(container.querySelector('[name="name"]'), "Patagonia");
+    await setValue(container.querySelector('[name="primaryDestination"]'), "Bariloche");
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe("No pudimos crear el viaje. Revisá los datos e intentá nuevamente.");
+  });
+
+  it("un formulario mal completado conserva su texto aunque el servidor conteste una validación (T150)", async () => {
+    const create = vi.fn().mockResolvedValue({ ok: false, error: { kind: "validation", fields: [{ field: "name", message: "x" }] } });
+    const container = await renderTrips({ list: vi.fn(), create }, "/trips/new");
+    await setValue(container.querySelector('[name="name"]'), "Patagonia");
+    await setValue(container.querySelector('[name="primaryDestination"]'), "Bariloche");
+    await act(async () => container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+
+    expect(container.textContent).toContain("No pudimos crear el viaje. Revisá los datos e intentá nuevamente.");
+    expect(container.textContent).not.toContain("tardó demasiado");
+  });
+
   it("prevents a second submission while creation is pending", async () => {
     let resolveCreate: (value: TripResult<TripSummary>) => void = () => undefined;
     const create = vi.fn(() => new Promise<TripResult<TripSummary>>((resolve) => { resolveCreate = resolve; }));
