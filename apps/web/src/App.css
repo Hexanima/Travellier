@@ -251,7 +251,8 @@ dd {
 /* T153: la acción de un vacío es un botón al ancho disponible (DESIGN.md «Buttons»), igual en Mis viajes, Explorar, itinerario, Diario y balance. */
 .trips-empty .ui-button { width: 100%; }
 .trips-state { display: grid; justify-items: start; gap: 12px; }
-.trips-secondary { display: flex; align-items: center; gap: 18px; margin-top: 32px; }
+/* Solo lo compartido: el reparto del pie de Cuenta lo decide su ámbito (.trips-panel--catalog). */
+.trips-secondary { margin-top: 32px; }
 .trips-back { display: inline-flex; align-items: center; min-height: 44px; margin-bottom: 12px; }
 
 .trip-public-preview {
@@ -310,7 +311,7 @@ dd {
   .trips-panel--catalog .trips-item-open { transition: background-color 150ms ease; }
 }
 .trips-panel--catalog .trips-item-open:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }
-/* T153: la única acción secundaria que queda es un botón, no un enlace subrayado. */
+/* T153: la acción secundaria de una tarjeta (hoy «Ver viaje», en Explorar) es un botón, no un enlace subrayado. */
 .trips-panel--catalog .trips-item-links { display: grid; gap: 12px; }
 .trips-panel--catalog .trips-settings-link { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; font-size: 0.875rem; line-height: 1.25rem; font-weight: 600; text-decoration: none; }
 .trips-panel--catalog .trips-settings-link:focus-visible { outline: 3px solid var(--ui-color-focus); outline-offset: 3px; }

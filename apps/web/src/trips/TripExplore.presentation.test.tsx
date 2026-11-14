@@ -42,6 +42,9 @@ describe("Explorar: presentación", () => {
     const link = container.querySelector(".trips-item .trips-item-links a.trips-settings-link");
     expect(link?.textContent).toBe("Ver viaje");
     expect(link?.getAttribute("href")).toBe(`/trips/explore/${tripId}`);
+    // La acción de la tarjeta es un botón secundario, no un enlace subrayado (T153).
+    expect(link?.classList.contains("ui-button")).toBe(true);
+    expect(link?.classList.contains("ui-button--secondary")).toBe(true);
   });
 
   it("el enlace del vacío es un botón y conserva su texto y destino", async () => {

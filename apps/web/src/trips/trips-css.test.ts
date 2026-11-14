@@ -205,6 +205,8 @@ describe("invariantes y reglas compartidas", () => {
     expect(baseBody(".trips-state")).toContain("justify-items: start");
     expect(baseBody(".trip-members-actions")).toBe(" display: flex; flex-wrap: wrap; gap: 12px; ");
     expect(baseBody(".trips-settings-link")).toContain("flex: none");
+    // .trips-secondary solo vive bajo el catálogo: su base aporta la separación y nada que el ámbito ya reemplace.
+    expect(baseBody(".trips-secondary")).toBe(" margin-top: 32px; ");
   });
   it("lo nuevo no usa hex, clamp, opacity, vh, ni fixed/sticky", () => {
     expect(added).not.toBe("");
