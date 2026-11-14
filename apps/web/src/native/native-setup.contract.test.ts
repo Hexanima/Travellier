@@ -46,7 +46,7 @@ describe("native setup", () => {
   it("syncs every added plugin into Android and iOS SPM", () => {
     const gradle = read("../../android/app/capacitor.build.gradle");
     const spm = read("../../ios/App/CapApp-SPM/Package.swift");
-    for (const name of ["camera", "push-notifications", "calendar", "filesystem", "share", "app-launcher"]) {
+    for (const name of ["camera", "push-notifications", "calendar", "filesystem", "share", "app-launcher", "keyboard"]) {
       expect(gradle).toContain(`project(':capacitor-${name}')`);
       expect(spm).toContain(`node_modules/@capacitor/${name}`);
     }
@@ -61,6 +61,14 @@ describe("native setup", () => {
     for (const name of ["Cache = \"CACHE\"", "writeFile(options", "deleteFile(options"]) expect(filesystem).toContain(name);
     expect(read("../../android/app/src/main/res/xml/file_paths.xml")).toContain("<cache-path");
     expect(android).toContain("${applicationId}.fileprovider");
+  });
+
+  it("keeps the keyboard resize surface capacitor.config.ts relies on", () => {
+    const definitions = read("../../../../node_modules/@capacitor/keyboard/dist/esm/definitions.d.ts");
+    expect(definitions).toMatch(/resize\?: KeyboardResize/);
+    expect(definitions).toMatch(/resizeOnFullScreen\?: boolean/);
+    expect(definitions).toContain('Native = "native"');
+    expect(definitions).toContain("declare module '@capacitor/cli'");
   });
 
   it("keeps the app launcher surface the maps opener relies on", () => {
