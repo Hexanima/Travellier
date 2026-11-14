@@ -10,7 +10,7 @@
 /* Accesos de la pantalla: un grupo de botones secundarios al ancho disponible, con el ritmo de 12px de Layout. */
 .itinerary-header-actions { display: grid; gap: 12px; width: 100%; }
 .itinerary-header-actions .ui-button { width: 100%; }
-.itinerary-shell .trips-empty .ui-button { width: 100%; }
+.itinerary-empty .ui-button { width: 100%; }
 .itinerary-days { display: grid; gap: 40px; }
 .itinerary-day h2 { margin: 0 0 16px; font-size: 1.125rem; line-height: 1.625rem; text-wrap: balance; }
 .itinerary-bands { display: grid; gap: 12px; }

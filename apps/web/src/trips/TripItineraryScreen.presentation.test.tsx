@@ -33,6 +33,8 @@ describe("Itinerario: jerarquía y agrupación (T153)", () => {
     const links = journeyLinks(container);
     expect(links.map((link) => link.textContent)).toEqual(["Configurar transportes"]);
     expect(links[0]!.closest(".trips-empty")).not.toBeNull();
+    // El vacío se identifica como propio del itinerario: el ancho completo del botón no alcanza a los vacíos vecinos del shell.
+    expect(links[0]!.closest(".itinerary-empty")).not.toBeNull();
     expect(links[0]!.classList.contains("ui-button")).toBe(true);
     expect(Array.from(container.querySelectorAll("button")).some((item) => item.textContent?.includes("Ver destinos"))).toBe(false);
   });
